@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "MBapp",
+    "slug": "mbapp",
+    "version": "1.0.0",
+    "extra": {
+      "API_BASE": "https://3maegcfw8d.execute-api.us-east-1.amazonaws.com",
+      "TENANTS_BASE": "https://3maegcfw8d.execute-api.us-east-1.amazonaws.com/tenants",
+      "ENV": "dev"
+    }
+  }
+}
