@@ -26,3 +26,14 @@ variable "deploy_api" {
   type    = bool
   default = true
 }
+
+variable "lambda_zip_path" {
+  description = "Path to the pre-built Objects Lambda zip relative to infra/"
+  type        = string
+  default     = "../objects-lambda.zip"
+}
+
+variable "log_retention_days" {
+  type    = number
+  default = 30
+}

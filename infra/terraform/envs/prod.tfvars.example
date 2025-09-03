@@ -1,0 +1,16 @@
+# Environment-specific overrides for prod
+
+project_name    = "mbapp"
+aws_region      = "us-east-1"
+
+# Path to the pre-built Objects Lambda zip
+lambda_zip_path = "../objects-lambda.zip"
+
+# CloudWatch log retention
+log_retention_days = 30
+
+# Update this once your prod CloudFront domain is live
+allowed_origins = ["https://<your-prod-cf-domain>"]
+
+deploy_web = true
+deploy_api = true

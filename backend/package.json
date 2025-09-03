@@ -1,14 +1,24 @@
 {
-  "name": "mbapp-backend",
-  "version": "0.1.0",
-  "main": "server.js",
-  "license": "MIT",
-  "type": "module",
+  "name": "mbapp-backend-objects",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "dist/index.js",
   "scripts": {
-    "start": "node server.js"
+    "build": "tsc -p tsconfig.json",
+    "clean": "powershell -NoProfile -Command \"Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Path dist | Out-Null\"",
+    "lint": "echo \"(add eslint if desired)\"",   
+    "bundle": "npm run build && bestzip --cwd dist ../objects-lambda.zip *",
+    "bundle:win": "npm run build && powershell -NoProfile -Command \"Compress-Archive -Path dist\\* -DestinationPath ..\\objects-lambda.zip -Force\""
   },
   "dependencies": {
-    "express": "^4.19.2",
-    "cors": "^2.8.5"
+    "@aws-sdk/client-dynamodb": "^3.609.0",
+    "@aws-sdk/lib-dynamodb": "^3.609.0",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "bestzip": "^2.2.1",
+    "typescript": "^5.5.4"
   }
 }

@@ -1,0 +1,16 @@
+# Environment-specific overrides for nonprod
+
+project_name    = "mbapp"
+aws_region      = "us-east-1"
+
+# Path to the pre-built Objects Lambda zip
+lambda_zip_path = "../../objects-lambda.zip"
+
+# CloudWatch log retention
+log_retention_days = 30
+
+# Existing vars (from your Phase 3 setup)
+allowed_origins = ["https://dyeahgvwe2bk3.cloudfront.net"]
+
+deploy_web = true
+deploy_api = false
