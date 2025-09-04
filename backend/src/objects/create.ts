@@ -1,8 +1,8 @@
 // backend/src/objects/create.ts
-import { PutCommand } from "@aws-sdk/lib-dynamodb";
-import { randomUUID } from "crypto"; // Node 20+
+import { GetCommand, PutCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { randomUUID } from "crypto";
 import { ddb, tableObjects } from "../common/ddb";
-import { ok, bad, error as errResp } from "../common/responses";
+import { ok, bad, notfound, error as errResp } from "../common/responses";
 import { getTenantId } from "../common/env";
 
 export const handler = async (evt: any) => {
@@ -12,71 +12,80 @@ export const handler = async (evt: any) => {
 
     const method = evt?.requestContext?.http?.method ?? "POST";
     const pp = evt?.pathParameters ?? {};
-    const typeParam = pp.type as string | undefined;
-    const idParam   = pp.id as string | undefined;
-
-    if (!typeParam) return bad("type is required");
+    const type = (pp.type as string | undefined)?.trim();
+    const idParam = (pp.id as string | undefined)?.trim();
+    if (!type) return bad("type is required");
 
     let body: any = {};
     if (evt?.body) {
-      try { body = JSON.parse(evt.body); }
+      try { body = typeof evt.body === "string" ? JSON.parse(evt.body) : evt.body; }
       catch { return bad("invalid JSON body"); }
     }
-    if (!body?.name) return bad("name is required");
 
-    // Route rules:
-    // - POST /objects/{type}        -> server generates id
-    // - PUT  /objects/{type}/{id}   -> client supplies id
-    // - POST /objects/{type}/{id}   -> discourage (use PUT instead)
-    if (method === "POST" && idParam) {
-      return bad("use PUT /objects/{type}/{id} when supplying id");
+    // === PUT /objects/{type}/{id}  -> update existing (no create on PUT)
+    if (method === "PUT") {
+      if (!idParam) return bad("id is required for PUT");
+
+      const pk = `TENANT#${tenantId}#TYPE#${type}`;
+      const sk = `ID#${idParam}`;
+
+      // ensure item exists
+      const cur = await ddb.send(new GetCommand({ TableName: tableObjects, Key: { pk, sk } }));
+      if (!cur.Item) return notfound("object not found");
+
+      const now = new Date().toISOString();
+      const names: Record<string,string> = { "#updatedAt": "updatedAt" };
+      const values: Record<string,any>   = { ":updatedAt": now };
+      const sets: string[]               = ["#updatedAt = :updatedAt"];
+
+      if (body.name !== undefined)         { names["#name"] = "name";                 values[":name"] = body.name;                 sets.push("#name = :name"); }
+      if (body.tags !== undefined)         { names["#tags"] = "tags";                 values[":tags"] = body.tags;                 sets.push("#tags = :tags"); }
+      if (body.integrations !== undefined) { names["#integrations"] = "integrations"; values[":integrations"] = body.integrations; sets.push("#integrations = :integrations"); }
+
+      await ddb.send(new UpdateCommand({
+        TableName: tableObjects,
+        Key: { pk, sk },
+        UpdateExpression: "SET " + sets.join(", "),
+        ExpressionAttributeNames: names,
+        ExpressionAttributeValues: values,
+        ConditionExpression: "attribute_exists(pk) AND attribute_exists(sk)", // update-only
+        ReturnValues: "ALL_NEW"
+      }));
+
+      return ok({ id: idParam, updated: true });
     }
 
-    const id  = method === "PUT" ? idParam! : ("obj_" + randomUUID());
+    // === POST /objects/{type}  -> create new (server generates id)
+    if (idParam) return bad("use PUT /objects/{type}/{id} when supplying id");
+    if (!body?.name) return bad("name is required");
+
+    const id  = randomUUID();
     const now = new Date().toISOString();
 
-    // Item shape compatible with GET + byId GSI
     const item = {
-      pk:        `TENANT#${tenantId}#TYPE#${typeParam}`,
+      pk:        `TENANT#${tenantId}#TYPE#${type}`,
       sk:        `ID#${id}`,
       id,
       tenantId,
-      type:      typeParam,
+      type,
       name:      body.name,
-      ...body, // keep extra fields (tags, metadata, integrations, etc.)
+      ...body, // tags, metadata, integrations, etc.
       id_tenant: `${id}#${tenantId}`,
       createdAt: now,
       updatedAt: now,
-      // optional legacy indexes you were using; harmless to keep
-      gsi1pk: `type#${typeParam}#tenant#${tenantId}`,
+      // legacy/aux GSIs (optional)
+      gsi1pk: `type#${type}#tenant#${tenantId}`,
       gsi1sk: now,
-      ...(body?.tags?.rfidEpc
-        ? { gsi2pk: `tag#${body.tags.rfidEpc}`, gsi2sk: `tenant#${tenantId}` }
-        : {}),
+      ...(body?.tags?.rfidEpc ? { gsi2pk: `tag#${body.tags.rfidEpc}`, gsi2sk: `tenant#${tenantId}` } : {}),
     };
 
-    try {
-      await ddb.send(new PutCommand({
-        TableName: tableObjects,
-        Item: item,
-        ConditionExpression: "attribute_not_exists(pk) AND attribute_not_exists(sk)",
-      }));
-    } catch (e: any) {
-      // If already exists, return 409 Conflict (idempotent protection)
-      if (e?.name === "ConditionalCheckFailedException") {
-        return {
-          statusCode: 409,
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ error: "Object already exists", code: "Conflict" }),
-        };
-      }
-      throw e;
-    }
+    await ddb.send(new PutCommand({
+      TableName: tableObjects,
+      Item: item,
+      ConditionExpression: "attribute_not_exists(pk) AND attribute_not_exists(sk)", // idempotent create
+    }));
 
-    // 201 + Location to canonical URL
-    const location = canonicalBase(evt)
-      + `/objects/${encodeURIComponent(typeParam)}/${encodeURIComponent(id)}`;
-
+    const location = canonicalBase(evt) + `/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}`;
     return {
       statusCode: 201,
       headers: { "content-type": "application/json", "Location": location },
@@ -84,7 +93,7 @@ export const handler = async (evt: any) => {
     };
   } catch (e) {
     console.error("CREATE object failed", e);
-    return errResp();
+    return errResp(e);
   }
 };
 

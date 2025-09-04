@@ -1,0 +1,17 @@
+{
+  "Statement": [
+    {
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:Query"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:us-east-1:054799133473:table/mbapp_objects",
+        "arn:aws:dynamodb:us-east-1:054799133473:table/mbapp_objects/index/*"
+      ],
+      "Effect": "Allow",
+      "Sid": "DynamoRead"
+    }
+  ],
+  "Version": "2012-10-17"
+}

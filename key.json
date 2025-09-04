@@ -1,0 +1,4 @@
+{
+  "pk": { "S": "TENANT#demo#TYPE#horse" },
+  "sk": { "S": "ID#H-001" }
+}

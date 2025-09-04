@@ -1,12 +1,22 @@
-export const json = (statusCode: number, body: any) => ({
-  statusCode,
-  headers: { "content-type": "application/json" },
+// backend/src/common/responses.ts
+type Headers = Record<string, string>;
+const baseHeaders: Headers = { "content-type": "application/json" };
+
+const json = (status: number, body: any, extra: Headers = {}) => ({
+  statusCode: status,
+  headers: { ...baseHeaders, ...extra },
   body: JSON.stringify(body),
 });
 
-export const ok = (body: any) => json(200, body);
-export const created = (body: any) => json(201, body);
-export const bad = (message: string) => json(400, { error: message });
-export const unauthorized = (message = "unauthorized") => json(401, { error: message });
-export const notfound = (message = "not found") => json(404, { error: message });
-export const servererr = (message = "internal error") => json(500, { error: message });
+export const ok       = (data: any, extra?: Headers) => json(200, data, extra);
+export const bad      = (msg: string, code = "BadRequest", extra?: Headers) =>
+  json(400, { error: msg, code }, extra);
+export const notfound = (msg: string, code = "NotFound", extra?: Headers) =>
+  json(404, { error: msg, code }, extra);
+export const error    = (msg = "Internal error", extra?: Headers) =>
+  json(500, { error: msg }, extra);
+
+export const redirect308 = (location: string) => ({
+  statusCode: 308,
+  headers: { Location: location },
+});

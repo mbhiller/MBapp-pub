@@ -21,3 +21,13 @@ infra/terraform/crash.log
 # Local tfvars (keep examples only)
 infra/terraform/envs/*.tfvars
 !infra/terraform/envs/*.example
+
+infra/**/dist/
+
+backend/**/*.map
+
+backend/node_modules/
+
+backend/.eslintcache
+
+.DS_Store
