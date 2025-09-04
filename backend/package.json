@@ -7,18 +7,19 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "clean": "powershell -NoProfile -Command \"Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Path dist | Out-Null\"",
-    "lint": "echo \"(add eslint if desired)\"",   
+    "lint": "echo \"(add eslint if desired)\"",
     "bundle": "npm run build && bestzip --cwd dist ../objects-lambda.zip *",
     "bundle:win": "npm run build && powershell -NoProfile -Command \"Compress-Archive -Path dist\\* -DestinationPath ..\\objects-lambda.zip -Force\""
   },
   "dependencies": {
-    "@aws-sdk/client-dynamodb": "^3.609.0",
-    "@aws-sdk/lib-dynamodb": "^3.609.0",
+    "@aws-sdk/client-dynamodb": "^3.879.0",
+    "@aws-sdk/lib-dynamodb": "^3.879.0",
     "uuid": "^9.0.1"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
     "bestzip": "^2.2.1",
+    "esbuild": "^0.21.5",
     "typescript": "^5.5.4"
   }
 }
