@@ -1,16 +1,45 @@
-name: ci
+name: CI
+
 on:
-  pull_request:
   push:
     branches: [ main ]
+  pull_request:
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
-        with: { node-version: '20' }
-      - run: npm ci
-      - run: npm --workspace packages/common run build
-      - run: npm run lint:ci
-      - run: npm --workspace apps/web run build
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install
+        run: npm install
+
+      - name: Lint (if present)
+        run: npm run lint -ws --if-present
+
+      - name: Build (if present)
+        run: npm run build -ws --if-present
+
+  terraform-validate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Format check
+        run: terraform fmt -check
+
+      - name: Init (no backend)
+        run: terraform init -backend=false
+
+      - name: Validate
+        run: terraform validate
