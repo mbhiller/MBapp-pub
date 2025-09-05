@@ -7,6 +7,11 @@ locals {
 }
 
 ############################
+# (Utility) Caller identity (optional)
+############################
+data "aws_caller_identity" "current" {}
+
+############################
 # DynamoDB (existing)
 ############################
 resource "aws_dynamodb_table" "devices" {
@@ -182,6 +187,43 @@ resource "aws_cloudfront_origin_access_control" "oac" {
   signing_protocol                  = "sigv4"
 }
 
+resource "aws_cloudfront_distribution" "web" {
+  count               = var.deploy_web ? 1 : 0
+  enabled             = true
+  default_root_object = "index.html"
+
+  origin {
+    domain_name              = aws_s3_bucket.web[0].bucket_regional_domain_name
+    origin_id                = aws_s3_bucket.web[0].id
+    origin_access_control_id = aws_cloudfront_origin_access_control.oac[0].id
+  }
+
+  default_cache_behavior {
+    allowed_methods        = ["GET", "HEAD"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = aws_s3_bucket.web[0].id
+    viewer_protocol_policy = "redirect-to-https"
+
+    forwarded_values {
+      query_string = false
+      cookies {
+        forward = "none"
+      }
+    }
+  }
+
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
+
+  viewer_certificate {
+    cloudfront_default_certificate = true
+  }
+}
+
+# S3 bucket policy to allow ONLY this distribution via OAC
 data "aws_iam_policy_document" "cf_to_s3" {
   count = var.deploy_web ? 1 : 0
 
@@ -208,36 +250,6 @@ resource "aws_s3_bucket_policy" "web" {
   policy = data.aws_iam_policy_document.cf_to_s3[0].json
 }
 
-resource "aws_cloudfront_distribution" "web" {
-  count               = var.deploy_web ? 1 : 0
-  enabled             = true
-  default_root_object = "index.html"
-
-  origin {
-    domain_name              = aws_s3_bucket.web[0].bucket_regional_domain_name
-    origin_id                = aws_s3_bucket.web[0].id
-    origin_access_control_id = aws_cloudfront_origin_access_control.oac[0].id
-  }
-
-  default_cache_behavior {
-    allowed_methods        = ["GET", "HEAD"]
-    cached_methods         = ["GET", "HEAD"]
-    target_origin_id       = aws_s3_bucket.web[0].id
-    viewer_protocol_policy = "redirect-to-https"
-
-    forwarded_values {
-      query_string = false
-      cookies { forward = "none" }
-    }
-  }
-
-  restrictions {
-    geo_restriction { restriction_type = "none" }
-  }
-
-  viewer_certificate { cloudfront_default_certificate = true }
-}
-
 resource "null_resource" "upload_web" {
   count      = var.deploy_web ? 1 : 0
   depends_on = [aws_cloudfront_distribution.web]
@@ -245,25 +257,6 @@ resource "null_resource" "upload_web" {
   provisioner "local-exec" {
     command = "echo \"<h1>MBapp Web via CloudFront</h1>\" > index.html && aws s3 cp index.html s3://${aws_s3_bucket.web[0].id}/index.html"
   }
-}
-
-############################
-# Outputs (safe even when gated off)
-############################
-output "http_api_url" {
-  value = length(aws_apigatewayv2_api.http) > 0 ? aws_apigatewayv2_api.http[0].api_endpoint : null
-}
-
-output "cloudfront_domain" {
-  value = length(aws_cloudfront_distribution.web) > 0 ? aws_cloudfront_distribution.web[0].domain_name : null
-}
-
-output "web_bucket_name" {
-  value = length(aws_s3_bucket.web) > 0 ? aws_s3_bucket.web[0].id : null
-}
-
-output "cloudfront_distribution_id" {
-  value = length(aws_cloudfront_distribution.web) > 0 ? aws_cloudfront_distribution.web[0].id : null
 }
 
 ############################
@@ -343,7 +336,14 @@ resource "aws_iam_role" "objects_lambda_role" {
   assume_role_policy = data.aws_iam_policy_document.objects_lambda_assume.json
 }
 
-data "aws_iam_policy_document" "objects_lambda_policy_doc" {
+# Attach AWS managed basic logs policy
+resource "aws_iam_role_policy_attachment" "objects_lambda_basic" {
+  role       = aws_iam_role.objects_lambda_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+# Custom policy for DynamoDB access
+data "aws_iam_policy_document" "objects_dynamo_policy_doc" {
   statement {
     sid     = "DynamoAccess"
     effect  = "Allow"
@@ -353,30 +353,25 @@ data "aws_iam_policy_document" "objects_lambda_policy_doc" {
       "${aws_dynamodb_table.objects.arn}/index/*"
     ]
   }
-  statement {
-    sid       = "Logs"
-    effect    = "Allow"
-    actions   = ["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogStreams"]
-    resources = ["arn:aws:logs:${var.aws_region}:*:*"]
-  }
 }
 
-resource "aws_iam_policy" "objects_lambda_policy" {
-  name   = "${local.name_prefix}-objects-lambda-policy"
-  policy = data.aws_iam_policy_document.objects_lambda_policy_doc.json
+resource "aws_iam_policy" "objects_dynamo_policy" {
+  name   = "${local.name_prefix}-objects-dynamo-policy"
+  policy = data.aws_iam_policy_document.objects_dynamo_policy_doc.json
 }
 
-resource "aws_iam_role_policy_attachment" "attach_objects_policy" {
+resource "aws_iam_role_policy_attachment" "attach_objects_dynamo_policy" {
   role       = aws_iam_role.objects_lambda_role.name
-  policy_arn = aws_iam_policy.objects_lambda_policy.arn
+  policy_arn = aws_iam_policy.objects_dynamo_policy.arn
 }
 
-# Lambda (Objects)
+# Log group for the Objects Lambda
 resource "aws_cloudwatch_log_group" "objects_lambda_lg" {
   name              = "/aws/lambda/${local.name_prefix}-objects"
   retention_in_days = var.log_retention_days
 }
 
+# Lambda (Objects)
 resource "aws_lambda_function" "objects" {
   function_name = "${local.name_prefix}-objects"
   role          = aws_iam_role.objects_lambda_role.arn
@@ -396,10 +391,18 @@ resource "aws_lambda_function" "objects" {
   depends_on = [aws_cloudwatch_log_group.objects_lambda_lg]
 }
 
-# HTTP API for Objects
+# HTTP API for Objects (+ CORS)
 resource "aws_apigatewayv2_api" "objects_api" {
   name          = "${var.project_name}-nonprod-objects-api"
   protocol_type = "HTTP"
+
+  cors_configuration {
+    allow_origins     = var.allowed_origins
+    allow_headers     = ["*"]
+    allow_methods     = ["GET", "POST", "PUT", "OPTIONS"]
+    allow_credentials = false
+    max_age           = 86400
+  }
 }
 
 resource "aws_apigatewayv2_integration" "objects_lambda_integration" {
@@ -409,24 +412,47 @@ resource "aws_apigatewayv2_integration" "objects_lambda_integration" {
   payload_format_version = "2.0"
 }
 
+# Routes (match handler & smoke)
 resource "aws_apigatewayv2_route" "post_objects" {
   api_id    = aws_apigatewayv2_api.objects_api.id
-  route_key = "POST /objects"
+  route_key = "POST /objects/{type}"
   target    = "integrations/${aws_apigatewayv2_integration.objects_lambda_integration.id}"
 }
+
 resource "aws_apigatewayv2_route" "get_objects" {
   api_id    = aws_apigatewayv2_api.objects_api.id
-  route_key = "GET /objects"
+  route_key = "GET /objects/{type}"
   target    = "integrations/${aws_apigatewayv2_integration.objects_lambda_integration.id}"
 }
+
 resource "aws_apigatewayv2_route" "get_objects_id" {
   api_id    = aws_apigatewayv2_api.objects_api.id
-  route_key = "GET /objects/{id}"
+  route_key = "GET /objects/{type}/{id}"
   target    = "integrations/${aws_apigatewayv2_integration.objects_lambda_integration.id}"
 }
+
+resource "aws_apigatewayv2_route" "put_objects_id" {
+  api_id    = aws_apigatewayv2_api.objects_api.id
+  route_key = "PUT /objects/{type}/{id}"
+  target    = "integrations/${aws_apigatewayv2_integration.objects_lambda_integration.id}"
+}
+
 resource "aws_apigatewayv2_route" "get_objects_search" {
   api_id    = aws_apigatewayv2_api.objects_api.id
   route_key = "GET /objects/search"
+  target    = "integrations/${aws_apigatewayv2_integration.objects_lambda_integration.id}"
+}
+
+resource "aws_apigatewayv2_route" "get_tenants" {
+  api_id    = aws_apigatewayv2_api.objects_api.id
+  route_key = "GET /tenants"
+  target    = "integrations/${aws_apigatewayv2_integration.objects_lambda_integration.id}"
+}
+
+# Catch-all so unmatched paths still reach the Lambda (handy for diagnostics)
+resource "aws_apigatewayv2_route" "default_objects" {
+  api_id    = aws_apigatewayv2_api.objects_api.id
+  route_key = "$default"
   target    = "integrations/${aws_apigatewayv2_integration.objects_lambda_integration.id}"
 }
 
@@ -443,4 +469,3 @@ resource "aws_lambda_permission" "apigw_invoke_objects" {
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.objects_api.execution_arn}/*/*"
 }
-

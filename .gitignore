@@ -1,7 +1,38 @@
-node_modules
-dist
-build
-.expo
-.expo-shared
-.DS_Store
+# Node / monorepo
+node_modules/
+npm-debug.log*
+pnpm-lock.yaml
+yarn.lock
+
+# Build artifacts
+dist/
+build/
+coverage/
+*.log
+
+# Vite (web)
+apps/web/dist/
+apps/web/.vite/
+
+# Local env files
 .env
+.env.*.local
+apps/web/.env*
+!apps/web/.env.example
+
+# Terraform
+infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.backup
+infra/terraform/crash.log
+infra/terraform/override.tf
+infra/terraform/override.tf.json
+infra/terraform/*_override.tf
+infra/terraform/*_override.tf.json
+
+# We’ll commit an example only; ignore real tfvars
+infra/terraform/*.tfvars
+!infra/terraform/*.tfvars.example
+
+# Lambda build zip & intermediates (rebuilt on deploy)
+infra/terraform/build/

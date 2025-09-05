@@ -1,27 +1,14 @@
-# MBapp Backend – Objects API (Starter)
+# MBapp (public)
 
-This package provides a minimal **Objects API** for MBapp (Phase 4), implemented as a single Lambda with a tiny router.
+Monorepo for MBapp.
 
-## Endpoints (API Gateway HTTP API, payload v2)
-- `POST /objects` – Create an object (`type`, `name`, optional `integrations`, `metadata`, `tags`)
-- `GET /objects?type=horse` – List objects by type (per tenant)
-- `GET /objects/{id}` – Get a specific object by ID
-- `GET /objects/search?tag=rfid:3008_...` – Search by tag (rfid, qr, nfc)
+## Structure
+- `apps/web` — Vite + React web app
+- `apps/api` — API app (placeholder)
+- `infra/terraform` — Infra as code (HTTP API + Lambda + DynamoDB + CloudFront)
+- `scripts/` — smoke tests and helper scripts
 
-## Required environment variables
-- `OBJECTS_TABLE` – DynamoDB table name (e.g., `mbapp_objects`)
-
-## Tenant resolution
-- Reads tenant from one of:
-  - `event.requestContext.authorizer.jwt.claims["custom:tenantId"]` (Cognito JWT custom claim), or
-  - `X-Tenant-Id` header (for nonprod/dev), or
-  - defaults to `"demo"` (helpful for bootstrapping)
-
-## Build
+## Dev quick start
 ```bash
-cd backend
-npm ci
-npm run build
-```
-
-You can deploy using your preferred method (Terraform, SAM, CDK). The build artifacts will be in `backend/dist`.
+npm install
+npm run web:dev

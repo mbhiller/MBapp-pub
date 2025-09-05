@@ -1,20 +1,35 @@
 {
   "name": "mbapp-monorepo",
   "private": true,
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "build": "npm run build -ws",
     "lint": "npm run lint -ws --if-present",
+    "format": "prettier --write .",
+    "lint:ci": "eslint . --ext .ts,.tsx --max-warnings=0",
     "test": "npm run test -ws --if-present",
     "api:dev": "npm --workspace apps/api run dev",
     "api:build": "npm --workspace apps/api run build",
     "web:dev": "npm --workspace apps/web run dev",
     "mobile:start": "npm --workspace apps/mobile run start",
     "smoke": "node ./scripts/smoke-robust-v3-20250904-164502.mjs --api %API% --tenant %TENANT% --type %TYPE%",
-    "smoke:powershell": "node ./scripts/smoke-robust-v3-20250904-164502.mjs --api $env:API --tenant $env:TENANT --type $env:TYPE"
+    "smoke:powershell": "pwsh -NoLogo -NoProfile -Command \"node ./scripts/smoke-robust-v3-20250904-164502.mjs --api $env:API --tenant $env:TENANT --type $env:TYPE\"",
+    "smoke:tf": "pwsh -File ./scripts/smoke-tf.ps1",
+    "lambda:build": "pwsh -File ./scripts/lambda-build.ps1",
+    "lambda:deploy": "pwsh -File ./scripts/lambda-deploy.ps1 -AutoApprove"
   },
   "devDependencies": {
+    "@aws-sdk/client-dynamodb": "^3.882.0",
+    "@aws-sdk/lib-dynamodb": "^3.882.0",
+    "@typescript-eslint/eslint-plugin": "^8.42.0",
+    "@typescript-eslint/parser": "^8.42.0",
     "esbuild": "^0.25.9",
+    "eslint": "^9.34.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.6.2",
     "typescript": "^5.9.2"
   }
 }

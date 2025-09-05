@@ -1,0 +1,7 @@
+project_name       = "mbapp"
+aws_region         = "us-east-1"
+allowed_origins    = ["http://localhost:5173", "https://YOUR_CF_DOMAIN.cloudfront.net"]
+deploy_web         = false
+deploy_api         = false
+lambda_zip_path    = "./build/objects.zip"
+log_retention_days = 14

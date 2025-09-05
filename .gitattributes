@@ -1,0 +1,14 @@
+* text=auto
+
+# Windows PS scripts should stay CRLF
+*.ps1 text eol=crlf
+
+# Everything else LF
+*.sh  text eol=lf
+*.js  text eol=lf
+*.ts  text eol=lf
+*.tsx text eol=lf
+*.mjs text eol=lf
+*.json text eol=lf
+*.tf  text eol=lf
+*.md  text eol=lf

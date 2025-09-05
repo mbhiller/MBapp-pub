@@ -1,6 +1,6 @@
 // src/lib/http.ts
-import axios, { AxiosInstance } from "axios";
-import { requireApiBase } from "./config";
+import axios, { AxiosInstance } from 'axios';
+import { requireApiBase } from './config';
 
 let client: AxiosInstance | null = null;
 
@@ -12,12 +12,12 @@ export function http(): AxiosInstance {
     });
 
     client.interceptors.response.use(
-      r => r,
-      err => {
+      (r) => r,
+      (err) => {
         const url = err.config?.baseURL
-          ? `${err.config.baseURL}${err.config.url ?? ""}`
+          ? `${err.config.baseURL}${err.config.url ?? ''}`
           : err.config?.url;
-        console.log("HTTP ERROR:", {
+        console.log('HTTP ERROR:', {
           url,
           status: err.response?.status,
           data: err.response?.data,

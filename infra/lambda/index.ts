@@ -1,5 +1,7 @@
-// Minimal Objects API for smoke.
-// Table: OBJECTS_TABLE, key: pk (id), sk = `${tenant}|${type}`
+// infra/lambda/index.ts
+// Minimal Objects API for smoke (real handler).
+// DynamoDB table: OBJECTS_TABLE
+// Keys: pk = id (uuid), sk = `${tenant}|${type}`
 
 import { randomUUID } from "node:crypto";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
@@ -42,41 +44,26 @@ const nocontent = (status = 204) => ({
   body: "",
 });
 
-function lowerHeaders(h?: Record<string, string | undefined>) {
-  return Object.fromEntries(
-    Object.entries(h ?? {}).map(([k, v]) => [k.toLowerCase(), v])
-  ) as Record<string, string | undefined>;
+function lower(h?: Record<string, string | undefined>) {
+  return Object.fromEntries(Object.entries(h ?? {}).map(([k, v]) => [k.toLowerCase(), v]));
 }
-
 function parse(event: APIGWEvent) {
   const method = event.requestContext?.http?.method ?? "GET";
   const path = event.rawPath ?? event.requestContext?.http?.path ?? "/";
-  const h = lowerHeaders(event.headers);
-  const tenant = h["x-tenant-id"] || "DemoTenant";
+  const headers = lower(event.headers);
+  const tenant = headers["x-tenant-id"] || "DemoTenant";
   const qs = Object.fromEntries(new URLSearchParams(event.rawQueryString || ""));
   let body: any = {};
-  try {
-    body =
-      typeof event.body === "string"
-        ? JSON.parse(event.body)
-        : event.body ?? {};
-  } catch {
-    body = {};
-  }
+  try { body = typeof event.body === "string" ? JSON.parse(event.body) : (event.body ?? {}); } catch {}
   return { method, path, tenant, qs, body };
 }
-
-function m(path: string, re: RegExp) {
-  const t = re.exec(path);
-  return t ? t.slice(1) : null;
-}
+const m = (path: string, re: RegExp) => (re.exec(path)?.slice(1) ?? null);
 
 export const handler = async (event: APIGWEvent) => {
   const { method, path, tenant, qs, body } = parse(event);
 
   if (method === "OPTIONS") return nocontent();
 
-  // health
   if (method === "GET" && path === "/tenants") {
     return json(200, [{ id: "DemoTenant" }]);
   }
@@ -88,53 +75,38 @@ export const handler = async (event: APIGWEvent) => {
       const type = decodeURIComponent(mm[0]);
       const id = randomUUID();
       const now = Date.now();
-      const name = body?.name ?? "Test Object";
-
-      await ddb.send(
-        new PutCommand({
-          TableName: TABLE,
-          Item: {
-            pk: id,
-            sk: `${tenant}|${type}`,
-            id,
-            type,
-            tenant,
-            name,
-            createdAt: now,
-            updatedAt: now,
-          },
-          ConditionExpression: "attribute_not_exists(pk)",
-        })
-      );
+      await ddb.send(new PutCommand({
+        TableName: TABLE,
+        Item: {
+          pk: id, sk: `${tenant}|${type}`,
+          id, type, tenant,
+          name: body?.name ?? "Test Object",
+          createdAt: now, updatedAt: now
+        },
+        ConditionExpression: "attribute_not_exists(pk)"
+      }));
       return json(200, { id });
     }
   }
 
-  // GET /objects/{type}?id=...  OR  GET /objects/{type}/{id}
+  // GET /objects/{type}?id=... OR /objects/{type}/{id}
   {
     let mm = m(path, /^\/objects\/([^\/]+)$/);
     if (method === "GET" && mm && qs["id"]) {
       const type = decodeURIComponent(mm[0]);
       const id = String(qs["id"]);
-      const res = await ddb.send(
-        new GetCommand({
-          TableName: TABLE,
-          Key: { pk: id, sk: `${tenant}|${type}` },
-        })
-      );
+      const res = await ddb.send(new GetCommand({
+        TableName: TABLE, Key: { pk: id, sk: `${tenant}|${type}` }
+      }));
       if (!res.Item) return json(404, { message: "Not found" });
       return json(200, res.Item);
     }
-
     mm = m(path, /^\/objects\/([^\/]+)\/([^\/]+)$/);
     if (method === "GET" && mm) {
       const [type, id] = mm.map(decodeURIComponent);
-      const res = await ddb.send(
-        new GetCommand({
-          TableName: TABLE,
-          Key: { pk: id, sk: `${tenant}|${type}` },
-        })
-      );
+      const res = await ddb.send(new GetCommand({
+        TableName: TABLE, Key: { pk: id, sk: `${tenant}|${type}` }
+      }));
       if (!res.Item) return json(404, { message: "Not found" });
       return json(200, res.Item);
     }
@@ -145,24 +117,19 @@ export const handler = async (event: APIGWEvent) => {
     const mm = m(path, /^\/objects\/([^\/]+)\/([^\/]+)$/);
     if (method === "PUT" && mm) {
       const [type, id] = mm.map(decodeURIComponent);
-      const name = body?.name ?? "Updated Object";
       const now = Date.now();
-
-      await ddb.send(
-        new UpdateCommand({
-          TableName: TABLE,
-          Key: { pk: id, sk: `${tenant}|${type}` },
-          UpdateExpression: "SET #n = :n, updatedAt = :u",
-          ExpressionAttributeNames: { "#n": "name" },
-          ExpressionAttributeValues: { ":n": name, ":u": now },
-          ReturnValues: "NONE",
-        })
-      );
+      await ddb.send(new UpdateCommand({
+        TableName: TABLE,
+        Key: { pk: id, sk: `${tenant}|${type}` },
+        UpdateExpression: "SET #n = :n, updatedAt = :u",
+        ExpressionAttributeNames: { "#n": "name" },
+        ExpressionAttributeValues: { ":n": (body?.name ?? "Updated Object"), ":u": now },
+        ReturnValues: "NONE"
+      }));
       return json(200, { ok: true });
     }
   }
 
-  // Not used by smoke but present
   if (method === "GET" && path === "/objects/search") {
     return json(200, { ok: true, note: "search stub" });
   }

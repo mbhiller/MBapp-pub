@@ -1,10 +1,7 @@
 {
   "Statement": [
     {
-      "Action": [
-        "dynamodb:GetItem",
-        "dynamodb:Query"
-      ],
+      "Action": ["dynamodb:GetItem", "dynamodb:Query"],
       "Resource": [
         "arn:aws:dynamodb:us-east-1:054799133473:table/mbapp_objects",
         "arn:aws:dynamodb:us-east-1:054799133473:table/mbapp_objects/index/*"

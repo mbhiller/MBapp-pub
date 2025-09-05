@@ -1,4 +1,4 @@
-import Constants from "expo-constants";
+import Constants from 'expo-constants';
 
 type Extra = {
   API_BASE?: string;
@@ -7,7 +7,9 @@ type Extra = {
 };
 
 export function getExtra(): Extra {
-  const fromExpoConfig = (Constants?.expoConfig as any)?.extra as Extra | undefined;
+  const fromExpoConfig = (Constants?.expoConfig as any)?.extra as
+    | Extra
+    | undefined;
   const fromManifest = (Constants as any)?.manifest?.extra as Extra | undefined;
   return fromExpoConfig ?? fromManifest ?? {};
 }
@@ -15,7 +17,7 @@ export function getExtra(): Extra {
 export function requireApiBase(): string {
   const { API_BASE } = getExtra();
   if (!API_BASE) {
-    throw new Error("Missing API_BASE in Expo extra. Set it in app.config.ts");
+    throw new Error('Missing API_BASE in Expo extra. Set it in app.config.ts');
   }
   return API_BASE;
 }

@@ -1,6 +1,6 @@
 {
   "Variables": {
     "OBJECTS_TABLE": "mbapp_objects",
-    "BY_ID_INDEX":   "byId"
+    "BY_ID_INDEX": "byId"
   }
 }

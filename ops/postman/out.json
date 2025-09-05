@@ -1,1 +1,5 @@
-{"statusCode":404,"headers":{"content-type":"application/json"},"body":"{\"error\":\"Object not found: horse/H-001\",\"code\":\"NotFound\"}"}
+{
+  "statusCode": 404,
+  "headers": { "content-type": "application/json" },
+  "body": "{\"error\":\"Object not found: horse/H-001\",\"code\":\"NotFound\"}"
+}

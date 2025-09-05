@@ -1,15 +1,9 @@
 #!/usr/bin/env node
-// smoke-robust-v3-20250904-164502.mjs
-//
-// Robust smoke test for MBapp Objects API.
-// Usage:
-//   node scripts/smoke-robust-v3-20250904-164502.mjs \
-//     --api https://...execute-api.us-east-1.amazonaws.com \
-//     --tenant DemoTenant --type horse
+// scripts/smoke-robust-v3-20250904-164502.mjs
+// Robust smoke test for MBapp Objects API without external fetch deps.
 
-import assert from "assert";
-import fetch from "node-fetch";
-import { randomUUID } from "crypto";
+import assert from "node:assert";
+import { randomUUID } from "node:crypto";
 
 const args = Object.fromEntries(
   process.argv.slice(2).map((a) => {
@@ -18,9 +12,9 @@ const args = Object.fromEntries(
   })
 );
 
-const API = args.api;
+const API    = args.api;
 const TENANT = args.tenant;
-const TYPE = args.type;
+const TYPE   = args.type;
 
 if (!API || !TENANT || !TYPE) {
   console.error("Usage: --api <url> --tenant <id> --type <objectType>");
@@ -33,6 +27,10 @@ const headers = {
 };
 
 async function main() {
+  // Prefer native fetch; fall back to node-fetch only if required.
+  // (On Node 18+, fetch is global.)
+  const fetcher = globalThis.fetch ?? (await import("node-fetch")).default;
+
   console.log(`MBapp smoke: ${new Date().toISOString()}`);
   console.log(`API=${API}`);
   console.log(`TENANT=${TENANT}`);
@@ -40,7 +38,7 @@ async function main() {
 
   // 1. GET /tenants (optional)
   {
-    const r = await fetch(`${API}/tenants`, { headers });
+    const r = await fetcher(`${API}/tenants`, { headers });
     assert(r.ok, `GET /tenants failed: ${r.status}`);
     console.log("✅ GET /tenants (optional)");
   }
@@ -49,7 +47,7 @@ async function main() {
   let id;
   {
     const body = { name: "Test Object", createdAt: Date.now() };
-    const r = await fetch(`${API}/objects/${TYPE}`, {
+    const r = await fetcher(`${API}/objects/${TYPE}`, {
       method: "POST",
       headers,
       body: JSON.stringify(body),
@@ -63,9 +61,9 @@ async function main() {
 
   // 3. GET object (query first, then path fallback)
   {
-    let r = await fetch(`${API}/objects/${TYPE}?id=${id}`, { headers });
+    let r = await fetcher(`${API}/objects/${TYPE}?id=${id}`, { headers });
     if (r.status === 404) {
-      r = await fetch(`${API}/objects/${TYPE}/${id}`, { headers });
+      r = await fetcher(`${API}/objects/${TYPE}/${id}`, { headers });
     }
     assert(r.ok, `GET by id failed: ${r.status}`);
     console.log("✅ GET object (query first, then path fallback)");
@@ -74,7 +72,7 @@ async function main() {
   // 4. PUT /objects/:type/:id
   {
     const body = { name: "Updated Object", updatedAt: Date.now() };
-    const r = await fetch(`${API}/objects/${TYPE}/${id}`, {
+    const r = await fetcher(`${API}/objects/${TYPE}/${id}`, {
       method: "PUT",
       headers,
       body: JSON.stringify(body),
@@ -85,7 +83,7 @@ async function main() {
 
   // 5. GET object again (flexible)
   {
-    const r = await fetch(`${API}/objects/${TYPE}/${id}`, { headers });
+    const r = await fetcher(`${API}/objects/${TYPE}/${id}`, { headers });
     assert(r.ok, `GET after update failed: ${r.status}`);
     const json = await r.json();
     assert.equal(json.name, "Updated Object");
@@ -95,7 +93,7 @@ async function main() {
   // 6. NEGATIVE GET non-existent id (expect 404)
   {
     const bogusId = randomUUID();
-    const r = await fetch(`${API}/objects/${TYPE}/${bogusId}`, { headers });
+    const r = await fetcher(`${API}/objects/${TYPE}/${bogusId}`, { headers });
     assert.equal(r.status, 404, `Expected 404, got ${r.status}`);
     console.log("✅ NEGATIVE GET non-existent id (expect 404)");
   }

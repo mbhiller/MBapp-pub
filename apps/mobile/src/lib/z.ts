@@ -1,10 +1,10 @@
 // src/lib/z.ts
-import { z } from "zod";
+import { z } from 'zod';
 
 // Coerce numbers/nullables to strings where possible
 const Stringish = z.preprocess((v) => {
   if (v === null || v === undefined) return undefined;
-  if (typeof v === "number") return String(v);
+  if (typeof v === 'number') return String(v);
   return v;
 }, z.string());
 
@@ -19,22 +19,29 @@ const TenantLoose = z
     code: Stringish.optional(),
   })
   .transform((t) => {
-    const id = t.id ?? t.tenantId ?? t.code ?? t.slug ?? t.tenantName ?? t.name ?? "unknown";
+    const id =
+      t.id ??
+      t.tenantId ??
+      t.code ??
+      t.slug ??
+      t.tenantName ??
+      t.name ??
+      'unknown';
     const name = t.name ?? t.tenantName ?? t.slug ?? t.code ?? id;
     const slug =
       t.slug ??
       name
         .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/(^-|-$)/g, "");
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '');
     return { id, name, slug };
   });
 
 export const TenantsFlexible = z
   .union([
-    z.array(TenantLoose),                                  // [ {...}, {...} ]
+    z.array(TenantLoose), // [ {...}, {...} ]
     z.object({ items: z.array(TenantLoose) }).transform((o) => o.items), // { items: [...] }
-    z.object({ data: z.array(TenantLoose) }).transform((o) => o.data),   // { data: [...] }
+    z.object({ data: z.array(TenantLoose) }).transform((o) => o.data), // { data: [...] }
   ])
   .transform((v) => (Array.isArray(v) ? v : (v as any)));
 
