@@ -1,42 +1,7 @@
-# Node/JS
-node_modules/
-npm-debug.log*
-yarn-debug.*
-pnpm-debug.*
-*.log
-
-# Build artifacts
-dist/
-build/
-coverage/
-.cache/
-.tmp/
-.out/
-.expo/
-.expo-shared/
-.next/
-expo-build/
-*.zip
-
-# OS / editor
+node_modules
+dist
+build
+.expo
+.expo-shared
 .DS_Store
-Thumbs.db
-.idea/
-.vscode/
-*.swp
-
-# Env
 .env
-.env.*
-!.env.example
-
-# Terraform
-*.tfstate
-*.tfstate.*
-.terraform/
-crash.log
-override.tf
-override.tf.json
-*_override.tf
-*_override.tf.json
-.terraform.lock.hcl
