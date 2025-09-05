@@ -345,14 +345,21 @@ resource "aws_iam_role_policy_attachment" "objects_lambda_basic" {
 # Custom policy for DynamoDB access
 data "aws_iam_policy_document" "objects_dynamo_policy_doc" {
   statement {
-    sid     = "DynamoAccess"
-    effect  = "Allow"
-    actions = ["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:Query", "dynamodb:UpdateItem"]
+    sid    = "DynamoAccess"
+    effect = "Allow"
+    actions = [
+      "dynamodb:PutItem",
+      "dynamodb:GetItem",
+      "dynamodb:Query",
+      "dynamodb:UpdateItem",
+      "dynamodb:DeleteItem" # << added
+    ]
     resources = [
       aws_dynamodb_table.objects.arn,
       "${aws_dynamodb_table.objects.arn}/index/*"
     ]
   }
+
 }
 
 resource "aws_iam_policy" "objects_dynamo_policy" {
@@ -399,7 +406,7 @@ resource "aws_apigatewayv2_api" "objects_api" {
   cors_configuration {
     allow_origins     = var.allowed_origins
     allow_headers     = ["*"]
-    allow_methods     = ["GET", "POST", "PUT", "OPTIONS"]
+    allow_methods     = ["GET", "POST", "PUT", "DELETE", "OPTIONS"] # << added DELETE
     allow_credentials = false
     max_age           = 86400
   }
@@ -448,6 +455,19 @@ resource "aws_apigatewayv2_route" "get_tenants" {
   route_key = "GET /tenants"
   target    = "integrations/${aws_apigatewayv2_integration.objects_lambda_integration.id}"
 }
+
+resource "aws_apigatewayv2_route" "list_objects_by_type" {
+  api_id    = aws_apigatewayv2_api.objects_api.id
+  route_key = "GET /objects/{type}/list"
+  target    = "integrations/${aws_apigatewayv2_integration.objects_lambda_integration.id}"
+}
+
+resource "aws_apigatewayv2_route" "delete_object" {
+  api_id    = aws_apigatewayv2_api.objects_api.id
+  route_key = "DELETE /objects/{type}/{id}"
+  target    = "integrations/${aws_apigatewayv2_integration.objects_lambda_integration.id}"
+}
+
 
 # Catch-all so unmatched paths still reach the Lambda (handy for diagnostics)
 resource "aws_apigatewayv2_route" "default_objects" {
