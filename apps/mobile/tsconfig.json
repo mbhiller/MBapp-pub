@@ -1,4 +1,16 @@
+// apps/mobile/tsconfig.json
 {
-  "compilerOptions": {},
-  "extends": "expo/tsconfig.base"
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["ES2021"],
+    "types": ["react", "react-native", "expo"],
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "moduleResolution": "bundler",
+    "baseUrl": ".",
+    "paths": { "@/*": ["src/*"] }
+  },
+  "include": ["**/*.ts", "**/*.tsx"]
 }
