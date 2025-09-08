@@ -28,3 +28,9 @@ git rm -r --cached -- ':(glob)**/node_modules' ':(glob)**/.expo' ':(glob)**/andr
 
 git add .gitignore
 git commit -m "chore: public snapshot hygiene (.gitignore and untrack build/deps)" 2>$null
+
+# API build output
+apps/api/dist/
+
+# API build output
+apps/api/dist/

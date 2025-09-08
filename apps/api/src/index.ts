@@ -1,51 +1,42 @@
-import { ok, bad } from "./common/responses";
-import * as createObj from "./objects/create";
-import * as getObj from "./objects/get";
-import * as listObj from "./objects/list";
+// apps/api/src/index.ts
+import { handler as getObject } from "./objects/get";
+import { handler as createObject } from "./objects/create";
+import { handler as updateObject } from "./objects/update";
+import { bad } from "./common/responses";
 
-export { handler as listByType } from "./objects/listByType";
-export { handler as searchByTag } from "./objects/searchByTag";
 export const handler = async (evt: any) => {
-  const method = evt?.requestContext?.http?.method;
-  const path = evt?.rawPath || evt?.requestContext?.http?.path || "";
+  // HTTP API v2 gives routeKey like "GET /objects/{type}/{id}"
+  const routeKey: string = evt?.routeKey || evt?.requestContext?.routeKey || "";
+  const method: string = evt?.requestContext?.http?.method || "";
 
-  try {
-    // Tenants (keeps mobile happy if it pings /tenants)
-    if (method === "GET" && path === "/tenants") {
-      const h = evt?.headers || {};
-      const tenant =
-        h["x-tenant-id"] ||
-        h["X-Tenant-Id"] ||
-        h["x-tenant"] ||
-        process.env.DEFAULT_TENANT ||
-        "DemoTenant";
-      return ok({
-        items: [{ id: String(tenant), name: String(tenant) }],
-        defaultTenant: String(tenant),
-      });
-    }
+  switch (routeKey) {
+    case "GET /objects/{type}/{id}":
+      return getObject(evt);
 
-    // Create / Update
-    if ((method === "POST" || method === "PUT") && path?.startsWith("/objects/")) {
-      return await createObj.handler(evt);
-    }
+    // (Optional) legacy shape: GET /objects/{id}?type=...
+    case "GET /objects/{id}":
+      return getObject(evt);
 
-    // List by type (query style): GET /objects?type=horse&limit=20&cursor=...
-    if (method === "GET" && path === "/objects") {
-      return await listObj.handler(evt);
-    }
+    case "POST /objects/{type}":
+      return createObject(evt);
 
-    // Fetch single (canonical & non-canonical)
-    if (method === "GET" && path?.startsWith("/objects/") && !path.endsWith("/search")) {
-      return await getObj.handler(evt);
-    }
+    case "PUT /objects/{type}/{id}":
+      return updateObject(evt);
 
-    return bad(`no route for ${method} ${path}`);
-  } catch (err: any) {
-    console.error("handler error", err);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: "internal error", detail: err?.message }),
-    };
+    // Not implemented yet – keep API consistent with 501s
+    case "GET /objects/{type}":
+    case "GET /objects":
+    case "GET /objects/search":
+    case "GET /objects/{type}/list":
+    case "DELETE /objects/{type}/{id}":
+      return { statusCode: 501, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: "NotImplemented", route: routeKey }) };
+
+    // Tenants or others – optionally stub
+    case "GET /tenants":
+      return { statusCode: 200, headers: { "content-type": "application/json" }, body: JSON.stringify([{ id: "DemoTenant", name: "DemoTenant" }]) };
+
+    default:
+      // $default and everything else – fail explicitly
+      return bad(`Unsupported route ${method} ${evt?.rawPath || ""}`);
   }
 };
