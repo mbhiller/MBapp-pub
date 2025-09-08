@@ -1,38 +1,24 @@
-# Node / monorepo
-node_modules/
-npm-debug.log*
-pnpm-lock.yaml
-yarn.lock
+@"
+# Dependencies
+**/node_modules/
 
-# Build artifacts
-dist/
-build/
-coverage/
-*.log
+# Build outputs
+**/dist/
+**/build/
+**/.turbo/
+**/coverage/
 
-# Vite (web)
-apps/web/dist/
-apps/web/.vite/
+# Expo / React Native
+**/.expo/
+**/.expo-shared/
+**/android/
+**/ios/
 
-# Local env files
+# Env & misc
 .env
-.env.*.local
-apps/web/.env*
-!apps/web/.env.example
-
-# Terraform
-infra/terraform/.terraform/
-infra/terraform/*.tfstate
-infra/terraform/*.tfstate.backup
-infra/terraform/crash.log
-infra/terraform/override.tf
-infra/terraform/override.tf.json
-infra/terraform/*_override.tf
-infra/terraform/*_override.tf.json
-
-# We’ll commit an example only; ignore real tfvars
-infra/terraform/*.tfvars
-!infra/terraform/*.tfvars.example
-
-# Lambda build zip & intermediates (rebuilt on deploy)
-infra/terraform/build/
+.env.*
+.DS_Store
+*.log
+npm-debug.log*
+yarn-error.log*
+"@ | Out-File -Encoding UTF8 .gitignore
