@@ -22,3 +22,9 @@
 npm-debug.log*
 yarn-error.log*
 "@ | Out-File -Encoding UTF8 .gitignore
+
+# Untrack any already-tracked junk (keeps files on disk)
+git rm -r --cached -- ':(glob)**/node_modules' ':(glob)**/.expo' ':(glob)**/android' ':(glob)**/ios' ':(glob)**/dist' ':(glob)**/build' ':(glob)**/coverage' 2>$null
+
+git add .gitignore
+git commit -m "chore: public snapshot hygiene (.gitignore and untrack build/deps)" 2>$null
