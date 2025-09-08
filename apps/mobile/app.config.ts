@@ -9,6 +9,8 @@ export default ({ config }: { config: ExpoConfig }): ExpoConfig => ({
   // No barcode-scanner plugin needed; we use expo-camera.
   plugins: [
     ...(Array.isArray((config as any).plugins) ? (config as any).plugins : []),
+     ...(Array.isArray((config as any).plugins) ? (config as any).plugins : []),
+  ["expo-camera", { cameraPermission: "Camera access is required to scan QR codes." }],
   ],
 
   ios: {
@@ -23,7 +25,7 @@ export default ({ config }: { config: ExpoConfig }): ExpoConfig => ({
     ...(config.android ?? {}),
     permissions: Array.from(new Set([...(config.android?.permissions ?? []), 'CAMERA'])),
   },
-
+  
   extra: {
     ...(config.extra ?? {}),
     API_BASE: process.env.API_BASE ?? HARDCODED_API,

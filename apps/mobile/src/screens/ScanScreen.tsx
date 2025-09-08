@@ -24,40 +24,53 @@ export default function ScanScreen() {
   }, []);
 
   const handleParsed = useCallback(async (text: string) => {
-    // Accept JSON or plain ID
-    let parsed: any;
-    try { parsed = JSON.parse(text); } catch { /* not JSON */ }
+  let parsed: any;
+  try { parsed = JSON.parse(text); } catch { /* not JSON */ }
 
-    const type = parsed?.type || "horse";
-    const id   = parsed?.id;
+  const type = parsed?.type || "horse";
+  const id   = parsed?.id;
 
-    setBusy(true);
-    try {
-      let obj: any;
-      if (id) {
-        const res = await getObject(type, id);
-        obj = { type, ...(res || {}) }; // ensure type present even if server returns only { id }
+  setBusy(true);
+  try {
+    let obj: any;
+    if (id) {
+      const res = await getObject(type, id);
+      obj = { type, ...(res || {}) };
+    } else {
+      const defaultName = `Scanned ${type} ${new Date().toISOString().slice(0,19)}`;
+      const body: any = {};
+
+      // Promote name/tags to top-level for server create
+      const nameFromParsed =
+        (typeof parsed === "object" && parsed) ? (parsed.name || parsed.data?.name) : undefined;
+      const tagsFromParsed =
+        (typeof parsed === "object" && parsed) ? (parsed.tags || parsed.data?.tags) : undefined;
+
+      body.name = nameFromParsed || defaultName;
+      if (tagsFromParsed) body.tags = tagsFromParsed;
+
+      // Keep original payload as data for UI richness
+      if (parsed && typeof parsed === "object") {
+        body.data = parsed.data ?? parsed;
+        if (parsed.integrations) body.integrations = parsed.integrations;
       } else {
-        const body: any = {};
-        if (parsed && typeof parsed === "object") {
-          body.data = parsed.data ?? parsed; // allow raw payload objects
-          if (parsed.integrations) body.integrations = parsed.integrations;
-        } else {
-          body.data = { raw: String(text) }; // fallback
-        }
-        const res = await createObject(type, body);
-        obj = { type, ...(res || {}) };
-        if (!obj.data && body.data) obj.data = body.data; // UI stays informative
-        if (!obj.integrations && body.integrations) obj.integrations = body.integrations;
+        body.data = { raw: String(text) };
       }
-      nav.navigate("ObjectDetail", { obj });
-    } catch (e: any) {
-      Alert.alert("Scan Error", e?.response?.data?.error || e?.message || "Failed to process scan");
-      setScanning(true);
-    } finally {
-      setBusy(false);
+
+      const res = await createObject(type, body);
+      obj = { type, ...(res || {}) };
+      if (!obj.data && body.data) obj.data = body.data;
+      if (!obj.integrations && body.integrations) obj.integrations = body.integrations;
     }
-  }, [nav]);
+    nav.navigate("ObjectDetail", { obj });
+  } catch (e: any) {
+    Alert.alert("Scan Error", e?.response?.data?.error || e?.message || "Failed to process scan");
+    setScanning(true);
+  } finally {
+    setBusy(false);
+  }
+}, [nav]);
+
 
   const onBarcodeScanned = useCallback((result: any) => {
     if (!scanning || busy) return;

@@ -6,5 +6,12 @@
     "build": "echo \"Skipping API build (infra/lambda provides the runtime)\"",
     "dev": "node -e \"console.log('No API dev server in public repo')\"",
     "test": "echo \"(no tests)\""
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.9"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.883.0",
+    "@aws-sdk/lib-dynamodb": "^3.883.0"
   }
 }

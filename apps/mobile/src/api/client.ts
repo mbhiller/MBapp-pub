@@ -52,3 +52,13 @@ export const updateObject = async (type: string, id: string, body: any) => {
   const u = unwrap(r.data);
   return mergeEcho(withType(type, u), body);
 };
+export const listObjects = async (
+  type: string,
+  opts?: { limit?: number; cursor?: string }
+) => {
+  const params = new URLSearchParams({ type });
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  if (opts?.cursor) params.set("cursor", opts.cursor);
+  const r = await api.get(`/objects?${params.toString()}`);
+  return r.data as { items: any[]; nextCursor?: string };
+};
