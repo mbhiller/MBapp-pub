@@ -25,8 +25,7 @@
     "react-native-paper": "^5.14.5",
     "react-native-safe-area-context": "5.4.0",
     "react-native-screens": "~4.11.1",
-    "react-native-vector-icons": "^10.3.0",
-    "simple-swizzle": "^0.2.2"
+    "react-native-vector-icons": "^10.3.0"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",
@@ -36,5 +35,8 @@
     "esbuild": "^0.25.9",
     "typescript": "~5.8.3",
     "zod": "^4.1.5"
+  },
+  "overrides": {
+    "simple-swizzle": "0.2.2"
   }
 }
