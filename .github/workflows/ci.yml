@@ -4,42 +4,33 @@ on:
   push:
     branches: [ main ]
   pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Install
-        run: npm install
-
-      - name: Lint (if present)
-        run: npm run lint -ws --if-present
-
-      - name: Build (if present)
-        run: npm run build -ws --if-present
-
-  terraform-validate:
+  api:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: infra/terraform
+        working-directory: apps/api
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm ci
+      - run: npx tsc -p tsconfig.json --noEmit
+      - run: npx esbuild src/index.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/index.js
 
-      - uses: hashicorp/setup-terraform@v3
-
-      - name: Format check
-        run: terraform fmt -check
-
-      - name: Init (no backend)
-        run: terraform init -backend=false
-
-      - name: Validate
-        run: terraform validate
+  mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm ci
+      - run: npx tsc -p tsconfig.json --noEmit

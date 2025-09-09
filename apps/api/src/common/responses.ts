@@ -1,22 +1,35 @@
-// backend/src/common/responses.ts
-type Headers = Record<string, string>;
-const baseHeaders: Headers = { 'content-type': 'application/json' };
+type Json = Record<string, any> | any[];
 
-const json = (status: number, body: any, extra: Headers = {}) => ({
-  statusCode: status,
-  headers: { ...baseHeaders, ...extra },
-  body: JSON.stringify(body),
+const baseHeaders = {
+  "content-type": "application/json",
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
+  "access-control-allow-headers": "content-type,x-tenant-id"
+};
+
+const respond = (statusCode: number, body: any) => ({
+  statusCode,
+  headers: baseHeaders,
+  body: typeof body === "string" ? body : JSON.stringify(body)
 });
 
-export const ok = (data: any, extra?: Headers) => json(200, data, extra);
-export const bad = (msg: string, code = 'BadRequest', extra?: Headers) =>
-  json(400, { error: msg, code }, extra);
-export const notfound = (msg: string, code = 'NotFound', extra?: Headers) =>
-  json(404, { error: msg, code }, extra);
-export const error = (msg = 'Internal error', extra?: Headers) =>
-  json(500, { error: msg }, extra);
+export const ok = (data: Json, status = 200) => respond(status, data);
+export const bad = (message: string, status = 400) =>
+  respond(status, { error: "BadRequest", message });
+export const notfound = (message: string) =>
+  respond(404, { error: "NotFound", message });
+export const conflict = (message: string) =>
+  respond(409, { error: "Conflict", message });
+export const notimpl = (route?: string) =>
+  respond(501, { error: "NotImplemented", message: route ? `Unsupported route ${route}` : "Not implemented" });
+export const error = (err: unknown) => {
+  const message =
+    typeof err === "string" ? err :
+    (err as any)?.message ? (err as any).message :
+    "Internal error";
+  return respond(500, { error: "Internal", message });
+};
 
-export const redirect308 = (location: string) => ({
-  statusCode: 308,
-  headers: { Location: location },
-});
+// CORS preflight (OPTIONS)
+export const preflight = () =>
+  ({ statusCode: 204, headers: { ...baseHeaders, "access-control-max-age": "86400" }, body: "" });
