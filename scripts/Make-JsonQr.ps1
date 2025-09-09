@@ -1,48 +1,77 @@
-# Make-JsonQr.ps1
-# Usage: .\Make-JsonQr.ps1            # creates a QR with test data and opens it
-#        .\Make-JsonQr.ps1 -Type dog  # (optional) change type
+<#
+.SYNOPSIS
+  Create a test MBapp object (with name) and generate a QR code PNG containing JSON: { t, id, type, href }.
 
-[CmdletBinding()]
+.EXAMPLES
+  ./Make-JsonQr.ps1
+  ./Make-JsonQr.ps1 -Type horse -Open
+  ./Make-JsonQr.ps1 -Id "<existing-id>" -Type horse   # skip create, just make a QR
+#>
+
 param(
-  [string]$Type = 'horse',
-  [int]$Size = 420,
+  [string]$ApiBase = "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com",
+  [string]$Tenant  = "DemoTenant",
+  [string]$Type    = "horse",
+  [string]$Name,
+  [string]$Id,
+  [int]$Size       = 512,
+  [string]$OutDir  = "./qr",
   [switch]$Open
 )
 
-# Build a simple test payload your ScanScreen understands (no id => create on scan)
-$ts   = Get-Date -Format 's'
-$epc  = 'E200TEST' + (Get-Random -Minimum 100000 -Maximum 999999)
-$payload = [ordered]@{
-  type = $Type
-  data = @{
-    name = "Demo $Type $ts"
-    tags = @{
-      rfidEpc      = $epc
-      friendlyName = "Demo $Type"
-    }
-  }
+$ErrorActionPreference = "Stop"
+
+# Ensure defaults
+if (-not $Name) {
+  $utc = (Get-Date).ToUniversalTime().ToString("yyyyMMdd-HHmmss")
+  $Name = "QR Smoke $utc"
 }
 
-# Compact JSON
-$json = $payload | ConvertTo-Json -Compress -Depth 10
+# Headers per multi-tenant API
+$hdr = @{
+  "x-tenant-id"   = $Tenant
+  "content-type"  = "application/json"
+}
 
-# Output file (qr-horse-YYYYMMDD-HHMMSS.png)
-$stamp   = Get-Date -Format 'yyyyMMdd-HHmmss'
-$outFile = Join-Path (Get-Location) "qr-$($Type)-$stamp.png"
+# Create if we don't have an id yet
+if (-not $Id) {
+  Write-Host "Creating test object: type=$Type name='$Name'"
+  $bodyObj = @{ name = $Name }
+  $bodyJson = $bodyObj | ConvertTo-Json -Depth 5
+  $create = Invoke-RestMethod -Method POST -Uri "$ApiBase/objects/$Type" -Headers $hdr -Body $bodyJson
+  $Id = $create.id
+  if (-not $Id) { throw "Create failed: no id returned" }
+  Write-Host "Created id: $Id"
+} else {
+  Write-Host "Using existing id: $Id (type=$Type)"
+}
 
-# Render via QuickChart
-$enc  = [System.Uri]::EscapeDataString($json)
-$qrUrl = "https://quickchart.io/qr?text=$enc&size=$Size&margin=2"
+# Build QR payload (JSON)
+$payload = [ordered]@{
+  t    = "mbapp/object-v1"
+  id   = $Id
+  type = $Type
+  href = "/objects/$Type/$Id"
+}
+$payloadJson = ($payload | ConvertTo-Json -Depth 5 -Compress)
 
-Write-Host "Payload JSON:" -ForegroundColor Cyan
-Write-Host $json
-Write-Host ""
+# Save the JSON alongside the PNG for reference
+$baseName = "qr-object-$($Type)-$($Id)"
+$jsonPath = [IO.Path]::Combine($OutDir, "$baseName.json")
+$pngPath  = [IO.Path]::Combine($OutDir, "$baseName.png")
+Set-Content -Path $jsonPath -Value $payloadJson -Encoding UTF8
 
-try {
-  Invoke-WebRequest -Uri $qrUrl -OutFile $outFile -ErrorAction Stop | Out-Null
-  Write-Host "Saved: $outFile" -ForegroundColor Green
-  if ($Open -or $true) { Start-Process $outFile | Out-Null }
-} catch {
-  Write-Error "Failed to fetch QR image. $_"
-  exit 1
+# Generate QR using a reliable web encoder
+$dataEnc = [System.Net.WebUtility]::UrlEncode($payloadJson)
+$qrUrl = "https://api.qrserver.com/v1/create-qr-code/?size=$($Size)x$($Size)&data=$dataEnc"
+
+Write-Host "Generating QR → $pngPath"
+Invoke-WebRequest -Uri $qrUrl -OutFile $pngPath | Out-Null
+
+Write-Host "Saved:"
+Write-Host "  JSON: $jsonPath"
+Write-Host "  PNG : $pngPath"
+
+if ($Open) {
+  try { Start-Process $pngPath } catch { Write-Warning "Couldn't open image: $_" }
 }

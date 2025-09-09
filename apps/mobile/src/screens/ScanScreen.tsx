@@ -5,6 +5,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import { getObject, updateObject } from "../api/client";
 import { toast } from "../ui/Toast";
 import { toastFromError } from "../lib/errors";
+import { parseMbappQr } from "../lib/qr";
 
 type AttachTarget = { id: string; type: string };
 
@@ -13,9 +14,7 @@ export default function ScanScreen({ route, navigation }: any) {
   const [permission, requestPermission] = useCameraPermissions();
   const [epc, setEpc] = useState<string>("");
   const [busy, setBusy] = useState(false);
-  const lockedRef = useRef(false); // gate multiple scans
-
-  const needPermission = !permission || !permission.granted;
+  const lockedRef = useRef(false);
 
   useEffect(() => {
     if (!permission) requestPermission();
@@ -24,7 +23,6 @@ export default function ScanScreen({ route, navigation }: any) {
   const normalize = (raw: string): string => {
     if (!raw) return "";
     const t = raw.trim();
-    // If QR contains a URL or query, best-effort pick last path/param segment
     try {
       if (/^https?:\/\//i.test(t)) {
         const u = new URL(t);
@@ -38,26 +36,16 @@ export default function ScanScreen({ route, navigation }: any) {
   const handleAttach = useCallback(
     async (value: string) => {
       const trimmed = normalize(value);
-      if (!trimmed) {
-        toast("No EPC to attach");
-        return;
-      }
-      if (!attachTo) {
-        setEpc(trimmed);
-        toast("Scanned EPC captured");
-        return;
-      }
+      if (!trimmed) { toast("No EPC to attach"); return; }
+      if (!attachTo) { setEpc(trimmed); toast("Scanned EPC captured"); return; }
 
       setBusy(true);
       try {
-        // fetch current to avoid clobbering sibling tags
         const cur = await getObject(attachTo.type, attachTo.id);
         const mergedTags = { ...(cur?.tags || {}), rfidEpc: trimmed };
         const next = await updateObject(attachTo.type, attachTo.id, { tags: mergedTags });
-
         toast("EPC attached");
-        // Go to detail with the updated object
-        navigation.replace("ObjectDetail", { obj: { ...next, type: attachTo.type } });
+        navigation.replace("ObjectDetail", { id: attachTo.id, type: attachTo.type, obj: { ...next, type: attachTo.type } });
       } catch (e: any) {
         toastFromError(e, "Attach failed");
       } finally {
@@ -70,28 +58,37 @@ export default function ScanScreen({ route, navigation }: any) {
 
   const onBarcodeScanned = useCallback(
     ({ data }: any) => {
-      if (!data || lockedRef.current) return;
+      if (!data || lockedRef.current || busy) return;
       lockedRef.current = true;
+
+      const mb = parseMbappQr(String(data));
+      if (mb?.id && mb?.type) {
+        // Pass both param shapes to be compatible with any ObjectDetail implementation
+        navigation.navigate("ObjectDetail", { id: mb.id, type: mb.type, obj: { id: mb.id, type: mb.type } });
+        return;
+      }
+
+      // Fallback: treat as EPC
       handleAttach(String(data));
     },
-    [handleAttach]
+    [busy, handleAttach, navigation]
   );
+
+  const needPermission = !permission || !permission.granted;
 
   return (
     <View style={{ flex: 1, backgroundColor: "#000" }}>
-      {/* Header / context */}
       <View style={{ padding: 12, backgroundColor: "#111" }}>
         <Text style={{ color: "#fff", fontWeight: "700" }}>
-          {attachTo ? `Attach EPC → ${attachTo.type}/${attachTo.id}` : "Scan EPC"}
+          {attachTo ? `Attach EPC → ${attachTo.type}/${attachTo.id}` : "Scan EPC or MBapp QR"}
         </Text>
         <Text style={{ color: "#ccc", marginTop: 4 }}>
           {attachTo
             ? "Scan a tag to attach to this object, or enter EPC manually."
-            : "Scan a tag; EPC will be captured so you can attach later."}
+            : "Scan an MBapp QR to open detail, or scan an EPC to capture/attach later."}
         </Text>
       </View>
 
-      {/* Camera or permission UI */}
       <View style={{ flex: 1 }}>
         {needPermission ? (
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#000" }}>
@@ -102,14 +99,12 @@ export default function ScanScreen({ route, navigation }: any) {
           <CameraView
             style={{ flex: 1 }}
             facing="back"
-            // keep types loose for CI; runtime uses real values
             barcodeScannerSettings={{ barcodeTypes: ["qr", "code128", "code39", "ean13", "upc_a", "upc_e"] } as any}
             onBarcodeScanned={onBarcodeScanned}
           />
         )}
       </View>
 
-      {/* Manual entry + actions */}
       <View style={{ backgroundColor: "#111", padding: 12 }}>
         <Text style={{ color: "#fff", marginBottom: 6 }}>Manual EPC</Text>
         <TextInput
