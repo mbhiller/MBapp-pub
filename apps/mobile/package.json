@@ -2,6 +2,7 @@
   "name": "mbappmobile",
   "version": "1.0.0",
   "main": "index.js",
+  "private": true,
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
@@ -24,8 +25,7 @@
     "react-native-paper": "^5.14.5",
     "react-native-safe-area-context": "5.4.0",
     "react-native-screens": "~4.11.1",
-    "react-native-vector-icons": "^10.3.0",
-    "zod": "^4.1.5"
+    "react-native-vector-icons": "^10.3.0"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",
@@ -33,7 +33,10 @@
     "@types/react-native": "^0.72.8",
     "dotenv": "^17.2.2",
     "esbuild": "^0.25.9",
-    "typescript": "~5.8.3"
+    "typescript": "~5.8.3",
+    "zod": "^4.1.5"
   },
-  "private": true
+  "overrides": {
+    "simple-swizzle": "0.2.2"
+  }
 }
