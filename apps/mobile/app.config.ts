@@ -1,3 +1,4 @@
+//  apps/mobile/app.config.ts
 import 'dotenv/config';
 import type { ExpoConfig } from 'expo/config';
 
