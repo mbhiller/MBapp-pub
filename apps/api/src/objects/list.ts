@@ -3,50 +3,49 @@ import { ddb, tableObjects } from "../common/ddb";
 import { ok, bad, error as errResp } from "../common/responses";
 import { getTenantId } from "../common/env";
 
-/**
- * GET /objects?type={type}&limit=20&cursor=...
- * Uses GSI1 (gsi1pk = `${tenant}|${type}`, gsi1sk DESC).
- * Env: GSI1_INDEX (defaults to "gsi1")
- */
+type Cursor = { pk: string; sk: string };
+
+function encodeCursor(k: any | undefined) {
+  if (!k) return undefined;
+  try { return Buffer.from(JSON.stringify(k)).toString("base64"); } catch { return undefined; }
+}
+function decodeCursor(s: string | undefined) {
+  if (!s) return undefined;
+  try { return JSON.parse(Buffer.from(s, "base64").toString("utf8")); } catch { return undefined; }
+}
+
 export const handler = async (evt: any) => {
   try {
-    const tenant = getTenantId(evt);
-    if (!tenant) return bad("x-tenant-id header required");
+    const tenantId = getTenantId(evt);
+    if (!tenantId) return bad("x-tenant-id header required");
 
-    const qs = evt?.queryStringParameters ?? {};
-    const type = (qs.type as string | undefined)?.trim();
+    const type = evt?.pathParameters?.type?.trim();
     if (!type) return bad("type is required");
 
-    const limitNum = Number.parseInt(String(qs.limit ?? "20"), 10);
-    const limit = Number.isFinite(limitNum) ? Math.max(1, Math.min(100, limitNum)) : 20;
+    const qs = evt?.queryStringParameters ?? {};
+    const limit = Math.max(1, Math.min(100, Number(qs.limit) || 20));
+    const cursor = decodeCursor(qs.cursor);
 
-    let ExclusiveStartKey: any;
-    const cursor = qs.cursor as string | undefined;
-    if (cursor) {
-      try { ExclusiveStartKey = JSON.parse(Buffer.from(cursor, "base64").toString("utf8")); } catch {}
-    }
-
-    const IndexName = process.env.GSI1_INDEX || "gsi1";
-    const gsiPk = `${tenant}|${type}`;
-
+    // Partition: pk; Range starts with "ID#"
+    const pk = `TENANT#${tenantId}#TYPE#${type}`;
     const r = await ddb.send(new QueryCommand({
       TableName: tableObjects,
-      IndexName,
-      KeyConditionExpression: "#p = :p",
-      ExpressionAttributeNames: { "#p": "gsi1pk" },
-      ExpressionAttributeValues: { ":p": gsiPk },
+      KeyConditionExpression: "#pk = :pk AND begins_with(#sk, :skprefix)",
+      ExpressionAttributeNames:  { "#pk": "pk", "#sk": "sk" },
+      ExpressionAttributeValues: { ":pk": pk, ":skprefix": "ID#" },
       Limit: limit,
-      ExclusiveStartKey,
-      ScanIndexForward: false,
+      ExclusiveStartKey: cursor,
+      ScanIndexForward: false, // newest first (if sk sortable)
+      ConsistentRead: false
     }));
 
-    const nextCursor = r.LastEvaluatedKey
-      ? Buffer.from(JSON.stringify(r.LastEvaluatedKey)).toString("base64")
-      : undefined;
-
-    return ok({ items: r.Items ?? [], nextCursor });
-  } catch (e) {
+    return ok({
+      items: r.Items ?? [],
+      nextCursor: encodeCursor(r.LastEvaluatedKey)
+    });
+  } catch (e: unknown) {
     console.error("LIST objects failed", e);
-    return errResp("Internal error");
+    const msg = e instanceof Error ? e.message : String(e);
+    return errResp(msg);
   }
 };
