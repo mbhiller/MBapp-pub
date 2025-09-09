@@ -45,3 +45,12 @@ apps/api/dist/
 apps/api/dist/*.zip
 tools/qr-*.png
 "@
+
+# runtime
+apps/api/out.json
+apps/api/post.json
+out.json
+post.json
+apps/api/dist/
+apps/api/dist/*.zip
+tools/qr-*.png
