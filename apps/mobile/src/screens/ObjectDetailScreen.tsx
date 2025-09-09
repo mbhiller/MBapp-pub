@@ -26,7 +26,12 @@ export default function ObjectDetailScreen({ route }: any) {
 
   const onToggle = async (key: "quickbooks"|"usef"|"petregistry", val: boolean) => {
     try {
-      const next = await updateObject(obj.type, obj.id, { integrations: { [key]: { enabled: val } } });
+      // merge existing integrations to avoid clobbering sibling keys
+      const merged = {
+        ...(obj?.integrations || {}),
+        [key]: { ...(obj?.integrations?.[key] || {}), enabled: val }
+      };
+      const next = await updateObject(obj.type, obj.id, { integrations: merged });
       setObj(next);
     } catch (e: any) {
       Alert.alert("Update failed", e?.response?.data?.error || e?.message || "Could not update integration");

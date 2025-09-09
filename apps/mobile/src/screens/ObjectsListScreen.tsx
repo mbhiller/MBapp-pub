@@ -54,7 +54,8 @@ export default function ObjectsListScreen({ route, navigation }: any) {
       if (reset) {
         setLoading(true);
         try {
-          const r = await listObjects(type, { limit: 20 });
+          // server-side name filter
+          const r = await listObjects(type, { limit: 20, name: query.trim() || undefined });
           setItems(r.items ?? []);
           setCursor(r.nextCursor);
         } catch (e: any) {
@@ -66,7 +67,8 @@ export default function ObjectsListScreen({ route, navigation }: any) {
         if (!cursor || loading) return;
         setLoading(true);
         try {
-          const r = await listObjects(type, { limit: 20, cursor });
+          // keep passing the same name filter when paginating
+          const r = await listObjects(type, { limit: 20, cursor, name: query.trim() || undefined });
           setItems(prev => [...prev, ...(r.items ?? [])]);
           setCursor(r.nextCursor);
         } finally {
@@ -74,7 +76,7 @@ export default function ObjectsListScreen({ route, navigation }: any) {
         }
       }
     },
-    [type, cursor, loading]
+    [type, cursor, loading, query]
   );
 
   // initial + whenever type changes
@@ -86,14 +88,15 @@ export default function ObjectsListScreen({ route, navigation }: any) {
   const onRefresh = useCallback(async () => {
     setRefreshing(true); setError(null);
     try {
-      const r = await listObjects(type, { limit: 20 });
+      const r = await listObjects(type, { limit: 20, name: query.trim() || undefined });
       setItems(r.items ?? []);
       setCursor(r.nextCursor);
     } catch (e: any) {
       setError(e?.message || "Failed to refresh");
     } finally { setRefreshing(false); }
-  }, [type]);
+  }, [type, query]);
 
+  // keep local filter for instant feel (also filters non-name fields)
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return items;
