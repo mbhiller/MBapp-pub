@@ -2,6 +2,7 @@
   "name": "mbappmobile",
   "version": "1.0.0",
   "main": "index.js",
+  "private": true,
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
@@ -34,6 +35,5 @@
     "dotenv": "^17.2.2",
     "esbuild": "^0.25.9",
     "typescript": "~5.8.3"
-  },
-  "private": true
+  }
 }
