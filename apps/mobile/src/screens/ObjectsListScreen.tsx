@@ -10,17 +10,27 @@ import {
   View,
 } from "react-native";
 import { listObjects } from "../api/client";
+import { toastFromError } from "../lib/errors";
 
 type Item = {
-  id: string; type?: string; name?: string; data?: any;
-  tags?: Record<string, any>; createdAt?: number | string; updatedAt?: number | string;
+  id: string;
+  type?: string;
+  name?: string;
+  data?: any;
+  tags?: Record<string, any>;
+  createdAt?: number | string;
+  updatedAt?: number | string;
   [k: string]: any;
 };
 
 const fmt = (v?: number | string) => {
   const n = typeof v === "string" ? Number(v) : v;
   if (typeof n !== "number" || !isFinite(n)) return "—";
-  try { return new Date(n).toLocaleString(); } catch { return "—"; }
+  try {
+    return new Date(n).toLocaleString();
+  } catch {
+    return "—";
+  }
 };
 
 const titleOf = (it: Item, type: string) => {
@@ -54,12 +64,13 @@ export default function ObjectsListScreen({ route, navigation }: any) {
       if (reset) {
         setLoading(true);
         try {
-          // server-side name filter
           const r = await listObjects(type, { limit: 20, name: query.trim() || undefined });
           setItems(r.items ?? []);
           setCursor(r.nextCursor);
         } catch (e: any) {
-          setError(e?.message || "Failed to load");
+          const msg = e?.message || "Failed to load";
+          setError(msg);
+          toastFromError(e, "Load failed");
         } finally {
           setLoading(false);
         }
@@ -67,9 +78,8 @@ export default function ObjectsListScreen({ route, navigation }: any) {
         if (!cursor || loading) return;
         setLoading(true);
         try {
-          // keep passing the same name filter when paginating
           const r = await listObjects(type, { limit: 20, cursor, name: query.trim() || undefined });
-          setItems(prev => [...prev, ...(r.items ?? [])]);
+          setItems((prev) => [...prev, ...(r.items ?? [])]);
           setCursor(r.nextCursor);
         } finally {
           setLoading(false);
@@ -79,28 +89,33 @@ export default function ObjectsListScreen({ route, navigation }: any) {
     [type, cursor, loading, query]
   );
 
-  // initial + whenever type changes
   useEffect(() => {
-    setItems([]); setCursor(undefined); setQuery("");
+    setItems([]);
+    setCursor(undefined);
+    setQuery("");
     load(true);
   }, [type]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onRefresh = useCallback(async () => {
-    setRefreshing(true); setError(null);
+    setRefreshing(true);
+    setError(null);
     try {
       const r = await listObjects(type, { limit: 20, name: query.trim() || undefined });
       setItems(r.items ?? []);
       setCursor(r.nextCursor);
     } catch (e: any) {
-      setError(e?.message || "Failed to refresh");
-    } finally { setRefreshing(false); }
+      const msg = e?.message || "Failed to refresh";
+      setError(msg);
+      toastFromError(e, "Refresh failed");
+    } finally {
+      setRefreshing(false);
+    }
   }, [type, query]);
 
-  // keep local filter for instant feel (also filters non-name fields)
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return items;
-    return items.filter(it => {
+    return items.filter((it) => {
       const fields = [
         it.name,
         it.id,
@@ -108,25 +123,42 @@ export default function ObjectsListScreen({ route, navigation }: any) {
         it.data?.title,
         it.tags?.rfidEpc,
         it.tags?.friendlyName,
-      ].filter(Boolean).map(String);
-      return fields.some(s => s.toLowerCase().includes(q));
+      ]
+        .filter(Boolean)
+        .map(String);
+      return fields.some((s) => s.toLowerCase().includes(q));
     });
   }, [items, query]);
 
+  const onPress = (item: Item) => {
+    navigation.navigate("ObjectDetail", { obj: { ...item, type } });
+  };
+  const onLongPress = (item: Item) => {
+    navigation.navigate("Scan", { attachTo: { id: item.id, type } });
+  };
+
   const renderItem = ({ item }: { item: Item }) => (
     <Pressable
-      onPress={() => navigation.navigate("ObjectDetail", { obj: { ...item, type } })}
+      onPress={() => onPress(item)}
+      onLongPress={() => onLongPress(item)}
+      delayLongPress={300}
       style={({ pressed }) => ({
         padding: 12,
         backgroundColor: pressed ? "#f5f5f5" : "#fff",
-        borderBottomWidth: 1, borderBottomColor: "#eee"
+        borderBottomWidth: 1,
+        borderBottomColor: "#eee",
       })}
     >
       <Text style={{ fontWeight: "700" }}>{titleOf(item, type)}</Text>
-      <Text selectable numberOfLines={1} style={{ color: "#555" }}>ID: {item.id}</Text>
-      <Text style={{ color: "#777", marginTop: 2 }}>
-        Created: {fmt(item.createdAt)}   Updated: {fmt(item.updatedAt)}
+      <Text selectable numberOfLines={1} style={{ color: "#555" }}>
+        ID: {item.id}
       </Text>
+      <Text style={{ color: "#777", marginTop: 2 }}>
+        Created: {fmt(item.createdAt)} Updated: {fmt(item.updatedAt)}
+      </Text>
+      {item.tags?.rfidEpc ? (
+        <Text style={{ color: "#2a6", fontWeight: "600" }}>EPC: {item.tags.rfidEpc}</Text>
+      ) : null}
     </Pressable>
   );
 
@@ -136,9 +168,13 @@ export default function ObjectsListScreen({ route, navigation }: any) {
       <Pressable
         onPress={() => setType(value)}
         style={{
-          paddingVertical: 6, paddingHorizontal: 12, borderRadius: 16, marginRight: 8,
-          borderWidth: 1, borderColor: active ? "#333" : "#ccc",
-          backgroundColor: active ? "#e9e9e9" : "#fff"
+          paddingVertical: 6,
+          paddingHorizontal: 12,
+          borderRadius: 16,
+          marginRight: 8,
+          borderWidth: 1,
+          borderColor: active ? "#333" : "#ccc",
+          backgroundColor: active ? "#e9e9e9" : "#fff",
         }}
       >
         <Text style={{ fontWeight: active ? "700" : "500" }}>{value}</Text>
@@ -159,7 +195,9 @@ export default function ObjectsListScreen({ route, navigation }: any) {
           <View style={{ padding: 16, backgroundColor: "#fafafa" }}>
             {/* Type selector */}
             <View style={{ flexDirection: "row", marginBottom: 10 }}>
-              {TYPES.map(t => <Chip key={t} value={t} />)}
+              {TYPES.map((t) => (
+                <Chip key={t} value={t} />
+              ))}
             </View>
 
             {/* Search */}
@@ -168,8 +206,12 @@ export default function ObjectsListScreen({ route, navigation }: any) {
               onChangeText={setQuery}
               placeholder="Search by name, ID, EPC…"
               style={{
-                backgroundColor: "#fff", borderWidth: 1, borderColor: "#ddd",
-                paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8
+                backgroundColor: "#fff",
+                borderWidth: 1,
+                borderColor: "#ddd",
+                paddingHorizontal: 12,
+                paddingVertical: 8,
+                borderRadius: 8,
               }}
             />
 
@@ -180,37 +222,23 @@ export default function ObjectsListScreen({ route, navigation }: any) {
               </Text>
               {error ? <Text style={{ color: "red" }}>{error}</Text> : null}
             </View>
+
+            <Text style={{ color: "#666", marginTop: 6 }}>
+              Tip: long-press an item to Scan & Attach an EPC directly.
+            </Text>
           </View>
         }
         ListFooterComponent={
           <View style={{ padding: 12, alignItems: "center" }}>
-            {loading ? <ActivityIndicator /> : (filtered.length === 0 ? <Text style={{ color: "#666" }}>No items</Text> : null)}
+            {loading ? (
+              <ActivityIndicator />
+            ) : filtered.length === 0 ? (
+              <Text style={{ color: "#666" }}>No items</Text>
+            ) : null}
           </View>
         }
         contentContainerStyle={{ backgroundColor: "#fff", minHeight: "100%" }}
       />
-
-      {/* Floating Scan button (FAB) */}
-      <Pressable
-        onPress={() => navigation.navigate("Scan")}
-        style={{
-          position: "absolute",
-          right: 16,
-          bottom: 24,
-          backgroundColor: "#111",
-          paddingHorizontal: 18,
-          paddingVertical: 12,
-          borderRadius: 24,
-          shadowColor: "#000",
-          shadowOpacity: 0.2,
-          shadowRadius: 6,
-          elevation: 4
-        }}
-        accessibilityRole="button"
-        accessibilityLabel="Scan"
-      >
-        <Text style={{ color: "#fff", fontWeight: "700" }}>Scan</Text>
-      </Pressable>
     </View>
   );
 }
