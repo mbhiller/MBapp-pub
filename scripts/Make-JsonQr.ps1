@@ -15,7 +15,7 @@ param(
   [string]$Name,
   [string]$Id,
   [int]$Size       = 512,
-  [string]$OutDir  = "./qr",
+  [string]$OutDir  = ".",
   [switch]$Open
 )
 
