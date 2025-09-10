@@ -1,6 +1,6 @@
 // apps/mobile/src/screens/ScanScreen.tsx
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { View, Text, TextInput, Button, ActivityIndicator, Pressable } from "react-native";
+import { View, Text, TextInput, Button, ActivityIndicator, Pressable, BackHandler } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { getObject, updateObject } from "../api/client";
 import { toast } from "../ui/Toast";
@@ -24,6 +24,15 @@ export default function ScanScreen({ route, navigation }: any) {
   useEffect(() => {
     if (!permission) requestPermission();
   }, [permission, requestPermission]);
+
+  // Ensure Android hardware back exits Scan
+  useEffect(() => {
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      navigation.goBack();
+      return true;
+    });
+    return () => sub.remove();
+  }, [navigation]);
 
   const normalize = (raw: string): string => {
     if (!raw) return "";
@@ -93,8 +102,17 @@ export default function ScanScreen({ route, navigation }: any) {
 
   return (
     <Screen title="Scan" scroll={false}>
+      {/* Overlays */}
       <View style={{ position: "absolute", top: 8, right: 8, zIndex: 10 }}>
         <NonProdBadge />
+      </View>
+      <View style={{ position: "absolute", top: 8, left: 8, zIndex: 10 }}>
+        <Pressable
+          onPress={() => navigation.goBack()}
+          style={{ backgroundColor: "rgba(0,0,0,0.6)", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999 }}
+        >
+          <Text style={{ color: "#fff", fontWeight: "700" }}>Close</Text>
+        </Pressable>
       </View>
 
       <Section label={attachTo ? `Attach EPC → ${attachTo.type}/${attachTo.id}` : "Scanner"} style={{ padding: 0, overflow: "hidden" }}>
