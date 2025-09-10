@@ -11,6 +11,10 @@ import {
 } from "react-native";
 import { listObjects } from "../api/client";
 import { toastFromError } from "../lib/errors";
+import { Screen } from "../ui/Screen";
+import { Section } from "../ui/Section";
+import { NonProdBadge } from "../ui/NonProdBadge";
+import { useTheme } from "../ui/ThemeProvider";
 
 type Item = {
   id: string;
@@ -45,9 +49,11 @@ const titleOf = (it: Item, type: string) => {
   );
 };
 
-const TYPES = ["horse", "dog", "cattle"]; // tweak to whatever you use
+// Adjust to the types you care about
+const TYPES = ["horse", "dog", "cattle"];
 
 export default function ObjectsListScreen({ route, navigation }: any) {
+  const t = useTheme();
   const initialType = (route?.params?.type as string) || "horse";
 
   const [type, setType] = useState<string>(initialType);
@@ -94,7 +100,8 @@ export default function ObjectsListScreen({ route, navigation }: any) {
     setCursor(undefined);
     setQuery("");
     load(true);
-  }, [type]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [type]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -137,28 +144,34 @@ export default function ObjectsListScreen({ route, navigation }: any) {
     navigation.navigate("Scan", { attachTo: { id: item.id, type } });
   };
 
-  const renderItem = ({ item }: { item: Item }) => (
+  const Row = ({ item }: { item: Item }) => (
     <Pressable
       onPress={() => onPress(item)}
       onLongPress={() => onLongPress(item)}
       delayLongPress={300}
       style={({ pressed }) => ({
-        padding: 12,
-        backgroundColor: pressed ? "#f5f5f5" : "#fff",
+        padding: 14,
+        backgroundColor: pressed ? "#f8fafc" : t.card,
         borderBottomWidth: 1,
-        borderBottomColor: "#eee",
+        borderBottomColor: t.border,
       })}
     >
-      <Text style={{ fontWeight: "700" }}>{titleOf(item, type)}</Text>
-      <Text selectable numberOfLines={1} style={{ color: "#555" }}>
-        ID: {item.id}
+      <Text style={{ fontWeight: "800", color: t.text }}>{titleOf(item, type)}</Text>
+
+      <Text selectable numberOfLines={1} style={{ color: t.textMuted, marginTop: 2 }}>
+        ID: <Text style={{ color: t.text }}>{item.id}</Text>
       </Text>
-      <Text style={{ color: "#777", marginTop: 2 }}>
-        Created: {fmt(item.createdAt)} Updated: {fmt(item.updatedAt)}
+
+      <Text style={{ color: t.textMuted, marginTop: 2 }}>
+        Created: {fmt(item.createdAt)}   Updated: {fmt(item.updatedAt)}
       </Text>
-      {item.tags?.rfidEpc ? (
-        <Text style={{ color: "#2a6", fontWeight: "600" }}>EPC: {item.tags.rfidEpc}</Text>
-      ) : null}
+
+      <View style={{ flexDirection: "row", flexWrap: "wrap", marginTop: 6, gap: 8 }}>
+        {item.tags?.rfidEpc ? (
+          <Badge text={`EPC ${item.tags.rfidEpc}`} tone="success" />
+        ) : null}
+        {item.tags?.archived ? <Badge text="Archived" tone="danger" /> : null}
+      </View>
     </Pressable>
   );
 
@@ -173,72 +186,101 @@ export default function ObjectsListScreen({ route, navigation }: any) {
           borderRadius: 16,
           marginRight: 8,
           borderWidth: 1,
-          borderColor: active ? "#333" : "#ccc",
-          backgroundColor: active ? "#e9e9e9" : "#fff",
+          borderColor: active ? t.text : t.border,
+          backgroundColor: active ? "#eef2ff" : t.card,
         }}
       >
-        <Text style={{ fontWeight: active ? "700" : "500" }}>{value}</Text>
+        <Text style={{ fontWeight: active ? "800" : "600", color: t.text }}>{value}</Text>
       </Pressable>
     );
   };
 
-  return (
-    <View style={{ flex: 1 }}>
-      <FlatList
-        data={filtered}
-        keyExtractor={(it) => it.id}
-        renderItem={renderItem}
-        onEndReachedThreshold={0.3}
-        onEndReached={() => load(false)}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-        ListHeaderComponent={
-          <View style={{ padding: 16, backgroundColor: "#fafafa" }}>
-            {/* Type selector */}
-            <View style={{ flexDirection: "row", marginBottom: 10 }}>
-              {TYPES.map((t) => (
-                <Chip key={t} value={t} />
-              ))}
-            </View>
+  const header = (
+    <Section label="Browse" style={{ marginTop: 8 }}>
+      {/* Type selector */}
+      <View style={{ flexDirection: "row", marginBottom: 10 }}>
+        {TYPES.map((tp) => (
+          <Chip key={tp} value={tp} />
+        ))}
+      </View>
 
-            {/* Search */}
-            <TextInput
-              value={query}
-              onChangeText={setQuery}
-              placeholder="Search by name, ID, EPC…"
-              style={{
-                backgroundColor: "#fff",
-                borderWidth: 1,
-                borderColor: "#ddd",
-                paddingHorizontal: 12,
-                paddingVertical: 8,
-                borderRadius: 8,
-              }}
-            />
-
-            {/* Meta + errors */}
-            <View style={{ marginTop: 8, flexDirection: "row", justifyContent: "space-between" }}>
-              <Text style={{ color: "#666" }}>
-                {filtered.length}/{items.length} shown{cursor ? " • more available…" : ""}
-              </Text>
-              {error ? <Text style={{ color: "red" }}>{error}</Text> : null}
-            </View>
-
-            <Text style={{ color: "#666", marginTop: 6 }}>
-              Tip: long-press an item to Scan & Attach an EPC directly.
-            </Text>
-          </View>
-        }
-        ListFooterComponent={
-          <View style={{ padding: 12, alignItems: "center" }}>
-            {loading ? (
-              <ActivityIndicator />
-            ) : filtered.length === 0 ? (
-              <Text style={{ color: "#666" }}>No items</Text>
-            ) : null}
-          </View>
-        }
-        contentContainerStyle={{ backgroundColor: "#fff", minHeight: "100%" }}
+      {/* Search */}
+      <TextInput
+        value={query}
+        onChangeText={setQuery}
+        placeholder="Search by name, ID, EPC…"
+        placeholderTextColor={t.textMuted}
+        style={{
+          backgroundColor: "#fff",
+          borderWidth: 1,
+          borderColor: t.border,
+          paddingHorizontal: 12,
+          paddingVertical: 10,
+          borderRadius: 10,
+          color: t.text,
+        }}
       />
+
+      {/* Meta + errors */}
+      <View style={{ marginTop: 10, flexDirection: "row", justifyContent: "space-between" }}>
+        <Text style={{ color: t.textMuted }}>
+          {filtered.length}/{items.length} shown{cursor ? " • more available…" : ""}
+        </Text>
+        {error ? <Text style={{ color: t.danger }}>{error}</Text> : null}
+      </View>
+
+      <Text style={{ color: t.textMuted, marginTop: 6 }}>
+        Tip: long-press an item to Scan & attach an EPC directly.
+      </Text>
+    </Section>
+  );
+
+  return (
+    <Screen title="Objects" scroll={false}>
+      {/* Non-prod badge */}
+      <View style={{ position: "absolute", top: 8, right: 8, zIndex: 10 }}>
+        <NonProdBadge />
+      </View>
+
+      {header}
+
+      <View style={{ flex: 1, marginHorizontal: 12, backgroundColor: t.card, borderRadius: t.radius, overflow: "hidden", borderWidth: 1, borderColor: t.border }}>
+        <FlatList
+          data={filtered}
+          keyExtractor={(it) => it.id}
+          renderItem={({ item }) => <Row item={item} />}
+          onEndReachedThreshold={0.3}
+          onEndReached={() => load(false)}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          ListFooterComponent={
+            <View style={{ padding: 12, alignItems: "center" }}>
+              {loading ? (
+                <ActivityIndicator />
+              ) : filtered.length === 0 ? (
+                <Text style={{ color: t.textMuted }}>No items</Text>
+              ) : null}
+            </View>
+          }
+          contentContainerStyle={{ minHeight: "100%" }}
+        />
+      </View>
+    </Screen>
+  );
+}
+
+function Badge({ text, tone }: { text: string; tone?: "success" | "danger" | "info" }) {
+  const t = useTheme();
+  const bg =
+    tone === "success" ? "#dcfce7" :
+    tone === "danger"  ? "#fee2e2" :
+                         "#e5e7eb";
+  const fg =
+    tone === "success" ? t.success :
+    tone === "danger"  ? t.danger  :
+                         t.textMuted;
+  return (
+    <View style={{ backgroundColor: bg, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 }}>
+      <Text style={{ color: fg, fontWeight: "700", fontSize: 12 }}>{text}</Text>
     </View>
   );
 }
