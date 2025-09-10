@@ -1,3 +1,4 @@
+// apps/mobile/src/navigation/AppNavigator.tsx
 import React from "react";
 import { Button } from "react-native";
 import { NavigationContainer } from "@react-navigation/native";
@@ -7,18 +8,29 @@ import ObjectsListScreen from "../screens/ObjectsListScreen";
 import ObjectDetailScreen from "../screens/ObjectDetailScreen";
 import ScanScreen from "../screens/ScanScreen";
 
+// Theme
+import { ThemeProvider, useTheme } from "../ui/ThemeProvider";
+
 type RootStackParamList = {
   ObjectsList: { type: string };
-  ObjectDetail: { obj: any };
+  ObjectDetail: { obj: any } | { id: string; type: string } | undefined;
   Scan: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-export default function AppNavigator() {
+function StackWithTheme() {
+  const t = useTheme();
   return (
     <NavigationContainer>
-      <Stack.Navigator initialRouteName="ObjectsList">
+      <Stack.Navigator
+        initialRouteName="ObjectsList"
+        screenOptions={{
+          headerStyle: { backgroundColor: t.card },
+          headerTitleStyle: { color: t.text, fontWeight: "800" },
+          headerTintColor: t.primary,
+        }}
+      >
         <Stack.Screen
           name="ObjectsList"
           component={ObjectsListScreen}
@@ -26,17 +38,21 @@ export default function AppNavigator() {
           options={({ navigation }) => ({
             title: "Horses",
             headerRight: () => (
-              <Button title="Scan" onPress={() => navigation.navigate("Scan")} />
+              <Button title="Scan" color={t.primary} onPress={() => navigation.navigate("Scan")} />
             ),
           })}
         />
-        <Stack.Screen
-          name="ObjectDetail"
-          component={ObjectDetailScreen}
-          options={{ title: "Object" }}
-        />
+        <Stack.Screen name="ObjectDetail" component={ObjectDetailScreen} options={{ title: "Object" }} />
         <Stack.Screen name="Scan" component={ScanScreen} options={{ title: "Scan" }} />
       </Stack.Navigator>
     </NavigationContainer>
+  );
+}
+
+export default function AppNavigator() {
+  return (
+    <ThemeProvider>
+      <StackWithTheme />
+    </ThemeProvider>
   );
 }

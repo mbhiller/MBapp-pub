@@ -10,33 +10,52 @@ import ObjectsListScreen from "./src/screens/ObjectsListScreen";
 import ObjectDetailScreen from "./src/screens/ObjectDetailScreen";
 import ScanScreen from "./src/screens/ScanScreen";
 
+// Theme
+import { ThemeProvider, useTheme } from "./src/ui/ThemeProvider";
+
 const Stack = createNativeStackNavigator();
 
 function ScanButton({ navigation }: { navigation: any }) {
+  const t = useTheme();
   return (
     <Pressable onPress={() => navigation.navigate("Scan")} style={{ paddingHorizontal: 12, paddingVertical: 6 }}>
-      <RNText style={{ fontWeight: "600" }}>Scan</RNText>
+      <RNText style={{ fontWeight: "700", color: t.primary }}>Scan</RNText>
     </Pressable>
+  );
+}
+
+function RootNavigator() {
+  const t = useTheme();
+  return (
+    <NavigationContainer>
+      <Stack.Navigator
+        screenOptions={{
+          headerStyle: { backgroundColor: t.card },
+          headerTitleStyle: { color: t.text, fontWeight: "800" },
+          headerTintColor: t.primary,
+        }}
+      >
+        <Stack.Screen
+          name="Objects"
+          component={ObjectsListScreen}
+          options={({ navigation }) => ({
+            title: "Objects",
+            headerRight: () => <ScanButton navigation={navigation} />,
+          })}
+        />
+        <Stack.Screen name="ObjectDetail" component={ObjectDetailScreen} options={{ title: "Object Detail" }} />
+        <Stack.Screen name="Scan" component={ScanScreen} options={{ title: "Scan" }} />
+      </Stack.Navigator>
+    </NavigationContainer>
   );
 }
 
 export default function App() {
   return (
     <PaperProvider>
-      <NavigationContainer>
-        <Stack.Navigator>
-          <Stack.Screen
-            name="Objects"
-            component={ObjectsListScreen}
-            options={({ navigation }) => ({
-              title: "Objects",
-              headerRight: () => <ScanButton navigation={navigation} />,
-            })}
-          />
-          <Stack.Screen name="ObjectDetail" component={ObjectDetailScreen} options={{ title: "Object Detail" }} />
-          <Stack.Screen name="Scan" component={ScanScreen} options={{ title: "Scan" }} />
-        </Stack.Navigator>
-      </NavigationContainer>
+      <ThemeProvider>
+        <RootNavigator />
+      </ThemeProvider>
     </PaperProvider>
   );
 }

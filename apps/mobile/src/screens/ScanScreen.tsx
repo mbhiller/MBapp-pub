@@ -6,10 +6,15 @@ import { getObject, updateObject } from "../api/client";
 import { toast } from "../ui/Toast";
 import { toastFromError } from "../lib/errors";
 import { parseMbappQr } from "../lib/qr";
+import { Screen } from "../ui/Screen";
+import { Section } from "../ui/Section";
+import { NonProdBadge } from "../ui/NonProdBadge";
+import { useTheme } from "../ui/ThemeProvider";
 
 type AttachTarget = { id: string; type: string };
 
 export default function ScanScreen({ route, navigation }: any) {
+  const t = useTheme();
   const attachTo: AttachTarget | undefined = route?.params?.attachTo;
   const [permission, requestPermission] = useCameraPermissions();
   const [epc, setEpc] = useState<string>("");
@@ -22,30 +27,42 @@ export default function ScanScreen({ route, navigation }: any) {
 
   const normalize = (raw: string): string => {
     if (!raw) return "";
-    const t = raw.trim();
+    const txt = raw.trim();
     try {
-      if (/^https?:\/\//i.test(t)) {
-        const u = new URL(t);
-        const last = u.pathname.split("/").filter(Boolean).pop() || u.searchParams.get("epc") || t;
+      if (/^https?:\/\//i.test(txt)) {
+        const u = new URL(txt);
+        const last = u.pathname.split("/").filter(Boolean).pop() || u.searchParams.get("epc") || txt;
         return String(last).toUpperCase();
       }
     } catch {}
-    return t.toUpperCase();
+    return txt.toUpperCase();
   };
 
   const handleAttach = useCallback(
     async (value: string) => {
       const trimmed = normalize(value);
-      if (!trimmed) { toast("No EPC to attach"); return; }
-      if (!attachTo) { setEpc(trimmed); toast("Scanned EPC captured"); return; }
+      if (!trimmed) {
+        toast("No EPC to attach");
+        return;
+      }
+      if (!attachTo) {
+        setEpc(trimmed);
+        toast("Scanned EPC captured");
+        return;
+      }
 
       setBusy(true);
       try {
         const cur = await getObject(attachTo.type, attachTo.id);
         const mergedTags = { ...(cur?.tags || {}), rfidEpc: trimmed };
         const next = await updateObject(attachTo.type, attachTo.id, { tags: mergedTags });
+
         toast("EPC attached");
-        navigation.replace("ObjectDetail", { id: attachTo.id, type: attachTo.type, obj: { ...next, type: attachTo.type } });
+        navigation.replace("ObjectDetail", {
+          id: attachTo.id,
+          type: attachTo.type,
+          obj: { ...next, type: attachTo.type },
+        });
       } catch (e: any) {
         toastFromError(e, "Attach failed");
       } finally {
@@ -63,12 +80,10 @@ export default function ScanScreen({ route, navigation }: any) {
 
       const mb = parseMbappQr(String(data));
       if (mb?.id && mb?.type) {
-        // Pass both param shapes to be compatible with any ObjectDetail implementation
         navigation.navigate("ObjectDetail", { id: mb.id, type: mb.type, obj: { id: mb.id, type: mb.type } });
         return;
       }
 
-      // Fallback: treat as EPC
       handleAttach(String(data));
     },
     [busy, handleAttach, navigation]
@@ -77,62 +92,60 @@ export default function ScanScreen({ route, navigation }: any) {
   const needPermission = !permission || !permission.granted;
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#000" }}>
-      <View style={{ padding: 12, backgroundColor: "#111" }}>
-        <Text style={{ color: "#fff", fontWeight: "700" }}>
-          {attachTo ? `Attach EPC → ${attachTo.type}/${attachTo.id}` : "Scan EPC or MBapp QR"}
-        </Text>
-        <Text style={{ color: "#ccc", marginTop: 4 }}>
-          {attachTo
-            ? "Scan a tag to attach to this object, or enter EPC manually."
-            : "Scan an MBapp QR to open detail, or scan an EPC to capture/attach later."}
-        </Text>
+    <Screen title="Scan" scroll={false}>
+      <View style={{ position: "absolute", top: 8, right: 8, zIndex: 10 }}>
+        <NonProdBadge />
       </View>
 
-      <View style={{ flex: 1 }}>
+      <Section label={attachTo ? `Attach EPC → ${attachTo.type}/${attachTo.id}` : "Scanner"} style={{ padding: 0, overflow: "hidden" }}>
         {needPermission ? (
-          <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#000" }}>
-            <Text style={{ color: "#fff", marginBottom: 12 }}>Camera permission is required</Text>
+          <View style={{ alignItems: "center", justifyContent: "center", padding: 16 }}>
+            <Text style={{ color: t.text, marginBottom: 12 }}>Camera permission is required</Text>
             <Button title="Grant permission" onPress={() => requestPermission()} />
           </View>
         ) : (
-          <CameraView
-            style={{ flex: 1 }}
-            facing="back"
-            barcodeScannerSettings={{ barcodeTypes: ["qr", "code128", "code39", "ean13", "upc_a", "upc_e"] } as any}
-            onBarcodeScanned={onBarcodeScanned}
-          />
+          <View style={{ height: 360, backgroundColor: "#000" }}>
+            <CameraView
+              style={{ flex: 1 }}
+              facing="back"
+              barcodeScannerSettings={{ barcodeTypes: ["qr", "code128", "code39", "ean13", "upc_a", "upc_e"] } as any}
+              onBarcodeScanned={onBarcodeScanned}
+            />
+          </View>
         )}
-      </View>
+      </Section>
 
-      <View style={{ backgroundColor: "#111", padding: 12 }}>
-        <Text style={{ color: "#fff", marginBottom: 6 }}>Manual EPC</Text>
+      <Section label="Manual EPC">
         <TextInput
           value={epc}
           onChangeText={setEpc}
           placeholder="RFID EPC (hex or text)"
-          placeholderTextColor="#777"
+          placeholderTextColor={t.textMuted}
           autoCapitalize="characters"
           autoCorrect={false}
           style={{
-            backgroundColor: "#222",
+            backgroundColor: "#f2f2f2",
+            borderColor: "#e5e5e5",
             borderWidth: 1,
-            borderColor: "#333",
-            color: "#fff",
+            borderRadius: 10,
             paddingHorizontal: 12,
-            paddingVertical: 8,
-            borderRadius: 8,
+            paddingVertical: 10,
+            color: t.text,
           }}
         />
 
         <View style={{ flexDirection: "row", gap: 12, marginTop: 10, alignItems: "center" }}>
-          <Button title={busy ? "Attaching…" : attachTo ? "Attach EPC" : "Save EPC"} onPress={() => handleAttach(epc)} disabled={busy || !epc.trim()} />
-          {busy && <ActivityIndicator color="#fff" />}
+          <Button
+            title={busy ? "Attaching…" : attachTo ? "Attach EPC" : "Save EPC"}
+            onPress={() => handleAttach(epc)}
+            disabled={busy || !epc.trim()}
+          />
+          {busy && <ActivityIndicator />}
           <Pressable onPress={() => navigation.goBack()} style={{ marginLeft: "auto", padding: 8 }}>
-            <Text style={{ color: "#9cf", fontWeight: "600" }}>Done</Text>
+            <Text style={{ color: t.primary, fontWeight: "700" }}>Done</Text>
           </Pressable>
         </View>
-      </View>
-    </View>
+      </Section>
+    </Screen>
   );
 }

@@ -1,9 +1,13 @@
 // apps/mobile/src/screens/ObjectDetailScreen.tsx
 import React, { useEffect, useMemo, useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, Switch, Alert, ScrollView } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, Switch, Alert } from "react-native";
 import { getObject, updateObject, createObject } from "../api/client";
 import { toast } from "../ui/Toast";
 import { toastFromError } from "../lib/errors";
+import { Screen } from "../ui/Screen";
+import { Section } from "../ui/Section";
+import { NonProdBadge } from "../ui/NonProdBadge";
+import { useTheme } from "../ui/ThemeProvider";
 
 type Obj = {
   id?: string;
@@ -24,11 +28,13 @@ function deriveIdType(params: any): { id?: string; type?: string } {
   return { id, type };
 }
 
-export default function ObjectDetailScreen({ route, navigation }: any) {
+export default function ObjectDetailScreen({ route }: any) {
+  const t = useTheme();
   const { id: routeId, type: routeType } = deriveIdType(route?.params);
   const [obj, setObj] = useState<Obj | null>(routeType ? { type: routeType } : null);
   const [name, setName] = useState<string>("");
   const [epc, setEpc] = useState<string>("");
+  const [archived, setArchived] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(!!(routeId && routeType));
   const [saving, setSaving] = useState<boolean>(false);
   const [quickbooks, setQuickbooks] = useState(false);
@@ -47,6 +53,7 @@ export default function ObjectDetailScreen({ route, navigation }: any) {
         setObj({ ...data, type: routeType });
         setName(data?.name ?? "");
         setEpc(data?.tags?.rfidEpc ?? "");
+        setArchived(Boolean(data?.tags?.archived));
       } catch (e) {
         toastFromError(e, "Load failed");
       } finally {
@@ -73,17 +80,24 @@ export default function ObjectDetailScreen({ route, navigation }: any) {
     setSaving(true);
     try {
       if (!objectId) {
-        // Create new
-        const created = await createObject(objectType, { name, tags: epc ? { rfidEpc: epc } : undefined });
+        const created = await createObject(objectType, {
+          name,
+          tags: {
+            ...(epc ? { rfidEpc: epc } : {}),
+            ...(archived ? { archived: true } : {}),
+          },
+        });
         setObj({ ...created, type: objectType });
         toast("Created");
-        // Show the new id in UI
       } else {
-        // Update existing
         const current = await getObject(objectType, objectId);
         const mergedTags = { ...(current?.tags || {}) };
+        // EPC merge
         if (epc && epc.trim()) mergedTags.rfidEpc = epc.trim();
         else if ("rfidEpc" in mergedTags) delete mergedTags.rfidEpc;
+        // Archived toggle
+        if (archived) mergedTags.archived = true;
+        else if ("archived" in mergedTags) delete mergedTags.archived;
 
         const updated = await updateObject(objectType, objectId, {
           name: name || undefined,
@@ -100,82 +114,105 @@ export default function ObjectDetailScreen({ route, navigation }: any) {
   };
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: "#f4f4f5" }} contentContainerStyle={{ paddingBottom: 24 }}>
-      <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 }}>
-        <Text style={{ fontSize: 18, fontWeight: "700" }}>Object Detail</Text>
+    <Screen title="Object Detail">
+      {/* Badge */}
+      <View style={{ position: "absolute", top: 8, right: 8, zIndex: 10 }}>
+        <NonProdBadge />
       </View>
 
-      <View style={{ backgroundColor: "#fff", margin: 12, borderRadius: 12, padding: 16, gap: 12 }}>
-        <Text style={{ fontSize: 12, color: "#666", letterSpacing: 1.2 }}>OBJECT</Text>
+      <Section label="Object">
+        <Text style={{ color: t.textMuted, marginBottom: 4 }}>
+          ID: <Text style={{ color: t.text }}>{objectId ?? "—"}</Text>
+        </Text>
 
-        <Text style={{ color: "#888" }}>ID: <Text style={{ color: "#000" }}>{objectId ?? "—"}</Text></Text>
-
-        <Text style={{ marginTop: 8, color: "#333" }}>Name</Text>
+        <Text style={{ marginTop: 8, color: t.text }}>Name</Text>
         <TextInput
           value={name}
           onChangeText={setName}
           placeholder="Name"
-          placeholderTextColor="#aaa"
-          style={{ backgroundColor: "#f2f2f2", borderColor: "#e5e5e5", borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10 }}
+          placeholderTextColor={t.textMuted}
+          style={{
+            backgroundColor: "#f2f2f2",
+            borderColor: "#e5e5e5",
+            borderWidth: 1,
+            borderRadius: 10,
+            paddingHorizontal: 12,
+            paddingVertical: 10,
+            color: t.text,
+          }}
         />
 
-        <Text style={{ marginTop: 8, color: "#333" }}>RFID EPC</Text>
+        <Text style={{ marginTop: 8, color: t.text }}>RFID EPC</Text>
         <TextInput
           value={epc}
           onChangeText={setEpc}
           placeholder="RFID EPC (hex)"
-          placeholderTextColor="#aaa"
+          placeholderTextColor={t.textMuted}
           autoCapitalize="characters"
           autoCorrect={false}
-          style={{ backgroundColor: "#f2f2f2", borderColor: "#e5e5e5", borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10 }}
+          style={{
+            backgroundColor: "#f2f2f2",
+            borderColor: "#e5e5e5",
+            borderWidth: 1,
+            borderRadius: 10,
+            paddingHorizontal: 12,
+            paddingVertical: 10,
+            color: t.text,
+          }}
         />
+
+        <View style={{ flexDirection: "row", alignItems: "center", marginTop: 10 }}>
+          <Text style={{ flex: 1, color: t.text }}>Archived</Text>
+          <Switch value={archived} onValueChange={setArchived} />
+        </View>
 
         <TouchableOpacity
           disabled={!canSave || saving}
           onPress={onSave}
           style={{
-            backgroundColor: !canSave || saving ? "#cbd5e1" : "#2563eb",
+            backgroundColor: !canSave || saving ? "#cbd5e1" : t.primary,
             paddingVertical: 12,
             borderRadius: 10,
             alignItems: "center",
-            marginTop: 6,
+            marginTop: 12,
           }}
         >
           {saving ? <ActivityIndicator /> : <Text style={{ color: "#fff", fontWeight: "700" }}>Save changes</Text>}
         </TouchableOpacity>
-      </View>
+      </Section>
 
-      <View style={{ backgroundColor: "#fff", marginHorizontal: 12, marginBottom: 12, borderRadius: 12, padding: 16, gap: 12 }}>
-        <Text style={{ fontSize: 12, color: "#666", letterSpacing: 1.2 }}>Core data</Text>
-        <Text style={{ color: "#666" }}>No additional core fields found.</Text>
-      </View>
+      <Section label="Core data">
+        <Text style={{ color: t.textMuted }}>No additional core fields found.</Text>
+      </Section>
 
-      <View style={{ backgroundColor: "#fff", marginHorizontal: 12, borderRadius: 12, padding: 16, gap: 12 }}>
-        <Text style={{ fontSize: 12, color: "#666", letterSpacing: 1.2 }}>Integrations</Text>
-
-        <Row label="Quickbooks" value={quickbooks} onChange={setQuickbooks} />
-        <Row label="Usef" value={usef} onChange={setUsef} />
-        <Row label="Petregistry" value={petregistry} onChange={setPetregistry} />
-      </View>
-
-      <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
-        <Text style={{ color: "#888" }}>Updated: <Text style={{ color: "#000" }}>{obj?.updatedAt ?? "—"}</Text></Text>
-      </View>
+      <Section label="Integrations">
+        <Row label="Quickbooks" value={false} />
+        <Row label="Usef" value={false} />
+        <Row label="Petregistry" value={false} />
+      </Section>
 
       {loading && (
-        <View style={{ position: "absolute", inset: 0, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.6)" }}>
+        <View
+          style={{
+            position: "absolute",
+            inset: 0,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: "rgba(255,255,255,0.6)",
+          }}
+        >
           <ActivityIndicator size="large" />
         </View>
       )}
-    </ScrollView>
+    </Screen>
   );
 }
 
-function Row({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
+function Row({ label, value }: { label: string; value: boolean }) {
   return (
     <View style={{ flexDirection: "row", alignItems: "center", paddingVertical: 6 }}>
-      <Text style={{ flex: 1, color: "#111" }}>{label}</Text>
-      <Switch value={value} onValueChange={onChange} />
+      <Text style={{ flex: 1 }}>{label}</Text>
+      <Switch value={value} />
     </View>
   );
 }
