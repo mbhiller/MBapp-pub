@@ -1,106 +1,137 @@
-import React, { useCallback, useState } from "react";
-import { View, Text, FlatList, RefreshControl } from "react-native";
-import { useQueryClient } from "@tanstack/react-query";
-import { useFocusEffect } from "@react-navigation/native";
-import { Snackbar } from "react-native-paper";
+import React, { useEffect, useState, useCallback } from "react";
+import {
+  ActivityIndicator,
+  FlatList,
+  RefreshControl,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { useTheme } from "../../providers/ThemeProvider";
+import type { RootStackScreenProps } from "../../navigation/types";
 
-import { useTenants } from "./useTenants";
-import { Screen } from "../../ui/Screen";
-import { Section } from "../../ui/Section";
-import { NonProdBadge } from "../../ui/NonProdBadge";
-import { useTheme } from "../../ui/ThemeProvider";
+type Tenant = {
+  id: string;
+  name?: string;
+  slug?: string;
+  [k: string]: any;
+};
 
-type Tenant = { id: string; name: string; slug?: string };
+const API_BASE =
+  process.env.EXPO_PUBLIC_API_BASE ||
+  "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com";
 
-export default function TenantsScreen() {
+export default function TenantsScreen({
+  navigation,
+}: RootStackScreenProps<"Tenants">) {
   const t = useTheme();
-  const qc = useQueryClient();
-  const { data, isLoading, isFetching, refetch, error } = useTenants();
-  const [refreshing, setRefreshing] = useState(false);
-  const [snackbar, setSnackbar] = useState<{ visible: boolean; msg: string }>({ visible: false, msg: "" });
 
-  const showSnack = (msg: string) => setSnackbar({ visible: true, msg });
+  const [items, setItems] = useState<Tenant[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setErr(null);
+    setLoading(true);
+    try {
+      const resp = await fetch(`${API_BASE}/tenants`, {
+        headers: { accept: "application/json" },
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.message || resp.statusText);
+      setItems(Array.isArray(data?.items) ? data.items : data ?? []);
+    } catch (e: any) {
+      setErr(e?.message || "Failed to load tenants");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    showSnack("Refreshing…");
-    try {
-      await refetch({ throwOnError: false });
-      showSnack("Updated!");
-    } catch {
-      showSnack("Refresh failed");
-    } finally {
-      setRefreshing(false);
-    }
-  }, [refetch]);
+    await load();
+    setRefreshing(false);
+  }, [load]);
 
-  useFocusEffect(
-    useCallback(() => {
-      qc.invalidateQueries({ queryKey: ["tenants"] });
-      return () => {};
-    }, [qc])
-  );
-
-  const renderItem = ({ item }: { item: Tenant }) => (
-    <View
-      style={{
-        padding: 14,
-        backgroundColor: t.card,
-        borderBottomWidth: 1,
-        borderBottomColor: t.border,
-      }}
-    >
-      <Text style={{ fontWeight: "800", color: t.text }}>{item.name}</Text>
-      <Text style={{ color: t.textMuted, marginTop: 2 }}>{item.slug || "—"}</Text>
-      <Text selectable numberOfLines={1} style={{ color: t.textMuted, marginTop: 4 }}>
-        ID: <Text style={{ color: t.text }}>{item.id}</Text>
-      </Text>
-    </View>
-  );
+  if (loading && !refreshing) {
+    return (
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+        <ActivityIndicator />
+        <Text style={{ marginTop: 8, color: t.colors.textMuted }}>
+          Loading tenants…
+        </Text>
+        {err ? (
+          <Text style={{ marginTop: 6, color: t.colors.danger }}>{err}</Text>
+        ) : null}
+      </View>
+    );
+  }
 
   return (
-    <Screen title="Tenants" scroll={false}>
-      {/* Non-prod badge */}
-      <View style={{ position: "absolute", top: 8, right: 8, zIndex: 10 }}>
-        <NonProdBadge />
-      </View>
+    <View style={{ flex: 1, backgroundColor: t.colors.bg }}>
+      {err ? (
+        <Text
+          style={{
+            color: t.colors.danger,
+            paddingHorizontal: 16,
+            paddingTop: 12,
+          }}
+        >
+          {err}
+        </Text>
+      ) : null}
 
-      <Section label="Directory" style={{ marginTop: 8, padding: 0, overflow: "hidden" }}>
-        {isLoading && !data ? (
-          <View style={{ padding: 16 }}>
-            <Text style={{ color: t.textMuted }}>Loading tenants…</Text>
-          </View>
-        ) : error ? (
-          <View style={{ padding: 16 }}>
-            <Text style={{ color: t.danger }}>
-              Failed to load tenants. Pull to retry.
-            </Text>
-          </View>
-        ) : (
-          <FlatList
-            data={(data ?? []) as Tenant[]}
-            keyExtractor={(x) => x.id}
-            renderItem={renderItem}
-            refreshControl={
-              <RefreshControl refreshing={refreshing || isFetching} onRefresh={onRefresh} />
-            }
-            ListEmptyComponent={
-              <View style={{ padding: 16 }}>
-                <Text style={{ color: t.textMuted }}>No tenants yet.</Text>
-              </View>
-            }
-            contentContainerStyle={{ flexGrow: 1 }}
+      <FlatList
+        data={items}
+        keyExtractor={(it) => it.id}
+        contentContainerStyle={{ paddingVertical: 8 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={t.colors.text}
           />
+        }
+        renderItem={({ item }) => (
+          <TouchableOpacity
+            onPress={() =>
+              navigation.navigate("Objects", { type: "horse" }) // adjust if you want tenant detail later
+            }
+            style={{
+              paddingVertical: 12,
+              paddingHorizontal: 16,
+              borderBottomWidth: 1,
+              borderBottomColor: t.colors.border,
+              backgroundColor: t.colors.card,
+            }}
+          >
+            <Text style={{ color: t.colors.text, fontWeight: "600" }}>
+              {item.name || item.slug || item.id}
+            </Text>
+            <Text style={{ color: t.colors.textMuted, marginTop: 2 }}>
+              {item.id}
+            </Text>
+          </TouchableOpacity>
         )}
-      </Section>
-
-      <Snackbar
-        visible={snackbar.visible}
-        onDismiss={() => setSnackbar({ visible: false, msg: "" })}
-        duration={1500}
-      >
-        {snackbar.msg}
-      </Snackbar>
-    </Screen>
+        ListEmptyComponent={
+          <Text
+            style={{
+              opacity: 0.7,
+              paddingVertical: 24,
+              paddingHorizontal: 16,
+              color: t.colors.textMuted,
+            }}
+          >
+            No tenants found.
+          </Text>
+        }
+        keyboardShouldPersistTaps="handled"
+      />
+    </View>
   );
 }

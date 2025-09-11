@@ -1,37 +1,29 @@
-// apps/mobile/src/ui/Screen.tsx
-import React from "react";
-import { View, Text, ScrollView, ViewStyle } from "react-native";
-import { useTheme } from "./ThemeProvider";
+import React, { PropsWithChildren } from "react";
+import { View, ScrollView, Text, ViewStyle } from "react-native";
+import { useTheme } from "../providers/ThemeProvider";
 
-export function Screen({
-  title,
-  children,
-  footer,
-  scroll = true,
-  style,
-}: {
+type Props = PropsWithChildren<{
   title?: string;
-  children: React.ReactNode;
-  footer?: React.ReactNode;
   scroll?: boolean;
-  style?: ViewStyle;
-}) {
+  style?: ViewStyle | ViewStyle[];
+}>;
+
+export function Screen({ title, scroll = true, children, style }: Props) {
   const t = useTheme();
-  const Container = scroll ? ScrollView : View;
+  const Container: any = scroll ? ScrollView : View;
 
   return (
-    <View style={{ flex: 1, backgroundColor: t.bg }}>
+    <Container
+      style={[{ flex: 1, backgroundColor: t.colors.bg }, style as any]}
+      contentContainerStyle={scroll ? { padding: 16 } : undefined}
+      keyboardShouldPersistTaps="handled"
+    >
       {title ? (
-        <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8 }}>
-          <Text style={{ fontSize: 18, fontWeight: "700", color: t.text }}>{title}</Text>
-        </View>
+        <Text style={{ color: t.colors.text, fontSize: 18, fontWeight: "700", marginBottom: 8 }}>
+          {title}
+        </Text>
       ) : null}
-
-      <Container contentContainerStyle={scroll ? { paddingBottom: 24 } : undefined} style={[{ flex: 1 }, style]}>
-        {children}
-      </Container>
-
-      {footer ? <View style={{ padding: 12 }}>{footer}</View> : null}
-    </View>
+      {children}
+    </Container>
   );
 }

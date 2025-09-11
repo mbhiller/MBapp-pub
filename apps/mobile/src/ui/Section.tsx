@@ -1,40 +1,33 @@
-// apps/mobile/src/ui/Section.tsx
-import React from "react";
+import React, { PropsWithChildren } from "react";
 import { View, Text, ViewStyle } from "react-native";
-import { useTheme } from "./ThemeProvider";
+import { useTheme } from "../providers/ThemeProvider";
 
-export function Section({
-  label,
-  children,
-  style,
-}: {
+type Props = PropsWithChildren<{
   label?: string;
-  children: React.ReactNode;
-  style?: ViewStyle;
-}) {
+  style?: ViewStyle | ViewStyle[];
+}>;
+
+export function Section({ label, children, style }: Props) {
   const t = useTheme();
   return (
-    <View
-      style={[
-        {
-          backgroundColor: t.card,
-          marginHorizontal: 12,
-          marginBottom: 12,
-          borderRadius: t.radius,
-          padding: 16,
-          borderColor: t.border,
-          borderWidth: 1,
-        },
-        t.shadowStyle as any,
-        style,
-      ]}
-    >
-      {!!label && (
-        <Text style={{ fontSize: 12, color: t.textMuted, letterSpacing: 1.2, marginBottom: 6 }}>
-          {label.toUpperCase()}
-        </Text>
-      )}
-      {children}
+    <View style={{ marginBottom: 12 }}>
+      {label ? (
+        <Text style={{ color: t.colors.textMuted, fontSize: 12, marginBottom: 6 }}>{label}</Text>
+      ) : null}
+      <View
+        style={[
+          {
+            backgroundColor: t.colors.card,
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: t.colors.border,
+            padding: 12
+          },
+          style as any
+        ]}
+      >
+        {children}
+      </View>
     </View>
   );
 }

@@ -1,17 +1,26 @@
-// apps/mobile/src/navigation/types.ts
+import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 
-export type ObjectRef =
-  | { id: string; type: string }
-  | { obj: { id: string; type: string; [k: string]: any } }
-  | { item: { id: string; type: string; [k: string]: any } };
+export type ObjectRef = { id: string; type: string };
+
+export type ScanIntent =
+  | "attach-epc"
+  | "lookup"
+  | "create"
+  | "assign-badge"
+  | "none";
 
 export type RootStackParamList = {
-  Objects:
-    | { type?: string } // default "horse"
-    | undefined;
-  ObjectDetail: ObjectRef | undefined;
-  Scan:
-    | undefined
-    | { attachTo: { id: string; type: string } };
+  Hub: undefined;
+  Objects: { type?: string } | undefined;
+  ObjectDetail:
+    | ObjectRef
+    | { obj: ObjectRef }
+    | { item: ObjectRef };
+  Products: undefined;
+  ProductDetail: { id?: string; sku?: string; mode?: "new" | "edit" } | undefined;
   Tenants: undefined;
+  Scan: { attachTo?: ObjectRef; intent?: ScanIntent } | undefined;
 };
+
+export type RootStackScreenProps<T extends keyof RootStackParamList> =
+  NativeStackScreenProps<RootStackParamList, T>;

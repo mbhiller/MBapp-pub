@@ -1,218 +1,155 @@
-// apps/mobile/src/screens/ObjectDetailScreen.tsx
 import React, { useEffect, useMemo, useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, Switch, Alert } from "react-native";
-import { getObject, updateObject, createObject } from "../api/client";
-import { toast } from "../ui/Toast";
-import { toastFromError } from "../lib/errors";
-import { Screen } from "../ui/Screen";
-import { Section } from "../ui/Section";
-import { NonProdBadge } from "../ui/NonProdBadge";
-import { useTheme } from "../ui/ThemeProvider";
+import { ActivityIndicator, Alert, ScrollView, Switch, Text, TextInput, TouchableOpacity, View } from "react-native";
+import type { RootStackScreenProps, ObjectRef } from "../navigation/types";
 
-type Obj = {
-  id?: string;
-  type: string;
-  name?: string;
-  tags?: Record<string, any>;
-  core?: Record<string, any>;
-  updatedAt?: string;
-};
+const API_BASE = process.env.EXPO_PUBLIC_API_BASE || "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com";
+const TENANT = process.env.EXPO_PUBLIC_TENANT_ID || "DemoTenant";
 
-function deriveIdType(params: any): { id?: string; type?: string } {
-  const p = params || {};
-  const fromRoot = { id: p.id, type: p.type };
-  const fromObj = p.obj ? { id: p.obj.id, type: p.obj.type } : {};
-  const fromItem = p.item ? { id: p.item.id, type: p.item.type } : {};
-  const id = fromRoot.id || fromObj.id || fromItem.id;
-  const type = fromRoot.type || fromObj.type || fromItem.type;
-  return { id, type };
+function extractAny(ref: any): { id?: string; type?: string } {
+  if (!ref) return {};
+  if (ref.id && ref.type) return { id: ref.id, type: ref.type };
+  if (ref.obj?.id && ref.obj?.type) return { id: ref.obj.id, type: ref.obj.type };
+  if (ref.item?.id && ref.item?.type) return { id: ref.item.id, type: ref.item.type };
+  return {};
 }
 
-export default function ObjectDetailScreen({ route }: any) {
-  const t = useTheme();
-  const { id: routeId, type: routeType } = deriveIdType(route?.params);
-  const [obj, setObj] = useState<Obj | null>(routeType ? { type: routeType } : null);
-  const [name, setName] = useState<string>("");
-  const [epc, setEpc] = useState<string>("");
-  const [archived, setArchived] = useState<boolean>(false);
-  const [loading, setLoading] = useState<boolean>(!!(routeId && routeType));
-  const [saving, setSaving] = useState<boolean>(false);
-  const [quickbooks, setQuickbooks] = useState(false);
-  const [usef, setUsef] = useState(false);
-  const [petregistry, setPetregistry] = useState(false);
+export default function ObjectDetailScreen({ route, navigation }: RootStackScreenProps<"ObjectDetail">) {
+  const { id, type } = extractAny(route?.params as any);
 
-  // Load existing object if id+type provided
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      if (!routeId || !routeType) return;
-      setLoading(true);
-      try {
-        const data = await getObject(routeType, routeId);
-        if (!mounted) return;
-        setObj({ ...data, type: routeType });
-        setName(data?.name ?? "");
-        setEpc(data?.tags?.rfidEpc ?? "");
-        setArchived(Boolean(data?.tags?.archived));
-      } catch (e) {
-        toastFromError(e, "Load failed");
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    })();
-    return () => { mounted = false; };
-  }, [routeId, routeType]);
+  const [obj, setObj] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
 
-  const objectId = obj?.id || routeId;
-  const objectType = obj?.type || routeType;
+  const [name, setName] = useState("");
+  const [epc, setEpc] = useState("");
+  const [archived, setArchived] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const canSave = useMemo(() => {
-    if (!objectType) return false;
-    if (objectId) return true; // update path
-    return (name || "").trim().length > 0; // create path requires name
-  }, [name, objectId, objectType]);
+  const canAttach = useMemo(() => !!id && !!type, [id, type]);
 
-  const onSave = async () => {
-    if (!objectType) {
-      Alert.alert("Missing type", "Object type is required.");
-      return;
-    }
-    setSaving(true);
+  async function load() {
+    if (!id || !type) return;
+    setErr(null);
+    setLoading(true);
     try {
-      if (!objectId) {
-        const created = await createObject(objectType, {
-          name,
-          tags: {
-            ...(epc ? { rfidEpc: epc } : {}),
-            ...(archived ? { archived: true } : {}),
-          },
-        });
-        setObj({ ...created, type: objectType });
-        toast("Created");
-      } else {
-        const current = await getObject(objectType, objectId);
-        const mergedTags = { ...(current?.tags || {}) };
-        // EPC merge
-        if (epc && epc.trim()) mergedTags.rfidEpc = epc.trim();
-        else if ("rfidEpc" in mergedTags) delete mergedTags.rfidEpc;
-        // Archived toggle
-        if (archived) mergedTags.archived = true;
-        else if ("archived" in mergedTags) delete mergedTags.archived;
+      const resp = await fetch(`${API_BASE}/objects/${encodeURIComponent(type!)}/${encodeURIComponent(id!)}`, {
+        headers: { "x-tenant-id": TENANT },
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.message || resp.statusText);
+      setObj(data);
+      setName(data?.name || "");
+      setEpc(data?.tags?.rfidEpc || "");
+      setArchived(!!data?.tags?.archived);
+    } catch (e: any) {
+      setErr(e?.message || "Failed to load");
+    } finally {
+      setLoading(false);
+    }
+  }
 
-        const updated = await updateObject(objectType, objectId, {
-          name: name || undefined,
-          tags: Object.keys(mergedTags).length ? mergedTags : undefined,
-        });
-        setObj({ ...updated, type: objectType });
-        toast("Saved");
-      }
-    } catch (e) {
-      toastFromError(e, "Save failed");
+  async function save() {
+    if (!id || !type) return;
+    setSaving(true);
+    setErr(null);
+    try {
+      const body: any = {
+        name: name?.trim() || undefined,
+        tags: { rfidEpc: epc?.trim() ? epc.trim() : null, archived },
+      };
+      const resp = await fetch(`${API_BASE}/objects/${encodeURIComponent(type!)}/${encodeURIComponent(id!)}`, {
+        method: "PUT",
+        headers: {
+          "x-tenant-id": TENANT,
+          "content-type": "application/json",
+          accept: "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.message || resp.statusText);
+      Alert.alert("Saved", "Object updated.");
+      await load();
+    } catch (e: any) {
+      setErr(e?.message || "Failed to save");
     } finally {
       setSaving(false);
     }
-  };
+  }
+
+  useEffect(() => { load(); }, [id, type]);
+
+  if (!id || !type) {
+    return (
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 16 }}>
+        <Text style={{ color: "crimson", textAlign: "center" }}>Missing object id/type.</Text>
+      </View>
+    );
+  }
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+        <ActivityIndicator />
+        <Text style={{ marginTop: 8, color: "#333" }}>Loading…</Text>
+        {err ? <Text style={{ marginTop: 6, color: "crimson" }}>{err}</Text> : null}
+      </View>
+    );
+  }
 
   return (
-    <Screen title="Object Detail">
-      {/* Badge */}
-      <View style={{ position: "absolute", top: 8, right: 8, zIndex: 10 }}>
-        <NonProdBadge />
-      </View>
-
-      <Section label="Object">
-        <Text style={{ color: t.textMuted, marginBottom: 4 }}>
-          ID: <Text style={{ color: t.text }}>{objectId ?? "—"}</Text>
-        </Text>
-
-        <Text style={{ marginTop: 8, color: t.text }}>Name</Text>
+    <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
+      <Text style={{ fontSize: 12, opacity: 0.7, color: "#333" }}>IDENTITY</Text>
+      <View style={{ backgroundColor: "#fff", borderRadius: 12, borderWidth: 1, borderColor: "#eee", padding: 12 }}>
+        <Text style={{ fontSize: 12, color: "#555" }}>Name</Text>
         <TextInput
           value={name}
           onChangeText={setName}
-          placeholder="Name"
-          placeholderTextColor={t.textMuted}
-          style={{
-            backgroundColor: "#f2f2f2",
-            borderColor: "#e5e5e5",
-            borderWidth: 1,
-            borderRadius: 10,
-            paddingHorizontal: 12,
-            paddingVertical: 10,
-            color: t.text,
-          }}
+          placeholder="(unnamed)"
+          style={{ borderWidth: 1, borderColor: "#ddd", borderRadius: 8, padding: 10, marginTop: 6 }}
+          autoCapitalize="words"
         />
+        <Text style={{ marginTop: 10, color: "#333" }}>type: {obj?.type}</Text>
+        <Text style={{ marginTop: 2, color: "#333" }}>id: {obj?.id}</Text>
+      </View>
 
-        <Text style={{ marginTop: 8, color: t.text }}>RFID EPC</Text>
+      <Text style={{ fontSize: 12, opacity: 0.7, color: "#333", marginTop: 8 }}>RFID</Text>
+      <View style={{ backgroundColor: "#fff", borderRadius: 12, borderWidth: 1, borderColor: "#eee", padding: 12 }}>
+        <Text style={{ fontSize: 12, color: "#555" }}>EPC (rfidEpc)</Text>
         <TextInput
           value={epc}
           onChangeText={setEpc}
-          placeholder="RFID EPC (hex)"
-          placeholderTextColor={t.textMuted}
-          autoCapitalize="characters"
+          placeholder="Scan or type EPC (leave blank to detach)"
+          autoCapitalize="none"
           autoCorrect={false}
-          style={{
-            backgroundColor: "#f2f2f2",
-            borderColor: "#e5e5e5",
-            borderWidth: 1,
-            borderRadius: 10,
-            paddingHorizontal: 12,
-            paddingVertical: 10,
-            color: t.text,
-          }}
+          style={{ borderWidth: 1, borderColor: "#ddd", borderRadius: 8, padding: 10, marginTop: 6 }}
         />
+      </View>
 
-        <View style={{ flexDirection: "row", alignItems: "center", marginTop: 10 }}>
-          <Text style={{ flex: 1, color: t.text }}>Archived</Text>
-          <Switch value={archived} onValueChange={setArchived} />
-        </View>
+      <Text style={{ fontSize: 12, opacity: 0.7, color: "#333", marginTop: 8 }}>FLAGS</Text>
+      <View style={{ backgroundColor: "#fff", borderRadius: 12, borderWidth: 1, borderColor: "#eee", padding: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+        <Text style={{ color: "#111", fontWeight: "600" }}>Archived</Text>
+        <Switch value={archived} onValueChange={setArchived} />
+      </View>
+
+      <View style={{ flexDirection: "row", gap: 12, marginTop: 4 }}>
+        <TouchableOpacity
+          onPress={save}
+          disabled={saving}
+          style={{ backgroundColor: saving ? "#9fbefb" : "#3478f6", padding: 14, borderRadius: 10, alignItems: "center", flex: 1 }}
+        >
+          <Text style={{ color: "#fff", fontWeight: "700" }}>{saving ? "Saving…" : "Save"}</Text>
+        </TouchableOpacity>
 
         <TouchableOpacity
-          disabled={!canSave || saving}
-          onPress={onSave}
-          style={{
-            backgroundColor: !canSave || saving ? "#cbd5e1" : t.primary,
-            paddingVertical: 12,
-            borderRadius: 10,
-            alignItems: "center",
-            marginTop: 12,
-          }}
+          onPress={() => navigation.navigate("Scan", { attachTo: { id, type } as ObjectRef, intent: "attach-epc" })}
+          style={{ backgroundColor: "#2a8b57", padding: 14, borderRadius: 10, alignItems: "center", flex: 1 }}
         >
-          {saving ? <ActivityIndicator /> : <Text style={{ color: "#fff", fontWeight: "700" }}>Save changes</Text>}
+          <Text style={{ color: "#fff", fontWeight: "700" }}>Scan to Attach EPC</Text>
         </TouchableOpacity>
-      </Section>
+      </View>
 
-      <Section label="Core data">
-        <Text style={{ color: t.textMuted }}>No additional core fields found.</Text>
-      </Section>
-
-      <Section label="Integrations">
-        <Row label="Quickbooks" value={false} />
-        <Row label="Usef" value={false} />
-        <Row label="Petregistry" value={false} />
-      </Section>
-
-      {loading && (
-        <View
-          style={{
-            position: "absolute",
-            inset: 0,
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor: "rgba(255,255,255,0.6)",
-          }}
-        >
-          <ActivityIndicator size="large" />
-        </View>
-      )}
-    </Screen>
-  );
-}
-
-function Row({ label, value }: { label: string; value: boolean }) {
-  return (
-    <View style={{ flexDirection: "row", alignItems: "center", paddingVertical: 6 }}>
-      <Text style={{ flex: 1 }}>{label}</Text>
-      <Switch value={value} />
-    </View>
+      {err ? <Text style={{ marginTop: 8, color: "crimson" }}>{err}</Text> : null}
+    </ScrollView>
   );
 }

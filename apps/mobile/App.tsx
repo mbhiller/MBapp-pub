@@ -1,38 +1,33 @@
-// apps/mobile/App.tsx
 import "react-native-gesture-handler";
-import React from "react";
-import { Provider as PaperProvider } from "react-native-paper";
-import { NavigationContainer, DefaultTheme } from "@react-navigation/native";
+import * as React from "react";
+import { NavigationContainer } from "@react-navigation/native";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-import { ThemeProvider, useTheme } from "./src/ui/ThemeProvider";
-import { RootStackNavigator } from "./src/navigation/RootStack";
+import RootStackNavigator from "./src/navigation/RootStack";
+import { ThemeProvider } from "./src/providers/ThemeProvider";
+import { RolesProvider } from "./src/providers/RolesProvider";
 
-function ThemedNavContainer() {
-  const t = useTheme();
-  const navTheme = {
-    ...DefaultTheme,
-    colors: {
-      ...DefaultTheme.colors,
-      background: t.bg,
-      card: t.card,
-      text: t.text,
-      primary: t.primary,
-      border: t.border,
+// Create a single QueryClient instance (module-level so it doesn't recreate)
+const qc = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      gcTime: 5 * 60_000,
+      retry: 1,
     },
-  };
-  return (
-    <NavigationContainer theme={navTheme}>
-      <RootStackNavigator />
-    </NavigationContainer>
-  );
-}
+  },
+});
 
 export default function App() {
   return (
-    <PaperProvider>
-      <ThemeProvider>
-        <ThemedNavContainer />
-      </ThemeProvider>
-    </PaperProvider>
+    <ThemeProvider>
+      <RolesProvider>
+        <QueryClientProvider client={qc}>
+          <NavigationContainer>
+            <RootStackNavigator />
+          </NavigationContainer>
+        </QueryClientProvider>
+      </RolesProvider>
+    </ThemeProvider>
   );
 }

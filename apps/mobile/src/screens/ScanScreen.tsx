@@ -1,15 +1,12 @@
-// apps/mobile/src/screens/ScanScreen.tsx
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { View, Text, TextInput, Button, ActivityIndicator, Pressable, BackHandler } from "react-native";
+import { View, Text, TextInput, Button, ActivityIndicator, Pressable, BackHandler, Alert } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { getObject, updateObject } from "../api/client";
-import { toast } from "../ui/Toast";
-import { toastFromError } from "../lib/errors";
 import { parseMbappQr } from "../lib/qr";
 import { Screen } from "../ui/Screen";
 import { Section } from "../ui/Section";
 import { NonProdBadge } from "../ui/NonProdBadge";
-import { useTheme } from "../ui/ThemeProvider";
+import { useTheme } from "../providers/ThemeProvider";
 
 type AttachTarget = { id: string; type: string };
 
@@ -25,7 +22,6 @@ export default function ScanScreen({ route, navigation }: any) {
     if (!permission) requestPermission();
   }, [permission, requestPermission]);
 
-  // Ensure Android hardware back exits Scan
   useEffect(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
       navigation.goBack();
@@ -51,12 +47,12 @@ export default function ScanScreen({ route, navigation }: any) {
     async (value: string) => {
       const trimmed = normalize(value);
       if (!trimmed) {
-        toast("No EPC to attach");
+        Alert.alert("No EPC to attach");
         return;
       }
       if (!attachTo) {
         setEpc(trimmed);
-        toast("Scanned EPC captured");
+        Alert.alert("Scanned EPC captured");
         return;
       }
 
@@ -66,14 +62,14 @@ export default function ScanScreen({ route, navigation }: any) {
         const mergedTags = { ...(cur?.tags || {}), rfidEpc: trimmed };
         const next = await updateObject(attachTo.type, attachTo.id, { tags: mergedTags });
 
-        toast("EPC attached");
+        Alert.alert("Success", "EPC attached");
         navigation.replace("ObjectDetail", {
           id: attachTo.id,
           type: attachTo.type,
-          obj: { ...next, type: attachTo.type },
+          obj: { ...next, type: attachTo.type }
         });
       } catch (e: any) {
-        toastFromError(e, "Attach failed");
+        Alert.alert("Attach failed", (e?.message || String(e)).slice(0, 200));
       } finally {
         setBusy(false);
         lockedRef.current = false;
@@ -102,7 +98,6 @@ export default function ScanScreen({ route, navigation }: any) {
 
   return (
     <Screen title="Scan" scroll={false}>
-      {/* Overlays */}
       <View style={{ position: "absolute", top: 8, right: 8, zIndex: 10 }}>
         <NonProdBadge />
       </View>
@@ -118,7 +113,7 @@ export default function ScanScreen({ route, navigation }: any) {
       <Section label={attachTo ? `Attach EPC → ${attachTo.type}/${attachTo.id}` : "Scanner"} style={{ padding: 0, overflow: "hidden" }}>
         {needPermission ? (
           <View style={{ alignItems: "center", justifyContent: "center", padding: 16 }}>
-            <Text style={{ color: t.text, marginBottom: 12 }}>Camera permission is required</Text>
+            <Text style={{ color: t.colors.text, marginBottom: 12 }}>Camera permission is required</Text>
             <Button title="Grant permission" onPress={() => requestPermission()} />
           </View>
         ) : (
@@ -138,7 +133,7 @@ export default function ScanScreen({ route, navigation }: any) {
           value={epc}
           onChangeText={setEpc}
           placeholder="RFID EPC (hex or text)"
-          placeholderTextColor={t.textMuted}
+          placeholderTextColor={t.colors.textMuted}
           autoCapitalize="characters"
           autoCorrect={false}
           style={{
@@ -148,7 +143,7 @@ export default function ScanScreen({ route, navigation }: any) {
             borderRadius: 10,
             paddingHorizontal: 12,
             paddingVertical: 10,
-            color: t.text,
+            color: t.colors.text
           }}
         />
 
@@ -160,7 +155,7 @@ export default function ScanScreen({ route, navigation }: any) {
           />
           {busy && <ActivityIndicator />}
           <Pressable onPress={() => navigation.goBack()} style={{ marginLeft: "auto", padding: 8 }}>
-            <Text style={{ color: t.primary, fontWeight: "700" }}>Done</Text>
+            <Text style={{ color: t.colors.primary, fontWeight: "700" }}>Done</Text>
           </Pressable>
         </View>
       </Section>
