@@ -1,9 +1,9 @@
+// apps/mobile/src/features/tenants/api.ts
 import { api } from "../../api/client";
 
-export type Tenant = { id: string; name: string; slug?: string };
-type TenantsOut = { items: Tenant[] } | Tenant[];
+export type Tenant = { id: string; name: string };
+export type TenantList = { items: Tenant[] };
 
-export async function listTenants(): Promise<{ items: Tenant[] }> {
-  const data = await api.get<TenantsOut>("/tenants");
-  return Array.isArray(data) ? { items: data } : data;
+export async function listTenants(): Promise<TenantList> {
+  return api.get<TenantList>("/tenants");
 }
