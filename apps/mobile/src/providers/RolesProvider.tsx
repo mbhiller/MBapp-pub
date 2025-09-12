@@ -1,48 +1,44 @@
-import React, { createContext, useContext, useMemo, useState } from "react";
-import { MODULES, ModuleKey, Role } from "../shared/modules";
+import React, { createContext, useContext, useMemo } from "react";
+import { MODULES, MODULES_BY_KEY, type ModuleKey, type Role, type ModuleDef } from "../shared/modules";
 
-type RolesContextType = {
+type RolesContextValue = {
   roles: Role[];
   hasRole: (r: Role) => boolean;
-  setRoles: (r: Role[]) => void;
-  toggleRole: (r: Role) => void;
-  allowedModules: ModuleKey[];
-  canAccess: (m: ModuleKey) => boolean;
+  canAccessModule: (key: ModuleKey) => boolean;
+  allowedModules: ModuleDef[];
 };
 
-const RolesCtx = createContext<RolesContextType | undefined>(undefined);
+const RolesContext = createContext<RolesContextValue | null>(null);
 
-export const RolesProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
-  // Minimal default for dev: "internal" only. We’ll wire to backend later.
-  const [roles, setRoles] = useState<Role[]>(["internal"]);
+export function RolesProvider({
+  children,
+  initialRoles,
+}: {
+  children: React.ReactNode;
+  /** Provide real user roles here once auth is wired */
+  initialRoles?: Role[];
+}) {
+  // Minimal, safe defaults allow basic viewing everywhere
+  const roles: Role[] = initialRoles ?? ["objects.view", "products.view", "tenants.view"];
 
   const hasRole = (r: Role) => roles.includes(r);
-  const toggleRole = (r: Role) =>
-    setRoles((curr) => (curr.includes(r) ? curr.filter((x) => x !== r) : [...curr, r]));
 
-  const allowedModules = useMemo<ModuleKey[]>(() => {
-    return (Object.keys(MODULES) as ModuleKey[]).filter((k) => {
-      const req = MODULES[k].required;
-      return req.length === 0 || req.some((r) => roles.includes(r));
-    });
-  }, [roles]);
-
-  const canAccess = (m: ModuleKey) => allowedModules.includes(m);
-
-  const value: RolesContextType = {
-    roles,
-    hasRole,
-    setRoles,
-    toggleRole,
-    allowedModules,
-    canAccess,
+  const canAccessModule = (key: ModuleKey) => {
+    const req = MODULES_BY_KEY[key].required;
+    return req.length === 0 || req.some((rr: Role) => hasRole(rr));
   };
 
-  return <RolesCtx.Provider value={value}>{children}</RolesCtx.Provider>;
-};
+  const allowedModules = useMemo(
+    () => MODULES.filter((m) => canAccessModule(m.key)),
+    [roles]
+  );
+
+  const value: RolesContextValue = { roles, hasRole, canAccessModule, allowedModules };
+  return <RolesContext.Provider value={value}>{children}</RolesContext.Provider>;
+}
 
 export function useRoles() {
-  const ctx = useContext(RolesCtx);
-  if (!ctx) throw new Error("useRoles must be used inside RolesProvider");
+  const ctx = useContext(RolesContext);
+  if (!ctx) throw new Error("useRoles must be used within RolesProvider");
   return ctx;
 }

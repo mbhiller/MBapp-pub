@@ -1,83 +1,72 @@
-// apps/mobile/src/screens/ProductsListScreen.tsx
-import React, { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, FlatList, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { useNavigation } from "@react-navigation/native";
-import { useProducts } from "../features/catalog/useProducts";
+import React, { useEffect, useState } from "react";
+import { ActivityIndicator, FlatList, Text, TouchableOpacity, View } from "react-native";
+import type { RootStackScreenProps } from "../navigation/types";
+import { listProducts, type Product } from "../features/products/api";
 
-export default function ProductsListScreen() {
-  const navigation = useNavigation<any>();
-  const [q, setQ] = useState("");
-  const { data, isLoading, isFetchingNextPage, fetchNextPage, hasNextPage, refetch } = useProducts({ q });
+type Props = RootStackScreenProps<"ProductsList">;
 
-  const items = useMemo(() => data?.pages.flatMap((p) => p.items) ?? [], [data]);
+export default function ProductsListScreen({ navigation }: Props) {
+  const [items, setItems] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
 
-  const onEnd = useCallback(() => {
-    if (hasNextPage && !isFetchingNextPage) fetchNextPage();
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+  async function load() {
+    setLoading(true);
+    setErr(null);
+    try {
+      const data = await listProducts(50);
+      setItems(data);
+    } catch (e: any) {
+      setErr(e?.message || "Failed to load products");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+        <ActivityIndicator />
+        {err ? <Text style={{ marginTop: 8, color: "crimson" }}>{err}</Text> : null}
+      </View>
+    );
+  }
 
   return (
-    <View style={{ flex: 1, padding: 12, gap: 8 }}>
-      <View style={{ flexDirection: "row", gap: 8 }}>
-        <TextInput
-          placeholder="Search products (name or sku)"
-          value={q}
-          onChangeText={setQ}
-          onSubmitEditing={() => refetch()}
-          style={{
-            flex: 1,
-            borderWidth: 1,
-            borderColor: "#ddd",
-            borderRadius: 8,
-            paddingHorizontal: 10,
-            paddingVertical: 8,
-          }}
-        />
-        <TouchableOpacity
-          style={{ paddingHorizontal: 12, justifyContent: "center" }}
-          onPress={() => navigation.navigate("ProductDetail", { mode: "new" })}
-        >
-          <Text style={{ color: "#007aff", fontWeight: "600" }}>+ New</Text>
-        </TouchableOpacity>
-      </View>
-
-      {isLoading ? (
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-          <ActivityIndicator />
-        </View>
-      ) : (
-        <FlatList
-          data={items}
-          keyExtractor={(it) => it.id}
-          onEndReached={onEnd}
-          onEndReachedThreshold={0.6}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              onPress={() => navigation.navigate("ProductDetail", { id: item.id })}
-              style={{
-                padding: 12,
-                borderWidth: 1,
-                borderColor: "#eee",
-                borderRadius: 10,
-                marginBottom: 8,
-                backgroundColor: "white",
-              }}
-            >
-              <Text style={{ fontWeight: "700" }}>{item.name}</Text>
-              <Text style={{ color: "#666", marginTop: 2 }}>{item.sku}</Text>
-              <Text style={{ color: "#333", marginTop: 4 }}>
-                {item.type} • {item.uom} • ${item.price}
-              </Text>
-            </TouchableOpacity>
-          )}
-          ListFooterComponent={
-            isFetchingNextPage ? (
-              <View style={{ padding: 12 }}>
-                <ActivityIndicator />
-              </View>
-            ) : null
-          }
-        />
-      )}
+    <View style={{ flex: 1, padding: 12 }}>
+      {err ? <Text style={{ color: "crimson", marginBottom: 8 }}>{err}</Text> : null}
+      <FlatList
+        data={items}
+        keyExtractor={(p) => p.id}
+        ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+        renderItem={({ item }) => (
+          <TouchableOpacity
+            onPress={() => navigation.navigate("ProductDetail", { id: item.id, mode: "view" })}
+            style={{
+              padding: 14,
+              borderRadius: 10,
+              backgroundColor: "#eee",
+            }}
+          >
+            <Text style={{ fontWeight: "700" }}>{item.name || "(no name)"}</Text>
+            <Text>
+              {item.sku ?? "—"}  •  {item.price != null ? `$${item.price}` : "no price"}
+            </Text>
+            <Text style={{ color: "#666", marginTop: 4 }}>{item.id}</Text>
+          </TouchableOpacity>
+        )}
+        ListEmptyComponent={
+          <View style={{ padding: 20 }}>
+            <Text>No products yet. Tap “New” in the header to create one.</Text>
+          </View>
+        }
+        refreshing={loading}
+        onRefresh={load}
+      />
     </View>
   );
 }

@@ -1,26 +1,39 @@
+// Central route & screen prop types shared across the mobile app.
+
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 
-export type ObjectRef = { id: string; type: string };
-
 export type ScanIntent =
+  | "navigate"
   | "attach-epc"
-  | "lookup"
-  | "create"
-  | "assign-badge"
-  | "none";
+  | "link"
+  | "add-to-order"
+  | "receive-po"
+  | "inventory-move"
+  | "ticket-validate"
+  | "badge-clock"
+  | "add-to-service";
+
+// A lightweight "reference" to an object in MBapp
+export type ObjectRef = { id: string; type: string };
 
 export type RootStackParamList = {
   Hub: undefined;
-  Objects: { type?: string } | undefined;
-  ObjectDetail:
-    | ObjectRef
-    | { obj: ObjectRef }
-    | { item: ObjectRef };
-  Products: undefined;
-  ProductDetail: { id?: string; sku?: string; mode?: "new" | "edit" } | undefined;
+  ProductsList: undefined;
+  ProductDetail:
+    | { id?: string; mode?: "new" | "edit" | "view" }
+    | undefined;
+  ObjectsList: undefined;
+  ObjectDetail: ObjectRef;
   Tenants: undefined;
-  Scan: { attachTo?: ObjectRef; intent?: ScanIntent } | undefined;
+  Scan:
+    | {
+        intent?: ScanIntent;
+        attachTo?: ObjectRef;
+        poId?: string;
+      }
+    | undefined;
 };
 
+// Convenience alias used across screens (this is what your files expected)
 export type RootStackScreenProps<T extends keyof RootStackParamList> =
   NativeStackScreenProps<RootStackParamList, T>;
