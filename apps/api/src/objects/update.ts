@@ -28,6 +28,7 @@ export const handler = async (evt: any) => {
     }
     const pick = (k: string) => body?.[k] ?? body?.core?.[k];
 
+    // Read current (for SKU change + repair)
     const curResp = await ddb.send(new GetCommand({
       TableName: tableObjects,
       Key: { pk: id, sk: `${tenantId}|${typeParam}` },
@@ -37,6 +38,14 @@ export const handler = async (evt: any) => {
 
     const now = Date.now();
     const next: Record<string, any> = { updatedAt: now };
+
+    // 🛠 repair bad rows that stored kind inside 'type'
+    if (!cur.type || cur.type === "good" || cur.type === "service") {
+      next["type"] = typeParam;
+      if (cur.type && (cur.type === "good" || cur.type === "service") && cur.kind == null) {
+        next["kind"] = cur.type;
+      }
+    }
 
     const name = pick("name");
     if (typeof name === "string" && name.trim()) {
@@ -51,7 +60,7 @@ export const handler = async (evt: any) => {
     if (sku != null && String(sku).trim()) {
       const s = String(sku).trim();
       next["sku"] = s;
-      next["sku_lc"] = s.toLowerCase(); // <-- keep GSI3 current
+      next["sku_lc"] = s.toLowerCase();
     }
 
     const uom = pick("uom");
@@ -60,8 +69,8 @@ export const handler = async (evt: any) => {
     const tax = pick("taxCode");
     if (tax != null && String(tax).trim()) next["taxCode"] = String(tax).trim();
 
-    const kindVal = parseKind(pick("kind"));
-    if (kindVal) next["kind"] = kindVal;
+    const kind = parseKind(pick("kind"));
+    if (kind) next["kind"] = kind;
 
     const priceRaw = pick("price");
     if (priceRaw !== undefined && priceRaw !== null) {
@@ -73,6 +82,7 @@ export const handler = async (evt: any) => {
       return ok({ id, type: typeParam, updated: false, updatedAt: now });
     }
 
+    // Build SET
     const names: Record<string, string> = {};
     const values: Record<string, any> = {};
     const sets: string[] = [];
@@ -87,6 +97,7 @@ export const handler = async (evt: any) => {
     const curSkuLc = cur?.sku ? String(cur.sku).toLowerCase() : undefined;
     const newSkuLc = next.sku ? String(next.sku).toLowerCase() : undefined;
 
+    // SKU change needs token txn
     if (typeParam === "product" && newSkuLc && newSkuLc !== curSkuLc) {
       await ddb.send(new TransactWriteCommand({
         TransactItems: [
