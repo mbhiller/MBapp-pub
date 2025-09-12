@@ -29,3 +29,10 @@ post.json
 apps/api/dist/
 apps/api/dist/*.zip
 tools/qr-*.png
+# Build outputs
+dist/
+dist.zip
+apps/api/dist.zip
+apps/api/bundle/
+apps/api/mbapp-api.zip
+apps/api/lambdas/

@@ -1,0 +1,24 @@
+{
+  "name": "mbapp-backend-objects",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "build": "echo \"Skipping API build (infra/lambda provides the runtime)\"",
+    "dev": "node -e \"console.log('No API dev server in public repo')\"",
+    "test": "echo \"(no tests)\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "bundle:monolith": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/index.js",
+    "zip:monolith": "powershell -NoProfile -Command \"Compress-Archive -Path ./dist/index.js -DestinationPath ./dist/mbapp-nonprod-objects.zip -Force\"",
+    "deploy:monolith": "npm run bundle:monolith && npm run zip:monolith && aws lambda update-function-code --region us-east-1 --function-name mbapp-nonprod-objects --zip-file fileb://dist/mbapp-nonprod-objects.zip"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.883.0",
+    "@aws-sdk/lib-dynamodb": "^3.883.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.9",
+    "typescript": "^5.9.2",
+    "@types/node": "^20.14.10"
+  }
+}

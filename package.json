@@ -24,19 +24,13 @@
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "^3.882.0",
     "@aws-sdk/lib-dynamodb": "^3.882.0",
-    "@types/react": "19.1.12",
+    "@types/react": "^19.1.12",
     "@typescript-eslint/eslint-plugin": "^8.42.0",
     "@typescript-eslint/parser": "^8.42.0",
     "esbuild": "^0.25.9",
     "eslint": "^9.34.0",
     "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.6.2",
-    "typescript": "~5.8.3"
-  },
-  "overrides": {
-    "react": "19.0.0",
-    "react-dom": "19.0.0",
-    "@types/react": "19.1.12",
-    "simple-swizzle": "0.2.2"
+    "typescript": "^5.6.3"
   }
 }

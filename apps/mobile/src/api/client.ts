@@ -1,101 +1,98 @@
 // apps/mobile/src/api/client.ts
-// Centralized API client for the mobile app.
-// Ensures correct base URL, tenant header, lowercase paths, and JSON error handling.
+const API_BASE = process.env.EXPO_PUBLIC_API_BASE ?? "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com";
+const TENANT = process.env.EXPO_PUBLIC_TENANT ?? "DemoTenant";
 
-export type ObjectRecord = {
-  id: string;
-  type: string;
-  name?: string;
-  tags?: Record<string, any>;
-  [k: string]: any;
-};
+type ReqInit = RequestInit & { tenant?: string };
 
-export type Product = {
-  id: string;
-  name: string;
-  sku?: string;
-  type?: "good" | "service";
-  uom?: string;
-  price?: number;
-};
-
-export type ListPage<T> = { items: T[]; nextCursor?: string };
-
-const API_BASE = (process.env.EXPO_PUBLIC_API_BASE || "").replace(/\/+$/, "");
-const TENANT   = process.env.EXPO_PUBLIC_TENANT_ID || "DemoTenant";
-
-function toUrl(path: string, params?: Record<string, string | number | boolean | undefined>) {
-  const url = new URL(API_BASE + path.toLowerCase());
-  if (params) {
-    for (const [k, v] of Object.entries(params)) {
-      if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
-    }
-  }
-  return url.toString();
-}
-
-async function request<T = any>(path: string, init?: RequestInit, params?: Record<string, any>): Promise<T> {
-  const url = toUrl(path, params);
-  const resp = await fetch(url, {
+async function request<T>(path: string, init?: ReqInit): Promise<T> {
+  const url = `${API_BASE}${path}`;
+  const r = await fetch(url, {
     ...init,
     headers: {
       accept: "application/json",
-      "x-tenant-id": TENANT,
-      ...(init?.headers || {}),
+      "content-type": init?.body ? "application/json" : "application/json",
+      "x-tenant-id": init?.tenant ?? TENANT,
+      ...(init?.headers ?? {}),
     },
   });
-
-  const text = await resp.text();
-  let data: any = null;
-  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
-
-  if (!resp.ok) {
-    const msg = (data && (data.message || data.error)) || resp.statusText;
-    throw new Error(msg);
+  if (!r.ok) {
+    let detail: any = undefined;
+    try {
+      detail = await r.json();
+    } catch {}
+    const msg = `HTTP ${r.status} ${r.statusText}${detail?.message ? `: ${detail.message}` : ""}`;
+    throw Object.assign(new Error(msg), { status: r.status, detail });
   }
-  return data as T;
+  return (await r.json()) as T;
 }
 
-/* --------------------------- Generic helpers ----------------------------- */
-function get<T = any>(path: string, params?: Record<string, any>) {
-  return request<T>(path, undefined, params);
-}
-function post<T = any>(path: string, body?: any) {
-  return request<T>(path, { method: "POST", headers: { "content-type": "application/json" }, body: body == null ? undefined : JSON.stringify(body) });
-}
-
-/* --------------------------- Objects endpoints --------------------------- */
-export async function listObjects(opts: { type: string; limit?: number; cursor?: string }): Promise<ListPage<ObjectRecord>> {
-  return request<ListPage<ObjectRecord>>("/objects", undefined, { type: opts.type, limit: opts.limit ?? 25, cursor: opts.cursor });
-}
-export async function getObject(type: string, id: string): Promise<ObjectRecord> {
-  return request<ObjectRecord>(`/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}`);
-}
-export async function createObject(type: string, body: Partial<ObjectRecord>): Promise<ObjectRecord> {
-  return request<ObjectRecord>(`/objects/${encodeURIComponent(type)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-}
-export async function updateObject(type: string, id: string, patch: Partial<ObjectRecord> & { tags?: Record<string, any> }): Promise<ObjectRecord> {
-  return request<ObjectRecord>(`/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(patch) });
+function qs(params: Record<string, any | undefined>) {
+  const u = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => {
+    if (v === undefined || v === null || v === "") return;
+    u.set(k, String(v));
+  });
+  const s = u.toString();
+  return s ? `?${s}` : "";
 }
 
-/* --------------------------- Products endpoints -------------------------- */
-export type UpdateProductPatch = Partial<Pick<Product, "name" | "sku" | "type" | "uom" | "price">>;
-export async function listProducts(opts: { q?: string; limit?: number; cursor?: string }): Promise<ListPage<Product>> {
-  return request<ListPage<Product>>("/products", undefined, { q: opts.q, limit: opts.limit ?? 25, cursor: opts.cursor });
-}
-export async function getProduct(id: string): Promise<Product> {
-  return request<Product>(`/products/${encodeURIComponent(id)}`);
-}
-export async function updateProduct(id: string, patch: UpdateProductPatch): Promise<Product> {
-  return request<Product>(`/products/${encodeURIComponent(id)}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(patch) });
-}
+export type ListPage<T> = { items: T[]; nextCursor?: string };
 
-/* ----------------------------- Public facade ----------------------------- */
-export const api = {
-  // generic
-  get,
-  post,
-  // grouped
-  objects: { list: listObjects, get: getObject, create: createObject, update: updateObject },
-  products: { list: listProducts, get: getProduct, update: updateProduct },
+// Domain types
+export type Product = {
+  id: string;
+  sku: string;
+  name: string;
+  type: "good" | "service";
+  uom: string;
+  price: number;
+  taxCode?: string;
+  tags?: any;
+  createdAt?: number;
+  updatedAt?: number;
 };
+
+export const api = {
+  get:    <T>(path: string, init?: ReqInit) => request<T>(path, { ...init, method: "GET" }),
+  post:   <T>(path: string, body?: any, init?: ReqInit) =>
+    request<T>(path, { ...init, method: "POST", body: body ? JSON.stringify(body) : undefined }),
+  put:    <T>(path: string, body?: any, init?: ReqInit) =>
+    request<T>(path, { ...init, method: "PUT", body: body ? JSON.stringify(body) : undefined }),
+  del:    <T>(path: string, init?: ReqInit) => request<T>(path, { ...init, method: "DELETE" }),
+
+  objects: {
+    list: (opts: { type: string; limit?: number; cursor?: string; name?: string; signal?: AbortSignal }) =>
+      request<ListPage<any>>(`/objects${qs({ type: opts.type, limit: opts.limit, cursor: opts.cursor, name: opts.name })}`, {
+        signal: opts.signal,
+      }),
+    get: (type: string, id: string) => request<any>(`/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}`),
+    create: (type: string, body: Partial<any>) =>
+      request<any>(`/objects/${encodeURIComponent(type)}`, { method: "POST", body: JSON.stringify(body) }),
+    update: (type: string, id: string, patch: Partial<any>) =>
+      request<any>(`/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        body: JSON.stringify(patch),
+      }),
+    delete: (type: string, id: string) =>
+      request<{ ok: true }>(`/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  },
+
+  products: {
+    list: (opts: { q?: string; sku?: string; limit?: number; cursor?: string; signal?: AbortSignal }) =>
+      request<ListPage<Product>>(`/products${qs({ q: opts.q, sku: opts.sku, limit: opts.limit, cursor: opts.cursor })}`, {
+        signal: opts.signal,
+      }),
+    get:    (id: string) => request<Product>(`/products/${encodeURIComponent(id)}`),
+    create: (body: Partial<Product>) => request<Product>(`/products`, { method: "POST", body: JSON.stringify(body) }),
+    update: (id: string, patch: Partial<Product>) =>
+      request<Product>(`/products/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(patch) }),
+  },
+};
+
+/** -------- Back-compat named exports (used by older modules) -------- */
+export const listProducts = api.products.list;
+export const getProduct   = api.products.get;
+export const updateProduct = api.products.update;
+
+export const getObject    = (type: string, id: string) => api.objects.get(type, id);
+export const updateObject = (type: string, id: string, patch: Partial<any>) => api.objects.update(type, id, patch);

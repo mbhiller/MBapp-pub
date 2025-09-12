@@ -10,15 +10,19 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "bundle:monolith": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/index.js",
     "zip:monolith": "powershell -NoProfile -Command \"Compress-Archive -Path ./dist/index.js -DestinationPath ./dist/mbapp-nonprod-objects.zip -Force\"",
-    "deploy:monolith": "npm run bundle:monolith && npm run zip:monolith && aws lambda update-function-code --region us-east-1 --function-name mbapp-nonprod-objects --zip-file fileb://dist/mbapp-nonprod-objects.zip"
+    "deploy:monolith": "npm run bundle:monolith && npm run zip:monolith && aws lambda update-function-code --region us-east-1 --function-name mbapp-nonprod-objects --zip-file fileb://dist/mbapp-nonprod-objects.zip",
+    "bundle:tf": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/index.js",
+    "zip:tf": "powershell -NoProfile -Command \"$out='..\\\\..\\\\infra\\\\terraform\\\\build'; if(-not (Test-Path $out)){ New-Item -ItemType Directory -Force -Path $out | Out-Null }; $zip=Join-Path $out 'objects.zip'; if(Test-Path $zip){ Remove-Item $zip -Force }; Compress-Archive -Path .\\\\dist\\\\ -DestinationPath $zip -Force\"",
+    "build:tf": "npm run bundle:tf && npm run zip:tf"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.883.0",
     "@aws-sdk/lib-dynamodb": "^3.883.0"
   },
   "devDependencies": {
+    "@types/aws-lambda": "^8.10.152",
+    "@types/node": "^20.14.10",
     "esbuild": "^0.25.9",
-    "typescript": "^5.9.2",
-    "@types/node": "^20.14.10"
+    "typescript": "^5.9.2"
   }
 }

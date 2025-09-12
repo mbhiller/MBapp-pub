@@ -1,24 +1,54 @@
-import { useInfiniteQuery, InfiniteData, UseInfiniteQueryResult } from "@tanstack/react-query";
-import { listProducts, updateProduct, type ListPage, type Product, type UpdateProductPatch } from "./api";
+// apps/mobile/src/features/catalog/useProducts.ts
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api, Product, ListPage } from "../../api/client";
 
-export function useProducts(q?: string) {
-  const query = useInfiniteQuery<ListPage, Error, InfiniteData<ListPage>, readonly unknown[], unknown>({
-    queryKey: ["products", q ?? ""],
-    queryFn: async ({ pageParam }) => {
-      const cursor = typeof pageParam === "string" && pageParam.length ? pageParam : undefined;
-      return listProducts({ q, limit: 25, cursor });
+/** We use an empty string as the initial pageParam to keep TPageParam strictly `string`. */
+const START = "";
+
+export function useProducts(opts: { q?: string; sku?: string; limit?: number } = {}) {
+  return useInfiniteQuery({
+    queryKey: ["products", { q: opts.q ?? "", sku: opts.sku ?? "" }],
+    initialPageParam: START, // string (not undefined) keeps types happy
+    queryFn: async ({ pageParam, signal }) => {
+      const cursor = pageParam || undefined; // treat "" as undefined for the API
+      const page = await api.products.list({
+        q: opts.q,
+        sku: opts.sku,
+        limit: opts.limit ?? 25,
+        cursor,
+        signal,
+      });
+      return page;
     },
-    initialPageParam: undefined,
-    getNextPageParam: (last) => last.nextCursor,
+    getNextPageParam: (last: ListPage<Product>) => last.nextCursor ?? "", // always return string
   });
+}
 
-  return query as UseInfiniteQueryResult<InfiniteData<ListPage>, Error>;
+export function useProduct(id?: string) {
+  return useQuery({
+    queryKey: ["product", id ?? "new"],
+    enabled: !!id,
+    queryFn: () => api.products.get(id!),
+  });
+}
+
+export function useCreateProduct() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Partial<Product>) => api.products.create(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["products"] });
+    },
+  });
 }
 
 export function useUpdateProduct(id: string) {
-  return {
-    mutateAsync: async (patch: UpdateProductPatch) => updateProduct(id, patch),
-  };
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: Partial<Product>) => api.products.update(id, patch),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["product", id] });
+      qc.invalidateQueries({ queryKey: ["products"] });
+    },
+  });
 }
-
-export type { Product, ListPage, UpdateProductPatch };

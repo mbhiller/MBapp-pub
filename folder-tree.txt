@@ -1,6 +1,0 @@
-Folder PATH listing for volume Local Disk
-Volume serial number is 000000DC 9E09:4859
-C:\USERS\BRYAN\MBAPP\MBAPP
-Invalid path - \USERS\BRYAN\MBAPP\MBAPP
-No subfolders exist 
-
