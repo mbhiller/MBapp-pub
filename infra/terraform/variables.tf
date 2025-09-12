@@ -17,7 +17,7 @@ variable "aws_region" {
 variable "aws_profile" {
   type        = string
   description = "AWS CLI profile to use for Terraform."
-  default     = "mbapp-nonprod"
+  default     = "mbapp-nonprod-admin"
 }
 
 
@@ -66,4 +66,9 @@ variable "log_retention_days" {
     condition     = var.log_retention_days >= 1 && var.log_retention_days <= 3653
     error_message = "log_retention_days must be between 1 and 3653 (10 years)."
   }
+}
+variable "objects_api_id" {
+  type        = string
+  description = "Existing HTTP API ID for nonprod (e.g., ki8kgivz1f)."
+  default     = "ki8kgivz1f"
 }

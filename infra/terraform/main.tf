@@ -12,7 +12,8 @@ locals {
 data "aws_caller_identity" "current" {}
 
 ############################
-# DynamoDB (existing)
+# DynamoDB (existing legacy tables)
+# If these already exist, import them before apply, or replace with data sources.
 ############################
 resource "aws_dynamodb_table" "devices" {
   name         = "${local.name}-devices"
@@ -40,7 +41,6 @@ resource "aws_dynamodb_table" "scans" {
 # Legacy API (gated by deploy_api)
 ############################
 
-# Package legacy API code from ./lambda only if deploying it
 data "archive_file" "api_zip" {
   count       = var.deploy_api ? 1 : 0
   type        = "zip"
@@ -87,7 +87,7 @@ resource "aws_apigatewayv2_api" "http" {
   cors_configuration {
     allow_credentials = false
     allow_headers     = ["*"]
-    allow_methods     = ["GET", "OPTIONS"]
+    allow_methods     = ["GET", "POST", "PUT", "OPTIONS"]
     allow_origins     = var.allowed_origins
     max_age           = 86400
   }
@@ -129,14 +129,12 @@ resource "aws_apigatewayv2_stage" "prod" {
   }
 }
 
-# CloudWatch Logs retention for legacy API Lambda
 resource "aws_cloudwatch_log_group" "lambda" {
   count             = var.deploy_api ? 1 : 0
   name              = "/aws/lambda/${aws_lambda_function.api[0].function_name}"
   retention_in_days = 14
 }
 
-# Alarm on HTTP API 5xx
 resource "aws_cloudwatch_metric_alarm" "api_5xx" {
   count               = var.deploy_api ? 1 : 0
   alarm_name          = "${var.project_name}-httpapi-5xx"
@@ -223,7 +221,6 @@ resource "aws_cloudfront_distribution" "web" {
   }
 }
 
-# S3 bucket policy to allow ONLY this distribution via OAC
 data "aws_iam_policy_document" "cf_to_s3" {
   count = var.deploy_web ? 1 : 0
 
@@ -280,6 +277,7 @@ resource "aws_dynamodb_table" "objects" {
     type = "S"
   }
 
+  # GSI1: by tenant|type, sorted by updatedAt (string)
   attribute {
     name = "gsi1pk"
     type = "S"
@@ -290,6 +288,14 @@ resource "aws_dynamodb_table" "objects" {
     type = "S"
   }
 
+  global_secondary_index {
+    name            = "gsi1"
+    hash_key        = "gsi1pk"
+    range_key       = "gsi1sk"
+    projection_type = "ALL"
+  }
+
+  # GSI2: by tenant|type, sorted by name_lc (optional but recommended)
   attribute {
     name = "gsi2pk"
     type = "S"
@@ -301,23 +307,42 @@ resource "aws_dynamodb_table" "objects" {
   }
 
   global_secondary_index {
-    name            = "gsi1"
-    hash_key        = "gsi1pk"
-    range_key       = "gsi1sk"
-    projection_type = "ALL"
-  }
-
-  global_secondary_index {
     name            = "gsi2"
     hash_key        = "gsi2pk"
     range_key       = "gsi2sk"
     projection_type = "ALL"
   }
 
+  # GSI3: exact SKU lookup (optional, enables fast /products?sku=)
+  attribute {
+    name = "sku_lc"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "gsi3_sku"
+    hash_key        = "sku_lc"
+    projection_type = "ALL"
+  }
+
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  server_side_encryption {
+    enabled = true
+  }
+
   tags = {
     Project = var.project_name
     Env     = "nonprod"
   }
+
+  # Give DynamoDB plenty of time to build new GSIs during updates
+  timeouts {
+    update = "3h"
+  }
+
 }
 
 # IAM for Objects Lambda
@@ -336,13 +361,12 @@ resource "aws_iam_role" "objects_lambda_role" {
   assume_role_policy = data.aws_iam_policy_document.objects_lambda_assume.json
 }
 
-# Attach AWS managed basic logs policy
 resource "aws_iam_role_policy_attachment" "objects_lambda_basic" {
   role       = aws_iam_role.objects_lambda_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-# Custom policy for DynamoDB access
+# DynamoDB access policy (includes TransactWriteItems)
 data "aws_iam_policy_document" "objects_dynamo_policy_doc" {
   statement {
     sid    = "DynamoAccess"
@@ -352,14 +376,14 @@ data "aws_iam_policy_document" "objects_dynamo_policy_doc" {
       "dynamodb:GetItem",
       "dynamodb:Query",
       "dynamodb:UpdateItem",
-      "dynamodb:DeleteItem" # << added
+      "dynamodb:DeleteItem",
+      "dynamodb:TransactWriteItems"
     ]
     resources = [
       aws_dynamodb_table.objects.arn,
       "${aws_dynamodb_table.objects.arn}/index/*"
     ]
   }
-
 }
 
 resource "aws_iam_policy" "objects_dynamo_policy" {
@@ -372,17 +396,16 @@ resource "aws_iam_role_policy_attachment" "attach_objects_dynamo_policy" {
   policy_arn = aws_iam_policy.objects_dynamo_policy.arn
 }
 
-# Log group for the Objects Lambda
 resource "aws_cloudwatch_log_group" "objects_lambda_lg" {
   name              = "/aws/lambda/${local.name_prefix}-objects"
   retention_in_days = var.log_retention_days
 }
 
-# Lambda (Objects)
+# Lambda (Objects) — expects a zip with dist/index.handler at root of zip
 resource "aws_lambda_function" "objects" {
   function_name = "${local.name_prefix}-objects"
   role          = aws_iam_role.objects_lambda_role.arn
-  handler       = "index.handler"
+  handler       = "dist/index.handler"
   runtime       = "nodejs20.x"
 
   filename         = var.lambda_zip_path
@@ -398,94 +421,19 @@ resource "aws_lambda_function" "objects" {
   depends_on = [aws_cloudwatch_log_group.objects_lambda_lg]
 }
 
-# HTTP API for Objects (+ CORS)
-resource "aws_apigatewayv2_api" "objects_api" {
-  name          = "${var.project_name}-nonprod-objects-api"
-  protocol_type = "HTTP"
-
-  cors_configuration {
-    allow_origins     = var.allowed_origins
-    allow_headers     = ["*"]
-    allow_methods     = ["GET", "POST", "PUT", "DELETE", "OPTIONS"] # << added DELETE
-    allow_credentials = false
-    max_age           = 86400
-  }
+# Use the EXISTING HTTP API by ID; do not manage routes/integration here
+data "aws_apigatewayv2_api" "objects_api" {
+  api_id = var.objects_api_id
 }
 
-resource "aws_apigatewayv2_integration" "objects_lambda_integration" {
-  api_id                 = aws_apigatewayv2_api.objects_api.id
-  integration_type       = "AWS_PROXY"
-  integration_uri        = aws_lambda_function.objects.arn
-  payload_format_version = "2.0"
-}
-
-# Routes (match handler & smoke)
-resource "aws_apigatewayv2_route" "post_objects" {
-  api_id    = aws_apigatewayv2_api.objects_api.id
-  route_key = "POST /objects/{type}"
-  target    = "integrations/${aws_apigatewayv2_integration.objects_lambda_integration.id}"
-}
-
-resource "aws_apigatewayv2_route" "get_objects" {
-  api_id    = aws_apigatewayv2_api.objects_api.id
-  route_key = "GET /objects/{type}"
-  target    = "integrations/${aws_apigatewayv2_integration.objects_lambda_integration.id}"
-}
-
-resource "aws_apigatewayv2_route" "get_objects_id" {
-  api_id    = aws_apigatewayv2_api.objects_api.id
-  route_key = "GET /objects/{type}/{id}"
-  target    = "integrations/${aws_apigatewayv2_integration.objects_lambda_integration.id}"
-}
-
-resource "aws_apigatewayv2_route" "put_objects_id" {
-  api_id    = aws_apigatewayv2_api.objects_api.id
-  route_key = "PUT /objects/{type}/{id}"
-  target    = "integrations/${aws_apigatewayv2_integration.objects_lambda_integration.id}"
-}
-
-resource "aws_apigatewayv2_route" "get_objects_search" {
-  api_id    = aws_apigatewayv2_api.objects_api.id
-  route_key = "GET /objects/search"
-  target    = "integrations/${aws_apigatewayv2_integration.objects_lambda_integration.id}"
-}
-
-resource "aws_apigatewayv2_route" "get_tenants" {
-  api_id    = aws_apigatewayv2_api.objects_api.id
-  route_key = "GET /tenants"
-  target    = "integrations/${aws_apigatewayv2_integration.objects_lambda_integration.id}"
-}
-
-resource "aws_apigatewayv2_route" "list_objects_by_type" {
-  api_id    = aws_apigatewayv2_api.objects_api.id
-  route_key = "GET /objects/{type}/list"
-  target    = "integrations/${aws_apigatewayv2_integration.objects_lambda_integration.id}"
-}
-
-resource "aws_apigatewayv2_route" "delete_object" {
-  api_id    = aws_apigatewayv2_api.objects_api.id
-  route_key = "DELETE /objects/{type}/{id}"
-  target    = "integrations/${aws_apigatewayv2_integration.objects_lambda_integration.id}"
-}
-
-
-# Catch-all so unmatched paths still reach the Lambda (handy for diagnostics)
-resource "aws_apigatewayv2_route" "default_objects" {
-  api_id    = aws_apigatewayv2_api.objects_api.id
-  route_key = "$default"
-  target    = "integrations/${aws_apigatewayv2_integration.objects_lambda_integration.id}"
-}
-
-resource "aws_apigatewayv2_stage" "objects_stage" {
-  api_id      = aws_apigatewayv2_api.objects_api.id
-  name        = "$default"
-  auto_deploy = true
-}
-
+# Permission for that API to invoke our Lambda across all stages/methods/paths
 resource "aws_lambda_permission" "apigw_invoke_objects" {
-  statement_id  = "AllowAPIGatewayInvokeObjects"
+  statement_id_prefix = "AllowInvokeFromHttpApi-"
+
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.objects.function_name
   principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_apigatewayv2_api.objects_api.execution_arn}/*/*"
+
+  # HTTP API execute-arn + wildcards for stage/method/path (works with $default)
+  source_arn = "${data.aws_apigatewayv2_api.objects_api.execution_arn}/*/*/*"
 }

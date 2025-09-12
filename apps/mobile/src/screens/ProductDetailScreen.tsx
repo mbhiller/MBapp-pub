@@ -1,115 +1,189 @@
-// apps/mobile/src/screens/ProductDetailScreen.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { RouteProp, useNavigation, useRoute } from "@react-navigation/native";
-import { useCreateProduct, useProduct, useUpdateProduct } from "../features/catalog/useProducts";
-import type { Product } from "../api/client";
+import type { RootStackScreenProps } from "../navigation/types";
+import { createProduct, getProduct, updateProduct, type Product } from "../features/products/api";
 
-type Params = { id?: string; mode?: "new" };
+type Props = RootStackScreenProps<"ProductDetail">;
 
-export default function ProductDetailScreen() {
-  const route = useRoute<RouteProp<Record<string, Params>, string>>();
-  const navigation = useNavigation<any>();
-  const { id, mode } = (route.params ?? {}) as Params;
-
+export default function ProductDetailScreen({ route, navigation }: Props) {
+  const { id, mode } = route.params ?? {};
   const creating = mode === "new" || !id;
-  const { data, isLoading } = useProduct(creating ? undefined : id);
-  const initial: Product | undefined = data;
 
-  const [sku, setSku] = useState("");
+  const [loading, setLoading] = useState(!creating);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
   const [name, setName] = useState("");
-  const [type, setType] = useState<"good" | "service">("good");
-  const [uom, setUom] = useState("ea");
-  const [price, setPrice] = useState<string>("0");
+  const [sku, setSku] = useState("");
+  const [price, setPrice] = useState<string>("");
+
+  // new fields
+  const [uom, setUom] = useState("");
   const [taxCode, setTaxCode] = useState("");
+  const [kind, setKind] = useState<"good" | "service" | "">("");
+
+  async function load() {
+    if (!id) return;
+    setErr(null);
+    setLoading(true);
+    try {
+      const p = (await getProduct(id)) as Product & {
+        uom?: string;
+        taxCode?: string;
+        kind?: "good" | "service";
+      };
+      setName(p?.name ?? "");
+      setSku(p?.sku ?? "");
+      setPrice(p?.price != null ? String(p.price) : "");
+      setUom(p?.uom ?? "");
+      setTaxCode(p?.taxCode ?? "");
+      setKind((p?.kind as any) ?? "");
+    } catch (e: any) {
+      setErr(e?.message || "Failed to load");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    if (initial && !creating) {
-      setSku(initial.sku ?? "");
-      setName(initial.name ?? "");
-      setType(initial.type ?? "good");
-      setUom(initial.uom ?? "ea");
-      setPrice(String(initial.price ?? 0));
-      setTaxCode(initial.taxCode ?? "");
+    if (!creating) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
+  const canSave = useMemo(() => {
+    if (name.trim().length === 0) return false;
+    if (kind && kind !== "good" && kind !== "service") return false;
+    if (price.trim().length === 0) return true;
+    const n = Number(price);
+    return Number.isFinite(n) && !Number.isNaN(n);
+  }, [name, price, kind]);
+
+  async function onSave() {
+    try {
+      setSaving(true);
+      setErr(null);
+      const body: Partial<Product> & {
+        uom?: string;
+        taxCode?: string;
+        kind?: "good" | "service";
+      } = {
+        name: name.trim(),
+        sku: sku.trim() || undefined,
+        price: price.trim() ? Number(price) : undefined,
+        uom: uom.trim() || undefined,
+        taxCode: taxCode.trim() || undefined,
+        kind: (kind as any) || undefined,
+      };
+
+      if (creating) {
+        const created = await createProduct(body);
+        Alert.alert("Created", "Product created.");
+        navigation.replace("ProductDetail", { id: created.id });
+      } else {
+        await updateProduct(id!, body);
+        Alert.alert("Saved", "Product updated.");
+        await load();
+      }
+    } catch (e: any) {
+      setErr(e?.message || "Save failed");
+    } finally {
+      setSaving(false);
     }
-  }, [initial, creating]);
+  }
 
-  const createMut = useCreateProduct();
-  const updateMut = useUpdateProduct(id ?? "");
-  const canSave = useMemo(() => (name || "").trim().length > 0, [name]);
-
-  if (!creating && isLoading) {
+  if (loading) {
     return (
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
         <ActivityIndicator />
+        {err ? <Text style={{ marginTop: 8, color: "crimson" }}>{err}</Text> : null}
       </View>
     );
   }
 
-  async function onSave() {
-    try {
-      if (creating) {
-        const body = {
-          sku: sku.trim(),
-          name: name.trim(),
-          type,
-          uom: uom.trim() || "ea",
-          price: Number(price) || 0,
-          taxCode: taxCode.trim() || undefined,
-        };
-        const created = await createMut.mutateAsync(body);
-        navigation.replace("ProductDetail", { id: created.id });
-      } else {
-        const patch: Partial<Product> = {
-          sku: sku.trim(),
-          name: name.trim(),
-          type,
-          uom: uom.trim() || "ea",
-          price: Number(price) || 0,
-          taxCode: taxCode.trim() || undefined,
-        };
-        await updateMut.mutateAsync(patch);
-        Alert.alert("Saved", "Product updated.");
-      }
-    } catch (e: any) {
-      Alert.alert("Error", e?.message ?? "Failed to save product");
-    }
-  }
-
   return (
     <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
-      <Text style={{ fontSize: 18, fontWeight: "700" }}>{creating ? "New Product" : "Edit Product"}</Text>
-
-      <Field label="Name" value={name} onChangeText={setName} autoCapitalize="words" />
-      <Field label="SKU" value={sku} onChangeText={setSku} autoCapitalize="characters" />
       <Field
-        label="Type (good|service)"
-        value={type}
-        onChangeText={(v: string) => setType(v === "service" ? "service" : "good")}
+        label="Name"
+        input={{
+          value: name,
+          onChangeText: (v: string) => setName(v),
+          placeholder: "Product name",
+        }}
       />
-      <Field label="UOM" value={uom} onChangeText={setUom} />
-      <Field label="Price" value={price} onChangeText={setPrice} keyboardType="decimal-pad" />
-      <Field label="Tax Code" value={taxCode} onChangeText={setTaxCode} />
+      <Field
+        label="SKU"
+        input={{
+          value: sku,
+          onChangeText: (v: string) => setSku(v),
+          placeholder: "e.g. ABC-123",
+          autoCapitalize: "characters",
+        }}
+      />
+      <Field
+        label="Price"
+        input={{
+          value: price,
+          onChangeText: (v: string) => setPrice(v),
+          placeholder: "e.g. 19.99",
+          keyboardType: "decimal-pad",
+        }}
+      />
+
+      {/* NEW FIELDS BELOW — they live inside the same ScrollView parent */}
+      <Field
+        label="UOM"
+        input={{
+          value: uom,
+          onChangeText: (v: string) => setUom(v),
+          placeholder: "e.g. each, hr, lb",
+        }}
+      />
+      <Field
+        label="Tax Code"
+        input={{
+          value: taxCode,
+          onChangeText: (v: string) => setTaxCode(v),
+          placeholder: "e.g. TAXABLE or EXEMPT",
+          autoCapitalize: "characters",
+        }}
+      />
+      <Field
+        label="Kind (good|service)"
+        input={{
+          value: kind,
+          onChangeText: (v: string) => setKind((v as any)?.toLowerCase()),
+          placeholder: "good or service",
+          autoCapitalize: "none",
+        }}
+      />
 
       <TouchableOpacity
-        disabled={!canSave || createMut.isPending || updateMut.isPending}
         onPress={onSave}
+        disabled={!canSave || saving}
         style={{
-          backgroundColor: canSave ? "#007aff" : "#aacbff",
-          paddingVertical: 12,
+          backgroundColor: !canSave || saving ? "#9fbefb" : "#3478f6",
+          padding: 14,
           borderRadius: 10,
           alignItems: "center",
-          marginTop: 8,
         }}
       >
-        <Text style={{ color: "white", fontWeight: "700" }}>{creating ? "Create" : "Save"}</Text>
+        <Text style={{ color: "#fff", fontWeight: "700" }}>
+          {saving ? "Saving…" : creating ? "Create" : "Save"}
+        </Text>
       </TouchableOpacity>
+
+      {err ? <Text style={{ color: "crimson", marginTop: 8 }}>{err}</Text> : null}
     </ScrollView>
   );
 }
 
-function Field(props: any) {
-  const { label, ...input } = props;
+function Field({
+  label,
+  input,
+}: {
+  label: string;
+  input: React.ComponentProps<typeof TextInput>;
+}) {
   return (
     <View style={{ gap: 6 }}>
       <Text style={{ color: "#444" }}>{label}</Text>
