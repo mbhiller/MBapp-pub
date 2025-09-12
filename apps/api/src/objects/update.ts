@@ -1,80 +1,160 @@
-import { GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { GetCommand, TransactWriteCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { ddb, tableObjects } from "../common/ddb";
-import { ok, bad, notfound, error as errResp, conflict } from "../common/responses";
+import { ok, bad, notfound, error as errResp } from "../common/responses";
 import { getTenantId } from "../common/env";
+
+const uniqPk = (tenant: string, skuLc: string) => `UNIQ#${tenant}#product#SKU#${skuLc}`;
+
+function parseKind(input: unknown): "good" | "service" | undefined {
+  if (typeof input !== "string") return undefined;
+  const k = input.trim().toLowerCase();
+  return k === "good" || k === "service" ? k : undefined;
+}
 
 export const handler = async (evt: any) => {
   try {
     const tenantId = getTenantId(evt);
     if (!tenantId) return bad("x-tenant-id header required");
 
-    const type = (evt?.pathParameters?.type as string | undefined)?.trim();
-    const id = (evt?.pathParameters?.id as string | undefined)?.trim();
-    if (!type) return bad("type is required");
+    const typeParam = (evt?.pathParameters?.type as string | undefined)?.trim();
+    const id        = (evt?.pathParameters?.id as string | undefined)?.trim();
+    if (!typeParam) return bad("type is required");
     if (!id) return bad("id is required");
 
     let body: any = {};
     if (evt?.body) {
-      try {
-        body = typeof evt.body === "string" ? JSON.parse(evt.body) : evt.body;
-      } catch {
-        return bad("invalid JSON body");
+      try { body = typeof evt.body === "string" ? JSON.parse(evt.body) : evt.body; }
+      catch { return bad("invalid json body"); }
+    }
+    const pick = (k: string) => body?.[k] ?? body?.core?.[k];
+
+    // Read current (for SKU change + repair)
+    const curResp = await ddb.send(new GetCommand({
+      TableName: tableObjects,
+      Key: { pk: id, sk: `${tenantId}|${typeParam}` },
+    }));
+    const cur = curResp.Item as Record<string, any> | undefined;
+    if (!cur) return notfound("object not found");
+
+    const now = Date.now();
+    const next: Record<string, any> = { updatedAt: now };
+
+    // 🛠 repair bad rows that stored kind inside 'type'
+    if (!cur.type || cur.type === "good" || cur.type === "service") {
+      next["type"] = typeParam;
+      if (cur.type && (cur.type === "good" || cur.type === "service") && cur.kind == null) {
+        next["kind"] = cur.type;
       }
     }
 
-    // Canonical keys
-    const pk = `TENANT#${tenantId}#TYPE#${type}`;
-    const sk = `ID#${id}`;
-
-    // Verify target exists
-    const cur = await ddb.send(
-      new GetCommand({ TableName: tableObjects, Key: { pk, sk } })
-    );
-    if (!cur.Item) return notfound("object not found");
-
-    // Guard type mismatch (coerce to string to avoid TS confusion)
-    const itemType = cur.Item?.type;
-    if (itemType && String(itemType) !== type) {
-      return conflict("type mismatch for this id");
+    const name = pick("name");
+    if (typeof name === "string" && name.trim()) {
+      const nm = name.trim();
+      next["name"] = nm;
+      next["name_lc"] = nm.toLowerCase();
+      next["gsi2pk"] = `${tenantId}|${typeParam}`;
+      next["gsi2sk"] = nm.toLowerCase();
     }
 
-    const now = new Date().toISOString();
-
-    const names: Record<string, string> = { "#updatedAt": "updatedAt" };
-    const values: Record<string, any> = { ":updatedAt": now };
-    const sets: string[] = ["#updatedAt = :updatedAt"];
-
-    if (body.name !== undefined) {
-      names["#name"] = "name";
-      values[":name"] = body.name;
-      sets.push("#name = :name");
-    }
-    if (body.tags !== undefined) {
-      names["#tags"] = "tags";
-      values[":tags"] = body.tags;
-      sets.push("#tags = :tags");
-    }
-    if (body.integrations !== undefined) {
-      names["#integrations"] = "integrations";
-      values[":integrations"] = body.integrations;
-      sets.push("#integrations = :integrations");
+    const sku = pick("sku");
+    if (sku != null && String(sku).trim()) {
+      const s = String(sku).trim();
+      next["sku"] = s;
+      next["sku_lc"] = s.toLowerCase();
     }
 
-    await ddb.send(
-      new UpdateCommand({
-        TableName: tableObjects,
-        Key: { pk, sk },
-        UpdateExpression: "SET " + sets.join(", "),
-        ExpressionAttributeNames: names,
-        ExpressionAttributeValues: values,
-        ConditionExpression: "attribute_exists(pk) AND attribute_exists(sk)",
-        ReturnValues: "ALL_NEW",
-      })
-    );
+    const uom = pick("uom");
+    if (uom != null && String(uom).trim()) next["uom"] = String(uom).trim();
 
-    return ok({ id, updated: true });
-  } catch (err: any) {
-    console.error("update.ts error", err);
-    return errResp(err);
+    const tax = pick("taxCode");
+    if (tax != null && String(tax).trim()) next["taxCode"] = String(tax).trim();
+
+    const kind = parseKind(pick("kind"));
+    if (kind) next["kind"] = kind;
+
+    const priceRaw = pick("price");
+    if (priceRaw !== undefined && priceRaw !== null) {
+      const n = typeof priceRaw === "string" ? Number(priceRaw) : priceRaw;
+      if (Number.isFinite(n)) next["price"] = Number(n);
+    }
+
+    if (Object.keys(next).length === 1) {
+      return ok({ id, type: typeParam, updated: false, updatedAt: now });
+    }
+
+    // Build SET
+    const names: Record<string, string> = {};
+    const values: Record<string, any> = {};
+    const sets: string[] = [];
+    Object.entries(next).forEach(([k, v], i) => {
+      const nk = `#n${i}`, vk = `:v${i}`;
+      names[nk] = k;
+      values[vk] = v;
+      sets.push(`${nk} = ${vk}`);
+    });
+
+    const key = { pk: id, sk: `${tenantId}|${typeParam}` };
+    const curSkuLc = cur?.sku ? String(cur.sku).toLowerCase() : undefined;
+    const newSkuLc = next.sku ? String(next.sku).toLowerCase() : undefined;
+
+    // SKU change needs token txn
+    if (typeParam === "product" && newSkuLc && newSkuLc !== curSkuLc) {
+      await ddb.send(new TransactWriteCommand({
+        TransactItems: [
+          {
+            Put: {
+              TableName: tableObjects,
+              Item: {
+                pk: uniqPk(tenantId, newSkuLc),
+                sk: "UNIQ",
+                tenant: tenantId,
+                refType: typeParam,
+                refId: id,
+                createdAt: now,
+              },
+              ConditionExpression: "attribute_not_exists(pk)",
+            },
+          },
+          {
+            Update: {
+              TableName: tableObjects,
+              Key: key,
+              UpdateExpression: "SET " + sets.join(", "),
+              ExpressionAttributeNames: names,
+              ExpressionAttributeValues: values,
+            },
+          },
+          ...(curSkuLc
+            ? [{
+                Delete: {
+                  TableName: tableObjects,
+                  Key: { pk: uniqPk(tenantId, curSkuLc), sk: "UNIQ" },
+                },
+              }]
+            : []),
+        ],
+      }));
+
+      const reread = await ddb.send(new GetCommand({ TableName: tableObjects, Key: key }));
+      const item = { id, type: typeParam, updatedAt: now, ...(reread.Item ?? {}) };
+      return ok(item);
+    }
+
+    const resp = await ddb.send(new UpdateCommand({
+      TableName: tableObjects,
+      Key: key,
+      UpdateExpression: "SET " + sets.join(", "),
+      ExpressionAttributeNames: names,
+      ExpressionAttributeValues: values,
+      ReturnValues: "ALL_NEW",
+    }));
+
+    const out = { id, type: typeParam, updatedAt: now, ...(resp.Attributes ?? {}) };
+    return ok(out);
+  } catch (e: any) {
+    if ((e?.name || "").includes("ConditionalCheckFailed")) {
+      return bad("SKU already exists for this tenant");
+    }
+    return errResp(e);
   }
 };

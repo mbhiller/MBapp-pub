@@ -1,62 +1,60 @@
 import React from "react";
-import { ScrollView, View, Text, TouchableOpacity } from "react-native";
-import type { RootStackScreenProps } from "../navigation/types";
-import { useTheme } from "../providers/ThemeProvider";
-import { useRoles } from "../providers/RolesProvider";
-import { MODULES } from "../shared/modules";
+import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
+import type { NativeStackScreenProps } from "@react-navigation/native-stack";
+import type { RootStackParamList } from "../navigation/types";
 
-export default function ModuleHubScreen({ navigation }: RootStackScreenProps<"Hub">) {
-  const t = useTheme();
-  const { roles, allowedModules, toggleRole } = useRoles();
+type Props = NativeStackScreenProps<RootStackParamList, "Hub">;
 
+type ModuleKey = "products" | "objects" | "tenants";
+type ModuleDef = {
+  key: ModuleKey;
+  title: string;
+  screen: keyof RootStackParamList;
+};
+
+const MODULES: ModuleDef[] = [
+  { key: "products", title: "Products", screen: "ProductsList" },
+  { key: "objects", title: "Objects", screen: "ObjectsList" },
+  { key: "tenants", title: "Tenants", screen: "Tenants" },
+];
+
+export default function ModuleHubScreen({ navigation }: Props) {
   return (
-    <ScrollView contentContainerStyle={{ padding: 16, gap: 12, backgroundColor: t.colors.bg }}>
-      <Text style={{ color: t.colors.textMuted, fontSize: 12 }}>MODULES</Text>
-
-      <View style={{ gap: 10 }}>
-        {allowedModules.map((key) => {
-          const m = MODULES[key];
-          return (
-            <TouchableOpacity
-              key={key}
-              onPress={() => navigation.navigate(m.route as any, m.params)}
-              style={{ backgroundColor: t.colors.card, borderColor: t.colors.border, borderWidth: 1, borderRadius: 12, padding: 14 }}
-            >
-              <Text style={{ color: t.colors.text, fontWeight: "700", fontSize: 16 }}>{m.title}</Text>
-              <Text style={{ color: t.colors.textMuted, marginTop: 4 }}>{key}</Text>
-            </TouchableOpacity>
-          );
-        })}
+    <View style={s.container}>
+      <Text style={s.h1}>Hub</Text>
+      <View style={s.grid}>
+        {MODULES.map((m) => (
+          <TouchableOpacity
+            key={m.key}
+            style={s.tile}
+            onPress={() => navigation.navigate(m.screen as any)}
+          >
+            <Text style={s.tileText}>{m.title}</Text>
+          </TouchableOpacity>
+        ))}
+        <TouchableOpacity
+          style={[s.tile, s.util]}
+          onPress={() => navigation.navigate("Scan")}
+        >
+          <Text style={s.tileText}>Scan</Text>
+        </TouchableOpacity>
       </View>
-
-      <View style={{ height: 1, backgroundColor: t.colors.border, marginVertical: 16 }} />
-
-      <Text style={{ color: t.colors.textMuted, fontSize: 12 }}>ROLES (local dev toggles)</Text>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
-        {(["internal", "inventory", "catalog", "admin"] as const).map((r) => {
-          const active = roles.includes(r);
-          return (
-            <TouchableOpacity
-              key={r}
-              onPress={() => toggleRole(r)}
-              style={{
-                paddingVertical: 8,
-                paddingHorizontal: 12,
-                borderRadius: 20,
-                backgroundColor: active ? "#dfe9ff" : t.colors.card,
-                borderWidth: 1,
-                borderColor: t.colors.border
-              }}
-            >
-              <Text style={{ color: active ? "#1b4ed8" : t.colors.text, fontWeight: "600" }}>{r}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-
-      <Text style={{ color: t.colors.textMuted, marginTop: 8 }}>
-        These toggles are in-app only for now; we’ll wire real user roles from the backend later.
-      </Text>
-    </ScrollView>
+    </View>
   );
 }
+
+const s = StyleSheet.create({
+  container: { flex: 1, padding: 16 },
+  h1: { fontSize: 22, fontWeight: "700", marginBottom: 12 },
+  grid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  tile: {
+    width: "46%",
+    minHeight: 90,
+    borderRadius: 12,
+    padding: 16,
+    backgroundColor: "#eee",
+    justifyContent: "center",
+  },
+  util: { backgroundColor: "#ddd" },
+  tileText: { fontSize: 16, fontWeight: "600" },
+});

@@ -1,35 +1,28 @@
 import type { RootStackParamList } from "../navigation/types";
 
-export type Role = "internal" | "inventory" | "catalog" | "admin";
-export type ModuleKey = "objects" | "products" | "tenants" | "scan";
+export type ModuleKey = "objects" | "products" | "tenants";
 
-type ModuleDef = {
+export type Role =
+  | "objects.view"
+  | "products.view"
+  | "products.edit"
+  | "tenants.view";
+
+export type ModuleDef = {
+  key: ModuleKey;
   title: string;
   route: keyof RootStackParamList;
-  required: Role[]; // any of these roles allows access
-  params?: Record<string, any>;
+  /** Roles required to see/open this module. Empty => everyone can see it. */
+  required: Role[];
 };
 
-export const MODULES: Record<ModuleKey, ModuleDef> = {
-  objects: {
-    title: "Objects",
-    route: "Objects",
-    required: ["internal", "inventory"],
-    params: { type: "horse" },
-  },
-  products: {
-    title: "Products",
-    route: "Products",
-    required: ["internal", "catalog"],
-  },
-  tenants: {
-    title: "Tenants",
-    route: "Tenants",
-    required: ["admin"],
-  },
-  scan: {
-    title: "Scan",
-    route: "Scan",
-    required: [], // everyone logged-in can scan
-  },
-};
+export const MODULES: ModuleDef[] = [
+  { key: "objects",  title: "Objects",  route: "ObjectsList",  required: ["objects.view"] },
+  { key: "products", title: "Products", route: "ProductsList", required: ["products.view"] },
+  { key: "tenants",  title: "Tenants",  route: "Tenants",      required: ["tenants.view"] },
+];
+
+export const MODULES_BY_KEY: Record<ModuleKey, ModuleDef> = MODULES.reduce(
+  (acc, m) => ((acc[m.key] = m), acc),
+  {} as Record<ModuleKey, ModuleDef>
+);

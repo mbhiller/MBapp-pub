@@ -1,164 +1,111 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { View, Text, TextInput, Button, ActivityIndicator, Pressable, BackHandler, Alert } from "react-native";
+import React, { useCallback, useEffect, useState } from "react";
+import { View, Text, Alert, ActivityIndicator } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { getObject, updateObject } from "../api/client";
-import { parseMbappQr } from "../lib/qr";
-import { Screen } from "../ui/Screen";
-import { Section } from "../ui/Section";
-import { NonProdBadge } from "../ui/NonProdBadge";
-import { useTheme } from "../providers/ThemeProvider";
+import type { NativeStackScreenProps } from "@react-navigation/native-stack";
+import type { RootStackParamList } from "../navigation/types";
 
-type AttachTarget = { id: string; type: string };
+type Props = NativeStackScreenProps<RootStackParamList, "Scan">;
 
-export default function ScanScreen({ route, navigation }: any) {
-  const t = useTheme();
-  const attachTo: AttachTarget | undefined = route?.params?.attachTo;
+// Parsed payload shape (intentionally loose to avoid TS errors)
+type QrParsed = {
+  t?: string; // e.g. "mbapp/object-v1" | "mbapp/po-v1" | etc.
+  id?: string;
+  type?: string;
+  href?: string;
+  epc?: string; // allow EPC text as parsed fallback
+};
+
+function tryParse(text: string): QrParsed | null {
+  try {
+    const obj = JSON.parse(text);
+    return typeof obj === "object" && obj ? (obj as QrParsed) : null;
+  } catch {
+    return null;
+  }
+}
+
+export default function ScanScreen({ navigation, route }: Props) {
   const [permission, requestPermission] = useCameraPermissions();
-  const [epc, setEpc] = useState<string>("");
+  const [scanning, setScanning] = useState(true);
   const [busy, setBusy] = useState(false);
-  const lockedRef = useRef(false);
 
   useEffect(() => {
-    if (!permission) requestPermission();
+    if (!permission?.granted) requestPermission();
   }, [permission, requestPermission]);
 
-  useEffect(() => {
-    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-      navigation.goBack();
-      return true;
-    });
-    return () => sub.remove();
-  }, [navigation]);
-
-  const normalize = (raw: string): string => {
-    if (!raw) return "";
-    const txt = raw.trim();
-    try {
-      if (/^https?:\/\//i.test(txt)) {
-        const u = new URL(txt);
-        const last = u.pathname.split("/").filter(Boolean).pop() || u.searchParams.get("epc") || txt;
-        return String(last).toUpperCase();
-      }
-    } catch {}
-    return txt.toUpperCase();
-  };
-
-  const handleAttach = useCallback(
-    async (value: string) => {
-      const trimmed = normalize(value);
-      if (!trimmed) {
-        Alert.alert("No EPC to attach");
-        return;
-      }
-      if (!attachTo) {
-        setEpc(trimmed);
-        Alert.alert("Scanned EPC captured");
-        return;
-      }
-
+  const handleScan = useCallback(
+    async (result: { data: string }) => {
+      if (!scanning || busy) return;
+      setScanning(false);
       setBusy(true);
-      try {
-        const cur = await getObject(attachTo.type, attachTo.id);
-        const mergedTags = { ...(cur?.tags || {}), rfidEpc: trimmed };
-        const next = await updateObject(attachTo.type, attachTo.id, { tags: mergedTags });
 
-        Alert.alert("Success", "EPC attached");
-        navigation.replace("ObjectDetail", {
-          id: attachTo.id,
-          type: attachTo.type,
-          obj: { ...next, type: attachTo.type }
-        });
-      } catch (e: any) {
-        Alert.alert("Attach failed", (e?.message || String(e)).slice(0, 200));
+      const text = result?.data ?? "";
+      const parsed = tryParse(text);
+      const intent = route.params?.intent ?? "navigate";
+
+      try {
+        // Minimal, safe intent handling
+        if (parsed?.t === "mbapp/object-v1" && parsed.id && parsed.type) {
+          if (intent === "attach-epc" && route.params?.attachTo) {
+            // In a later slice, call API to set tags.rfidEpc etc.
+            Alert.alert("Attach EPC", "Simulated attach complete.");
+            navigation.goBack();
+          } else {
+            navigation.replace("ObjectDetail", {
+              id: parsed.id,
+              type: parsed.type,
+            });
+          }
+          return;
+        }
+
+        // Fallback: treat as EPC/text and just alert for now
+        const epc = parsed?.epc ?? text;
+        Alert.alert("Scanned", epc.slice(0, 140));
+        navigation.goBack();
       } finally {
         setBusy(false);
-        lockedRef.current = false;
+        setTimeout(() => setScanning(true), 250);
       }
     },
-    [attachTo, navigation]
+    [busy, navigation, route.params, scanning]
   );
 
-  const onBarcodeScanned = useCallback(
-    ({ data }: any) => {
-      if (!data || lockedRef.current || busy) return;
-      lockedRef.current = true;
-
-      const mb = parseMbappQr(String(data));
-      if (mb?.id && mb?.type) {
-        navigation.navigate("ObjectDetail", { id: mb.id, type: mb.type, obj: { id: mb.id, type: mb.type } });
-        return;
-      }
-
-      handleAttach(String(data));
-    },
-    [busy, handleAttach, navigation]
-  );
-
-  const needPermission = !permission || !permission.granted;
+  if (!permission?.granted) {
+    return (
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+        <Text>Camera permission is required.</Text>
+      </View>
+    );
+  }
 
   return (
-    <Screen title="Scan" scroll={false}>
-      <View style={{ position: "absolute", top: 8, right: 8, zIndex: 10 }}>
-        <NonProdBadge />
-      </View>
-      <View style={{ position: "absolute", top: 8, left: 8, zIndex: 10 }}>
-        <Pressable
-          onPress={() => navigation.goBack()}
-          style={{ backgroundColor: "rgba(0,0,0,0.6)", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999 }}
-        >
-          <Text style={{ color: "#fff", fontWeight: "700" }}>Close</Text>
-        </Pressable>
-      </View>
-
-      <Section label={attachTo ? `Attach EPC → ${attachTo.type}/${attachTo.id}` : "Scanner"} style={{ padding: 0, overflow: "hidden" }}>
-        {needPermission ? (
-          <View style={{ alignItems: "center", justifyContent: "center", padding: 16 }}>
-            <Text style={{ color: t.colors.text, marginBottom: 12 }}>Camera permission is required</Text>
-            <Button title="Grant permission" onPress={() => requestPermission()} />
-          </View>
-        ) : (
-          <View style={{ height: 360, backgroundColor: "#000" }}>
-            <CameraView
-              style={{ flex: 1 }}
-              facing="back"
-              barcodeScannerSettings={{ barcodeTypes: ["qr", "code128", "code39", "ean13", "upc_a", "upc_e"] } as any}
-              onBarcodeScanned={onBarcodeScanned}
-            />
-          </View>
-        )}
-      </Section>
-
-      <Section label="Manual EPC">
-        <TextInput
-          value={epc}
-          onChangeText={setEpc}
-          placeholder="RFID EPC (hex or text)"
-          placeholderTextColor={t.colors.textMuted}
-          autoCapitalize="characters"
-          autoCorrect={false}
+    <View style={{ flex: 1 }}>
+      {busy && (
+        <View
           style={{
-            backgroundColor: "#f2f2f2",
-            borderColor: "#e5e5e5",
-            borderWidth: 1,
-            borderRadius: 10,
-            paddingHorizontal: 12,
-            paddingVertical: 10,
-            color: t.colors.text
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 4,
+            backgroundColor: "#00000020",
+            zIndex: 1,
           }}
-        />
-
-        <View style={{ flexDirection: "row", gap: 12, marginTop: 10, alignItems: "center" }}>
-          <Button
-            title={busy ? "Attaching…" : attachTo ? "Attach EPC" : "Save EPC"}
-            onPress={() => handleAttach(epc)}
-            disabled={busy || !epc.trim()}
-          />
-          {busy && <ActivityIndicator />}
-          <Pressable onPress={() => navigation.goBack()} style={{ marginLeft: "auto", padding: 8 }}>
-            <Text style={{ color: t.colors.primary, fontWeight: "700" }}>Done</Text>
-          </Pressable>
+        >
+          <ActivityIndicator />
         </View>
-      </Section>
-    </Screen>
+      )}
+      <CameraView
+        style={{ flex: 1 }}
+        barcodeScannerSettings={{ barcodeTypes: ["qr", "code128", "code39", "ean13", "ean8", "upc_a", "upc_e", "pdf417"] }}
+        onBarcodeScanned={({ data }) => handleScan({ data })}
+      />
+      <View style={{ padding: 12 }}>
+        <Text>
+          Intent: {route.params?.intent ?? "navigate"}
+        </Text>
+      </View>
+    </View>
   );
 }

@@ -1,8 +1,0 @@
-{
-  "pk": { "S": "TENANT#demo#TYPE#horse" },
-  "sk": { "S": "ID#H-001" },
-  "id": { "S": "H-001" },
-  "tenantId": { "S": "demo" },
-  "type": { "S": "horse" },
-  "name": { "S": "Test Horse" }
-}
