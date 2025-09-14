@@ -17,60 +17,45 @@ export const handler = async (evt: any) => {
     if (!tenantId) return bad("x-tenant-id header required");
 
     const typeParam = (evt?.pathParameters?.type as string | undefined)?.trim();
-    const id        = (evt?.pathParameters?.id as string | undefined)?.trim();
+    const id = (evt?.pathParameters?.id as string | undefined)?.trim();
     if (!typeParam) return bad("type is required");
     if (!id) return bad("id is required");
 
+    const bodyText = evt?.isBase64Encoded ? Buffer.from(evt.body ?? "", "base64").toString("utf8") : (evt?.body ?? "{}");
     let body: any = {};
-    if (evt?.body) {
-      try { body = typeof evt.body === "string" ? JSON.parse(evt.body) : evt.body; }
-      catch { return bad("invalid json body"); }
-    }
-    const pick = (k: string) => body?.[k] ?? body?.core?.[k];
+    try { body = JSON.parse(bodyText || "{}"); } catch {}
+    const pick = (k: string) => (body?.[k] ?? body?.[k.toLowerCase()]);
 
-    // Read current (for SKU change + repair)
-    const curResp = await ddb.send(new GetCommand({
+    const curRes = await ddb.send(new GetCommand({
       TableName: tableObjects,
       Key: { pk: id, sk: `${tenantId}|${typeParam}` },
     }));
-    const cur = curResp.Item as Record<string, any> | undefined;
+    const cur = curRes.Item as Record<string, any> | undefined;
     if (!cur) return notfound("object not found");
 
     const now = Date.now();
-    const next: Record<string, any> = { updatedAt: now };
+    const next: Record<string, any> = {
+      updatedAt: now,
+      // 🔑 keep list index current
+      gsi1pk: `${tenantId}|${typeParam}`,
+      gsi1sk: String(now),
+    };
 
-    // 🛠 repair bad rows that stored kind inside 'type'
+    // Repair legacy rows where type was 'good'|'service'
     if (!cur.type || cur.type === "good" || cur.type === "service") {
       next["type"] = typeParam;
-      if (cur.type && (cur.type === "good" || cur.type === "service") && cur.kind == null) {
-        next["kind"] = cur.type;
-      }
+      if ((cur.type === "good" || cur.type === "service") && cur.kind == null) next["kind"] = cur.type;
     }
 
-    const name = pick("name");
-    if (typeof name === "string" && name.trim()) {
-      const nm = name.trim();
-      next["name"] = nm;
-      next["name_lc"] = nm.toLowerCase();
-      next["gsi2pk"] = `${tenantId}|${typeParam}`;
-      next["gsi2sk"] = nm.toLowerCase();
-    }
+    const name = (pick("name") ? String(pick("name")).trim() : "") || undefined;
+    if (name) { next["name"] = name; next["name_lc"] = name.toLowerCase(); }
 
-    const sku = pick("sku");
-    if (sku != null && String(sku).trim()) {
-      const s = String(sku).trim();
-      next["sku"] = s;
-      next["sku_lc"] = s.toLowerCase();
-    }
+    const sku = (pick("sku") ? String(pick("sku")).trim() : "") || undefined;
+    const uom = (pick("uom") ? String(pick("uom")).trim() : "") || undefined;
+    if (uom) next["uom"] = uom;
 
-    const uom = pick("uom");
-    if (uom != null && String(uom).trim()) next["uom"] = String(uom).trim();
-
-    const tax = pick("taxCode");
-    if (tax != null && String(tax).trim()) next["taxCode"] = String(tax).trim();
-
-    const kind = parseKind(pick("kind"));
-    if (kind) next["kind"] = kind;
+    const taxCode = (pick("taxCode") ? String(pick("taxCode")).trim() : "") || undefined;
+    if (taxCode) next["taxCode"] = taxCode;
 
     const priceRaw = pick("price");
     if (priceRaw !== undefined && priceRaw !== null) {
@@ -78,83 +63,86 @@ export const handler = async (evt: any) => {
       if (Number.isFinite(n)) next["price"] = Number(n);
     }
 
-    if (Object.keys(next).length === 1) {
-      return ok({ id, type: typeParam, updated: false, updatedAt: now });
-    }
+    const kind = parseKind(pick("kind"));
+    if (kind) next["kind"] = kind;
 
-    // Build SET
-    const names: Record<string, string> = {};
-    const values: Record<string, any> = {};
-    const sets: string[] = [];
-    Object.entries(next).forEach(([k, v], i) => {
-      const nk = `#n${i}`, vk = `:v${i}`;
-      names[nk] = k;
-      values[vk] = v;
-      sets.push(`${nk} = ${vk}`);
-    });
+    const parts = buildUpdateParts(next, { sku });
 
-    const key = { pk: id, sk: `${tenantId}|${typeParam}` };
-    const curSkuLc = cur?.sku ? String(cur.sku).toLowerCase() : undefined;
-    const newSkuLc = next.sku ? String(next.sku).toLowerCase() : undefined;
-
-    // SKU change needs token txn
-    if (typeParam === "product" && newSkuLc && newSkuLc !== curSkuLc) {
-      await ddb.send(new TransactWriteCommand({
-        TransactItems: [
-          {
-            Put: {
-              TableName: tableObjects,
-              Item: {
-                pk: uniqPk(tenantId, newSkuLc),
-                sk: "UNIQ",
-                tenant: tenantId,
-                refType: typeParam,
-                refId: id,
-                createdAt: now,
-              },
-              ConditionExpression: "attribute_not_exists(pk)",
-            },
-          },
-          {
-            Update: {
-              TableName: tableObjects,
-              Key: key,
-              UpdateExpression: "SET " + sets.join(", "),
-              ExpressionAttributeNames: names,
-              ExpressionAttributeValues: values,
-            },
-          },
-          ...(curSkuLc
-            ? [{
-                Delete: {
-                  TableName: tableObjects,
-                  Key: { pk: uniqPk(tenantId, curSkuLc), sk: "UNIQ" },
-                },
-              }]
-            : []),
-        ],
-      }));
-
-      const reread = await ddb.send(new GetCommand({ TableName: tableObjects, Key: key }));
-      const item = { id, type: typeParam, updatedAt: now, ...(reread.Item ?? {}) };
-      return ok(item);
+    if (typeParam === "product" && sku && sku !== cur.sku) {
+      const skuLc = sku.toLowerCase();
+      const oldSkuLc = (cur.sku ?? "").toLowerCase();
+      const txItems: any[] = [];
+      if (oldSkuLc) {
+        txItems.push({
+          Delete: { TableName: tableObjects, Key: { pk: uniqPk(tenantId, oldSkuLc), sk: `${tenantId}|product|${id}` } },
+        });
+      }
+      txItems.push({
+        Put: {
+          TableName: tableObjects,
+          Item: { pk: uniqPk(tenantId, skuLc), sk: `${tenantId}|product|${id}`, id, tenant: tenantId, updatedAt: now },
+          ConditionExpression: "attribute_not_exists(pk)",
+        },
+      });
+      txItems.push({
+        Update: {
+          TableName: tableObjects,
+          Key: { pk: id, sk: `${tenantId}|${typeParam}` },
+          UpdateExpression: parts.expr,
+          ExpressionAttributeNames: parts.names,
+          ExpressionAttributeValues: parts.values,
+          ReturnValues: "ALL_NEW",
+        },
+      });
+      await ddb.send(new TransactWriteCommand({ TransactItems: txItems }));
+      return ok({ id, type: typeParam, ...next });
     }
 
     const resp = await ddb.send(new UpdateCommand({
       TableName: tableObjects,
-      Key: key,
-      UpdateExpression: "SET " + sets.join(", "),
-      ExpressionAttributeNames: names,
-      ExpressionAttributeValues: values,
+      Key: { pk: id, sk: `${tenantId}|${typeParam}` },
+      UpdateExpression: parts.expr,
+      ExpressionAttributeNames: parts.names,
+      ExpressionAttributeValues: parts.values,
       ReturnValues: "ALL_NEW",
     }));
 
-    const out = { id, type: typeParam, updatedAt: now, ...(resp.Attributes ?? {}) };
-    return ok(out);
+    return ok({ id, type: typeParam, ...(resp.Attributes ?? {}) });
   } catch (e: any) {
-    if ((e?.name || "").includes("ConditionalCheckFailed")) {
-      return bad("SKU already exists for this tenant");
-    }
+    if ((e?.name || "").includes("ConditionalCheckFailed")) return bad("SKU already exists for this tenant");
     return errResp(e);
   }
 };
+
+function buildUpdateParts(
+  next: Record<string, any>,
+  extras?: { sku?: string }
+): { expr: string; names: Record<string,string>; values: Record<string,any> } {
+  const sets: string[] = [];
+  const names: Record<string,string> = {};
+  const values: Record<string,any> = {};
+
+  const set = (k: string, v: any) => {
+    const nk = `#${k}`;
+    const vk = `:${k}`;
+    sets.push(`${nk} = ${vk}`);
+    names[nk] = k;
+    values[vk] = v;
+  };
+
+  set("updatedAt", next.updatedAt);
+
+  if (next.name) { set("name", next.name); set("name_lc", next.name_lc); }
+  if (extras?.sku) set("sku", extras.sku);
+  if (next.uom) set("uom", next.uom);
+  if (next.taxCode) set("taxCode", next.taxCode);
+  if (next.price != null) set("price", next.price);
+  if (next.kind) set("kind", next.kind);
+  if (next.type) set("type", next.type);
+
+  // 🔑 keep list GSI current
+  if (next.gsi1pk) set("gsi1pk", next.gsi1pk);
+  if (next.gsi1sk) set("gsi1sk", next.gsi1sk);
+
+  return { expr: "SET " + sets.join(", "), names, values };
+}

@@ -16,58 +16,46 @@ export const handler = async (evt: any) => {
   try {
     const tenantId = getTenantId(evt);
     if (!tenantId) return bad("x-tenant-id header required");
-
     const typeParam = (evt?.pathParameters?.type as string | undefined)?.trim();
     if (!typeParam) return bad("type is required");
 
+    const bodyText = evt?.isBase64Encoded ? Buffer.from(evt.body ?? "", "base64").toString("utf8") : (evt?.body ?? "{}");
     let body: any = {};
-    if (evt?.body) {
-      try { body = typeof evt.body === "string" ? JSON.parse(evt.body) : evt.body; }
-      catch { return bad("invalid json body"); }
-    }
-    const pick = (k: string) => body?.[k] ?? body?.core?.[k];
+    try { body = JSON.parse(bodyText || "{}"); } catch {}
 
+    const pick = (k: string) => (body?.[k] ?? body?.[k.toLowerCase()]);
     const name = String(pick("name") ?? "").trim();
     if (!name) return bad("name is required");
 
-    const sku = pick("sku") != null && String(pick("sku")).trim() ? String(pick("sku")).trim() : undefined;
-    const uom = pick("uom") != null && String(pick("uom")).trim() ? String(pick("uom")).trim() : undefined;
-    const taxCode = pick("taxCode") != null && String(pick("taxCode")).trim() ? String(pick("taxCode")).trim() : undefined;
-
-    const priceRaw = pick("price");
-    const price = priceRaw != null ? Number(priceRaw) : undefined;
-    const kind = parseKind(pick("kind")); // <- only from 'kind'
-
     const id = randomUUID();
     const now = Date.now();
-    const name_lc = name.toLowerCase();
+    const sku = (pick("sku") ? String(pick("sku")).trim() : "") || undefined;
+    const priceRaw = pick("price");
+    const price = priceRaw != null ? Number(priceRaw) : undefined;
+    const uom = (pick("uom") ? String(pick("uom")).trim() : "") || undefined;
+    const taxCode = (pick("taxCode") ? String(pick("taxCode")).trim() : "") || undefined;
+    const kind = parseKind(pick("kind"));
 
     const item: any = {
-      // keys + indexes
       pk: id,
       sk: `${tenantId}|${typeParam}`,
-      gsi1pk: `${tenantId}|${typeParam}`,
-      gsi1sk: String(now),
-      gsi2pk: `${tenantId}|${typeParam}`,
-      gsi2sk: name_lc,
-
-      // data
       id,
       tenant: tenantId,
-      type: typeParam, // <- always object class, never 'good'/'service'
+      type: typeParam,
       name,
-      name_lc,
+      name_lc: name.toLowerCase(),
       createdAt: now,
       updatedAt: now,
-      tags: null,
+      // 🔑 ensure list GSI sees the item immediately
+      gsi1pk: `${tenantId}|${typeParam}`, // e.g., DemoTenant|product
+      gsi1sk: String(now),
     };
-    if (sku) { item.sku = sku; item.sku_lc = sku.toLowerCase(); }
+    if (sku) item.sku = sku;
     if (uom) item.uom = uom;
     if (taxCode) item.taxCode = taxCode;
     if (price != null && Number.isFinite(price)) item.price = price;
     if (kind) item.kind = kind;
 
-    // SKU uniqueness for products
     if (typeParam === "product" && sku) {
       const skuLc = sku.toLowerCase();
       await ddb.send(new TransactWriteCommand({
@@ -75,17 +63,11 @@ export const handler = async (evt: any) => {
           {
             Put: {
               TableName: tableObjects,
-              Item: { pk: uniqPk(tenantId, skuLc), sk: "UNIQ", tenant: tenantId, refType: typeParam, refId: id, createdAt: now },
+              Item: { pk: uniqPk(tenantId, skuLc), sk: `${tenantId}|product|${id}`, id, tenant: tenantId, createdAt: now },
               ConditionExpression: "attribute_not_exists(pk)",
             },
           },
-          {
-            Put: {
-              TableName: tableObjects,
-              Item: item,
-              ConditionExpression: "attribute_not_exists(pk)",
-            },
-          },
+          { Put: { TableName: tableObjects, Item: item } },
         ],
       }));
       return ok(item);

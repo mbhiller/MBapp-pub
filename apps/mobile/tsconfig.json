@@ -5,8 +5,7 @@
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
     "lib": [
-      "ESNext",
-      "DOM"
+      "ES2020"
     ],
     "allowJs": true,
     "strict": true,

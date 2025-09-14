@@ -1,4 +1,5 @@
-// Products API client (calls /products only)
+// apps/mobile/src/features/products/api.ts
+// Minimal client for /products endpoints only (no shared client).
 
 export type Product = {
   id: string;
@@ -10,17 +11,19 @@ export type Product = {
   kind?: "good" | "service";
 };
 
-const API_BASE = (process.env.EXPO_PUBLIC_API_BASE || "").replace(/\/+$/, "");
-const TENANT_ID = process.env.EXPO_PUBLIC_TENANT_ID || "";
+export type ListPage<T> = { items: T[]; nextCursor?: string };
 
-function must(v: string, hint: string) {
-  if (!v) throw new Error(`${hint} not set`);
-  return v;
-}
-function hdr() {
+const API_BASE = (process.env.EXPO_PUBLIC_API_BASE || "").replace(/\/+$/, "");
+const TENANT = process.env.EXPO_PUBLIC_TENANT
+  || process.env.EXPO_PUBLIC_TENANT_ID
+  || "DemoTenant";
+
+function hdr(extra?: Record<string,string>) {
   return {
+    accept: "application/json",
     "content-type": "application/json",
-    "x-tenant-id": must(TENANT_ID, "EXPO_PUBLIC_TENANT_ID"),
+    "x-tenant-id": TENANT,
+    ...(extra ?? {}),
   };
 }
 async function okJson<T>(res: Response): Promise<T> {
@@ -28,41 +31,31 @@ async function okJson<T>(res: Response): Promise<T> {
     const text = await res.text().catch(() => "");
     throw new Error(text || `HTTP ${res.status}`);
   }
-  return (await res.json()) as T;
+  return res.json();
 }
 
-export async function listProducts(limit = 50, q?: string, sku?: string): Promise<Product[]> {
-  must(API_BASE, "EXPO_PUBLIC_API_BASE");
-  const params = new URLSearchParams({ limit: String(limit) });
-  if (q) params.set("q", q);
-  if (sku) params.set("sku", sku);
-  const res = await fetch(`${API_BASE}/products?${params.toString()}`, { headers: hdr() });
-  const data = (await okJson<{ items?: Product[] }>(res));
-  return data.items ?? [];
+export async function listProducts(opts?: { q?: string; sku?: string; limit?: number; cursor?: string; signal?: AbortSignal; }) {
+  const p = new URLSearchParams();
+  if (opts?.q) p.set("q", opts.q);
+  if (opts?.sku) p.set("sku", opts.sku);
+  if (opts?.limit) p.set("limit", String(opts.limit));
+  if (opts?.cursor) p.set("cursor", opts.cursor);
+  const url = `${API_BASE}/products${p.toString() ? `?${p.toString()}` : ""}`;
+  const res = await fetch(url, { method: "GET", headers: hdr(), signal: opts?.signal });
+  return okJson<ListPage<Product>>(res);
 }
 
-export async function getProduct(id: string): Promise<Product> {
-  must(API_BASE, "EXPO_PUBLIC_API_BASE");
-  const res = await fetch(`${API_BASE}/products/${encodeURIComponent(id)}`, { headers: hdr() });
+export async function getProduct(id: string) {
+  const res = await fetch(`${API_BASE}/products/${encodeURIComponent(id)}`, { method: "GET", headers: hdr() });
   return okJson<Product>(res);
 }
 
-export async function createProduct(body: Partial<Product>): Promise<Product> {
-  must(API_BASE, "EXPO_PUBLIC_API_BASE");
-  const res = await fetch(`${API_BASE}/products`, {
-    method: "POST",
-    headers: hdr(),
-    body: JSON.stringify(body),
-  });
+export async function createProduct(body: Partial<Product>) {
+  const res = await fetch(`${API_BASE}/products`, { method: "POST", headers: hdr(), body: JSON.stringify(body) });
   return okJson<Product>(res);
 }
 
-export async function updateProduct(id: string, body: Partial<Product>): Promise<Product> {
-  must(API_BASE, "EXPO_PUBLIC_API_BASE");
-  const res = await fetch(`${API_BASE}/products/${encodeURIComponent(id)}`, {
-    method: "PUT",
-    headers: hdr(),
-    body: JSON.stringify(body),
-  });
+export async function updateProduct(id: string, body: Partial<Product>) {
+  const res = await fetch(`${API_BASE}/products/${encodeURIComponent(id)}`, { method: "PUT", headers: hdr(), body: JSON.stringify(body) });
   return okJson<Product>(res);
 }

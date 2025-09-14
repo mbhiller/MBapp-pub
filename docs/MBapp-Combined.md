@@ -1,250 +1,553 @@
-# MBapp — Combined (Updated for Terraform Option A)
-_Last updated: 2025-09-12 17:50 UTC_
+# MBapp — Updated Docs (Aligned)
 
-This update captures our final **Terraform Option A** shape and the day‑to‑day ops flow. In Option A, **Terraform manages infrastructure** (DynamoDB, IAM, CloudWatch Log Group, API invoke permission), while **code deploys** happen via `ops/Publish-ObjectsLambda-EsbuildOnly.ps1`.
-
----
-
-## What Terraform Manages vs. Scripts
-
-**Terraform (infra/terraform):**
-- **DynamoDB**
-  - `mbapp_objects` (products + other objects)
-  - `mbapp-devices`, `mbapp-scans` (placeholders / ready for future slices)
-  - Indexes on **objects**:
-    - `gsi1`: `gsi1pk=tenant|<type>`, `gsi1sk=updatedAt` (strings)
-    - `gsi2` (optional): `gsi2pk=tenant|<type>`, `gsi2sk=name_lc`
-    - `gsi3_sku`: `hash=sku_lc` (for fast SKU lookups)
-- **IAM**
-  - Role: `mbapp-<env>-objects-lambda-role`
-  - Inline policy: DDB read/write on the tables + GSIs above
-  - Managed: `AWSLambdaBasicExecutionRole`
-- **CloudWatch Logs**
-  - Log group: `/aws/lambda/mbapp-<env>-objects` (retention set in TF)
-- **API Gateway permission**
-  - `aws_lambda_permission` for HTTP API → Lambda _toggled_ by `create_invoke_permission` (bool)
-
-**Scripts (ops):**
-- `Publish-ObjectsLambda-EsbuildOnly.ps1` → **build + zip + create/update Lambda** code (handler `dist/index.handler`)
-- `Set-MBEnv.ps1` → exports env for profile/region/API/Lambda/etc.
-- `Tf-Init.ps1`, `Tf-PlanApply.ps1` → noninteractive backend init + plan/apply
-- `Smoke-API.ps1` → POST/LIST/GET/PUT **/products** smoke with tenant header
-- `Check-Routes.ps1` → prints current routes
-- `Git-Push.ps1` → branch/commit/push helper
-- (Optional) `Bootstrap-TerraformBackend.ps1`, `Align-And-Import-Routes-Simple.ps1`, `Import-Infra-OptionA.ps1` for new envs or importing legacy routes
+> Drop-in replacements for the four project docs, aligned to our current implementation and the new **Events + Reservations** requirements.
 
 ---
 
-## Terraform Layout (final)
+## File: MBapp-Master.md
 
+# MBapp — Master Systems Doc (nonprod)
+
+_Last updated: 2025-09-11 19:30 UTC._
+
+We are intentionally running **lean** during this sprint: Hub shows the core 3 modules (**Products**, **Objects**, **Tenants**) and **Scan** is available everywhere. Role/module gating is reintroduced in a light form via `RolesProvider` (client) and per-module required roles (registry).
+
+---
+
+## Quick callouts
+- **Repo:** `github.com/mbhiller/MBapp-pub`
+- **Main branch:** `main` (always releasable)
+- **Current sprint branch:** `feature/sprint-2025-09-11`
+- **API Base:** `https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com`
+- **Tenant ID:** `DemoTenant`
+- **AWS (nonprod):** API ID `ki8kgivz1f` • Lambda `mbapp-nonprod-objects` • DynamoDB `mbapp_objects` • GSI `byId`
+- **HTTP API Integration ID (mbapp-nonprod-objects):** `tdnoorp`
+- **Lambda handler path:** `dist/index.handler` (Node 20, CommonJS)
+- **Mobile env:** `EXPO_PUBLIC_ENV=nonprod` • `EXPO_PUBLIC_API_BASE=https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com` • `EXPO_PUBLIC_TENANT_ID=DemoTenant`
+- **Toolchain (recommended)**
+  - **React:** `19.1.x` (web + mobile) — **ensure React matches renderer**
+  - **TypeScript:** `5.5.x` (hoisted at workspace root)
+  - **@types/react:** `^19.1` (hoisted; avoid root `overrides` that conflict)
+
+---
+
+## Scope for this sprint slice (catalog-first, scan-first)
+- **Hub** (lean): Products, Objects, Tenants; plus header **Scan** button on all primary screens.
+- **Catalog / Products**: list + detail; create (mode `new`) and update (by `id`).
+- **Objects**: list + detail; “Scan to Attach EPC” button from detail opens Scan with `attachTo`.
+- **Scan**: single screen, launched from headers or with `attachTo` from Object Detail; default intent `navigate`.
+- **Tenants**: visible from headers and Hub (placeholder list).
+- **Events (new requirement)**: add **Registrations & Reservations** slice — see below.
+
+---
+
+## Monorepo layout (relevant parts)
 ```
-infra/
-  terraform/
-    backend.tf                  # terraform { backend "s3" {} }
-    backend.auto.tfbackend      # bucket/key/region/use_lockfile/encrypt
-    versions.tf                 # required_providers (aws ~> 5.x)
-    providers.tf                # provider "aws" (region via var)
-    variables.app.tf            # environment, region, names/ids
-    outputs.app.tf              # only outputs we actually use
-    app_infra.tf                # wires modules below
-    modules/
-      ddb/      # tables + GSIs
-      iam/      # role + inline + basic exec attachment
-      lambda/   # CloudWatch log group only
-      api/      # optional invoke permission (counted by flag)
-```
-
-### Backend configuration
-Use **S3 backend** file **in the same folder** as your `terraform init`:
-```hcl
-# backend.tf
-terraform {
-  backend "s3" {}  # keep empty; details live in the .tfbackend file
-}
-```
-```hcl
-# backend.auto.tfbackend (no prompts, nonprod)
-bucket  = "mbapp-tfstate-nonprod"
-key     = "mbapp/infra/terraform.tfstate"
-region  = "us-east-1"
-use_lockfile = true     # replaces legacy dynamodb_table locking
-encrypt = true
-```
-
-> Note: `dynamodb_table = "mbapp-terraform-locks"` is **deprecated** by Terraform; we use `use_lockfile=true`. Keeping the DDB lock table in AWS is harmless but unused by the backend.
-
-### Root variables (subset)
-```hcl
-# variables.app.tf
-variable "environment" { default = "nonprod" }
-variable "region"      { default = "us-east-1" }
-
-variable "http_api_id"          { description = "HTTP API id (e.g., ki8kgivz1f)" }
-variable "lambda_function_name" { default = "mbapp-nonprod-objects" }
-
-variable "objects_table_name" { default = "mbapp_objects" }
-variable "devices_table_name" { default = "mbapp-devices" }
-variable "scans_table_name"   { default = "mbapp-scans" }
-
-variable "tags" { type = map(string), default = { Project = "mbapp", Env = "nonprod" } }
-```
-
-### Module wiring (root)
-```hcl
-# app_infra.tf
-module "ddb" {
-  source              = "./modules/ddb"
-  environment         = var.environment
-  objects_table_name  = var.objects_table_name
-  devices_table_name  = var.devices_table_name
-  scans_table_name    = var.scans_table_name
-  tags                = var.tags
-}
-
-module "iam" {
-  source              = "./modules/iam"
-  environment         = var.environment
-  region              = var.region
-  objects_table_arn   = module.ddb.objects_arn
-  objects_gsi_arns    = module.ddb.objects_gsi_arns   # gsi1/gsi2/gsi3_sku
-  tags                = var.tags
-}
-
-module "lambda" {
-  source             = "./modules/lambda"
-  environment        = var.environment
-  function_name      = var.lambda_function_name       # log group only
-  tags               = var.tags
-}
-
-module "api" {
-  source                   = "./modules/api"
-  region                   = var.region
-  http_api_id              = var.http_api_id
-  lambda_function_name     = var.lambda_function_name
-  create_invoke_permission = false   # flip to true after function exists
-}
-```
-
-### Modules — notable bits
-**`modules/ddb/main.tf`** (high level)
-- Creates 3 tables (objects/devices/scans) with on‑demand billing
-- `objects` has attributes: `pk`, `sk`, `gsi1pk`, `gsi1sk`, `gsi2pk`, `gsi2sk`, `sku_lc`
-- GSIs: `gsi1` (tenant|type vs updatedAt), `gsi2` (optional name sort), `gsi3_sku` (sku_lc)
-
-**`modules/iam/main.tf`** (high level)
-- Role: `mbapp-<env>-objects-lambda-role` + trust `lambda.amazonaws.com`
-- Inline policy grants: `dynamodb:Get/Put/Update/Delete/Query/Scan` on the table + `/index/*`
-- Attach `AWSLambdaBasicExecutionRole`
-
-**`modules/lambda/main.tf`**
-- Only the **CloudWatch log group** for `mbapp-<env>-objects` (retention e.g. `14`)
-
-**`modules/api/main.tf`**
-```hcl
-variable "create_invoke_permission" { type = bool, default = false }
-data "aws_caller_identity" "current" {}
-
-resource "aws_lambda_permission" "apigw_invoke_objects" {
-  count               = var.create_invoke_permission ? 1 : 0
-  statement_id_prefix = "AllowInvokeFromHttpApi-"
-  action              = "lambda:InvokeFunction"
-  function_name       = var.lambda_function_name
-  principal           = "apigateway.amazonaws.com"
-  source_arn          = "arn:aws:execute-api:${var.region}:${data.aws_caller_identity.current.account_id}:${var.http_api_id}/*/*/*"
-}
+apps/
+  api/
+    src/
+      index.ts               # Route switch — HANDLER: dist/index.handler
+      objects/               # Canonical object handlers (get, create, update, list, search)
+      products/              # Thin alias to objects/product (optional)
+      events/                # events + reservations (new)
+      common/
+        ddb.ts, responses.ts, env.ts
+    ops/
+      Publish-ObjectsLambda-EsbuildOnly.ps1
+      Setup-ProductsRoutes.ps1
+  mobile/
+    App.tsx                  # RolesProvider + NavigationContainer + RootStack
+    src/
+      navigation/
+        RootStack.tsx
+        types.ts
+      screens/
+        ModuleHubScreen.tsx
+        ProductsListScreen.tsx
+        ProductDetailScreen.tsx
+        ObjectsListScreen.tsx
+        ObjectDetailScreen.tsx
+        TenantsScreen.tsx
+        ScanScreen.tsx
+      features/
+        products/api.ts      # /products client (GET/POST/PUT/list) with tolerant normalizer
+        tenants/...
+        events/api.ts        # (placeholder)
+      providers/RolesProvider.tsx
 ```
 
 ---
 
-## API Routes & Products
+## Backend (Objects API + Products alias)
 
-**Canonical** object routes (Lambda):  
-- `POST /objects/{type}`  
-- `GET /objects/{type}` (list)  
-- `GET /objects/{type}/{id}`  
-- `PUT /objects/{type}/{id}`  
-- `GET /objects/search`
+### Environment
+- **Lambda:** `mbapp-nonprod-objects` (Node 20, CommonJS)
+- **DynamoDB:** table `mbapp_objects`
+- **Indexes:**
+  - **GSI1 (existing)**: `gsi1pk = tenant|type`, `gsi1sk = updatedAt` (string)
+  - **GSI2 (optional)**: `gsi2pk = tenant|type`, `gsi2sk = name_lc` (for name-sorted lists)
 
-**Products** alias:  
-- `POST /products` → `POST /objects/product`  
-- `GET /products` → list/search product  
-- `GET /products/{id}`  
-- `PUT /products/{id}`
+### Headers
+- Multi-tenant header required on all API calls: `x-tenant-id: DemoTenant`
 
-> We keep routes in API Gateway as-is. Terraform optionally manages them if imported (via one‑off script), but **day‑to‑day** we only keep the **invoke permission** in TF.
+### Canonical Object routes
+- **Create:** `POST /objects/{type}`
+- **Read:** `GET /objects/{type}/{id}` and legacy `GET /objects/{id}`
+- **Update:** `PUT /objects/{type}/{id}`
+- **List:** `GET /objects/{type}` (supports `limit`, `cursor`, `sort`, `order`)
+- **Search:** `GET /objects/search` (supports `type`, `sku`, `q`)
+
+### Products alias routes (public client surface)
+- `POST /products` → `POST /objects/product` (accepts flat or `{ core: {...} }`)
+- `PUT /products/{id}` → `PUT /objects/product/{id}`
+- `GET /products/{id}` → `GET /objects/product/{id}`
+- `GET /products?sku=&q=&limit=&cursor=` → list/search
+
+### Product canonical fields (persisted **top-level**)
+```
+{ id, tenant, type: "product",
+  name, name_lc,
+  sku, price,
+  uom?, taxCode?,
+  kind?: "good"|"service",
+  createdAt, updatedAt }
+```
+- **SKU uniqueness per tenant** enforced via a token item: `pk=UNIQ#<tenant>#product#SKU#<sku_lc>, sk=UNIQ` (TransactWrite on create and on SKU change).
 
 ---
 
-## Ops Runbook (nonprod)
+## Events & Reservations (new slice)
 
-```powershell
-# 0) env + init
-.\ops\Set-MBEnv.ps1
-.\ops\Tf-Init.ps1
+**Goal:** users can **register** for scheduled events and **reserve** resources (Rooms, RV spaces, Parking, Stalls, or other Objects).
 
-# 1) infra changes (DDB/IAM/Logs/API perm)
-.\ops\Tf-PlanApply.ps1
-.\ops\Tf-PlanApply.ps1 -Apply
+### Entities
+- **Event** `{ id, name, startsAt, endsAt, venueId?, status, createdAt, updatedAt }`
+- **ResourceType** `{ id, name, kind: "room"|"stall"|"rv"|"parking"|"other" }`
+- **Resource** `{ id, typeId, name, venueId?, tags{} }`
+- **Reservation** `{ id, eventId, resourceId, accountId, status: "held"|"confirmed"|"canceled", from, to, qty?, notes? }`
+- **Registration** `{ id, eventId, accountId, status: "pending"|"confirmed"|"canceled", createdAt }`
 
-# 2) code deploy
-.\ops\Publish-ObjectsLambda-EsbuildOnly.ps1 -Install   # first time
-.\ops\Publish-ObjectsLambda-EsbuildOnly.ps1            # subsequent
+### APIs
+- `/events` `GET/POST/PUT`
+- `/events/{id}/registrations` `GET/POST/PUT`
+- `/resources` `GET/POST/PUT` (filter by typeId/kind)
+- `/reservations` `GET/POST/PUT` (supports `eventId`, `resourceId`, `accountId`)
+- `/availability` `GET` (check resource availability by range; returns time windows)
 
-# 3) enable API invoke (once function exists)
-#   in app_infra.tf: create_invoke_permission = true
-.\ops\Tf-PlanApply.ps1
-.\ops\Tf-PlanApply.ps1 -Apply
+### Keys
+- Keep a **per-domain** PK/SK pattern to avoid cross-domain coupling. For example:
+  - **Events:** `PK=TENANT#<t>#EVENT#<id>`, `SK=METADATA`
+  - **Resources:** `PK=TENANT#<t>#RESOURCE#<id>`, `SK=METADATA`
+  - **Reservations:** `PK=TENANT#<t>#RESV#<eventId>`, `SK=<resourceId>#<from>` (time-sorted)
+  - **Registrations:** `PK=TENANT#<t>#REG#<eventId>`, `SK=<accountId>`
 
-# 4) verify
-.\ops\Check-Routes.ps1
-.\ops\Smoke-API.ps1 -TailLogs
+### Reservation constraints
+- **Atomicity:** use **TransactWrite** to assert availability when confirming reservations.
+- **Idempotency:** accept `Idempotency-Key` header for create to prevent double-booking on retries.
+- **Events:** emit `reservation.held`, `reservation.confirmed`, `reservation.canceled`.
+
+---
+
+## Ops — build, publish, and route wiring
+
+### Publish Lambda (esbuild only)
+`apps/api/ops/Publish-ObjectsLambda-EsbuildOnly.ps1`
+
+### Wire `/products` routes
+`apps/api/ops/Setup-ProductsRoutes.ps1`
+
+---
+
+## Mobile test plan
+1) **Products**: create → detail → update → list reflects fields.
+2) **Scan**: object deep-link (`mbapp/object-v1`) → Object Detail.
+3) **Events** (later): list events; create a reservation; verify availability blocks double-book.
+
+---
+
+## Change log
+- **2025-09-11:** Persist `sku/price` at top-level; add `uom`, `taxCode`, `kind` fields; SKU uniqueness; optional name GSI; Events & Reservations slice added.
+
+
+---
+
+## File: Purchasing-Inventory-API.md
+
+# Purchasing & Inventory — Entities & APIs (Aligned)
+
+_Last updated: 2025-09-11 19:30 UTC._
+
+## Catalog (Products)
+**Product**
+```
+{ id, sku, name, kind: "good"|"service", uom, price, taxCode?,
+  tenant, createdAt, updatedAt }
+```
+- Persist fields **top-level** (no client normalizers required).
+- **Uniq SKU per tenant** via token item (TransactWrite).
+
+**API**
+- `GET /products?sku=&q=&limit=&cursor=` — list & search (exact `sku`, contains `q` on `name_lc`).
+- `GET /products/{id}` — read.
+- `POST /products` — create (accepts flat or `{ core:{...} }`).
+- `PUT /products/{id}` — update.
+
+**Indexes**
+- `gsi1` (updated): `gsi1pk = tenant|product`, `gsi1sk = updatedAt` (string)
+- `gsi2` (optional): `gsi2pk = tenant|product`, `gsi2sk = name_lc` (name sort)
+
+---
+
+## Inventory
+**Location**
+```
+{ id, name, kind: "warehouse"|"booth"|"truck"|"room"|"stall"|"rv"|"parking", tenant }
+```
+**StockItem** (per location)
+```
+{ productId, locationId, onHand, reserved, lot?, tenant }
+```
+**Movement**
+```
+{ id, productId, from?, to?, qty, reason, refType?, refId?, at, tenant }
 ```
 
-**Gotchas to avoid**
-- `terraform init` must run **from** `infra/terraform` or use `-chdir`. Do **not** add a trailing path to `init` (causes “Too many command line arguments”).  
-- Don’t set `TF_CLI_ARGS_init` to `-backend-config=$backendFile`. If you want convenience, use the **literal** file name: `-backend-config=backend.auto.tfbackend`.
-- Backend locking: use `use_lockfile=true`; the old `dynamodb_table=` param is deprecated.
-- Handler path: archive the **`dist/` folder**, not its contents → handler stays `dist/index.handler`.
+**API**
+- `GET/POST/PUT /inventory/locations`
+- `GET/POST/PUT /inventory/stock`
+- `GET/POST /inventory/movements`
+
+**Events**
+- `inventory.received`, `inventory.moved`, `inventory.reserved`, `inventory.released`
 
 ---
 
-## Product Model (persisted top‑level)
+## Purchasing
+**Vendor** `{ id, name, contact?, tenant }`
+**PO**
+```
+{ id, status: "draft"|"sent"|"received"|"closed", vendorId, lines: [ { productId, qty, cost, lot? } ], totals, tenant }
+```
+**Receipt** `{ id, poId, lines[], at, by, tenant }`
 
-```jsonc
-{
-  "id": "...",
-  "tenant": "DemoTenant",
-  "type": "product",
-  "sku": "SKU-123",
-  "name": "Widget",
-  "name_lc": "widget",
-  "price": 12.34,
-  "uom": "ea",
-  "taxCode": "TX_STD",
-  "kind": "good",
-  "createdAt": 0,
-  "updatedAt": 0
-}
+**API**
+- `GET/POST/PUT /purchasing/vendors`
+- `GET/POST/PUT /purchasing/po`
+- `POST /purchasing/po/{id}/receive`
+
+**Receive semantics**
+- Atomically **upsert StockItem** and **append Movement** via TransactWrite.
+- Emit `po.received` + `inventory.received`.
+
+---
+
+## Events & Reservations (integration points)
+- **Events booth merch** pulls `Products` (kind:`good`) for POS; reservations may reserve **rooms/stalls** as **Locations** for the event.
+- **Reservations** can **reserve Inventory capacity** (optional) or just book a **Resource** independent of stock (e.g., stall). Use `refType/refId` on Movement for traceability when stock is involved.
+
+
+---
+
+## File: Cross-Module-Design-Vision.md
+
+# Cross-Module Design Vision — Sales, Inventory, Purchasing, Ticketing, Badging, Events
+
+_Last updated: 2025-09-11 19:30 UTC._
+
+## Principles
+1) **Single source of truth per domain** (Products, Inventory, Purchasing, Sales, Events, Accounts).
+2) **Modules share capabilities** via clear APIs and **domain events** (no hidden coupling).
+3) **Scan-first UX** on mobile; every barcode/QR path is an **intent** (see Scan Intents).
+4) **Multi-tenant + RBAC** everywhere; per-action permissions possible (`perms[]`).
+5) **Nonprod first**: ship thin vertical slices behind feature flags and grow.
+
+---
+
+## Domains & responsibilities
+### Catalog (Products & Services)
+- **Entity:** `Product` = { id, sku, name, kind:"good"|"service", uom, price, taxCode?, tags{} }
+- **API:** `GET/POST/PUT /products`, `GET /products?sku=`, `GET /priceLists` (later)
+
+### Inventory
+- **Entities:** `Location`, `StockItem`, `Movement`
+- **API:** `/inventory/locations`, `/inventory/stock`, `/inventory/movements`
+- **Events:** `inventory.received`, `inventory.moved`, `inventory.reserved`, `inventory.released`
+
+### Purchasing
+- **Entities:** `Vendor`, `PurchaseOrder`, `POLine`, `Receipt`
+- **API:** `/purchasing/vendors`, `/purchasing/po`, `/purchasing/po/{id}/receive`
+- **Events:** `po.created`, `po.received` → emits `inventory.received`
+
+### Sales (shared by many modules)
+- **Entities:** `Order`, `Invoice`, `Payment`
+- **API:** `/sales/orders`, `/sales/invoices`, `/sales/payments`
+- **Cross-module:** events sell **tickets/merch**; services/boarding create billable lines.
+
+### Events & Reservations (new)
+- **Purpose:** manage events and allow **registrations** + **resource reservations** (rooms, RV, parking, stalls, other objects).
+- **Entities:** `Event`, `ResourceType`, `Resource`, `Reservation`, `Registration`
+- **API:** `/events`, `/events/{id}/registrations`, `/resources`, `/reservations`, `/availability`
+- **Events:** `event.created`, `registration.created`, `reservation.held|confirmed|canceled`
+- **Scanning:** `ticket-validate`, `reserve-resource`, `check-in`, `assign-stall`
+
+### Badging
+- **Entities:** `Badge`, `TimeEntry`
+- **API:** `/badges`, `/badges/scan`, `/time/clock`
+
+---
+
+## Shared scans = shared intents
+- **One Scan screen** handles intents (see Scan Intents Catalog).
+
+## Associations (objects ↔ objects)
+- Use embedded `links[]` first; promote to dedicated table only if needed.
+
+---
+
+## Environments & flags
+- `EXPO_PUBLIC_ENV=nonprod|prod`
+- Feature flags: `features.catalog`, `features.inventory`, `features.purchasing`, `features.sales`, `features.ticketing`, `features.badging`, `features.events`, `features.reservations`
+
+
+---
+
+## File: Scan-Intents-Catalog.md
+
+# Scan Intents Catalog (v1.1)
+
+_Last updated: 2025-09-11 19:30 UTC._
+
+## Common payloads
+- **MBapp Object QR (JSON)**
+  `{ "t":"mbapp/object-v1", "id":"...", "type":"...", "href":"/objects/<type>/<id>" }`
+- **Ticket QR** `{ "t":"mbapp/ticket-v1", "id":"t_<...>", "eventId":"e_<...>" }`
+- **Badge QR** `{ "t":"mbapp/badge-v1", "id":"b_<...>", "employeeId":"emp_<...>" }`
+- **PO QR** `{ "t":"mbapp/po-v1", "id":"po_<...>" }`
+- **Reservation QR (new)** `{ "t":"mbapp/resv-v1", "id":"r_<...>", "eventId":"e_<...>", "resourceId":"res_<...>" }`
+- **Resource QR (new)** `{ "t":"mbapp/resource-v1", "id":"res_<...>", "kind":"stall|room|rv|parking|other" }`
+- **SKU/UPC** plain barcode text; map to `Product` via `/products?upc=` (later)
+
+## Intents
+- `navigate` → open Object Detail for `{id,type}`
+- `attach-epc` (requires `attachTo`) → set `tags.rfidEpc` on the target
+- `link` (requires `attachTo`) → link source object to scanned object
+- `add-to-order` (optional `orderId`) → add scanned SKU to an order
+- `receive-po` (requires `poId` or PO QR) → receive items; tally progress
+- `inventory-move` (`fromId`,`toId`) → create stock movement
+- `ticket-validate` → validate ticket; show green/red result
+- `badge-clock` → clock in/out based on last state
+- `add-to-service` (`serviceOrderId?`) → add line to a work order
+- **`reserve-resource` (new)** → select resource/time, hold or confirm reservation
+- **`assign-stall` (new)** → link a stall resource to an object (e.g., horse) for an event
+- **`check-in` (new)** → confirm arrival against a reservation or registration
+
+## UI affordances
+- Top pill shows current context (e.g., “Reserving Stall for Event X”)
+- Multi-scan toggle for bulk actions
+- Haptics + toasts on success/failure
+- `navigation.replace(...)` when flow completes
+
+
+
+---
+
+## File: MBapp-Combined.md
+
+# MBapp — Combined Aligned Docs
+
+_Last updated: 2025-09-11 19:45 UTC._
+
+> This single document combines the content of **MBapp-Master.md**, **Cross-Module-Design-Vision.md**, **Purchasing-Inventory-API.md**, and **Scan-Intents-Catalog.md** into one file for easier distribution and versioning.
+
+---
+
+## Table of Contents
+1. Master Overview & Scope
+2. Monorepo & Tooling
+3. Backend APIs & Data (Objects + Products)
+4. Purchasing & Inventory (Entities & APIs)
+5. Events & Reservations (Entities & APIs)
+6. Scan Intents (v1.1)
+7. Ops & Environments
+8. Change Log
+
+---
+
+## 1) Master Overview & Scope
+
+### Current Sprint Scope (lean)
+- **Hub**: Products, Objects, Tenants (role-gated light via `RolesProvider`).
+- **Scan**: Global header button; intents enabled: `navigate`, `attach-epc` (stub).
+- **Products**: List, Detail, Create, Update.
+- **Objects**: List, Detail; deep links from Scan.
+- **Tenants**: placeholder list.
+- **New slice**: **Events & Reservations** (registrations + resource reservations) — defined below.
+
+### Quick Callouts
+- **Repo**: `github.com/mbhiller/MBapp-pub`
+- **API Base (nonprod)**: `https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com`
+- **Tenant**: `DemoTenant`
+- **Lambda (Objects)**: `mbapp-nonprod-objects` (Node 20, CJS) → `dist/index.handler`
+- **Dynamo Table**: `mbapp_objects` with `gsi1` (updatedAt) and optional `gsi2` (name_lc)
+- **Mobile env**: `EXPO_PUBLIC_API_BASE`, `EXPO_PUBLIC_TENANT_ID` (and optional `EXPO_PUBLIC_DEBUG=1`)
+
+---
+
+## 2) Monorepo & Tooling
+
+```
+apps/
+  api/
+    src/
+      objects/            # get, create, update, list, search
+      products/           # optional public alias to objects/product
+      events/             # events + reservations (new)
+      common/             # ddb, responses, env
+    ops/                  # publish & route scripts
+  mobile/
+    App.tsx               # RolesProvider + NavigationContainer + RootStack
+    src/
+      navigation/         # RootStack, types
+      screens/            # Hub, Products, ProductDetail, Objects, ObjectDetail, Tenants, Scan
+      features/products/  # api.ts (GET/POST/PUT/list)
+      providers/          # RolesProvider
 ```
 
-- **Uniq per tenant** on `sku` via token item: `UNIQ#<tenant>#product#SKU#<sku_lc>` (asserted in TransactWrite).
-- **Indexes** provide list/search by tenant + type, name ordering, and SKU lookup.
+**Tooling pins**
+- React 19.1.x (ensure exact match with `react-native-renderer`)
+- TypeScript 5.5.x hoisted at root
+- Avoid root `overrides` that conflict with workspace deps
 
 ---
 
-## Smoke Test (happy path)
-- POST `/products` → returns object with `id`
-- GET `/products` → list includes the new product
-- GET `/products/{id}` → returns the created product
-- PUT `/products/{id}` → accepts update (e.g., price), returns updated object
+## 3) Backend APIs & Data (Objects + Products)
 
-See `ops/Smoke-API.ps1` for the exact flow.
+### Multi-tenant header
+All requests require `x-tenant-id`.
+
+### Canonical Object routes
+- `POST /objects/{type}`
+- `GET /objects/{type}/{id}` (legacy fallback: `GET /objects/{id}?type=...`)
+- `PUT /objects/{type}/{id}`
+- `GET /objects/{type}?limit=&cursor=&sort=&order=`
+- `GET /objects/search?type=&sku=&q=&limit=&cursor=`
+
+### Products public alias
+- `POST /products` → `POST /objects/product`
+- `PUT /products/{id}` → `PUT /objects/product/{id}`
+- `GET /products/{id}` → `GET /objects/product/{id}`
+- `GET /products?sku=&q=&limit=&cursor=` → list/search
+
+### Product data (canonical)
+```
+{ id, tenant, type: "product",
+  name, name_lc,
+  sku, price,
+  uom?, taxCode?,
+  kind?: "good"|"service",
+  createdAt, updatedAt }
+```
+- Persist fields **top-level**; client does not need normalizers.
+- **SKU uniqueness per tenant** via token item: `pk=UNIQ#<tenant>#product#SKU#<sku_lc>, sk=UNIQ` (TransactWrite on create and on SKU change).
+- **Indexes**
+  - `gsi1`: `gsi1pk = tenant|product`, `gsi1sk = updatedAt` (string)
+  - `gsi2` (optional): `gsi2pk = tenant|product`, `gsi2sk = name_lc` (for name sort/search)
 
 ---
 
-## Change Log (Terraform slice)
-- Replace backend locking with `use_lockfile=true` (remove `dynamodb_table=` from backend file).
-- Split Terraform into modules: `ddb`, `iam`, `lambda` (log group only), `api` (optional permission).
-- Remove legacy root files: `main.tf`, `variables.tf`, `outputs.tf` (moved into `app_infra.tf`, `variables.app.tf`, `outputs.app.tf`).
-- Add ops scripts: `Tf-Init.ps1`, `Tf-PlanApply.ps1`, `Check-Routes.ps1`, `Smoke-API.ps1`, reworked `Publish-ObjectsLambda-EsbuildOnly.ps1`.
+## 4) Purchasing & Inventory (Entities & APIs)
+
+### Catalog (Products)
+- See product shape above; API exposes `/products` with `sku` (exact) and `q` (contains on `name_lc`).
+
+### Inventory Entities
+- **Location** `{ id, name, kind: "warehouse"|"booth"|"truck"|"room"|"stall"|"rv"|"parking", tenant }`
+- **StockItem** `{ productId, locationId, onHand, reserved, lot?, tenant }`
+- **Movement** `{ id, productId, from?, to?, qty, reason, refType?, refId?, at, tenant }`
+
+### Inventory API
+- `GET/POST/PUT /inventory/locations`
+- `GET/POST/PUT /inventory/stock`
+- `GET/POST /inventory/movements`
+
+**Events**: `inventory.received`, `inventory.moved`, `inventory.reserved`, `inventory.released`
+
+### Purchasing Entities
+- **Vendor** `{ id, name, contact?, tenant }`
+- **PO** `{ id, status: "draft"|"sent"|"received"|"closed", vendorId, lines:[{ productId, qty, cost, lot? }], totals, tenant }`
+- **Receipt** `{ id, poId, lines[], at, by, tenant }`
+
+### Purchasing API
+- `GET/POST/PUT /purchasing/vendors`
+- `GET/POST/PUT /purchasing/po`
+- `POST /purchasing/po/{id}/receive`
+
+**Receive semantics**
+- TransactWrite to upsert StockItem(s) and append Movement(s), emit `po.received` + `inventory.received`.
+
+---
+
+## 5) Events & Reservations (Entities & APIs)
+
+### Purpose
+Users can **register** for scheduled events and **reserve** resources (Rooms, RV spaces, Parking, Stalls, or other Objects).
+
+### Entities
+- **Event** `{ id, name, startsAt, endsAt, venueId?, status, createdAt, updatedAt }`
+- **ResourceType** `{ id, name, kind: "room"|"stall"|"rv"|"parking"|"other" }`
+- **Resource** `{ id, typeId, name, venueId?, tags{} }`
+- **Registration** `{ id, eventId, accountId, status: "pending"|"confirmed"|"canceled", createdAt }`
+- **Reservation** `{ id, eventId, resourceId, accountId, status: "held"|"confirmed"|"canceled", from, to, qty?, notes? }`
+
+### APIs
+- `/events` `GET/POST/PUT`
+- `/events/{id}/registrations` `GET/POST/PUT`
+- `/resources` `GET/POST/PUT` (filter by typeId/kind)
+- `/reservations` `GET/POST/PUT` (supports `eventId`, `resourceId`, `accountId`)
+- `/availability` `GET` (check resource availability by range; returns free/blocked windows)
+
+### Keys & Consistency
+- Domain-scoped keys to reduce coupling:
+  - Events: `PK=TENANT#<t>#EVENT#<id>`, `SK=METADATA`
+  - Resources: `PK=TENANT#<t>#RESOURCE#<id>`, `SK=METADATA`
+  - Registrations: `PK=TENANT#<t>#REG#<eventId>`, `SK=<accountId>`
+  - Reservations: `PK=TENANT#<t>#RESV#<eventId>`, `SK=<resourceId>#<from>`
+- **Atomic holds/confirmation**: use TransactWrite + idempotency key to prevent double-booking.
+- **Events**: emit `reservation.held`, `reservation.confirmed`, `reservation.canceled`.
+
+---
+
+## 6) Scan Intents (v1.1)
+
+### Common payloads
+- **MBapp Object QR** `{ "t":"mbapp/object-v1", "id":"...", "type":"...", "href":"/objects/<type>/<id>" }`
+- **Ticket QR** `{ "t":"mbapp/ticket-v1", "id":"t_<...>", "eventId":"e_<...>" }`
+- **Badge QR** `{ "t":"mbapp/badge-v1", "id":"b_<...>", "employeeId":"emp_<...>" }`
+- **PO QR** `{ "t":"mbapp/po-v1", "id":"po_<...>" }`
+- **Reservation QR** `{ "t":"mbapp/resv-v1", "id":"r_<...>", "eventId":"e_<...>", "resourceId":"res_<...>" }`
+- **Resource QR** `{ "t":"mbapp/resource-v1", "id":"res_<...>", "kind":"stall|room|rv|parking|other" }`
+
+### Intents
+- `navigate`, `attach-epc`, `link`, `add-to-order`, `receive-po`, `inventory-move`, `ticket-validate`, `badge-clock`, `add-to-service`
+- **New**: `reserve-resource`, `assign-stall`, `check-in`
+
+### UI affordances
+- Context pill, bulk toggle, haptics/toasts, `navigation.replace(...)` on completion
+
+---
+
+## 7) Ops & Environments
+
+### Envs & Flags
+- `EXPO_PUBLIC_ENV=nonprod|prod`
+- Feature flags: `features.catalog`, `features.inventory`, `features.purchasing`, `features.sales`, `features.ticketing`, `features.badging`, `features.events`, `features.reservations`
+
+### Publish & Routes
+- `apps/api/ops/Publish-ObjectsLambda-EsbuildOnly.ps1`
+- `apps/api/ops/Setup-ProductsRoutes.ps1`
+
+---
+
+## 8) Change Log
+- **2025-09-11**: Products made canonical (top-level fields, SKU uniqueness, optional name GSI); `/products` search (`sku`, `q`); Events & Reservations domain added; Scan Intents v1.1.
+
