@@ -34,16 +34,20 @@ async function okJson<T>(res: Response): Promise<T> {
   return res.json();
 }
 
-export async function listProducts(opts?: { q?: string; sku?: string; limit?: number; cursor?: string; signal?: AbortSignal; }) {
+export async function listProducts(opts?: {
+  q?: string; sku?: string; limit?: number; cursor?: string; order?: "asc" | "desc"; signal?: AbortSignal;
+}) {
   const p = new URLSearchParams();
   if (opts?.q) p.set("q", opts.q);
   if (opts?.sku) p.set("sku", opts.sku);
   if (opts?.limit) p.set("limit", String(opts.limit));
   if (opts?.cursor) p.set("cursor", opts.cursor);
+  if (opts?.order) p.set("order", opts.order);
   const url = `${API_BASE}/products${p.toString() ? `?${p.toString()}` : ""}`;
   const res = await fetch(url, { method: "GET", headers: hdr(), signal: opts?.signal });
   return okJson<ListPage<Product>>(res);
 }
+
 
 export async function getProduct(id: string) {
   const res = await fetch(`${API_BASE}/products/${encodeURIComponent(id)}`, { method: "GET", headers: hdr() });

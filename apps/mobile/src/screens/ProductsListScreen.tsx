@@ -15,7 +15,7 @@ export default function ProductsListScreen({ navigation }: Props) {
     setLoading(true);
     setErr(null);
     try {
-      const data = await listProducts({ limit: 50 }); // <- restart at page 1
+      const data = await listProducts({ limit: 50, order: "desc" });// <- restart at page 1
       setItems(data.items ?? []);
     } catch (e: any) {
       setErr(e?.message || "Failed to load products");

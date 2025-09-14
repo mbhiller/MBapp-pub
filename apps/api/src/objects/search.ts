@@ -3,94 +3,55 @@ import { ddb, tableObjects } from "../common/ddb";
 import { ok, bad, error as errResp } from "../common/responses";
 import { getTenantId } from "../common/env";
 
+type Order = "asc" | "desc";
+
+function b64e(o: any) { return Buffer.from(JSON.stringify(o), "utf8").toString("base64"); }
+function b64d(s?: string) {
+  if (!s) return undefined;
+  try { return JSON.parse(Buffer.from(s, "base64").toString("utf8")); } catch { return undefined; }
+}
+
 export const handler = async (evt: any) => {
   try {
     const tenantId = getTenantId(evt);
     if (!tenantId) return bad("x-tenant-id header required");
 
-    const q = evt?.queryStringParameters ?? {};
-    const type = (q.type ?? "").toString().trim();
-    const sku = q.sku ? q.sku.toString().trim() : undefined;
-    const term = q.q ? q.q.toString().trim().toLowerCase() : undefined;
-    const limit = Math.min(Number(q.limit ?? 50), 200);
-
+    const qs = evt?.queryStringParameters ?? {};
+    const type = String(qs.type ?? "").trim();
     if (!type) return bad("type query param is required");
 
-    let items: any[] = [];
+    const limit = Math.max(1, Math.min(100, Number(qs.limit ?? 50)));
+    const cursor = b64d(qs.cursor);
+    const order: Order = (String(qs.order ?? "desc").toLowerCase() === "asc" ? "asc" : "desc");
 
-    if (sku) {
-      const skuLc = sku.toLowerCase();
+    // List by GSI1: gsi1pk = tenant|type, gsi1sk = updatedAt (stringified)
+    const params: any = {
+      TableName: tableObjects,
+      IndexName: "gsi1",
+      KeyConditionExpression: "#pk = :pk",
+      ExpressionAttributeNames: { "#pk": "gsi1pk" },
+      ExpressionAttributeValues: { ":pk": `${tenantId}|${type}` },
+      Limit: limit,
+      ScanIndexForward: order === "asc", // asc = oldest first, desc = newest first
+    };
+    if (cursor) params.ExclusiveStartKey = cursor;
 
-      // Try GSI3 first (fast exact match)
-      try {
-        const gsi3 = await ddb.send(new QueryCommand({
-          TableName: tableObjects,
-          IndexName: "gsi3_sku",
-          KeyConditionExpression: "#k = :v",
-          ExpressionAttributeNames: { "#k": "sku_lc" },
-          ExpressionAttributeValues: { ":v": skuLc },
-          Limit: limit,
-        }));
-        items = gsi3.Items ?? [];
-      } catch (e: any) {
-        // Fallback: use gsi1 and filter in-memory if GSI3 not present
-        const base = await ddb.send(new QueryCommand({
-          TableName: tableObjects,
-          IndexName: "gsi1",
-          KeyConditionExpression: "#pk = :pk",
-          ExpressionAttributeNames: { "#pk": "gsi1pk" },
-          ExpressionAttributeValues: { ":pk": `${tenantId}|${type}` },
-          Limit: limit,
-          ScanIndexForward: false,
-        }));
-        items = (base.Items ?? []).filter((x: any) => (x?.sku ?? "").toLowerCase() === skuLc);
-      }
-    } else {
-      // Name contains search via GSI2 if available; otherwise use gsi1 and filter
-      if (term) {
-        const byName = await ddb.send(new QueryCommand({
-          TableName: tableObjects,
-          IndexName: "gsi2",
-          KeyConditionExpression: "#pk = :pk AND begins_with(#sk, :prefix)", // cheap prefix; still filter contains below
-          ExpressionAttributeNames: { "#pk": "gsi2pk", "#sk": "gsi2sk" },
-          ExpressionAttributeValues: { ":pk": `${tenantId}|${type}`, ":prefix": term.slice(0, 1) },
-          Limit: limit,
-        })).catch(async () => {
-          // fallback to gsi1 when gsi2 isn't present
-          return ddb.send(new QueryCommand({
-            TableName: tableObjects,
-            IndexName: "gsi1",
-            KeyConditionExpression: "#pk = :pk",
-            ExpressionAttributeNames: { "#pk": "gsi1pk" },
-            ExpressionAttributeValues: { ":pk": `${tenantId}|${type}` },
-            Limit: limit,
-            ScanIndexForward: false,
-          }));
-        });
-
-        items = (byName.Items ?? []).filter((x: any) => (x?.name_lc ?? "").includes(term));
-      } else {
-        // plain list by type via gsi1
-        const base = await ddb.send(new QueryCommand({
-          TableName: tableObjects,
-          IndexName: "gsi1",
-          KeyConditionExpression: "#pk = :pk",
-          ExpressionAttributeNames: { "#pk": "gsi1pk" },
-          ExpressionAttributeValues: { ":pk": `${tenantId}|${type}` },
-          Limit: limit,
-          ScanIndexForward: false,
-        }));
-        items = base.Items ?? [];
-      }
-    }
-
-    items = items.slice(0, limit).map((x: any) => ({
-      id: x.id, tenant: x.tenant, type: x.type,
-      name: x.name ?? "", sku: x.sku, price: x.price, uom: x.uom, taxCode: x.taxCode, kind: x.kind,
-      updatedAt: x.updatedAt,
+    const res = await ddb.send(new QueryCommand(params));
+    const items = (res.Items ?? []).map((it: any) => ({
+      id: it.id,
+      tenant: it.tenant,
+      type: it.type,
+      name: it.name,
+      sku: it.sku,
+      price: it.price,
+      uom: it.uom,
+      taxCode: it.taxCode,
+      kind: it.kind,
+      createdAt: it.createdAt,
+      updatedAt: it.updatedAt,
     }));
 
-    return ok({ items });
+    return ok({ items, nextCursor: res.LastEvaluatedKey ? b64e(res.LastEvaluatedKey) : undefined });
   } catch (e: any) {
     return errResp(e);
   }
