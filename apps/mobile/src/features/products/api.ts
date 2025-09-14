@@ -1,5 +1,4 @@
-// apps/mobile/src/features/products/api.ts
-// Minimal client for /products endpoints only (no shared client).
+// Minimal, typed client for /products
 
 export type Product = {
   id: string;
@@ -14,11 +13,12 @@ export type Product = {
 export type ListPage<T> = { items: T[]; nextCursor?: string };
 
 const API_BASE = (process.env.EXPO_PUBLIC_API_BASE || "").replace(/\/+$/, "");
-const TENANT = process.env.EXPO_PUBLIC_TENANT
-  || process.env.EXPO_PUBLIC_TENANT_ID
-  || "DemoTenant";
+const TENANT =
+  process.env.EXPO_PUBLIC_TENANT ||
+  process.env.EXPO_PUBLIC_TENANT_ID ||
+  "DemoTenant";
 
-function hdr(extra?: Record<string,string>) {
+function hdr(extra?: Record<string, string>) {
   return {
     accept: "application/json",
     "content-type": "application/json",
@@ -26,6 +26,7 @@ function hdr(extra?: Record<string,string>) {
     ...(extra ?? {}),
   };
 }
+
 async function okJson<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -35,8 +36,13 @@ async function okJson<T>(res: Response): Promise<T> {
 }
 
 export async function listProducts(opts?: {
-  q?: string; sku?: string; limit?: number; cursor?: string; order?: "asc" | "desc"; signal?: AbortSignal;
-}) {
+  q?: string;
+  sku?: string;
+  limit?: number;
+  cursor?: string;
+  order?: "asc" | "desc";
+  signal?: AbortSignal;
+}): Promise<ListPage<Product>> {
   const p = new URLSearchParams();
   if (opts?.q) p.set("q", opts.q);
   if (opts?.sku) p.set("sku", opts.sku);
@@ -45,21 +51,34 @@ export async function listProducts(opts?: {
   if (opts?.order) p.set("order", opts.order);
   const url = `${API_BASE}/products${p.toString() ? `?${p.toString()}` : ""}`;
   const res = await fetch(url, { method: "GET", headers: hdr(), signal: opts?.signal });
-  return okJson<ListPage<Product>>(res);
+  return okJson<ListPage<Product>>(res); // ← make sure to RETURN
 }
 
-
-export async function getProduct(id: string) {
-  const res = await fetch(`${API_BASE}/products/${encodeURIComponent(id)}`, { method: "GET", headers: hdr() });
+export async function getProduct(id: string): Promise<Product> {
+  const res = await fetch(`${API_BASE}/products/${encodeURIComponent(id)}`, {
+    method: "GET",
+    headers: hdr(),
+  });
   return okJson<Product>(res);
 }
 
-export async function createProduct(body: Partial<Product>) {
-  const res = await fetch(`${API_BASE}/products`, { method: "POST", headers: hdr(), body: JSON.stringify(body) });
+export async function createProduct(body: Partial<Product>): Promise<Product> {
+  const res = await fetch(`${API_BASE}/products`, {
+    method: "POST",
+    headers: hdr(),
+    body: JSON.stringify(body),
+  });
   return okJson<Product>(res);
 }
 
-export async function updateProduct(id: string, body: Partial<Product>) {
-  const res = await fetch(`${API_BASE}/products/${encodeURIComponent(id)}`, { method: "PUT", headers: hdr(), body: JSON.stringify(body) });
+export async function updateProduct(
+  id: string,
+  body: Partial<Product>
+): Promise<Product> {
+  const res = await fetch(`${API_BASE}/products/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: hdr(),
+    body: JSON.stringify(body),
+  });
   return okJson<Product>(res);
 }
