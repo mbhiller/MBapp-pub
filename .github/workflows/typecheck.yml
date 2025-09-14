@@ -3,26 +3,8 @@ name: Typecheck (API & Mobile)
 on:
   push:
     branches: [ main, feature/** ]
-    paths:
-      - "apps/api/**"
-      - "apps/mobile/**"
-      - "tsconfig.base.json"
-      - ".github/workflows/**"
-      - "package.json"
-      - "package-lock.json"
   pull_request:
     branches: [ main ]
-    paths:
-      - "apps/api/**"
-      - "apps/mobile/**"
-      - "tsconfig.base.json"
-      - ".github/workflows/**"
-      - "package.json"
-      - "package-lock.json"
-
-concurrency:
-  group: typecheck-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   api:
@@ -37,7 +19,7 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-          cache-dependency-path: apps/api/package-lock.json
+          cache-dependency-path: apps/api/package-lock.json   # ✅ correct path
       - run: npm ci
       - run: npx tsc --noEmit -p tsconfig.json
 
@@ -53,6 +35,6 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-          cache-dependency-path: apps/mobile/package-lock.json
+          cache-dependency-path: apps/mobile/package-lock.json  # ✅ correct path
       - run: npm ci
       - run: npx tsc --noEmit -p tsconfig.json
