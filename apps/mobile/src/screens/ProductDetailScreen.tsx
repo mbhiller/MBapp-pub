@@ -1,28 +1,24 @@
 import React, { useEffect, useState } from "react";
 import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  Alert,
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
+  View, Text, TextInput, TouchableOpacity, Alert, ActivityIndicator,
+  KeyboardAvoidingView, Platform, ScrollView,
 } from "react-native";
 import { getProduct, createProduct, updateProduct, type Product } from "../features/products/api";
+import { useTheme } from "../providers/ThemeProvider";
+import type { RootStackScreenProps } from "../navigation/types";
+import type { ViewStyle, TextStyle } from "react-native";
 
-type Props = any; // keep this simple; if you have RootStackScreenProps<"ProductDetail">, you can use it instead
+type Props = RootStackScreenProps<"ProductDetail">;
 
 export default function ProductDetailScreen({ route, navigation }: Props) {
+  const t = useTheme();
   const id: string | undefined = route?.params?.id;
-  const modeParam: "view" | "edit" | "create" | undefined = route?.params?.mode;
-  const isCreate = modeParam === "create" || !id;
+  const modeParam: "new" | undefined = route?.params?.mode;
+  const isCreate = modeParam === "new" || !id;
 
-  // form state
   const [name, setName] = useState("");
   const [sku, setSku] = useState("");
-  const [price, setPrice] = useState<string>(""); // keep as string for input
+  const [price, setPrice] = useState<string>("");
   const [uom, setUom] = useState("each");
   const [taxCode, setTaxCode] = useState("");
   const [kind, setKind] = useState<"good" | "service">("good");
@@ -31,7 +27,6 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // load existing when editing
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -77,14 +72,10 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
 
       if (isCreate) {
         const created = await createProduct(body);
-        // Go back to list with the created product for instant display
-        navigation.navigate("ProductsList", { created });
+        navigation.replace("ProductDetail", { id: created.id });
       } else if (id) {
-        const updated = await updateProduct(id, body);
-        // After edit, just go back; list will refetch on focus
+        await updateProduct(id, body);
         navigation.goBack();
-        // If you want to pass updated back too:
-        // navigation.navigate("ProductsList", { updated });
       }
     } catch (e: any) {
       setErr(e?.message || "Save failed");
@@ -96,28 +87,29 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
 
   if (loading) {
     return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: t.colors.bg }}>
         <ActivityIndicator />
-        {err ? <Text style={{ marginTop: 8, color: "crimson" }}>{err}</Text> : null}
+        {err ? <Text style={{ marginTop: 8, color: t.colors.danger }}>{err}</Text> : null}
       </View>
     );
   }
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1 }}
+      style={{ flex: 1, backgroundColor: t.colors.bg }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       keyboardVerticalOffset={Platform.OS === "ios" ? 64 : 0}
     >
-      <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
-        {err ? <Text style={{ color: "crimson" }}>{err}</Text> : null}
+      <ScrollView contentContainerStyle={{ padding: 14 }}>
+        {err ? <Text style={{ color: t.colors.danger, marginBottom: 10 }}>{err}</Text> : null}
 
         <Field label="Name" required>
           <TextInput
             value={name}
             onChangeText={setName}
             placeholder="e.g., Deluxe Wash"
-            style={styles.input}
+            placeholderTextColor={t.colors.textMuted}
+            style={styles.input(t)}
           />
         </Field>
 
@@ -127,7 +119,8 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
             onChangeText={setSku}
             placeholder="e.g., SKU-00123"
             autoCapitalize="characters"
-            style={styles.input}
+            placeholderTextColor={t.colors.textMuted}
+            style={styles.input(t)}
           />
         </Field>
 
@@ -137,7 +130,8 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
             onChangeText={setPrice}
             placeholder="e.g., 9.99"
             keyboardType="decimal-pad"
-            style={styles.input}
+            placeholderTextColor={t.colors.textMuted}
+            style={styles.input(t)}
           />
         </Field>
 
@@ -147,7 +141,8 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
             onChangeText={setUom}
             placeholder="e.g., each"
             autoCapitalize="none"
-            style={styles.input}
+            placeholderTextColor={t.colors.textMuted}
+            style={styles.input(t)}
           />
         </Field>
 
@@ -157,30 +152,34 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
             onChangeText={setTaxCode}
             placeholder="optional"
             autoCapitalize="characters"
-            style={styles.input}
+            placeholderTextColor={t.colors.textMuted}
+            style={styles.input(t)}
           />
         </Field>
 
-        <Text style={{ fontWeight: "600", marginTop: 8 }}>Kind</Text>
-        <View style={{ flexDirection: "row", gap: 8 }}>
-          <Segment onPress={() => setKind("good")} selected={kind === "good"}>Good</Segment>
-          <Segment onPress={() => setKind("service")} selected={kind === "service"}>Service</Segment>
+        <Text style={{ fontWeight: "600" as TextStyle["fontWeight"], marginTop: 8, color: t.colors.text }}>
+          Kind
+        </Text>
+        <View style={{ flexDirection: "row", marginTop: 6 }}>
+          <Segment onPress={() => setKind("good")}    selected={kind === "good"}    label="Good" />
+          <View style={{ width: 8 }} />
+          <Segment onPress={() => setKind("service")} selected={kind === "service"} label="Service" />
         </View>
 
         <TouchableOpacity
           onPress={onSave}
           disabled={saving}
-          style={[styles.button, saving && { opacity: 0.6 }]}
+          style={[styles.primaryBtn(t), saving && ({ opacity: 0.6 } as ViewStyle)]}
         >
-          <Text style={styles.buttonText}>{isCreate ? "Create" : "Save"}</Text>
+          <Text style={styles.primaryBtnText(t)}>{isCreate ? "Create" : "Save"}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           onPress={() => navigation.goBack()}
           disabled={saving}
-          style={[styles.buttonSecondary]}
+          style={styles.secondaryBtn(t)}
         >
-          <Text style={styles.buttonSecondaryText}>Cancel</Text>
+          <Text style={styles.secondaryBtnText(t)}>Cancel</Text>
         </TouchableOpacity>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -189,8 +188,8 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
 
 function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
   return (
-    <View>
-      <Text style={{ fontWeight: "600", marginBottom: 6 }}>
+    <View style={{ marginBottom: 12 }}>
+      <Text style={{ fontWeight: "600" as TextStyle["fontWeight"], marginBottom: 6 }}>
         {label} {required ? <Text style={{ color: "crimson" }}>*</Text> : null}
       </Text>
       {children}
@@ -198,7 +197,8 @@ function Field({ label, required, children }: { label: string; required?: boolea
   );
 }
 
-function Segment({ children, selected, onPress }: { children: React.ReactNode; selected: boolean; onPress: () => void }) {
+function Segment({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
+  const t = useTheme();
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -206,36 +206,50 @@ function Segment({ children, selected, onPress }: { children: React.ReactNode; s
         paddingVertical: 10,
         paddingHorizontal: 14,
         borderRadius: 8,
-        backgroundColor: selected ? "#333" : "#ddd",
+        backgroundColor: selected ? "#333" : t.colors.card,
+        borderWidth: 1,
+        borderColor: t.colors.border,
       }}
     >
-      <Text style={{ color: selected ? "#fff" : "#333", fontWeight: "600" }}>{children}</Text>
+      <Text style={{ color: selected ? "#fff" : "#333", fontWeight: "600" as TextStyle["fontWeight"] }}>
+        {label}
+      </Text>
     </TouchableOpacity>
   );
 }
 
 const styles = {
-  input: {
+  input: (t: ReturnType<typeof useTheme>): TextStyle => ({
     borderWidth: 1,
-    borderColor: "#ccc",
+    borderColor: t.colors.border,
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,
-  },
-  button: {
+    backgroundColor: t.colors.card,
+    color: t.colors.text, // TextStyle OK
+  }),
+  primaryBtn: (t: ReturnType<typeof useTheme>): ViewStyle => ({
     marginTop: 16,
     paddingVertical: 12,
     borderRadius: 10,
     alignItems: "center",
-    backgroundColor: "#007aff",
-  },
-  buttonText: { color: "#fff", fontWeight: "700" },
-  buttonSecondary: {
+    backgroundColor: t.colors.primary,
+  }),
+  primaryBtnText: (t: ReturnType<typeof useTheme>): TextStyle => ({
+    color: t.colors.headerText,
+    fontWeight: "700",
+  }),
+  secondaryBtn: (t: ReturnType<typeof useTheme>): ViewStyle => ({
     marginTop: 10,
     paddingVertical: 12,
     borderRadius: 10,
     alignItems: "center",
-    backgroundColor: "#eee",
-  },
-  buttonSecondaryText: { color: "#333", fontWeight: "600" },
+    backgroundColor: t.colors.card,
+    borderWidth: 1,
+    borderColor: t.colors.border,
+  }),
+  secondaryBtnText: (t: ReturnType<typeof useTheme>): TextStyle => ({
+    color: t.colors.text,
+    fontWeight: "600",
+  }),
 } as const;

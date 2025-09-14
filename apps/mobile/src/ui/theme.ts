@@ -1,28 +1,42 @@
-// Minimal theme tokens + hook
-
 export type Theme = {
-  bg: string;
-  card: string;
-  text: string;
-  textMuted: string;
-  tint: string;
-  border: string;
+  colors: {
+    bg: string;
+    card: string;
+    border: string;
+    text: string;
+    textMuted: string;
+    primary: string;
+    danger: string;
+    headerBg: string;
+    headerText: string;
+  };
+  radius: {
+    sm: number;
+    md: number;
+    lg: number;
+    pill: number;
+  };
+  spacing: {
+    xs: number;
+    sm: number;
+    md: number;
+    lg: number;
+  };
 };
 
-export const lightTheme: Theme = {
-  bg: "#f7f7f7",
-  card: "#ffffff",
-  text: "#111111",
-  textMuted: "#666666",
-  tint: "#3478f6",
-  border: "#e6e6e6",
-};
-
-export const darkTheme: Theme = {
-  bg: "#0b0b0b",
-  card: "#161616",
-  text: "#f2f2f2",
-  textMuted: "#a1a1a1",
-  tint: "#4da3ff",
-  border: "#242424",
+export const defaultTheme: Theme = {
+  colors: {
+    // Matches your existing look from the originals
+    bg: "#ffffff",
+    card: "#eeeeee",
+    border: "#cccccc",
+    text: "#111111",
+    textMuted: "#666666",
+    primary: "#007aff",
+    danger: "crimson",
+    headerBg: "#ffffff",
+    headerText: "#111111",
+  },
+  radius: { sm: 6, md: 8, lg: 12, pill: 999 },
+  spacing: { xs: 6, sm: 10, md: 14, lg: 18 },
 };
