@@ -6,8 +6,9 @@ import * as ObjGet from "./objects/get";
 import * as ObjList from "./objects/list";
 import * as ObjSearch from "./objects/search";
 
-type EventV2 = {
+type ApiEvt = {
   rawPath?: string;
+  path?: string; // REST API
   requestContext?: { http?: { method?: string } };
   queryStringParameters?: Record<string, string | undefined>;
   pathParameters?: Record<string, string | undefined>;
@@ -16,80 +17,165 @@ type EventV2 = {
   isBase64Encoded?: boolean;
 };
 
-// attach/override path parameters without mutating the original object
-function withParams(evt: EventV2, patch: Record<string, string>) {
-  return {
-    ...evt,
-    pathParameters: { ...(evt.pathParameters ?? {}), ...patch },
-  };
+function withParams(evt: ApiEvt, add: Record<string, string | undefined>): ApiEvt {
+  return { ...evt, pathParameters: { ...(evt.pathParameters || {}), ...add } };
+}
+function withQuery(evt: ApiEvt, add: Record<string, string | undefined>): ApiEvt {
+  return { ...evt, queryStringParameters: { ...(evt.queryStringParameters || {}), ...add } };
+}
+function withPath(evt: ApiEvt, newPath: string): ApiEvt {
+  // also update rawPath so downstream libs that read it won't choke
+  return { ...evt, path: newPath, rawPath: newPath };
+}
+function json(code: number, body: unknown) {
+  return { statusCode: code, headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
 }
 
-export const handler = async (evt: EventV2) => {
-  const method = (evt?.requestContext?.http?.method || "GET").toUpperCase();
-  const path = (evt?.rawPath || "/").replace(/\/+$/, "") || "/";
+function norm(raw: string | undefined): string {
+  const r = (raw || "/").split("?")[0];
+  const noTrail = r.replace(/\/+$/, "") || "/";
+  if (noTrail === "/") return "/";
 
-  // CORS preflight
+  const parts = noTrail.split("/").filter(Boolean); // ["nonprod","products"] or ["products"]
+  const KNOWN = new Set(["objects", "products", "events", "registrations", "__echo"]);
+  if (KNOWN.has(parts[0])) return "/" + parts.join("/");
+
+  // If first looks like a stage, strip it when the next is known
+  if (parts.length > 1 && KNOWN.has(parts[1])) return "/" + parts.slice(1).join("/");
+  return "/" + parts.join("/");
+}
+
+export const handler = async (evt: ApiEvt) => {
+  const method = (evt?.requestContext?.http?.method ?? "GET").toUpperCase();
   if (method === "OPTIONS") return preflight();
 
-  // ------- “/products” aliases mapped to objects(type=product) -------
-  // Create
-  if (path === "/products" && method === "POST") {
-    return ObjCreate.handler(withParams(evt, { type: "product" }));
-  }
+  const raw = evt.rawPath || (evt as any).path || "/";
+  const path = norm(raw);
 
-  // List / search
-  if (path === "/products" && method === "GET") {
-    // Reuse search; force type=product. Pass through q, sku, limit, cursor, order.
-    const qs = evt.queryStringParameters ?? {};
-    const patched = { ...evt, queryStringParameters: { ...qs, type: "product" } };
-    return ObjSearch.handler(patched as any);
-  }
-
-  // Get / Update by id
-  const mProd = /^\/products\/([^/]+)$/.exec(path);
-  if (mProd && method === "GET") {
-    return ObjGet.handler(withParams(evt, { type: "product", id: mProd[1] }));
-  }
-  if (mProd && method === "PUT") {
-    return ObjUpdate.handler(withParams(evt, { type: "product", id: mProd[1] }));
-  }
-
-  // --------------------- Native /objects routes ----------------------
-  // POST /objects/:type
-  const mCreate = /^\/objects\/([^/]+)$/.exec(path);
-  if (mCreate && method === "POST") {
-    return ObjCreate.handler(withParams(evt, { type: mCreate[1] }));
-  }
-
-  // PUT /objects/:type/:id   |   GET /objects/:type/:id
-  const mId = /^\/objects\/([^/]+)\/([^/]+)$/.exec(path);
-  if (mId && method === "PUT") {
-    return ObjUpdate.handler(withParams(evt, { type: mId[1], id: mId[2] }));
-  }
-  if (mId && method === "GET") {
-    return ObjGet.handler(withParams(evt, { type: mId[1], id: mId[2] }));
-  }
-
-  // GET /objects/:type  (paged list)
-  const mList = /^\/objects\/([^/]+)$/.exec(path);
-  if (mList && method === "GET") {
-    return ObjList.handler(withParams(evt, { type: mList[1] }));
-  }
-
-  // GET /objects/search (list/search)
-  if (path === "/objects/search" && method === "GET") {
-    return ObjSearch.handler(evt as any);
-  }
-
-  // Legacy: GET /objects?id=...&type=...
-  if (path === "/objects" && method === "GET") {
-    const qs = evt.queryStringParameters ?? {};
-    if (qs?.id && qs?.type) {
-      return ObjGet.handler(withParams(evt, { type: String(qs.type), id: String(qs.id) }));
+  try {
+    // ---------- DEBUG: echo what the router sees ----------
+    if (path.startsWith("/__echo")) {
+      return json(200, {
+        method,
+        rawPath: raw,
+        normalized: path,
+        queryString: evt.queryStringParameters || {},
+        pathParameters: evt.pathParameters || {},
+      });
     }
-    // fallback to search (supports ?type=&q=&sku=) or list when only type is present
-    return ObjSearch.handler(evt as any);
-  }
 
-  return notimpl(`${method} ${path}`);
+    // --------------------- PRODUCTS aliases ---------------------
+    // POST /products  -> /objects/product
+    if (path === "/products" && method === "POST") {
+      const patched = withPath(withParams(evt, { type: "product" }), "/objects/product");
+      return ObjCreate.handler(patched as any);
+    }
+    // GET /products    -> /objects/product (list)
+    if (path === "/products" && method === "GET") {
+      const patched = withPath(withParams(evt, { type: "product" }), "/objects/product");
+      return ObjList.handler(patched as any);
+    }
+    // GET /products/search -> search with type=product
+    if (path === "/products/search" && method === "GET") {
+      const patched = withPath(withQuery(evt, { type: "product" }), "/objects");
+      return ObjSearch.handler(patched as any);
+    }
+    // GET|PUT /products/:id -> /objects/product/:id
+    {
+      const m = /^\/products\/([^/]+)$/.exec(path);
+      if (m && method === "GET") {
+        const patched = withPath(withParams(evt, { type: "product", id: m[1] }), `/objects/product/${m[1]}`);
+        return ObjGet.handler(patched as any);
+      }
+      if (m && method === "PUT") {
+        const patched = withPath(withParams(evt, { type: "product", id: m[1] }), `/objects/product/${m[1]}`);
+        return ObjUpdate.handler(patched as any);
+      }
+    }
+
+    // ----------------------- EVENTS aliases ---------------------
+    // POST /events  -> /objects/event
+    if (path === "/events" && method === "POST") {
+      const patched = withPath(withParams(evt, { type: "event" }), "/objects/event");
+      return ObjCreate.handler(patched as any);
+    }
+    // GET /events    -> /objects/event (list)
+    if (path === "/events" && method === "GET") {
+      const patched = withPath(withParams(evt, { type: "event" }), "/objects/event");
+      return ObjList.handler(patched as any);
+    }
+    // GET|PUT /events/:id -> /objects/event/:id
+    {
+      const m = /^\/events\/([^/]+)$/.exec(path);
+      if (m && method === "GET") {
+        const patched = withPath(withParams(evt, { type: "event", id: m[1] }), `/objects/event/${m[1]}`);
+        return ObjGet.handler(patched as any);
+      }
+      if (m && method === "PUT") {
+        const patched = withPath(withParams(evt, { type: "event", id: m[1] }), `/objects/event/${m[1]}`);
+        return ObjUpdate.handler(patched as any);
+      }
+    }
+    // GET /events/:id/registrations -> /objects/registration?eventId=...
+    {
+      const m = /^\/events\/([^/]+)\/registrations$/.exec(path);
+      if (m && method === "GET") {
+        const patched = withPath(
+          withQuery(withParams(evt, { type: "registration" }), { eventId: m[1] }),
+          "/objects/registration"
+        );
+        return ObjList.handler(patched as any);
+      }
+    }
+
+    // ------------------- REGISTRATIONS aliases ------------------
+    // POST /registrations -> /objects/registration
+    if (path === "/registrations" && method === "POST") {
+      const patched = withPath(withParams(evt, { type: "registration" }), "/objects/registration");
+      return ObjCreate.handler(patched as any);
+    }
+    // GET /registrations   -> /objects/registration (list)
+    if (path === "/registrations" && method === "GET") {
+      const patched = withPath(withParams(evt, { type: "registration" }), "/objects/registration");
+      return ObjList.handler(patched as any);
+    }
+    // GET|PUT /registrations/:id -> /objects/registration/:id
+    {
+      const m = /^\/registrations\/([^/]+)$/.exec(path);
+      if (m && method === "GET") {
+        const patched = withPath(withParams(evt, { type: "registration", id: m[1] }), `/objects/registration/${m[1]}`);
+        return ObjGet.handler(patched as any);
+      }
+      if (m && method === "PUT") {
+        const patched = withPath(withParams(evt, { type: "registration", id: m[1] }), `/objects/registration/${m[1]}`);
+        return ObjUpdate.handler(patched as any);
+      }
+    }
+
+    // --------------------- Native /objects routes ----------------
+    {
+      const m = /^\/objects\/([^/]+)$/.exec(path);
+      if (m && method === "POST") return ObjCreate.handler(withParams(evt, { type: m[1] }) as any);
+      if (m && method === "GET")  return ObjList.handler(withParams(evt, { type: m[1] }) as any);
+    }
+    {
+      const m = /^\/objects\/([^/]+)\/([^/]+)$/.exec(path);
+      if (m && method === "GET") return ObjGet.handler(withParams(evt, { type: m[1], id: m[2] }) as any);
+      if (m && method === "PUT") return ObjUpdate.handler(withParams(evt, { type: m[1], id: m[2] }) as any);
+    }
+
+    // Legacy: GET /objects?id=...&type=...
+    if (path === "/objects" && method === "GET") {
+      const qs = evt.queryStringParameters ?? {};
+      if (qs?.id && qs?.type) {
+        return ObjGet.handler(withParams(evt, { type: String(qs.type), id: String(qs.id) }) as any);
+      }
+      return ObjSearch.handler(evt as any);
+    }
+
+    return notimpl(`${method} ${path}`);
+  } catch (e: any) {
+    console.error("router error", { method, raw, normalized: path, err: e?.message, stack: e?.stack });
+    return json(500, { error: "router", method, rawPath: raw, normalized: path, message: e?.message });
+  }
 };

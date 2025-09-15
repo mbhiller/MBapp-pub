@@ -1,4 +1,4 @@
-import { GetCommand, PutCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
+import { PutCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { randomUUID } from "crypto";
 import { ddb, tableObjects } from "../common/ddb";
 import { ok, bad, error as errResp, conflict } from "../common/responses";
@@ -21,13 +21,17 @@ export const handler = async (evt: any) => {
     if (!typeParam) return bad("type is required");
 
     const nowIso = new Date().toISOString();
+
     let body: any = {};
-    if (evt?.body) { try { body = JSON.parse(evt.body); } catch { return bad("invalid JSON body"); } }
+    if (evt?.body) {
+      try { body = JSON.parse(evt.body); }
+      catch { return bad("invalid JSON body"); }
+    }
 
     const id = (body?.id as string | undefined) || randomUUID();
 
-    // Base item (shared)
-    const item: any = {
+    // ---- Base item (shared) ----
+    const base: any = {
       pk: id,
       sk: `${tenantId}|${typeParam}`,
       id,
@@ -37,28 +41,27 @@ export const handler = async (evt: any) => {
       updatedAt: nowIso,
     };
 
-    // ——— Product specifics (preserve your existing behavior) ———
+    // ========== PRODUCT ==========
     if (typeParam === "product") {
       const name = String(body?.name ?? "").trim();
+      if (!name) return bad("name is required");
+
       const sku = body?.sku != null ? String(body.sku).trim() : undefined;
       const price = body?.price != null ? Number(body.price) : undefined;
       const uom = body?.uom != null ? String(body.uom) : undefined;
       const taxCode = body?.taxCode != null ? String(body.taxCode) : undefined;
       const kind = parseKind(body?.kind) ?? "good";
 
-      if (!name) return bad("name is required");
+      const item: any = {
+        ...base,
+        name, sku, price, uom, taxCode, kind,
+        gsi1pk: `${tenantId}|product`,
+        gsi1sk: `name#${name.toLowerCase()}#id#${id}`,
+      };
 
-      Object.assign(item, { name, sku, price, uom, taxCode, kind });
-
-      // Default list index for products (by type)
-      item.gsi1pk = `${tenantId}|product`;
-      item.gsi1sk = `name#${name.toLowerCase()}#id#${id}`;
-
-      // If SKU provided, enforce uniqueness with a UNIQ record
       if (sku) {
         const skuLc = sku.toLowerCase();
         item.skuLc = skuLc;
-
         await ddb.send(new TransactWriteCommand({
           TransactItems: [
             {
@@ -78,51 +81,55 @@ export const handler = async (evt: any) => {
       return ok(item);
     }
 
-    // ——— Event specifics ———
+    // ========== EVENT ==========
     if (typeParam === "event") {
       const name = String(body?.name ?? "").trim();
       if (!name) return bad("name is required");
-      const startsAt: string | undefined = body?.startsAt ? String(body.startsAt) : undefined;
-      const endsAt  : string | undefined = body?.endsAt   ? String(body.endsAt)   : undefined;
-      const status  : string | undefined = body?.status   ? String(body.status)   : undefined;
 
-      Object.assign(item, { name, startsAt, endsAt, status });
-
-      // Index for event lists (by start date)
-      const startKey = startsAt || nowIso;
-      item.gsi1pk = `${tenantId}|event`;
-      item.gsi1sk = `startsAt#${startKey}#id#${id}`;
+      const item: any = {
+        ...base,
+        name,
+        startsAt: body?.startsAt ? String(body.startsAt) : undefined,
+        endsAt:   body?.endsAt   ? String(body.endsAt)   : undefined,
+        status:   body?.status   ? String(body.status)   : undefined,
+        // match list-by-type pattern (no special index required)
+        gsi1pk: `${tenantId}|event`,
+        gsi1sk: `createdAt#${nowIso}#id#${id}`,
+      };
 
       await ddb.send(new PutCommand({ TableName: tableObjects, Item: item }));
       return ok(item);
     }
 
-    // ——— Registration specifics ———
+    // ======== REGISTRATION ========
     if (typeParam === "registration") {
       const eventId = String(body?.eventId ?? "").trim();
       if (!eventId) return bad("eventId is required");
-      const accountId: string | undefined = body?.accountId ? String(body.accountId) : undefined;
-      const status   : string | undefined = body?.status     ? String(body.status)     : "pending";
 
-      Object.assign(item, { eventId, accountId, status });
-
-      // Index registrations globally, and enable "by event" via begins_with on gsi1sk
-      item.gsi1pk = `${tenantId}|registration`;
-      item.gsi1sk = `event#${eventId}#createdAt#${nowIso}#id#${id}`;
+      const item: any = {
+        ...base,
+        eventId,
+        accountId: body?.accountId ? String(body.accountId) : undefined,
+        status: body?.status ? String(body.status) : "pending",
+        gsi1pk: `${tenantId}|registration`,
+        gsi1sk: `createdAt#${nowIso}#id#${id}`,
+      };
 
       await ddb.send(new PutCommand({ TableName: tableObjects, Item: item }));
       return ok(item);
     }
 
-    // ——— Default for any other object types ———
-    Object.assign(item, body || {});
+    // ======== DEFAULT (other types) ========
+    const item: any = { ...base, ...(body || {}) };
     item.gsi1pk = `${tenantId}|${typeParam}`;
     item.gsi1sk = `createdAt#${nowIso}#id#${id}`;
 
     await ddb.send(new PutCommand({ TableName: tableObjects, Item: item }));
     return ok(item);
   } catch (e: any) {
-    if ((e?.name || "").includes("ConditionalCheckFailed")) return conflict("SKU already exists for this tenant");
+    if ((e?.name || "").includes("ConditionalCheckFailed")) {
+      return conflict("SKU already exists for this tenant");
+    }
     return errResp(e);
   }
 };
