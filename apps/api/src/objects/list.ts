@@ -37,9 +37,9 @@ export const handler = async (evt: any) => {
     // sort param (optional): "asc" | "desc"
     const sort = String(qs.sort ?? "").toLowerCase();
     // Default: products => DESC (Z→A), others => ASC
-    let scanForward = typeParam === "product" ? false : true;
-    if (sort === "asc") scanForward = true;
-    if (sort === "desc") scanForward = false;
+    let scanForward = (typeParam === "product" || typeParam === "event") ? false : true;
+      if (sort === "asc") scanForward = true;
+      if (sort === "desc") scanForward = false;
 
     // Optional correctness filter: list registrations by eventId
     const eventIdFilter =
