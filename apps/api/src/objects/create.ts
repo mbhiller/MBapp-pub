@@ -43,43 +43,52 @@ export const handler = async (evt: any) => {
 
     // ========== PRODUCT ==========
     if (typeParam === "product") {
-      const name = String(body?.name ?? "").trim();
-      if (!name) return bad("name is required");
+  const name = String(body?.name ?? "").trim();
+  if (!name) return bad("name is required");
 
-      const sku = body?.sku != null ? String(body.sku).trim() : undefined;
-      const price = body?.price != null ? Number(body.price) : undefined;
-      const uom = body?.uom != null ? String(body.uom) : undefined;
-      const taxCode = body?.taxCode != null ? String(body.taxCode) : undefined;
-      const kind = parseKind(body?.kind) ?? "good";
+  const sku = body?.sku != null ? String(body.sku).trim() : undefined;
+  const price = body?.price != null ? Number(body.price) : undefined;
+  const uom = body?.uom != null ? String(body.uom) : undefined;
+  const taxCode = body?.taxCode != null ? String(body.taxCode) : undefined;
+  const kind = parseKind(body?.kind) ?? "good";
 
-      const item: any = {
-        ...base,
-        name, sku, price, uom, taxCode, kind,
-        gsi1pk: `${tenantId}|product`,
-        gsi1sk: `name#${name.toLowerCase()}#id#${id}`,
-      };
+  const item: any = {
+    ...base,
+    name, sku, price, uom, taxCode, kind,
+    // ✅ index by createdAt so list can be DESC (newest → oldest)
+    gsi1pk: `${tenantId}|product`,
+    gsi1sk: `createdAt#${nowIso}#id#${id}`,
+  };
 
-      if (sku) {
-        const skuLc = sku.toLowerCase();
-        item.skuLc = skuLc;
-        await ddb.send(new TransactWriteCommand({
-          TransactItems: [
-            {
-              Put: {
-                TableName: tableObjects,
-                Item: { pk: uniqPk(tenantId, skuLc), sk: id, id, tenantId, type: "product:sku", createdAt: nowIso },
-                ConditionExpression: "attribute_not_exists(pk)",
-              }
+  if (sku) {
+    const skuLc = sku.toLowerCase();
+    item.skuLc = skuLc;
+
+    await ddb.send(new TransactWriteCommand({
+      TransactItems: [
+        {
+          Put: {
+            TableName: tableObjects,
+            Item: {
+              pk: uniqPk(tenantId, skuLc),
+              sk: id,
+              id,
+              tenantId,
+              type: "product:sku",
+              createdAt: nowIso,
             },
-            { Put: { TableName: tableObjects, Item: item } },
-          ],
-        }));
-        return ok(item);
-      }
+            ConditionExpression: "attribute_not_exists(pk)",
+          }
+        },
+        { Put: { TableName: tableObjects, Item: item } },
+      ],
+    }));
+    return ok(item);
+  }
 
-      await ddb.send(new PutCommand({ TableName: tableObjects, Item: item }));
-      return ok(item);
-    }
+  await ddb.send(new PutCommand({ TableName: tableObjects, Item: item }));
+  return ok(item);
+}
 
     // ========== EVENT ==========
     if (typeParam === "event") {
