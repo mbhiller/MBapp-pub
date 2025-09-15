@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import { ActivityIndicator, Alert, FlatList, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { useTheme } from "../providers/ThemeProvider";
@@ -12,7 +12,8 @@ export default function RegistrationsListScreen({ route }: Props) {
   const t = useTheme();
   const eventId = route?.params?.eventId!;
   const eventName = route?.params?.eventName;
-
+  
+  const listRef = useRef<FlatList<Registration>>(null);
   const [items, setItems] = useState<Registration[]>([]);
   const [next, setNext] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
@@ -55,6 +56,7 @@ export default function RegistrationsListScreen({ route }: Props) {
       {err ? <Text style={{ color: t.colors.danger, marginBottom: 8 }}>{err}</Text> : null}
 
       <FlatList
+        ref={listRef}
         data={items}
         keyExtractor={(it) => it.id}
         onEndReached={() => next && load(false)}
@@ -80,7 +82,11 @@ export default function RegistrationsListScreen({ route }: Props) {
         </TouchableOpacity>
       </View>
 
-      <Fab label="Top" onPress={() => { /* no-op: placeholder for future filter */ }} style={{ bottom: 24 }} />
+      <Fab
+        label="Top"
+        onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
+        style={{ bottom: 96 }}
+      />
     </View>
   );
 }

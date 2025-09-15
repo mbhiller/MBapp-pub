@@ -52,38 +52,44 @@ export default function ProductDetailScreen({ route, navigation }: Props) {
     return () => { mounted = false; };
   }, [id, isCreate]);
 
-  async function onSave() {
-    try {
-      if (!name.trim()) {
-        Alert.alert("Validation", "Name is required.");
-        return;
-      }
-      setSaving(true);
-      setErr(null);
-
-      const body: Partial<Product> = {
-        name: name.trim(),
-        sku: sku.trim() || undefined,
-        price: price ? Number(price) : undefined,
-        uom: uom.trim() || undefined,
-        taxCode: taxCode.trim() || undefined,
-        kind,
-      };
-
-      if (isCreate) {
-        const created = await createProduct(body);
-        navigation.replace("ProductDetail", { id: created.id });
-      } else if (id) {
-        await updateProduct(id, body);
-        navigation.goBack();
-      }
-    } catch (e: any) {
-      setErr(e?.message || "Save failed");
-      Alert.alert("Save failed", e?.message || "Unknown error");
-    } finally {
-      setSaving(false);
+  // replace your current onSave with this version
+async function onSave() {
+  try {
+    if (!name.trim()) {
+      Alert.alert("Validation", "Name is required.");
+      return;
     }
+    setSaving(true);
+    setErr(null);
+
+    const body: Partial<Product> = {
+      name: name.trim(),
+      sku: sku.trim() || undefined,
+      price: price ? Number(price) : undefined,
+      uom: uom.trim() || undefined,
+      taxCode: taxCode.trim() || undefined,
+      kind,
+    };
+
+    if (isCreate) {
+      await createProduct(body);
+      Alert.alert("Saved", "Product created", [
+        { text: "OK", onPress: () => navigation.navigate("ProductsList" as never) },
+      ]);
+    } else if (id) {
+      await updateProduct(id, body);
+      Alert.alert("Saved", "Product updated", [
+        { text: "OK", onPress: () => navigation.navigate("ProductsList" as never) },
+      ]);
+    }
+  } catch (e: any) {
+    setErr(e?.message || "Save failed");
+    Alert.alert("Save failed", e?.message || "Unknown error");
+  } finally {
+    setSaving(false);
   }
+}
+
 
   if (loading) {
     return (

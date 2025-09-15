@@ -42,29 +42,34 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     }
   }, [id, isCreate]);
 
-  async function onSave() {
-    try {
-      setSaving(true);
-      const payload = {
-        name,
-        startsAt: startsAt || undefined,
-        endsAt: endsAt || undefined,
-        status: status || undefined,
-      };
-      if (isCreate) {
-        const created = await createEvent(payload);
-        Alert.alert("Saved", "Event created");
-        navigation.replace("EventDetail", { id: created.id });
-      } else if (id) {
-        await updateEvent(id, payload);
-        Alert.alert("Saved", "Event updated");
-      }
-    } catch (ex: any) {
-      Alert.alert("Error", ex?.message || String(ex));
-    } finally {
-      setSaving(false);
+  // replace your current onSave with this version
+async function onSave() {
+  try {
+    setSaving(true);
+    const payload = {
+      name,
+      startsAt: startsAt || undefined,
+      endsAt: endsAt || undefined,
+      status: status || undefined,
+    };
+    if (isCreate) {
+      await createEvent(payload);
+      Alert.alert("Saved", "Event created", [
+        { text: "OK", onPress: () => navigation.navigate("EventsList" as never) },
+      ]);
+    } else if (id) {
+      await updateEvent(id, payload);
+      Alert.alert("Saved", "Event updated", [
+        { text: "OK", onPress: () => navigation.navigate("EventsList" as never) },
+      ]);
     }
+  } catch (ex: any) {
+    Alert.alert("Error", ex?.message || String(ex));
+  } finally {
+    setSaving(false);
   }
+}
+
 
   return (
     <KeyboardAvoidingView
