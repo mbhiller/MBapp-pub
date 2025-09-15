@@ -60,7 +60,7 @@ export const handler = async (evt: any) => {
       }
     }
 
-    setIf("name", name);
+    setIf("name", name, "#name"); 
     setIf("name_lc", name_lc);
     setIf("price", price);
     setIf("sku", sku);
@@ -106,7 +106,7 @@ export const handler = async (evt: any) => {
       ExpressionAttributeValues: values,
       ReturnValues: "ALL_NEW",
     }));
-    return ok(r.Attributes);
+    return ok((r.Attributes ?? {}) as any);
   } catch (e: any) {
     if ((e?.name || "").includes("ConditionalCheckFailed")) return conflict("SKU already exists for this tenant");
     return errResp(e);
