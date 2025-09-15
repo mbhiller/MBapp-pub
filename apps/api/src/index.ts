@@ -16,13 +16,17 @@ type EventV2 = {
   isBase64Encoded?: boolean;
 };
 
-function withParams(evt: EventV2, adds: Record<string, string>) {
-  return { ...evt, pathParameters: { ...(evt.pathParameters ?? {}), ...adds } };
+// attach/override path parameters without mutating the original object
+function withParams(evt: EventV2, patch: Record<string, string>) {
+  return {
+    ...evt,
+    pathParameters: { ...(evt.pathParameters ?? {}), ...patch },
+  };
 }
 
 export const handler = async (evt: EventV2) => {
-  const method = (evt?.requestContext?.http?.method ?? "GET").toUpperCase();
-  const path = (evt?.rawPath ?? "").replace(/\/+$/, "") || "/";
+  const method = (evt?.requestContext?.http?.method || "GET").toUpperCase();
+  const path = (evt?.rawPath || "/").replace(/\/+$/, "") || "/";
 
   // CORS preflight
   if (method === "OPTIONS") return preflight();
@@ -35,15 +39,9 @@ export const handler = async (evt: EventV2) => {
 
   // List / search
   if (path === "/products" && method === "GET") {
-    // Reuse search; force type=product. Pass through q, sku, limit, cursor.
+    // Reuse search; force type=product. Pass through q, sku, limit, cursor, order.
     const qs = evt.queryStringParameters ?? {};
-    const patched = {
-      ...evt,
-      queryStringParameters: {
-        ...qs,
-        type: "product",
-      },
-    };
+    const patched = { ...evt, queryStringParameters: { ...qs, type: "product" } };
     return ObjSearch.handler(patched as any);
   }
 
@@ -72,15 +70,25 @@ export const handler = async (evt: EventV2) => {
     return ObjGet.handler(withParams(evt, { type: mId[1], id: mId[2] }));
   }
 
-  // GET /objects (search & list)
+  // GET /objects/:type  (paged list)
+  const mList = /^\/objects\/([^/]+)$/.exec(path);
+  if (mList && method === "GET") {
+    return ObjList.handler(withParams(evt, { type: mList[1] }));
+  }
+
+  // GET /objects/search (list/search)
+  if (path === "/objects/search" && method === "GET") {
+    return ObjSearch.handler(evt as any);
+  }
+
+  // Legacy: GET /objects?id=...&type=...
   if (path === "/objects" && method === "GET") {
     const qs = evt.queryStringParameters ?? {};
-    // If you ever want pure list by type, ObjList.handler is available;
-    // search currently handles q/sku/name and also “just type” listings.
-    if (qs?.q || qs?.sku || qs?.name || qs?.type) {
-      return ObjSearch.handler(evt as any);
+    if (qs?.id && qs?.type) {
+      return ObjGet.handler(withParams(evt, { type: String(qs.type), id: String(qs.id) }));
     }
-    return ObjList.handler(evt as any);
+    // fallback to search (supports ?type=&q=&sku=) or list when only type is present
+    return ObjSearch.handler(evt as any);
   }
 
   return notimpl(`${method} ${path}`);

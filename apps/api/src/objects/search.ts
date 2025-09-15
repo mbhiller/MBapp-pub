@@ -1,15 +1,9 @@
 import { QueryCommand } from "@aws-sdk/lib-dynamodb";
-import { ddb, tableObjects } from "../common/ddb";
+import { ddb, tableObjects, GSI1_NAME } from "../common/ddb";
 import { ok, bad, error as errResp } from "../common/responses";
 import { getTenantId } from "../common/env";
 
-type Order = "asc" | "desc";
-
-function b64e(o: any) { return Buffer.from(JSON.stringify(o), "utf8").toString("base64"); }
-function b64d(s?: string) {
-  if (!s) return undefined;
-  try { return JSON.parse(Buffer.from(s, "base64").toString("utf8")); } catch { return undefined; }
-}
+const MAX_LIST_LIMIT = Math.max(1, parseInt(process.env.MAX_LIST_LIMIT ?? "100", 10) || 100);
 
 export const handler = async (evt: any) => {
   try {
@@ -17,33 +11,40 @@ export const handler = async (evt: any) => {
     if (!tenantId) return bad("x-tenant-id header required");
 
     const qs = evt?.queryStringParameters ?? {};
-    const type = String(qs.type ?? "").trim();
-    if (!type) return bad("type query param is required");
+    const typeParam = (qs?.type as string | undefined)?.trim();
+    if (!typeParam) return bad("type query param is required");
 
-    const limit = Math.max(1, Math.min(100, Number(qs.limit ?? 50)));
-    const cursor = b64d(qs.cursor);
-    const order: Order = (String(qs.order ?? "desc").toLowerCase() === "asc" ? "asc" : "desc");
+    const limit = Math.min(MAX_LIST_LIMIT, Math.max(1, parseInt(qs?.limit ?? "25", 10) || 25));
+    const order = (qs?.order || "desc").toLowerCase(); // 'asc'|'desc'
+    const sku = (qs?.sku as string | undefined)?.trim()?.toLowerCase();
+    const q = (qs?.q as string | undefined)?.trim()?.toLowerCase();
 
-    // List by GSI1: gsi1pk = tenant|type, gsi1sk = updatedAt (stringified)
+    // Strategy: query gsi1 by tenant|type (cheap), then filter by sku or name_lc.
+    // This is fine for nonprod sizes and keeps the model simple per this sprint.
     const params: any = {
       TableName: tableObjects,
-      IndexName: "gsi1",
-      KeyConditionExpression: "#pk = :pk",
-      ExpressionAttributeNames: { "#pk": "gsi1pk" },
-      ExpressionAttributeValues: { ":pk": `${tenantId}|${type}` },
+      IndexName: GSI1_NAME,
+      KeyConditionExpression: "gsi1pk = :gpk",
+      ExpressionAttributeValues: { ":gpk": `${tenantId}|${typeParam}` },
       Limit: limit,
-      ScanIndexForward: order === "asc", // asc = oldest first, desc = newest first
+      ScanIndexForward: order === "asc",
     };
-    if (cursor) params.ExclusiveStartKey = cursor;
 
-    const res = await ddb.send(new QueryCommand(params));
-    const items = (res.Items ?? []).map((it: any) => ({
+    const r = await ddb.send(new QueryCommand(params));
+    let items = (r.Items ?? []) as any[];
+
+    if (sku) items = items.filter(it => (it.sku ?? "").toLowerCase() === sku);
+    if (q) items = items.filter(it => (it.name_lc ?? "").includes(q));
+
+    items = items.slice(0, limit);
+
+    const out = items.map((it: any) => ({
       id: it.id,
       tenant: it.tenant,
-      type: it.type,
+      type: typeParam,
       name: it.name,
-      sku: it.sku,
       price: it.price,
+      sku: it.sku,
       uom: it.uom,
       taxCode: it.taxCode,
       kind: it.kind,
@@ -51,8 +52,8 @@ export const handler = async (evt: any) => {
       updatedAt: it.updatedAt,
     }));
 
-    return ok({ items, nextCursor: res.LastEvaluatedKey ? b64e(res.LastEvaluatedKey) : undefined });
-  } catch (e: any) {
+    return ok({ items, next: undefined });
+  } catch (e) {
     return errResp(e);
   }
 };

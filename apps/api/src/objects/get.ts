@@ -21,25 +21,26 @@ export const handler = async (evt: any) => {
     const it = res.Item as any;
     if (!it) return notfound("object not found");
 
-    // Back-compat: if someone incorrectly saved kind into 'type', surface it
+    // Normalize response type (guard against historical misuse of 'type' for kind)
     const kindFromType = it.type === "good" || it.type === "service" ? it.type : undefined;
     const kind = it.kind ?? kindFromType;
 
     const out = {
       id: it.id,
       tenant: it.tenant,
-      type: typeParam,       // normalize response type
+      type: typeParam,
       name: it.name,
-      sku: it.sku,
       price: it.price,
+      sku: it.sku,
       uom: it.uom,
       taxCode: it.taxCode,
-      kind,                  // always present when provided
+      kind,
       createdAt: it.createdAt,
       updatedAt: it.updatedAt,
     };
+
     return ok(out);
-  } catch (e: any) {
+  } catch (e) {
     return errResp(e);
   }
 };

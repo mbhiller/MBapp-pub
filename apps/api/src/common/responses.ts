@@ -4,22 +4,19 @@ const baseHeaders = {
   "content-type": "application/json",
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
-  "access-control-allow-headers": "content-type,x-tenant-id"
+  "access-control-allow-headers": "content-type,x-tenant-id,Idempotency-Key"
 };
 
 const respond = (statusCode: number, body: any) => ({
   statusCode,
   headers: baseHeaders,
-  body: typeof body === "string" ? body : JSON.stringify(body)
+  body: typeof body === "string" ? body : JSON.stringify(body),
 });
 
 export const ok = (data: Json, status = 200) => respond(status, data);
-export const bad = (message: string, status = 400) =>
-  respond(status, { error: "BadRequest", message });
-export const notfound = (message: string) =>
-  respond(404, { error: "NotFound", message });
-export const conflict = (message: string) =>
-  respond(409, { error: "Conflict", message });
+export const bad = (message = "Bad Request") => respond(400, { error: "BadRequest", message });
+export const notfound = (message = "Not Found") => respond(404, { error: "NotFound", message });
+export const conflict = (message = "Conflict") => respond(409, { error: "Conflict", message });
 export const notimpl = (route?: string) =>
   respond(501, { error: "NotImplemented", message: route ? `Unsupported route ${route}` : "Not implemented" });
 export const error = (err: unknown) => {
