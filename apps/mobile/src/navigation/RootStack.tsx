@@ -4,7 +4,6 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "./types";
 import { useTheme } from "../providers/ThemeProvider";
 
-// Screens
 import ModuleHubScreen from "../screens/ModuleHubScreen";
 import ProductsListScreen from "../screens/ProductsListScreen";
 import ProductDetailScreen from "../screens/ProductDetailScreen";
@@ -13,26 +12,28 @@ import ObjectDetailScreen from "../screens/ObjectDetailScreen";
 import TenantsScreen from "../screens/TenantsScreen";
 import ScanScreen from "../screens/ScanScreen";
 
+// NEW
+import EventsListScreen from "../screens/EventsListScreen";
+import EventDetailScreen from "../screens/EventDetailScreen";
+import RegistrationsListScreen from "../screens/RegistrationsListScreen";
+
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 function HeaderButton({ title, onPress }: { title: string; onPress: () => void }) {
   const t = useTheme();
   return (
-    <Pressable onPress={onPress} style={{ paddingHorizontal: 8 }}>
-      <Text style={{ fontWeight: "700", color: t.colors.primary }}>{title}</Text>
+    <Pressable onPress={onPress} style={{ paddingHorizontal: 12, paddingVertical: 6 }}>
+      <Text style={{ color: t.colors.primary, fontWeight: "700" }}>{title}</Text>
     </Pressable>
   );
 }
 
 export default function RootStack() {
   const t = useTheme();
-
   return (
     <Stack.Navigator
-      initialRouteName="Hub"
       screenOptions={({ navigation }) => ({
         headerStyle: { backgroundColor: t.colors.headerBg },
-        headerTintColor: t.colors.headerText,
         headerTitleStyle: { color: t.colors.headerText, fontWeight: "700" },
         headerRight: () => <HeaderButton title="Scan" onPress={() => navigation.navigate("Scan")} />,
       })}
@@ -44,6 +45,11 @@ export default function RootStack() {
       <Stack.Screen name="ObjectDetail" component={ObjectDetailScreen} options={{ title: "Object" }} />
       <Stack.Screen name="Tenants" component={TenantsScreen} options={{ title: "Tenants" }} />
       <Stack.Screen name="Scan" component={ScanScreen} options={{ title: "Scan" }} />
+
+      {/* NEW */}
+      <Stack.Screen name="EventsList" component={EventsListScreen} options={{ title: "Events" }} />
+      <Stack.Screen name="EventDetail" component={EventDetailScreen} options={{ title: "Event" }} />
+      <Stack.Screen name="RegistrationsList" component={RegistrationsListScreen} options={{ title: "Registrations" }} />
     </Stack.Navigator>
   );
 }

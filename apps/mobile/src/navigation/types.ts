@@ -7,11 +7,12 @@ export type RootStackParamList = {
   ObjectsList: { type?: string } | undefined;
   ObjectDetail: { type: string; id: string };
   Tenants: undefined;
-  // Add optional 'intent' so ScanScreen can read route.params.intent safely
-  Scan: {
-    attachTo?: { type: string; id: string };
-    intent?: "navigate" | "attach" | string;
-  } | undefined;
+  Scan: { attachTo?: { type: string; id: string }; intent?: "navigate" | "attach" | string } | undefined;
+
+  // New
+  EventsList: undefined;
+  EventDetail: { id?: string; mode?: "new" };
+  RegistrationsList: { eventId: string; eventName?: string };
 };
 
 export type RootStackScreenProps<T extends keyof RootStackParamList> =
