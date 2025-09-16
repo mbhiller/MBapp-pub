@@ -1,46 +1,31 @@
 // apps/mobile/app.config.ts
-import 'dotenv/config';
-import type { ExpoConfig, ConfigContext } from 'expo/config';
+import type { ExpoConfig } from "expo/config";
+import * as dotenv from "dotenv";
 
-const HARDCODED_API = 'https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com';
+// Load .env at config time (dev + EAS)
+dotenv.config();
 
-export default ({ config }: ConfigContext): ExpoConfig => ({
-  ...config,
-
-  // Defaults (safe if not already set in app.json)
-  name: config.name ?? 'MBapp',
-  slug: config.slug ?? 'mbapp',
-  version: config.version ?? '1.0.0',
-  orientation: config.orientation ?? 'portrait',
-  platforms: config.platforms ?? ['ios', 'android', 'web'],
-
-  // Plugins
-  plugins: [
-    ...(Array.isArray((config as any).plugins) ? (config as any).plugins : []),
-    ['expo-camera', { cameraPermission: 'Camera access is required to scan QR codes.' }],
-  ],
-
-  ios: {
-    ...(config.ios ?? {}),
-    supportsTablet: config.ios?.supportsTablet ?? true,
-    infoPlist: {
-      ...(config.ios?.infoPlist ?? {}),
-      NSCameraUsageDescription: 'Camera access is required to scan QR codes.',
-    },
-  },
-
-  android: {
-    ...(config.android ?? {}),
-    permissions: Array.from(new Set([...(config.android?.permissions ?? []), 'CAMERA'])),
-  },
-
+const config: ExpoConfig = {
+  name: "MBapp",
+  slug: "mbapp",
+  scheme: "mbapp",
+  version: "1.0.0",
+  orientation: "portrait",
+  jsEngine: "hermes",
+  platforms: ["ios", "android"],
+  ios: { supportsTablet: true },
+  android: { adaptiveIcon: { foregroundImage: "./assets/adaptive-icon.png", backgroundColor: "#FFFFFF" } },
   extra: {
-    ...(config.extra ?? {}),
-    API_BASE: process.env.API_BASE ?? HARDCODED_API,
-    TENANTS_BASE:
-      process.env.TENANTS_BASE ?? `${process.env.API_BASE ?? HARDCODED_API}/tenants`,
-    TENANT: process.env.TENANT ?? 'DemoTenant',
-    ENV: process.env.APP_ENV ?? 'nonprod',
-    eas: { projectId: process.env.EAS_PROJECT_ID },
+    // These are readable via process.env.* at runtime in your code
+    EXPO_PUBLIC_API_BASE:
+      process.env.EXPO_PUBLIC_API_BASE ??
+      "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com",
+    EXPO_PUBLIC_TENANT_ID:
+      process.env.EXPO_PUBLIC_TENANT_ID ?? "DemoTenant",
+    EXPO_PUBLIC_ROLES:
+      process.env.EXPO_PUBLIC_ROLES ??
+      "admin,objects.view,products.view,tenants.view,events.view,inventory.view",
   },
-});
+};
+
+export default config;

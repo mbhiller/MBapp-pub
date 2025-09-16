@@ -13,7 +13,7 @@ type Props = RootStackScreenProps<"ProductDetail">;
 export default function ProductDetailScreen({ route, navigation }: Props) {
   const t = useTheme();
   const id: string | undefined = route?.params?.id;
-  const modeParam: "new" | undefined = route?.params?.mode;
+ const modeParam: "new" | "edit" | undefined = route?.params?.mode;
   const isCreate = modeParam === "new" || !id;
 
   const [name, setName] = useState("");

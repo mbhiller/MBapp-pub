@@ -1,51 +1,61 @@
-import React, { useCallback, useEffect, useState } from "react";
+// apps/mobile/src/screens/ObjectsListScreen.tsx
+import React, { useCallback } from "react";
 import { ActivityIndicator, FlatList, Text, TouchableOpacity, View } from "react-native";
 import type { RootStackScreenProps } from "../navigation/types";
 import { listObjects, type MbObject } from "../api/client";
 import { useTheme } from "../providers/ThemeProvider";
 import { Fab } from "../ui/Fab";
+import { useInfiniteQuery, type InfiniteData } from "@tanstack/react-query";
+import { useFocusEffect } from "@react-navigation/native";
 
 type Props = RootStackScreenProps<"ObjectsList">;
+type Page = { items: MbObject[]; next?: string };
 
 export default function ObjectsListScreen({ navigation, route }: Props) {
   const t = useTheme();
   const type = route.params?.type || "horse";
-  const [items, setItems] = useState<MbObject[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setErr(null);
-    try {
-      const res = await listObjects(type, { limit: 50, order: "desc" });
-      setItems(res.items ?? []);
-    } catch (e: any) {
-      setErr(e?.message || "Failed to load");
-    } finally {
-      setLoading(false);
-    }
-  }, [type]);
+  const q = useInfiniteQuery<
+    Page,                           // TQueryFnData
+    Error,                          // TError
+    InfiniteData<Page>,             // TData
+    ["objects", string],            // TQueryKey
+    string | undefined              // TPageParam
+  >({
+    queryKey: ["objects", type],
+    queryFn: ({ pageParam }) => listObjects(type, { cursor: pageParam, limit: 50 }),
+    getNextPageParam: (last) => last?.next ?? undefined,
+    initialPageParam: undefined,
+  });
 
-  useEffect(() => { load(); }, [load]);
+  useFocusEffect(useCallback(() => { q.refetch(); }, [q]));
 
-  if (loading && items.length === 0) {
+  // While loading first page, just show spinner (no error read here to avoid TS narrowing to never)
+  if (q.isLoading && !q.data) {
     return (
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: t.colors.bg }}>
         <ActivityIndicator />
-        {err ? <Text style={{ marginTop: 8, color: t.colors.danger }}>{err}</Text> : null}
       </View>
     );
   }
 
+  const items = q.data?.pages.flatMap((p) => p?.items ?? []) ?? [];
+
   return (
     <View style={{ flex: 1, padding: 10, backgroundColor: t.colors.bg }}>
-      {err ? <Text style={{ color: t.colors.danger, marginBottom: 8 }}>{err}</Text> : null}
+      {q.isError ? (
+        <Text style={{ color: t.colors.danger, marginBottom: 8 }}>
+          {q.error?.message ?? "Failed to load"}
+        </Text>
+      ) : null}
 
       <FlatList
         data={items}
         keyExtractor={(o) => o.id}
         ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+        onEndReached={() => q.hasNextPage && !q.isFetchingNextPage && q.fetchNextPage()}
+        refreshing={q.isRefetching || q.isFetching}
+        onRefresh={() => q.refetch()}
         renderItem={({ item }) => (
           <TouchableOpacity
             onPress={() => navigation.navigate("ObjectDetail", { type, id: item.id })}
@@ -57,13 +67,15 @@ export default function ObjectsListScreen({ navigation, route }: Props) {
               borderColor: t.colors.border,
             }}
           >
-            <Text style={{ fontWeight: "700" as const, color: t.colors.text }}>{item.name || "(no name)"}</Text>
+            <Text style={{ fontWeight: "700" as const, color: t.colors.text }}>
+              {item.name || "(no name)"}
+            </Text>
             <Text style={{ color: t.colors.textMuted, marginTop: 4 }}>{item.id}</Text>
           </TouchableOpacity>
         )}
       />
 
-      {/* For objects, FAB = Scan (keeps pattern consistent and practical) */}
+      {/* For objects, FAB = Scan */}
       <Fab label="Scan" onPress={() => navigation.navigate("Scan", { intent: "navigate" })} />
     </View>
   );

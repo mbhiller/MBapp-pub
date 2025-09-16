@@ -1,104 +1,154 @@
 // apps/mobile/src/api/client.ts
-const API_BASE = process.env.EXPO_PUBLIC_API_BASE ?? "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com";
-const TENANT = process.env.EXPO_PUBLIC_TENANT_ID ?? "DemoTenant";
+// Central API client for MBapp (mobile). Shared across modules for consistency.
 
-type ReqInit = RequestInit & { tenant?: string };
+type Qs = Record<string, string | number | boolean | undefined>;
 
-async function request<T>(path: string, init?: ReqInit): Promise<T> {
-  const url = `${API_BASE}${path}`;
-  const r = await fetch(url, {
-    ...init,
+const API_BASE =
+  process.env.EXPO_PUBLIC_API_BASE ??
+  "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com";
+const TENANT =
+  process.env.EXPO_PUBLIC_TENANT_ID ??
+  "DemoTenant";
+
+// -----------------------------
+// Low-level request helper
+// -----------------------------
+async function request<T = unknown>(
+  path: string,
+  opts?: { method?: "GET" | "POST" | "PUT" | "DELETE"; body?: any; qs?: Qs; signal?: AbortSignal }
+): Promise<T> {
+  const url = new URL(`${API_BASE}${path}`);
+
+  // build query string (skip undefined)
+  if (opts?.qs) {
+    for (const [k, v] of Object.entries(opts.qs)) {
+      if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
+    }
+  }
+
+  const res = await fetch(url.toString(), {
+    method: opts?.method ?? "GET",
+    body: opts?.body != null ? JSON.stringify(opts.body) : undefined,
     headers: {
       accept: "application/json",
-      "content-type": init?.body ? "application/json" : "application/json",
-      "x-tenant-id": init?.tenant ?? TENANT,
-      ...(init?.headers ?? {}),
+      "content-type": "application/json",
+      "x-tenant-id": TENANT,
     },
+    signal: opts?.signal,
   });
-  if (!r.ok) {
-    const txt = await r.text().catch(() => "");
-    let msg = txt;
-    try { const j = JSON.parse(txt); msg = j?.message || j?.error || txt; } catch {}
-    throw new Error(msg || `HTTP ${r.status}`);
+
+  const text = await res.text().catch(() => "");
+  if (!res.ok) {
+    try {
+      const j = text ? JSON.parse(text) : {};
+      const msg = j?.message ?? j?.error ?? `HTTP ${res.status}`;
+      throw new Error(msg);
+    } catch {
+      throw new Error(text || `HTTP ${res.status}`);
+    }
   }
-  return r.json() as Promise<T>;
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
-export type ListPage<T> = { items: T[]; next?: string };
-export type OrderDir = "asc" | "desc";
-
-export type Product = {
-  id: string;
-  tenant: string;
-  type: "product";
-  name?: string;
-  name_lc?: string;
-  sku?: string;
-  price?: number;
-  uom?: string;
-  taxCode?: string;
-  kind?: "good" | "service";
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type MbObject = {
-  id: string;
-  tenant: string;
-  type: string;
-  name?: string;
-  createdAt: string;
-  updatedAt: string;
-  [k: string]: any;
-};
-
+// -----------------------------
+// Objects API (generic type bucket)
+// Backed by /objects/:type endpoints on the server.
+// -----------------------------
 export const api = {
   objects: {
-    list: (type: string, opts?: { limit?: number; cursor?: string; order?: OrderDir }) => {
-      const p = new URLSearchParams();
-      if (opts?.limit) p.set("limit", String(opts.limit));
-      if (opts?.cursor) p.set("cursor", opts.cursor);
-      if (opts?.order) p.set("order", opts.order);
-      const qs = p.toString() ? `?${p.toString()}` : "";
-      return request<ListPage<MbObject>>(`/objects/${encodeURIComponent(type)}${qs}`);
-    },
-    get: (type: string, id: string) =>
-      request<MbObject>(`/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}`),
+    /**
+     * List objects of a given type with cursor-based paging.
+     * opts:
+     *  - cursor -> sent as `next`
+     *  - limit
+     *  - q
+     *  - kind
+     */
+    async list<T = any>(
+      type: string,
+      opts?: { cursor?: string; limit?: number; q?: string; kind?: string; signal?: AbortSignal }
+    ): Promise<{ items: T[]; next?: string }> {
+      const qs: Qs = {};
+      if (opts?.cursor) qs.next = opts.cursor;
+      if (opts?.limit != null) qs.limit = opts.limit;
+      if (opts?.q) qs.q = opts.q;
+      if (opts?.kind) qs.kind = opts.kind;
 
-    update: (type: string, id: string, patch: Partial<MbObject>) =>
-      request<MbObject>(`/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}`, {
-        method: "PUT", body: JSON.stringify(patch)
-      }),
-  },
-
-  products: {
-    list:   (opts?: { q?: string; sku?: string; limit?: number; cursor?: string; order?: OrderDir }) => {
-      const p = new URLSearchParams();
-      if (opts?.q) p.set("q", opts.q);
-      if (opts?.sku) p.set("sku", opts.sku);
-      if (opts?.limit) p.set("limit", String(opts.limit));
-      if (opts?.cursor) p.set("cursor", opts.cursor);
-      if (opts?.order) p.set("order", opts.order);
-      const qs = p.toString() ? `?${p.toString()}` : "";
-      return request<ListPage<Product>>(`/products${qs}`);
+      return request<{ items: T[]; next?: string }>(`/objects/${encodeURIComponent(type)}`, {
+        method: "GET",
+        qs,
+        signal: opts?.signal,
+      });
     },
 
-    get:    (id: string) => request<Product>(`/products/${encodeURIComponent(id)}`),
+    /** Get object by type + id */
+    async get<T = any>(type: string, id: string, signal?: AbortSignal): Promise<T> {
+      return request<T>(`/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}`, {
+        method: "GET",
+        signal,
+      });
+    },
 
-    create: (body: Partial<Product>) =>
-      request<Product>(`/products`, { method: "POST", body: JSON.stringify(body) }),
+    /** Create object (server assigns id). Body must include the type for consistency. */
+    async create<T = any>(
+      type: string,
+      body: Record<string, unknown>,
+      signal?: AbortSignal
+    ): Promise<T> {
+      const payload = { ...body, type };
+      return request<T>(`/objects/${encodeURIComponent(type)}`, {
+        method: "POST",
+        body: payload,
+        signal,
+      });
+    },
 
-    update: (id: string, patch: Partial<Product>) =>
-      request<Product>(`/products/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(patch) }),
+    /** Update object by id. Body should include type for consistency. */
+    async update<T = any>(
+      type: string,
+      id: string,
+      patch: Record<string, unknown>,
+      signal?: AbortSignal
+    ): Promise<T> {
+      const payload = { ...patch, type };
+      return request<T>(`/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        body: payload,
+        signal,
+      });
+    },
   },
 };
 
-// Back-compat named exports used elsewhere
-export const listProducts  = api.products.list;
-export const getProduct    = api.products.get;
-export const updateProduct = api.products.update;
-export const createProduct = api.products.create;
+// -----------------------------
+// Convenience re-exports (optional)
+// If your feature code prefers named helpers, you can import these.
+// -----------------------------
+export type MbObject = { id: string; type: string; name?: string; sku?: string; [k: string]: any };
 
-export const listObjects   = api.objects.list;
-export const getObject     = api.objects.get;
-export const updateObject  = api.objects.update;
+export const listObjects = api.objects.list.bind(api.objects) as <T = any>(
+  type: string,
+  opts?: { cursor?: string; limit?: number; q?: string; kind?: string; order?: "asc" | "desc"; signal?: AbortSignal }
+) => Promise<{ items: T[]; next?: string }>;
+
+export const getObject = api.objects.get.bind(api.objects) as <T = any>(
+  type: string,
+  id: string,
+  signal?: AbortSignal
+) => Promise<T>;
+
+export const createObject = api.objects.create.bind(api.objects) as <T = any>(
+  type: string,
+  body: Record<string, unknown>,
+  signal?: AbortSignal
+) => Promise<T>;
+
+export const updateObject = api.objects.update.bind(api.objects) as <T = any>(
+  type: string,
+  id: string,
+  patch: Record<string, unknown>,
+  signal?: AbortSignal
+) => Promise<T>;
+
+// Also export request in case a feature needs a one-off call (avoid if possible).
+export { request };

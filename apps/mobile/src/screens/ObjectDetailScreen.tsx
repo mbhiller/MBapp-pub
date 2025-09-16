@@ -1,3 +1,4 @@
+// apps/mobile/src/screens/ObjectDetailScreen.tsx
 import React, { useEffect, useState } from "react";
 import {
   View, Text, TextInput, TouchableOpacity, ActivityIndicator,
@@ -12,7 +13,10 @@ type Props = RootStackScreenProps<"ObjectDetail">;
 
 export default function ObjectDetailScreen({ route, navigation }: Props) {
   const t = useTheme();
-  const { type, id } = route.params;
+
+  // route.params can be undefined; make it safe and provide defaults
+  const type = route.params?.type ?? "horse";
+  const id   = route.params?.id;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving]   = useState(false);
@@ -22,23 +26,33 @@ export default function ObjectDetailScreen({ route, navigation }: Props) {
 
   useEffect(() => {
     let mounted = true;
+
+    // If id is missing, show a friendly error
+    if (!id) {
+      setLoading(false);
+      setErr("Missing object id");
+      return;
+    }
+
     (async () => {
       try {
         setLoading(true);
         setErr(null);
-        const o = await getObject(type, id);
+        const o = await getObject<MbObject>(type, id);
         if (!mounted) return;
-        setName(o.name ?? "");
+        setName(o?.name ?? "");
       } catch (e: any) {
         if (mounted) setErr(e?.message || "Failed to load");
       } finally {
         if (mounted) setLoading(false);
       }
     })();
+
     return () => { mounted = false; };
   }, [type, id]);
 
   async function onSave() {
+    if (!id) return; // safety
     setSaving(true);
     try {
       await updateObject(type, id, { name: name || undefined });
@@ -69,7 +83,7 @@ export default function ObjectDetailScreen({ route, navigation }: Props) {
         {err ? <Text style={{ color: t.colors.danger }}>{err}</Text> : null}
 
         <Text style={{ fontWeight: "700" as const, color: t.colors.text, marginBottom: 8 }}>
-          {type.toUpperCase()} · {id}
+          {type.toUpperCase()} · {id ?? "—"}
         </Text>
 
         <Field label="Name">
@@ -84,8 +98,8 @@ export default function ObjectDetailScreen({ route, navigation }: Props) {
 
         <TouchableOpacity
           onPress={onSave}
-          disabled={saving}
-          style={[styles.primaryBtn(t), saving && ({ opacity: 0.6 } as ViewStyle)]}
+          disabled={saving || !id}
+          style={[styles.primaryBtn(t), (saving || !id) && ({ opacity: 0.6 } as ViewStyle)]}
         >
           <Text style={styles.primaryBtnText(t)}>Save</Text>
         </TouchableOpacity>
@@ -119,7 +133,7 @@ const styles = {
     paddingHorizontal: 12,
     paddingVertical: 10,
     backgroundColor: t.colors.card,
-    color: t.colors.text, // TextStyle OK
+    color: t.colors.text,
   }),
   primaryBtn: (t: ReturnType<typeof useTheme>): ViewStyle => ({
     marginTop: 16,
