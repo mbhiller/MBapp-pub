@@ -27,10 +27,24 @@ export const handler = async (evt: any) => {
     if (!typeParam) return bad("type is required");
 
     const qs = evt?.queryStringParameters ?? {};
-    const limit = Math.min(MAX_LIST_LIMIT, Math.max(1, parseInt(String(qs.limit ?? "25"), 10) || 25));
+    const limit = Math.min(
+      MAX_LIST_LIMIT,
+      Math.max(1, parseInt(String(qs.limit ?? "25"), 10) || 25)
+    );
     const nextIn = dec(qs.next);
 
-    // Generic list-by-type (same for product/event/registration)
+    // sort param (optional): "asc" | "desc"
+    const sort = String(qs.sort ?? "").toLowerCase();
+
+    // ✅ Default: products & events => DESC (newest first), others => ASC
+    let scanForward = (typeParam === "product" || typeParam === "event") ? false : true;
+    if (sort === "asc") scanForward = true;
+    if (sort === "desc") scanForward = false;
+
+    // Optional correctness filter: list registrations by eventId
+    const eventIdFilter =
+      typeParam === "registration" && qs?.eventId ? String(qs.eventId) : undefined;
+
     const params: any = {
       TableName: tableObjects,
       IndexName: GSI1_NAME,
@@ -38,12 +52,17 @@ export const handler = async (evt: any) => {
       ExpressionAttributeValues: { ":pk": `${tenantId}|${typeParam}` },
       Limit: limit,
       ExclusiveStartKey: nextIn,
-      ScanIndexForward: true,
+      ScanIndexForward: scanForward,
     };
 
     const r = await ddb.send(new QueryCommand(params));
+    let items = (r.Items || []);
 
-    const items = (r.Items || []).map((it: any) => {
+    if (eventIdFilter) {
+      items = items.filter((it: any) => it?.eventId === eventIdFilter);
+    }
+
+    const shaped = items.map((it: any) => {
       if (typeParam === "product") {
         return {
           id: it.id, type: it.type,
@@ -51,11 +70,10 @@ export const handler = async (evt: any) => {
           createdAt: it.createdAt, updatedAt: it.updatedAt,
         };
       }
-      // For events & registrations (and others), pass through fields
       return it;
     });
 
-    return ok({ items, next: enc(r.LastEvaluatedKey as Key | undefined) });
+    return ok({ items: shaped, next: enc(r.LastEvaluatedKey as Key | undefined) });
   } catch (e) {
     return errResp(e);
   }

@@ -34,9 +34,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 // Events
-export async function listEvents(next?: string): Promise<ListPage<Event>> {
-  const qs = next ? `?next=${encodeURIComponent(next)}` : "";
-  return request<ListPage<Event>>(`/objects/event${qs}`);
+export async function listEvents(next?: string, sort: "asc" | "desc" = "desc") {
+  const p = new URLSearchParams({ sort });
+  if (next) p.set("next", next);
+  return request<ListPage<Event>>(`/objects/event?${p.toString()}`);
 }
 export async function getEvent(id: string): Promise<Event> {
   return request<Event>(`/objects/event/${encodeURIComponent(id)}`);

@@ -1,44 +1,47 @@
-import React, { createContext, useContext, useMemo } from "react";
-import { MODULES, MODULES_BY_KEY, type ModuleKey, type Role, type ModuleDef } from "../shared/modules";
+// apps/mobile/src/providers/RolesProvider.tsx
+import React, { createContext, useContext, useMemo, useState } from "react";
+import type { ReactNode } from "react";
+import { MODULES, type Role, type ModuleDef } from "../shared/modules";
 
-type RolesContextValue = {
+type Ctx = {
   roles: Role[];
-  hasRole: (r: Role) => boolean;
-  canAccessModule: (key: ModuleKey) => boolean;
+  setRoles(next: Role[]): void;
+  has(role: Role): boolean;
   allowedModules: ModuleDef[];
+  can(required: Role | Role[]): boolean;
 };
 
-const RolesContext = createContext<RolesContextValue | null>(null);
+const RolesCtx = createContext<Ctx | undefined>(undefined);
 
 export function RolesProvider({
   children,
   initialRoles,
 }: {
   children: React.ReactNode;
-  /** Provide real user roles here once auth is wired */
-  initialRoles?: Role[];
+  initialRoles?: (string | Role)[]; // <= allow strings or Role literals
 }) {
-  // Minimal, safe defaults allow basic viewing everywhere
-  const roles: Role[] = initialRoles ?? ["objects.view", "products.view", "tenants.view"];
+  const initial: Role[] = (initialRoles ?? [])
+    .map(r => String(r).trim())
+    .filter(Boolean) as Role[];
+  const [roles, setRoles] = useState<Role[]>(initial);
 
-  const hasRole = (r: Role) => roles.includes(r);
-
-  const canAccessModule = (key: ModuleKey) => {
-    const req = MODULES_BY_KEY[key].required;
-    return req.length === 0 || req.some((rr: Role) => hasRole(rr));
+  const has = (r: Role) => roles.includes(r);
+  const can = (req: Role | Role[]) => {
+    const needs = Array.isArray(req) ? req : [req];
+    return needs.some((r) => roles.includes(r));
   };
 
   const allowedModules = useMemo(
-    () => MODULES.filter((m) => canAccessModule(m.key)),
+    () => MODULES.filter((m) => can(m.required)),
     [roles]
   );
 
-  const value: RolesContextValue = { roles, hasRole, canAccessModule, allowedModules };
-  return <RolesContext.Provider value={value}>{children}</RolesContext.Provider>;
+  const value: Ctx = { roles, setRoles, has, allowedModules, can };
+  return <RolesCtx.Provider value={value}>{children}</RolesCtx.Provider>;
 }
 
 export function useRoles() {
-  const ctx = useContext(RolesContext);
+  const ctx = useContext(RolesCtx);
   if (!ctx) throw new Error("useRoles must be used within RolesProvider");
   return ctx;
 }

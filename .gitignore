@@ -36,3 +36,5 @@ apps/api/dist.zip
 apps/api/bundle/
 apps/api/mbapp-api.zip
 apps/api/lambdas/
+
+apps/api/dist.zip

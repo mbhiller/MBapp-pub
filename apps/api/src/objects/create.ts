@@ -30,7 +30,7 @@ export const handler = async (evt: any) => {
 
     const id = (body?.id as string | undefined) || randomUUID();
 
-    // ---- Base item (shared) ----
+    // ---- Base item (shared fields) ----
     const base: any = {
       pk: id,
       sk: `${tenantId}|${typeParam}`,
@@ -56,18 +56,26 @@ export const handler = async (evt: any) => {
         ...base,
         name, sku, price, uom, taxCode, kind,
         gsi1pk: `${tenantId}|product`,
-        gsi1sk: `name#${name.toLowerCase()}#id#${id}`,
+        gsi1sk: `createdAt#${nowIso}#id#${id}`, // ✅ newest-first supported
       };
 
       if (sku) {
         const skuLc = sku.toLowerCase();
         item.skuLc = skuLc;
+
         await ddb.send(new TransactWriteCommand({
           TransactItems: [
             {
               Put: {
                 TableName: tableObjects,
-                Item: { pk: uniqPk(tenantId, skuLc), sk: id, id, tenantId, type: "product:sku", createdAt: nowIso },
+                Item: {
+                  pk: uniqPk(tenantId, skuLc),
+                  sk: id,
+                  id,
+                  tenantId,
+                  type: "product:sku",
+                  createdAt: nowIso,
+                },
                 ConditionExpression: "attribute_not_exists(pk)",
               }
             },
@@ -92,9 +100,8 @@ export const handler = async (evt: any) => {
         startsAt: body?.startsAt ? String(body.startsAt) : undefined,
         endsAt:   body?.endsAt   ? String(body.endsAt)   : undefined,
         status:   body?.status   ? String(body.status)   : undefined,
-        // match list-by-type pattern (no special index required)
         gsi1pk: `${tenantId}|event`,
-        gsi1sk: `createdAt#${nowIso}#id#${id}`,
+        gsi1sk: `createdAt#${nowIso}#id#${id}`, // ✅ newest-first supported
       };
 
       await ddb.send(new PutCommand({ TableName: tableObjects, Item: item }));

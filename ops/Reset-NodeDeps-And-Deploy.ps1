@@ -1,104 +1,114 @@
-# Reset-NodeDeps-And-Deploy.ps1
-# Cleans node_modules/ caches for apps/api & apps/mobile, reinstalls, typechecks, rebuilds,
-# zips Lambda, and (optionally) deploys. Safe to run repeatedly.
-# Requirements: PowerShell 7+, git, Node 20+, npm, AWS CLI v2 (profile configured).
+param(
+  [string]$Region      = "us-east-1",
+  [string]$Profile     = "mbapp-nonprod-admin",
+  [string]$ApiId       = "ki8kgivz1f",
+  [string]$LambdaName  = "mbapp-nonprod-objects",
+  [string]$ExpoApiBase = "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com",
+  [string]$TenantId    = "DemoTenant",
+  [switch]$EnsureRoutes # add/verify HTTP API routes
+)
 
-$ErrorActionPreference = "Stop"
-$Repo       = "C:\Users\bryan\MBapp-pub"    # per your note
-$AwsProfile = "mbapp-nonprod-admin"
-$AwsRegion  = "us-east-1"
-$LambdaName = "mbapp-nonprod-objects"
+function Info($msg){ Write-Host "== $msg" -ForegroundColor Cyan }
+function Step($msg){ Write-Host "-> $msg" -ForegroundColor Yellow }
+function Ok($msg){ Write-Host "✓ $msg" -ForegroundColor Green }
+function Err($msg){ Write-Host "✗ $msg" -ForegroundColor Red }
 
-function Say($m,$c="Cyan"){ Write-Host $m -ForegroundColor $c }
-function Ensure-Tool($t,$h){ if(!(Get-Command $t -Ea SilentlyContinue)){ throw "Missing '$t'. $h" } }
+# ---------- Reset & build API ----------
+Info "Resetting and building apps/api"
+Push-Location apps\api
+Step "Clean node_modules + lockfile"
+if (Test-Path node_modules) { Remove-Item -Recurse -Force node_modules }
+if (Test-Path package-lock.json) { Remove-Item -Force package-lock.json }
 
-Ensure-Tool node "Install Node.js 20.x and retry."
-Ensure-Tool npm  "npm should be on PATH."
-Ensure-Tool git  "Install Git and retry."
-Ensure-Tool aws  "Install AWS CLI v2 and run 'aws configure sso' for $AwsProfile."
+Step "npm ci"
+npm ci
+if ($LASTEXITCODE -ne 0) { Err "npm ci failed (api)"; exit 1 }
 
-Set-Location $Repo
-git rev-parse --abbrev-ref HEAD | Out-Null
-Say "Repo: $Repo  |  Branch: $(git rev-parse --abbrev-ref HEAD)"
-
-function CleanNode($p){
-  if(!(Test-Path $p)){ return }
-  Push-Location $p
-  Say "Cleaning $p"
-  # Common build outputs & caches
-  Remove-Item node_modules,.expo,.cache,.turbo,dist,build,out,dist.zip -Recurse -Force -Ea SilentlyContinue
-  # Lockfiles (we'll prefer npm install unless a lockfile exists)
-  Remove-Item yarn.lock,pnpm-lock.yaml -Force -Ea SilentlyContinue
-  # Metro cache (mobile)
-  Remove-Item .\metro-cache -Recurse -Force -Ea SilentlyContinue
-  npm cache verify | Out-Null
-  Pop-Location
-}
-
-function SmartInstall($p){
-  Push-Location $p
-  if(Test-Path package-lock.json){
-    Say "Installing with npm ci in $p"
-    npm ci
-  } else {
-    Say "Installing with npm install in $p"
-    npm install
-  }
-  Pop-Location
-}
-
-# --- API ---
-$Api = Join-Path $Repo "apps\api"
-CleanNode $Api
-SmartInstall $Api
-
-# Ensure AWS SDK v3 + TS toolchain present
-Push-Location $Api
-npm i @aws-sdk/client-dynamodb @aws-sdk/lib-dynamodb @aws-sdk/util-dynamodb
-npm i -D esbuild typescript @types/node
-
-Say "Typechecking API (no emit)…"
-if (Test-Path .\tsconfig.json) { npx tsc --noEmit }
-
-Say "Building API…"
+Step "build api (esbuild)"
 npm run build
-if (!(Test-Path .\dist\index.js)) { throw "Build missing dist\index.js" }
-if (Test-Path .\dist.zip) { Remove-Item .\dist.zip -Force }
-Push-Location .\dist
-Compress-Archive -Path .\index.js -DestinationPath ..\dist.zip -Force
+if ($LASTEXITCODE -ne 0) { Err "npm run build failed (api)"; exit 1 }
+
+Step "zip dist/index.js -> dist.zip"
+if (Test-Path dist.zip) { Remove-Item -Force dist.zip }
+Compress-Archive -Path .\dist\index.js -DestinationPath .\dist.zip -Force
+Ok "api build packaged"
+
+# ---------- Deploy Lambda ----------
+Info "Deploying Lambda $LambdaName"
+aws lambda update-function-code `
+  --function-name $LambdaName `
+  --zip-file fileb://dist.zip `
+  --region $Region --profile $Profile | Out-Null
+
+aws lambda wait function-updated `
+  --function-name $LambdaName `
+  --region $Region --profile $Profile
+Ok "Lambda updated"
+
 Pop-Location
+
+# ---------- (Optional) Ensure HTTP API routes ----------
+if ($EnsureRoutes) {
+  Info "Ensuring HTTP API routes on $ApiId"
+  $ints = aws apigatewayv2 get-integrations --api-id $ApiId --region $Region --profile $Profile | ConvertFrom-Json
+  $int  = $ints.Items | Where-Object {
+    $_.IntegrationUri -match $LambdaName -or $_.IntegrationType -eq "AWS_PROXY"
+  } | Select-Object -First 1
+  if (-not $int) { Err "No integration found for $LambdaName"; exit 1 }
+  $target = "integrations/$($int.IntegrationId)"
+
+  $routeKeys = @(
+    'ANY /products','ANY /products/{id}','ANY /products/search',
+    'ANY /events','ANY /events/{id}','ANY /events/{id}/registrations',
+    'ANY /registrations','ANY /registrations/{id}',
+    'ANY /objects','ANY /objects/{type}','ANY /objects/{type}/{id}',
+    'ANY /__echo', '$default'
+  )
+  $existing = (aws apigatewayv2 get-routes --api-id $ApiId --region $Region --profile $Profile | ConvertFrom-Json).Items
+  foreach($rk in $routeKeys){
+    if($existing | Where-Object { $_.RouteKey -eq $rk }){
+      Write-Host "Route exists: $rk" -ForegroundColor DarkGray
+    } else {
+      Step "Creating route: $rk"
+      aws apigatewayv2 create-route --api-id $ApiId --route-key $rk --target $target --region $Region --profile $Profile | Out-Null
+    }
+  }
+  Ok "Routes ensured"
+}
+
+# ---------- Reset & check Mobile ----------
+Info "Resetting apps/mobile deps"
+Push-Location apps\mobile
+
+Step "Clean node_modules + lockfile"
+if (Test-Path node_modules) { Remove-Item -Recurse -Force node_modules }
+if (Test-Path package-lock.json) { Remove-Item -Force package-lock.json }
+
+Step "npm ci (mobile)"
+npm ci
+if ($LASTEXITCODE -ne 0) { Err "npm ci failed (mobile)"; exit 1 }
+
+Step "Typecheck (mobile)"
+npx tsc --noEmit
+if ($LASTEXITCODE -ne 0) { Err "Typecheck failed (mobile)"; exit 1 } else { Ok "Typecheck clean" }
+
 Pop-Location
 
-# --- MOBILE ---
-$Mobile = Join-Path $Repo "apps\mobile"
-CleanNode $Mobile
-SmartInstall $Mobile
-Push-Location $Mobile
+# ---------- Print handy env + smokes ----------
+Info "Expo env to run locally:"
+Write-Host ('$env:EXPO_PUBLIC_API_BASE = "' + $ExpoApiBase + '"')
+Write-Host ('$env:EXPO_PUBLIC_TENANT_ID = "' + $TenantId + '"')
+Write-Host 'npx expo start -c'
+Write-Host ""
 
-# Align Expo-native deps (no-op if not needed)
-try { npx expo install } catch { Say "expo install skipped (not needed?)" "Yellow" }
-
-Say "Typechecking Mobile (no emit)…"
-if (Test-Path .\tsconfig.json) { npx tsc --noEmit }
-
-Pop-Location
-
-# --- OPTIONAL: Deploy Lambda (uncomment to deploy automatically) ---
-#Push-Location $Api
-#Say "Deploying Lambda $LambdaName…"
-#aws sts get-caller-identity --profile $AwsProfile | Out-Null
-#aws lambda update-function-code `
-#  --function-name $LambdaName `
-#  --zip-file fileb://dist.zip `
-#  --region $AwsRegion `
-#  --profile $AwsProfile | Out-Null
-#aws lambda wait function-updated `
-#  --function-name $LambdaName `
-#  --region $AwsRegion `
-#  --profile $AwsProfile
-#Say "Lambda updated." "Green"
-#Pop-Location
-
-Say "✅ Reset complete. Next:"
-Say " - Mobile:  cd $Mobile ; npx expo start -c" "Gray"
-Say " - API smoke: use your existing Invoke-RestMethod calls" "Gray"
+Info "API smoke commands:"
+Write-Host ('$API="' + $ExpoApiBase + '"')
+Write-Host ('$HDR=@{ "x-tenant-id"="' + $TenantId + '"; "content-type"="application/json" }')
+Write-Host 'Invoke-RestMethod "$API/__echo"'
+Write-Host '$p = Invoke-RestMethod -Method POST "$API/products" -Headers $HDR -Body (@{ name="Smoke Product" } | ConvertTo-Json)'
+Write-Host 'Invoke-RestMethod "$API/products/$($p.id)" -Headers $HDR | ConvertTo-Json -Depth 4'
+Write-Host '$e = Invoke-RestMethod -Method POST "$API/events" -Headers $HDR -Body (@{ name="Smoke Event" } | ConvertTo-Json)'
+Write-Host 'Invoke-RestMethod "$API/events?sort=desc" -Headers $HDR | ConvertTo-Json -Depth 4'
+Write-Host '$r = Invoke-RestMethod -Method POST "$API/registrations" -Headers $HDR -Body (@{ eventId=$e.id; accountId="acct-smoke" } | ConvertTo-Json)'
+Write-Host 'Invoke-RestMethod "$API/events/$($e.id)/registrations" -Headers $HDR | ConvertTo-Json -Depth 4'
+Ok "All done"
