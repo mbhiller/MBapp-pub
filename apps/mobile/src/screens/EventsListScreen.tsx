@@ -19,7 +19,7 @@ export default function EventsListScreen({ navigation }: Props) {
     try {
       setErr(null);
       setLoading(true);
-      const r = await listEvents(reset ? undefined : next);
+      const r = await listEvents(reset ? undefined : { next });
       setItems(reset ? r.items : [...items, ...r.items]);
       setNext(r.next);
     } catch (e: any) {

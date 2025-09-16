@@ -55,6 +55,7 @@ type ListOpts = {
 export function listProducts(): Promise<ListPage<Product>>;
 export function listProducts(next: string): Promise<ListPage<Product>>;
 export function listProducts(opts: ListOpts): Promise<ListPage<Product>>;
+export function listProducts(arg: undefined): Promise<ListPage<Product>>;
 export async function listProducts(arg?: string | ListOpts): Promise<ListPage<Product>> {
   const p = new URLSearchParams();
   if (typeof arg === "string") {

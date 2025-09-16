@@ -10,8 +10,8 @@ export type Role =
 export type ModuleDef = {
   key: ModuleKey;
   title: string;
-  screen: string;
-  required: Role[]; // any one grants access
+  screen: string;          // RootStack route name
+  required: Role[];        // any one role grants access
 };
 
 export const MODULES: ModuleDef[] = [
