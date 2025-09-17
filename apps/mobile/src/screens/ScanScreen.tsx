@@ -3,25 +3,24 @@ import { View, Text, Alert, ActivityIndicator } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/types";
+import { getObject } from "../api/client";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Scan">;
 
-// Parsed payload shape (intentionally loose to avoid TS errors)
 type QrParsed = {
-  t?: string; // e.g. "mbapp/object-v1" | "mbapp/po-v1" | etc.
+  t?: string;          // "mbapp/object-v1"
   id?: string;
-  type?: string;
-  href?: string;
-  epc?: string; // allow EPC text as parsed fallback
+  type?: string;       // product | inventory | event | registration
+  intent?: "navigate" | "attach-epc";
+  attachTo?: { type: string; id: string };
 };
 
 function tryParse(text: string): QrParsed | null {
   try {
-    const obj = JSON.parse(text);
-    return typeof obj === "object" && obj ? (obj as QrParsed) : null;
-  } catch {
+    const j = JSON.parse(text);
+    if (j && typeof j === "object") return j as QrParsed;
     return null;
-  }
+  } catch { return null; }
 }
 
 export default function ScanScreen({ navigation, route }: Props) {
@@ -33,79 +32,97 @@ export default function ScanScreen({ navigation, route }: Props) {
     if (!permission?.granted) requestPermission();
   }, [permission, requestPermission]);
 
-  const handleScan = useCallback(
-    async (result: { data: string }) => {
-      if (!scanning || busy) return;
-      setScanning(false);
-      setBusy(true);
+  const routeTo = useCallback((type: string, id: string) => {
+    switch (type) {
+      case "product":
+        navigation.navigate("ProductDetail", { id, mode: "edit" });
+        return;
+      case "inventory":
+        navigation.navigate("InventoryDetail", { id, mode: "edit" });
+        return;
+      case "event":
+        navigation.navigate("EventDetail", { id, mode: "edit" });
+        return;
+      case "registration":
+        navigation.navigate("RegistrationDetail", { id });
+        return;
+      default:
+        Alert.alert("Unsupported type", `Type "${type}" is not routed yet.`);
+    }
+  }, [navigation]);
 
-      const text = result?.data ?? "";
-      const parsed = tryParse(text);
-      const intent = route.params?.intent ?? "navigate";
+  const handleAttachEpc = useCallback((payload: QrParsed) => {
+    Alert.alert(
+      "Attach EPC (coming soon)",
+      `Intent: attach-epc\nAttachTo: ${JSON.stringify(payload.attachTo)}`
+    );
+  }, []);
 
-      try {
-        // Minimal, safe intent handling
-        if (parsed?.t === "mbapp/object-v1" && parsed.id && parsed.type) {
-          if (intent === "attach-epc" && route.params?.attachTo) {
-            // In a later slice, call API to set tags.rfidEpc etc.
-            Alert.alert("Attach EPC", "Simulated attach complete.");
-            navigation.goBack();
-          } else {
-            navigation.replace("ObjectDetail", {
-              id: parsed.id,
-              type: parsed.type,
-            });
-          }
-          return;
-        }
+  const onBarcodeScanned = useCallback(async (scan: { data: string }) => {
+    if (!scanning || busy) return;
+    setScanning(false);
+    setBusy(true);
+    try {
+      const text = scan.data?.trim();
+      const parsed = tryParse(text) ?? ({ id: text } as QrParsed);
+      const intent = parsed.intent ?? route.params?.intent ?? "navigate";
 
-        // Fallback: treat as EPC/text and just alert for now
-        const epc = parsed?.epc ?? text;
-        Alert.alert("Scanned", epc.slice(0, 140));
-        navigation.goBack();
-      } finally {
-        setBusy(false);
-        setTimeout(() => setScanning(true), 250);
+      if (intent === "attach-epc") {
+        handleAttachEpc(parsed);
+        return;
       }
-    },
-    [busy, navigation, route.params, scanning]
-  );
 
-  if (!permission?.granted) {
+      // Prefer explicit object payloads
+      if (parsed.t === "mbapp/object-v1" && parsed.type && parsed.id) {
+        routeTo(parsed.type, parsed.id);
+        return;
+      }
+
+      // Fallback heuristics: try product, then inventory
+      if (parsed.id) {
+        try {
+          await getObject("product", parsed.id);
+          routeTo("product", parsed.id);
+          return;
+        } catch (_) { /* try inventory next */ }
+        try {
+          await getObject("inventory", parsed.id);
+          routeTo("inventory", parsed.id);
+          return;
+        } catch (_) { /* no-op */ }
+      }
+
+      Alert.alert("Not recognized", "Couldn’t resolve a known object from the scan.");
+    } finally {
+      setBusy(false);
+      // Re-arm the scanner a moment later so accidental double scans are avoided
+      setTimeout(() => setScanning(true), 600);
+    }
+  }, [scanning, busy, route.params?.intent, routeTo, handleAttachEpc]);
+
+  if (!permission) {
+    return <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}><ActivityIndicator /></View>;
+  }
+  if (!permission.granted) {
     return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-        <Text>Camera permission is required.</Text>
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}>
+        <Text>Camera access is required to scan codes.</Text>
       </View>
     );
   }
 
   return (
     <View style={{ flex: 1 }}>
-      {busy && (
-        <View
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            height: 4,
-            backgroundColor: "#00000020",
-            zIndex: 1,
-          }}
-        >
-          <ActivityIndicator />
+      {!scanning && (
+        <View style={{ position: "absolute", top: 12, left: 12, right: 12, zIndex: 10, alignItems: "center" }}>
+          {busy ? <ActivityIndicator /> : <Text>Re-arming scanner…</Text>}
         </View>
       )}
       <CameraView
         style={{ flex: 1 }}
-        barcodeScannerSettings={{ barcodeTypes: ["qr", "code128", "code39", "ean13", "ean8", "upc_a", "upc_e", "pdf417"] }}
-        onBarcodeScanned={({ data }) => handleScan({ data })}
+        onBarcodeScanned={scanning ? onBarcodeScanned : undefined}
+        barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
       />
-      <View style={{ padding: 12 }}>
-        <Text>
-          Intent: {route.params?.intent ?? "navigate"}
-        </Text>
-      </View>
     </View>
   );
 }

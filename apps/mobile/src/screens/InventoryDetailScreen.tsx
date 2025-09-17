@@ -47,7 +47,8 @@ export default function InventoryDetailScreen() {
   const mCreate = useMutation({
     mutationFn: (input: Partial<InventoryItem>) => createInventory(input),
     onSuccess: (item) => {
-      qc.invalidateQueries({ queryKey: ["inventory", "list"] });
+      // Invalidate all inventory list keys (with or without filters)
+      qc.invalidateQueries({ queryKey: ["inventory"] });
       Alert.alert("Created", `Inventory ${item.id}`);
       nav.goBack();
     },
@@ -56,8 +57,7 @@ export default function InventoryDetailScreen() {
   const mUpdate = useMutation({
     mutationFn: (patch: Partial<InventoryItem>) => updateInventory(id!, patch),
     onSuccess: (item) => {
-      qc.invalidateQueries({ queryKey: ["inventory", "list"] });
-      qc.invalidateQueries({ queryKey: ["inventory", id] });
+      qc.invalidateQueries({ queryKey: ["inventory"] });
       Alert.alert("Saved", `Inventory ${item.id}`);
       nav.goBack();
     },
@@ -65,9 +65,15 @@ export default function InventoryDetailScreen() {
 
   const save = () => {
     const qty = Number(qtyOnHand);
-    if (Number.isNaN(qty)) { Alert.alert("Invalid quantity", "Qty must be a number"); return; }
+    if (Number.isNaN(qty)) {
+      Alert.alert("Invalid quantity", "Qty must be a number");
+      return;
+    }
     const costNum = cost === "" ? undefined : Number(cost);
-    if (costNum != null && Number.isNaN(costNum)) { Alert.alert("Invalid cost", "Cost must be a number"); return; }
+    if (costNum != null && Number.isNaN(costNum)) {
+      Alert.alert("Invalid cost", "Cost must be a number");
+      return;
+    }
 
     const payload: Partial<InventoryItem> = {
       sku: sku || undefined,
@@ -78,6 +84,7 @@ export default function InventoryDetailScreen() {
       cost: costNum,
       type: "inventory",
     };
+
     if (mode === "new") mCreate.mutate(payload);
     else mUpdate.mutate(payload);
   };
@@ -86,14 +93,28 @@ export default function InventoryDetailScreen() {
 
   return (
     <View style={{ flex: 1, padding: 16, backgroundColor: t.colors.bg, gap: 12 }}>
-      <Text variant="titleLarge">{mode === "new" ? "New Inventory Item" : (q.data?.name ?? q.data?.sku ?? "Inventory")}</Text>
+      <Text variant="titleLarge">
+        {mode === "new" ? "New Inventory Item" : (q.data?.name ?? q.data?.sku ?? "Inventory")}
+      </Text>
 
       <TextInput label="SKU" value={sku} onChangeText={setSku} mode="outlined" />
       <TextInput label="Name" value={name} onChangeText={setName} mode="outlined" />
-      <TextInput label="Quantity on hand" value={qtyOnHand} onChangeText={setQty} keyboardType="numeric" mode="outlined" />
+      <TextInput
+        label="Quantity on hand"
+        value={qtyOnHand}
+        onChangeText={setQty}
+        keyboardType="numeric"
+        mode="outlined"
+      />
       <TextInput label="UOM" value={uom} onChangeText={setUom} mode="outlined" />
       <TextInput label="Location" value={location} onChangeText={setLocation} mode="outlined" />
-      <TextInput label="Unit cost" value={cost} onChangeText={setCost} keyboardType="decimal-pad" mode="outlined" />
+      <TextInput
+        label="Unit cost"
+        value={cost}
+        onChangeText={setCost}
+        keyboardType="decimal-pad"
+        mode="outlined"
+      />
 
       <Button mode="contained" onPress={save} loading={busy} disabled={busy} style={{ marginTop: 8 }}>
         {mode === "new" ? "Create" : "Save"}

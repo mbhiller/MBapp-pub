@@ -1,14 +1,17 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022", "DOM"],
+    "useDefineForClassFields": true,
     "module": "ESNext",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
     "strict": true,
-    "skipLibCheck": true,
     "noEmit": true,
-    "types": ["vite/client"]
+    "skipLibCheck": true,
+    "allowJs": false,
+    "resolveJsonModule": true,
+    "isolatedModules": true
   },
-  "include": ["src"]
+  "include": ["src", "src/vite-env.d.ts"]
 }
