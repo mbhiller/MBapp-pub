@@ -2,13 +2,13 @@
 import "react-native-gesture-handler";
 import * as React from "react";
 import { NavigationContainer } from "@react-navigation/native";
-import RootStack from "./src/navigation/RootStack";
-import { ThemeProvider } from "./src/providers/ThemeProvider";
-import { RolesProvider } from "./src/providers/RolesProvider";
+import RootStack from "./navigation/RootStack"
+import { ThemeProvider } from "./providers/ThemeProvider";
+import { RolesProvider } from "./providers/RolesProvider";
 import { QueryClientProvider } from "@tanstack/react-query";
 
 // ✅ use the shared client
-import { queryClient } from "./src/providers/queryClient";
+import { queryClient } from "./providers/queryClient";
 
 function parseEnvRoles(): string[] {
   const raw =
