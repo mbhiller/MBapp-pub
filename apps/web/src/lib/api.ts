@@ -174,6 +174,49 @@ export async function searchByTag<T>(
   return data;
 }
 
+// ---- Clients
+export type Client = {
+  id: string; type: "client"; tenant?: string;
+  name?: string; email?: string; phone?: string; status?: "active"|"blocked"; tags?: string[];
+  createdAt?: string; updatedAt?: string;
+};
+export function listClients(opts: { limit?:number; next?:string; q?:string; email?:string; order?:"asc"|"desc" } = {}) {
+  const p = new URLSearchParams();
+  if (opts.limit!=null) p.set("limit", String(opts.limit));
+  if (opts.next) p.set("next", opts.next);
+  if (opts.q) p.set("q", opts.q);
+  if (opts.email) p.set("email", opts.email);
+  if (opts.order) p.set("order", opts.order);
+  return req(`/objects/client?${p.toString()}`);
+}
+export const getClient = (id: string) => req(`/objects/client/${encodeURIComponent(id)}`);
+export const createClient = (body: Partial<Client>) => req(`/objects/client`, { method:"POST", body: JSON.stringify(body) });
+export const updateClient = (id: string, patch: Partial<Client>) =>
+  req(`/objects/client/${encodeURIComponent(id)}`, { method:"PUT", body: JSON.stringify(patch) });
+
+// ---- Resources
+export type Resource = {
+  id: string; type: "resource"; tenant?: string;
+  name?: string; resourceType?: string; location?: string; capacity?: number; status?: string; tags?: string[];
+  createdAt?: string; updatedAt?: string;
+};
+export function listResources(opts: { limit?:number; next?:string; q?:string; resourceType?:string; location?:string; order?:"asc"|"desc" } = {}) {
+  const p = new URLSearchParams();
+  if (opts.limit!=null) p.set("limit", String(opts.limit));
+  if (opts.next) p.set("next", opts.next);
+  if (opts.q) p.set("q", opts.q);
+  if (opts.resourceType) p.set("resourceType", opts.resourceType);
+  if (opts.location) p.set("location", opts.location);
+  if (opts.order) p.set("order", opts.order);
+  return req(`/objects/resource?${p.toString()}`);
+}
+export const getResource = (id: string) => req(`/objects/resource/${encodeURIComponent(id)}`);
+export const createResource = (body: Partial<Resource>) => req(`/objects/resource`, { method:"POST", body: JSON.stringify(body) });
+export const updateResource = (id: string, patch: Partial<Resource>) =>
+  req(`/objects/resource/${encodeURIComponent(id)}`, { method:"PUT", body: JSON.stringify(patch) });
+
+
+
 // ---------- Convenience: bundle for `import { api } from "./lib/api"`
 export const api = {
   // canonical
@@ -182,4 +225,7 @@ export const api = {
   getTenants,
   // legacy helpers kept for App.tsx
   getObjectByQuery, getObjectByPath, listByType, searchByTag,
+   //Clients and Resources
+  listClients, getClient, createClient, updateClient,
+  listResources, getResource, createResource, updateResource,
 };

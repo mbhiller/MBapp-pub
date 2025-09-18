@@ -37,6 +37,14 @@ export type RootStackParamList = {
   // Inventory
   InventoryList: undefined;
   InventoryDetail: { id?: string; mode?: "new" | "edit" } | undefined;
+  
+  //Clients
+  ClientsList: undefined;
+  ClientDetail: { id?: string; mode?: "new" | "edit" } | undefined;
+  
+  //Resources
+  ResourcesList: undefined;
+  ResourceDetail: { id?: string; mode?: "new" | "edit" } | undefined;
 };
 
 // Convenience prop helper used by many screens

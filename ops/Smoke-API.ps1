@@ -1,105 +1,101 @@
 [CmdletBinding()]
 param(
-  [string]$ApiId    = $env:MBAPP_API_ID,
-  [string]$Region   = $env:MBAPP_REGION ?? "us-east-1",
-  [string]$TenantId = $env:MBAPP_TENANT ?? "DemoTenant",
-  [switch]$TailLogs
+  [string]$Base,
+  [string]$Tenant,
+  [switch]$VerboseErrors
 )
 
-if (-not $ApiId) { throw "ApiId not found. Run .\ops\Set-MBEnv.ps1 first or pass -ApiId." }
-
-$Base = "https://$ApiId.execute-api.$Region.amazonaws.com"
-$Fn   = "mbapp-$($env:MBAPP_ENV ?? 'nonprod')-objects"
-
-Write-Host "Base:   $Base"
-Write-Host "Tenant: $TenantId"
-if ($env:AWS_PROFILE) { Write-Host "Profile: $env:AWS_PROFILE" }
-
-# tail logs (optional)
-if ($TailLogs) {
-  Start-Job -Name "tail" -ScriptBlock {
-    param($fn,$region,$profile)
-    $args = @("--region",$region)
-    if ($profile) { $args += @("--profile",$profile) }
-    & aws @args logs tail "/aws/lambda/$fn" --since 10m --follow
-  } -ArgumentList $Fn,$Region,$env:AWS_PROFILE | Out-Null
-  Write-Host "Tailing CloudWatch logs for $Fn ..." -ForegroundColor DarkGray
-}
-
-function Invoke-Json {
-  param(
-    [string]$Url,
-    [string]$Method = "GET",
-    [object]$Body = $null
-  )
-  $headers = @{ "x-tenant-id" = $TenantId }
-  if ($Body -ne $null) { $headers["Content-Type"] = "application/json" }
-
-  try {
-    if ($Body -ne $null) {
-      $json = ($Body | ConvertTo-Json -Depth 10)
-      return irm $Url -Method $Method -Headers $headers -Body $json
+# ------------------------------
+# Resolve Base/Tenant from envs
+# ------------------------------
+if (-not $Base) {
+  if     ($env:MBAPP_API_BASE)        { $Base = $env:MBAPP_API_BASE }
+  elseif ($env:EXPO_PUBLIC_API_BASE)  { $Base = $env:EXPO_PUBLIC_API_BASE }
+  elseif ($env:MBAPP_BASE)            { $Base = $env:MBAPP_BASE }
+  else {
+    # Try to build from API ID + region
+    if ($env:MBAPP_API_ID -and $env:AWS_REGION) {
+      $Base = "https://$($env:MBAPP_API_ID).execute-api.$($env:AWS_REGION).amazonaws.com"
     } else {
-      return irm $Url -Method $Method -Headers $headers
+      throw "No API base set. Pass -Base or set MBAPP_API_BASE / EXPO_PUBLIC_API_BASE (or MBAPP_API_ID + AWS_REGION)."
     }
-  } catch {
-    Write-Host "ERROR calling $Method $Url" -ForegroundColor Red
-    throw
   }
 }
-
-$fail = 0
-function Assert {
-  param([bool]$cond,[string]$msg)
-  if (-not $cond) { $script:fail++; Write-Host "❌ $msg" -ForegroundColor Red } else { Write-Host "✅ $msg" -ForegroundColor Green }
+if (-not $Tenant) {
+  if     ($env:MBAPP_TENANT_ID)       { $Tenant = $env:MBAPP_TENANT_ID }
+  elseif ($env:EXPO_PUBLIC_TENANT_ID) { $Tenant = $env:EXPO_PUBLIC_TENANT_ID }
+  elseif ($env:MBAPP_TENANT)          { $Tenant = $env:MBAPP_TENANT }
+  else { $Tenant = "DemoTenant" }
 }
 
-# --- CREATE ---
-$id = [guid]::NewGuid().ToString()
-$createBody = @{
-  kind  = "product"
-  id    = $id
-  sku   = "SKU-$([int](Get-Random -Minimum 100 -Maximum 999))"
-  name  = "SmokeTest Widget"
-  price = 12.34
-  brand = "Acme"
+# Sanitize base
+$Base = ($Base -replace '"','' -replace "'","").Trim()
+$Base = $Base.TrimEnd('/')
+# Validate
+$uriObj = $null
+if (-not [System.Uri]::TryCreate($Base, [System.UriKind]::Absolute, [ref]$uriObj)) {
+  throw "Invalid API base: [$Base] — expected something like https://<api-id>.execute-api.$($env:AWS_REGION).amazonaws.com"
 }
-$created = Invoke-Json "$Base/products" "POST" $createBody
-Assert ($created.id -eq $id) "POST /products created id=$id"
 
-# --- LIST ---
-$listRaw = Invoke-Json "$Base/products" "GET"
-# Normalize: some handlers return { items, cursor }, others return an array
-if ($listRaw -is [System.Array]) {
-  $items = $listRaw
-} elseif ($listRaw.PSObject.Properties.Name -contains 'items') {
-  $items = $listRaw.items
-} else {
-  $items = @()
+$Headers = @{ "x-tenant-id" = $Tenant; "content-type" = "application/json" }
+
+function Assert($cond, $msg) {
+  if (-not $cond) { throw "❌ $msg" } else { Write-Host "✅ $msg" }
 }
-Assert ($items -is [System.Array]) "GET /products returned a list"
-Assert (($items | Where-Object { $_.id -eq $id } | Measure-Object).Count -gt 0) "Created product appears in list"
-
-# --- GET by id ---
-$got = Invoke-Json "$Base/products/$id" "GET"
-Assert ($got.id -eq $id) "GET /products/{id} returns created product"
-
-# --- UPDATE ---
-# choose a reasonable new price between 10 and 50 with 2 decimals
-$newPrice = [math]::Round((Get-Random -Minimum 10.0 -Maximum 50.0), 2)
-$got.price = $newPrice
-
-$updated = Invoke-Json "$Base/products/$id" "PUT" $got
-# accept either the updated object or a minimal { id, price } echo
-$updatedPrice = if ($updated.price) { [decimal]$updated.price } else { [decimal]$got.price }
-Assert ($updatedPrice -eq [decimal]$newPrice) "PUT /products/{id} updated price -> $newPrice"
-
-# Summary
-if ($TailLogs) { Get-Job tail | Stop-Job | Remove-Job | Out-Null }
-if ($fail -gt 0) {
-  Write-Host "SMOKE: $fail failure(s)" -ForegroundColor Red
-  exit 1
-} else {
-  Write-Host "SMOKE: all tests passed 🎉" -ForegroundColor Green
-  exit 0
+function GET($path)  {
+  try { Invoke-RestMethod -Method GET -Headers $Headers -Uri "$Base$path" }
+  catch { if ($VerboseErrors) { $_ | Format-List * -Force }; throw }
 }
+function POST($p,$b) {
+  try { Invoke-RestMethod -Method POST -Headers $Headers -Uri "$Base$p" -Body ($b | ConvertTo-Json -Depth 8) }
+  catch { if ($VerboseErrors) { $_ | Format-List * -Force }; throw }
+}
+function PUT($p,$b)  {
+  try { Invoke-RestMethod -Method PUT -Headers $Headers -Uri "$Base$p" -Body ($b | ConvertTo-Json -Depth 8) }
+  catch { if ($VerboseErrors) { $_ | Format-List * -Force }; throw }
+}
+
+Write-Host "Smoke → $Base  tenant=$Tenant"
+
+# ------------------------------
+# Health
+# ------------------------------
+$h = GET "/health"
+Assert ($h.ok -eq $true) "/health ok"
+
+# ------------------------------
+# Clients CRUD
+# ------------------------------
+$ts = [int][double]::Parse((Get-Date -UFormat %s))
+$c = POST "/clients" @{ type="client"; name="Smoke Client"; email=("smoke+$ts@example.com") }
+Assert ($c.id) "POST /clients -> id returned"
+$cl = GET "/clients?limit=5"
+# 'items' might be null if empty; coerce to array count
+$clCount = 0; if ($cl.items) { if ($cl.items -is [array]) { $clCount = $cl.items.Count } else { $clCount = 1 } }
+Assert ($clCount -ge 1) "GET /clients list has items"
+$cg = GET "/clients/$($c.id)"
+Assert ($cg.id -eq $c.id) "GET /clients/{id} returns same id"
+$cu = PUT "/clients/$($c.id)" @{ name="Smoke Client Updated" }
+Assert ($cu.id -eq $c.id) "PUT /clients/{id} returns id"
+
+# ------------------------------
+# Resources CRUD
+# ------------------------------
+$r = POST "/resources" @{ type="resource"; name="Smoke Stall"; resourceType="stall"; location="Barn A" }
+Assert ($r.id) "POST /resources -> id returned"
+$rl = GET "/resources?limit=5"
+$rlCount = 0; if ($rl.items) { if ($rl.items -is [array]) { $rlCount = $rl.items.Count } else { $rlCount = 1 } }
+Assert ($rlCount -ge 1) "GET /resources list has items"
+$rg = GET "/resources/$($r.id)"
+Assert ($rg.id -eq $r.id) "GET /resources/{id} returns same id"
+$ru = PUT "/resources/$($r.id)" @{ status="available" }
+Assert ($ru.id -eq $r.id) "PUT /resources/{id} returns id"
+
+# ------------------------------
+# Generic objects sanity
+# ------------------------------
+$ol = GET "/objects/resource?limit=1"
+$olCount = 0; if ($ol.items) { if ($ol.items -is [array]) { $olCount = $ol.items.Count } else { $olCount = 1 } }
+Assert ($olCount -ge 0) "GET /objects/resource reachable"
+
+Write-Host "🎉 API SMOKE OK"

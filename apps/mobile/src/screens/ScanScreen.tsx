@@ -4,13 +4,14 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/types";
 import { getObject } from "../api/client";
+import { useColors } from "../providers/useColors";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Scan">;
 
 type QrParsed = {
-  t?: string;          // "mbapp/object-v1"
+  t?: "mbapp/object-v1";
   id?: string;
-  type?: string;       // product | inventory | event | registration
+  type?: "product" | "inventory" | "event" | "registration" | "client" | "resource";
   intent?: "navigate" | "attach-epc";
   attachTo?: { type: string; id: string };
 };
@@ -18,12 +19,14 @@ type QrParsed = {
 function tryParse(text: string): QrParsed | null {
   try {
     const j = JSON.parse(text);
-    if (j && typeof j === "object") return j as QrParsed;
+    return j && typeof j === "object" ? (j as QrParsed) : null;
+  } catch {
     return null;
-  } catch { return null; }
+  }
 }
 
 export default function ScanScreen({ navigation, route }: Props) {
+  const t = useColors();
   const [permission, requestPermission] = useCameraPermissions();
   const [scanning, setScanning] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -32,90 +35,101 @@ export default function ScanScreen({ navigation, route }: Props) {
     if (!permission?.granted) requestPermission();
   }, [permission, requestPermission]);
 
-  const routeTo = useCallback((type: string, id: string) => {
-    switch (type) {
-      case "product":
-        navigation.navigate("ProductDetail", { id, mode: "edit" });
-        return;
-      case "inventory":
-        navigation.navigate("InventoryDetail", { id, mode: "edit" });
-        return;
-      case "event":
-        navigation.navigate("EventDetail", { id, mode: "edit" });
-        return;
-      case "registration":
-        navigation.navigate("RegistrationDetail", { id });
-        return;
-      default:
-        Alert.alert("Unsupported type", `Type "${type}" is not routed yet.`);
-    }
-  }, [navigation]);
+  const routeTo = useCallback(
+    (type: string, id: string) => {
+      switch (type) {
+        case "product":       navigation.navigate("ProductDetail", { id, mode: "edit" }); return;
+        case "inventory":     navigation.navigate("InventoryDetail", { id, mode: "edit" }); return;
+        case "event":         navigation.navigate("EventDetail", { id, mode: "edit" }); return;
+        case "registration":  navigation.navigate("RegistrationDetail", { id }); return;
+        case "client":        navigation.navigate("ClientDetail", { id, mode: "edit" }); return;
+        case "resource":      navigation.navigate("ResourceDetail", { id, mode: "edit" }); return;
+        default:
+          Alert.alert("Unsupported type", `Type "${type}" is not routed yet.`);
+      }
+    },
+    [navigation]
+  );
 
   const handleAttachEpc = useCallback((payload: QrParsed) => {
-    Alert.alert(
-      "Attach EPC (coming soon)",
-      `Intent: attach-epc\nAttachTo: ${JSON.stringify(payload.attachTo)}`
-    );
+    Alert.alert("Attach EPC (coming soon)", `AttachTo: ${JSON.stringify(payload.attachTo)}`);
   }, []);
 
-  const onBarcodeScanned = useCallback(async (scan: { data: string }) => {
-    if (!scanning || busy) return;
-    setScanning(false);
-    setBusy(true);
-    try {
-      const text = scan.data?.trim();
-      const parsed = tryParse(text) ?? ({ id: text } as QrParsed);
-      const intent = parsed.intent ?? route.params?.intent ?? "navigate";
+  const onBarcodeScanned = useCallback(
+    async (scan: { data: string }) => {
+      if (!scanning || busy) return;
+      setScanning(false);
+      setBusy(true);
+      try {
+        const text = scan.data?.trim();
+        const parsed = tryParse(text) ?? ({ id: text } as QrParsed);
+        const intent = parsed.intent ?? route.params?.intent ?? "navigate";
 
-      if (intent === "attach-epc") {
-        handleAttachEpc(parsed);
-        return;
-      }
-
-      // Prefer explicit object payloads
-      if (parsed.t === "mbapp/object-v1" && parsed.type && parsed.id) {
-        routeTo(parsed.type, parsed.id);
-        return;
-      }
-
-      // Fallback heuristics: try product, then inventory
-      if (parsed.id) {
-        try {
-          await getObject("product", parsed.id);
-          routeTo("product", parsed.id);
+        if (intent === "attach-epc") {
+          handleAttachEpc(parsed);
           return;
-        } catch (_) { /* try inventory next */ }
-        try {
-          await getObject("inventory", parsed.id);
-          routeTo("inventory", parsed.id);
-          return;
-        } catch (_) { /* no-op */ }
-      }
+        }
 
-      Alert.alert("Not recognized", "Couldn’t resolve a known object from the scan.");
-    } finally {
-      setBusy(false);
-      // Re-arm the scanner a moment later so accidental double scans are avoided
-      setTimeout(() => setScanning(true), 600);
-    }
-  }, [scanning, busy, route.params?.intent, routeTo, handleAttachEpc]);
+        // Preferred exact payload
+        if (parsed.t === "mbapp/object-v1" && parsed.type && parsed.id) {
+          routeTo(parsed.type, parsed.id);
+          return;
+        }
+
+        // Fallback heuristics: try common types by id
+        if (parsed.id) {
+          const candidates = ["product", "event", "client", "resource"] as const;
+          for (const ty of candidates) {
+            try {
+              await getObject(ty, parsed.id);
+              routeTo(ty, parsed.id);
+              return;
+            } catch {
+              // keep trying
+            }
+          }
+        }
+
+        Alert.alert("Not recognized", "Couldn’t resolve a known object from the scan.");
+      } finally {
+        setBusy(false);
+        setTimeout(() => setScanning(true), 600);
+      }
+    },
+    [scanning, busy, route.params?.intent, routeTo, handleAttachEpc]
+  );
 
   if (!permission) {
-    return <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}><ActivityIndicator /></View>;
+    return (
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+        <ActivityIndicator />
+      </View>
+    );
   }
   if (!permission.granted) {
     return (
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}>
-        <Text>Camera access is required to scan codes.</Text>
+        <Text style={{ color: t.colors.text, textAlign: "center" }}>
+          Camera access is required to scan codes.
+        </Text>
       </View>
     );
   }
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, backgroundColor: t.colors.bg }}>
       {!scanning && (
-        <View style={{ position: "absolute", top: 12, left: 12, right: 12, zIndex: 10, alignItems: "center" }}>
-          {busy ? <ActivityIndicator /> : <Text>Re-arming scanner…</Text>}
+        <View
+          style={{
+            position: "absolute",
+            top: 12,
+            left: 12,
+            right: 12,
+            zIndex: 10,
+            alignItems: "center",
+          }}
+        >
+          {busy ? <ActivityIndicator /> : <Text style={{ color: t.colors.muted }}>Re-arming…</Text>}
         </View>
       )}
       <CameraView

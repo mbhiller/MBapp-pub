@@ -1,169 +1,78 @@
-import React, { useEffect, useState } from "react";
-import {
-  View, Text, TextInput, TouchableOpacity, ActivityIndicator,
-  KeyboardAvoidingView, Platform, ScrollView, Alert
-} from "react-native";
-import type { ViewStyle, TextStyle } from "react-native";
-import { useTheme } from "../providers/ThemeProvider";
-import type { RootStackScreenProps } from "../navigation/types";
-import { createEvent, getEvent, updateEvent } from "../features/events/api";
+import React from "react";
+import { ScrollView, View, Text, TextInput, Pressable, Alert } from "react-native";
+import { Events } from "../features/events/hooks";
+import { useColors } from "../providers/useColors";
 
-type Props = RootStackScreenProps<"EventDetail">;
+export default function EventDetailScreen({ route, navigation }: any) {
+  const id: string | undefined = route?.params?.id;
+  const t = useColors();
+  const { data, isLoading } = Events.useGet(id);
+  const update = id ? Events.useUpdate(id) : undefined;
+  const create = Events.useCreate();
 
-export default function EventDetailScreen({ route, navigation }: Props) {
-  const t = useTheme();
-  const id = route?.params?.id;
-  const isCreate = route?.params?.mode === "new" || !id;
+  const [name, setName] = React.useState("");
+  const [startDate, setStartDate] = React.useState("");
+  const [endDate, setEndDate] = React.useState("");
+  const [location, setLocation] = React.useState("");
 
-  const [name, setName] = useState("");
-  const [startsAt, setStartsAt] = useState("");
-  const [endsAt, setEndsAt] = useState("");
-  const [status, setStatus] = useState("");
-  const [loading, setLoading] = useState(!isCreate);
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  React.useEffect(() => {
+    setName(data?.name ?? "");
+    setStartDate(data?.startDate ?? "");
+    setEndDate(data?.endDate ?? "");
+    setLocation(data?.location ?? "");
+  }, [data?.id]);
 
-  useEffect(() => {
-    if (!isCreate && id) {
-      (async () => {
-        try {
-          setLoading(true);
-          const e = await getEvent(id);
-          setName(e.name ?? "");
-          setStartsAt(e.startsAt ?? "");
-          setEndsAt(e.endsAt ?? "");
-          setStatus(e.status ?? "");
-        } catch (ex: any) {
-          setErr(ex?.message || String(ex));
-        } finally {
-          setLoading(false);
-        }
-      })();
+  const saving = Boolean(update?.isPending || create.isPending);
+
+  const onSave = async () => {
+    try {
+      const payload = { name, startDate, endDate, location };
+      if (id && update) {
+        await update.mutateAsync(payload);
+        navigation.goBack();
+      } else {
+        await create.mutateAsync(payload);
+        navigation.navigate("EventsList");
+      }
+    } catch (e: any) {
+      console.warn("Save failed:", e?.message || e);
+      Alert.alert("Save failed", e?.message ?? "Unknown error");
     }
-  }, [id, isCreate]);
+  };
 
-  // replace your current onSave with this version
-async function onSave() {
-  try {
-    setSaving(true);
-    const payload = {
-      name,
-      startsAt: startsAt || undefined,
-      endsAt: endsAt || undefined,
-      status: status || undefined,
-    };
-    if (isCreate) {
-      await createEvent(payload);
-      Alert.alert("Saved", "Event created", [
-        { text: "OK", onPress: () => navigation.navigate("EventsList" as never) },
-      ]);
-    } else if (id) {
-      await updateEvent(id, payload);
-      Alert.alert("Saved", "Event updated", [
-        { text: "OK", onPress: () => navigation.navigate("EventsList" as never) },
-      ]);
-    }
-  } catch (ex: any) {
-    Alert.alert("Error", ex?.message || String(ex));
-  } finally {
-    setSaving(false);
-  }
-}
-
+  if (id && isLoading) return <View style={{ padding: 16 }}><Text style={{ color: t.colors.muted }}>Loading…</Text></View>;
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.select({ ios: "padding", android: undefined })}
-      style={{ flex: 1 }}
-    >
-      <ScrollView style={{ flex: 1, backgroundColor: t.colors.bg }} contentContainerStyle={{ padding: 14 }}>
-        {loading ? <ActivityIndicator /> : null}
-        {err ? <Text style={{ color: t.colors.danger, marginBottom: 8 }}>{err}</Text> : null}
-
-        <Text style={{ color: t.colors.text, marginBottom: 6 }}>Name</Text>
-        <TextInput
-          value={name}
-          onChangeText={setName}
-          placeholder="Spring Classic"
-          placeholderTextColor={t.colors.textMuted}
-          style={styles.input(t)}
-        />
-
-        <Text style={{ color: t.colors.text, marginVertical: 6 }}>Starts At (ISO)</Text>
-        <TextInput
-          value={startsAt}
-          onChangeText={setStartsAt}
-          placeholder="2025-11-26T09:00:00Z"
-          placeholderTextColor={t.colors.textMuted}
-          style={styles.input(t)}
-        />
-
-        <Text style={{ color: t.colors.text, marginVertical: 6 }}>Ends At (ISO)</Text>
-        <TextInput
-          value={endsAt}
-          onChangeText={setEndsAt}
-          placeholder="2025-11-30T16:00:00Z"
-          placeholderTextColor={t.colors.textMuted}
-          style={styles.input(t)}
-        />
-
-        <Text style={{ color: t.colors.text, marginVertical: 6 }}>Status</Text>
-        <TextInput
-          value={status}
-          onChangeText={setStatus}
-          placeholder="draft | published | closed"
-          placeholderTextColor={t.colors.textMuted}
-          style={styles.input(t)}
-        />
-
-        <TouchableOpacity disabled={saving} onPress={onSave} style={styles.primaryBtn(t)}>
-          <Text style={styles.primaryBtnText(t)}>{isCreate ? "Create" : "Save"}</Text>
-        </TouchableOpacity>
-
-        {!isCreate && id ? (
-          <TouchableOpacity
-            onPress={() => navigation.navigate("RegistrationsList", { eventId: id, eventName: name })}
-            style={styles.secondaryBtn(t)}
-          >
-            <Text style={styles.secondaryBtnText(t)}>View Registrations</Text>
-          </TouchableOpacity>
-        ) : null}
-      </ScrollView>
-    </KeyboardAvoidingView>
+    <ScrollView style={{ flex: 1, backgroundColor: t.colors.background, padding: 16 }}>
+      <LabeledInput label="Name" value={name} onChangeText={setName} />
+      <LabeledInput label="Start (ISO)" value={startDate} onChangeText={setStartDate} />
+      <LabeledInput label="End (ISO)" value={endDate} onChangeText={setEndDate} />
+      <LabeledInput label="Location" value={location} onChangeText={setLocation} />
+      <PrimaryButton title={saving ? "Saving…" : "Save"} disabled={saving} onPress={onSave} />
+    </ScrollView>
   );
 }
 
-const styles = {
-  input: (t: ReturnType<typeof useTheme>): TextStyle => ({
-    borderWidth: 1,
-    borderColor: t.colors.border,
-    backgroundColor: t.colors.card,
-    padding: 10,
-    borderRadius: 10,
-    color: t.colors.text,
-  }),
-  primaryBtn: (t: ReturnType<typeof useTheme>): ViewStyle => ({
-    marginTop: 14,
-    paddingVertical: 12,
-    borderRadius: 10,
-    alignItems: "center",
-    backgroundColor: t.colors.primary,
-  }),
-  primaryBtnText: (t: ReturnType<typeof useTheme>): TextStyle => ({
-    color: t.colors.headerText,
-    fontWeight: "700" as TextStyle["fontWeight"],
-  }),
-  secondaryBtn: (t: ReturnType<typeof useTheme>): ViewStyle => ({
-    marginTop: 10,
-    paddingVertical: 12,
-    borderRadius: 10,
-    alignItems: "center",
-    backgroundColor: t.colors.card,
-    borderWidth: 1,
-    borderColor: t.colors.border,
-  }),
-  secondaryBtnText: (t: ReturnType<typeof useTheme>): TextStyle => ({
-    color: t.colors.text,
-    fontWeight: "700" as TextStyle["fontWeight"],
-  }),
-} as const;
+function LabeledInput({ label, value, onChangeText, ...rest }: any) {
+  const t = useColors();
+  return (
+    <View style={{ marginBottom: 12 }}>
+      <Text style={{ color: t.colors.muted, marginBottom: 6 }}>{label}</Text>
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        {...rest}
+        style={{ borderWidth: 1, borderColor: t.colors.border, borderRadius: 8, padding: 10, color: t.colors.text, backgroundColor: t.colors.card }}
+      />
+    </View>
+  );
+}
+function PrimaryButton({ title, onPress, disabled }: any) {
+  const t = useColors();
+  return (
+    <Pressable onPress={onPress} disabled={disabled}
+      style={{ backgroundColor: disabled ? t.colors.disabled : t.colors.primary, padding: 14, borderRadius: 10, alignItems: "center", marginTop: 4 }}>
+      <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>{title}</Text>
+    </Pressable>
+  );
+}

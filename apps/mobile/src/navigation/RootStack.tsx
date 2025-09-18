@@ -6,16 +6,26 @@ import type { RootStackParamList } from "./types";
 import { useTheme } from "../providers/ThemeProvider";
 
 import ModuleHubScreen from "../screens/ModuleHubScreen";
+
 import ProductsListScreen from "../screens/ProductsListScreen";
 import ProductDetailScreen from "../screens/ProductDetailScreen";
+
 import ObjectsListScreen from "../screens/ObjectsListScreen";
 import ObjectDetailScreen from "../screens/ObjectDetailScreen";
+
 import TenantsScreen from "../screens/TenantsScreen";
 import ScanScreen from "../screens/ScanScreen";
+
+import ClientsListScreen from "../screens/ClientsListScreen";
+import ClientDetailScreen from "../screens/ClientDetailScreen";
+
+import ResourcesListScreen from "../screens/ResourcesListScreen";
+import ResourceDetailScreen from "../screens/ResourceDetailScreen";
 
 // Events
 import EventsListScreen from "../screens/EventsListScreen";
 import EventDetailScreen from "../screens/EventDetailScreen";
+
 import RegistrationsListScreen from "../screens/RegistrationsListScreen";
 import RegistrationDetailScreen from "../screens/RegistrationDetailScreen";
 
@@ -67,6 +77,15 @@ export default function RootStack() {
       {/* ✅ Inventory */}
       <Stack.Screen name="InventoryList" component={InventoryListScreen} options={{ title: "Inventory" }} />
       <Stack.Screen name="InventoryDetail" component={InventoryDetailScreen} options={{ title: "Inventory Item" }} />
+
+      {/* Clients */}
+      <Stack.Screen name="ClientsList" component={ClientsListScreen} options={{ title: "Clients" }} />
+      <Stack.Screen name="ClientDetail" component={ClientDetailScreen} options={{ title: "Client" }} />
+
+      {/* Resources */}
+      <Stack.Screen name="ResourcesList" component={ResourcesListScreen} options={{ title: "Resources" }} />
+      <Stack.Screen name="ResourceDetail" component={ResourceDetailScreen} options={{ title: "Resource" }} />
+
     </Stack.Navigator>
   );
 }

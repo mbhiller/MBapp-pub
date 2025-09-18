@@ -1,60 +1,32 @@
 [CmdletBinding()]
 param(
-  [ValidateSet("nonprod","prod")] [string]$Env = "nonprod",
-  [string]$RepoRoot = $env:MBAPP_REPO_ROOT,
-  [string]$AwsProfile = $env:AWS_PROFILE,
-  [switch]$Plan,
-  [switch]$Apply,
-  [switch]$Destroy
+  [string]$Dir,
+  [string]$Workspace,
+  [string]$VarFile,
+  [switch]$AutoApprove,
+  [string[]]$Target
 )
 
-if (-not $RepoRoot) { $RepoRoot = "C:\Users\bryan\MBapp-pub" }
-$tfDir = Join-Path $RepoRoot "infra\terraform"
-if (-not (Test-Path $tfDir)) { throw "Terraform dir not found at $tfDir" }
-if (-not $AwsProfile) { $AwsProfile = "mbapp-$Env-admin" }
+if (-not $Dir)       { $Dir = (Resolve-Path "$PSScriptRoot\..\infra\terraform").Path }
+if (-not $Workspace) { if ($env:MBAPP_ENV) { $Workspace = $env:MBAPP_ENV } else { $Workspace = "dev" } }
 
-Write-Host "Terraform in $tfDir for $Env (profile $AwsProfile) ..." -ForegroundColor Cyan
-$env:AWS_PROFILE = $AwsProfile
+Write-Host "Terraform Plan/Apply"
+Write-Host "Dir:       $Dir"
+Write-Host "Workspace: $Workspace"
 
-try { terraform version | Out-Null } catch { throw "Terraform CLI not found on PATH." }
+Push-Location $Dir
+terraform workspace select $Workspace | Out-Null
 
-# Provide TF_VARs so Terraform won't prompt
-if ($env:MBAPP_REGION)         { $env:TF_VAR_region                 = $env:MBAPP_REGION }
-if ($env:MBAPP_API_ID)         { $env:TF_VAR_http_api_id            = $env:MBAPP_API_ID }
-if ($env:MBAPP_INTEGRATION_ID) { $env:TF_VAR_objects_integration_id = $env:MBAPP_INTEGRATION_ID }
+$args = @("plan","-out=tfplan")
+if ($VarFile -and (Test-Path $VarFile)) { $args += @("-var-file",$VarFile) }
+if ($Target) { foreach ($t in $Target) { $args += @("-target",$t) } }
+terraform @args
 
-Push-Location $tfDir
-try {
-  # Build backend-config flags (no subexpressions on lines)
-  $initArgs = @()
-  $bkt = $env:MBAPP_TFSTATE_BUCKET
-  $key = $env:MBAPP_TFSTATE_KEY
-  $tbl = $env:MBAPP_TFLOCK_TABLE
-  $reg = $env:MBAPP_REGION
-  $backendKey = if ($key) { $key } else { "mbapp/infra/terraform.tfstate" }
-  $backendRegion = if ($reg) { $reg } else { "us-east-1" }
-  if ($bkt) {
-    $initArgs += "-backend-config=bucket=$bkt"
-    $initArgs += "-backend-config=key=$backendKey"
-    $initArgs += "-backend-config=region=$backendRegion"
-    if ($tbl) { $initArgs += "-backend-config=dynamodb_table=$tbl" }
-    $initArgs += "-backend-config=encrypt=true"
-  }
+if ($LASTEXITCODE -ne 0) { throw "terraform plan failed" }
 
-  terraform init @initArgs
+$applyArgs = @("apply","tfplan")
+if ($AutoApprove) { $applyArgs = @("apply","-auto-approve","tfplan") }
+terraform @applyArgs
+Pop-Location
 
-  if ($Plan -or (-not $Apply -and -not $Destroy)) {
-    terraform plan -var-file "$Env.tfvars"
-  }
-  if ($Apply) {
-    terraform apply -var-file "$Env.tfvars" -auto-approve
-    Write-Host "`nOutputs:" -ForegroundColor Cyan
-    terraform output
-  }
-  if ($Destroy) {
-    terraform destroy -var-file "$Env.tfvars" -auto-approve
-  }
-}
-finally {
-  Pop-Location
-}
+Write-Host "Apply done."
