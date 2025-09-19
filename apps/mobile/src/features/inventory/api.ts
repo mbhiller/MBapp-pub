@@ -1,31 +1,12 @@
-import type { InventoryItem, ListPage } from "./types";
-// Reuse your existing objects client functions (as used by ScanScreen, etc.)
-import {
-  listObjects,
-  getObject,
-  createObject,
-  updateObject,
-} from "../../api/client";
+import { listObjects, getObject, createObject, updateObject, type ListPage } from "../../api/client";
+import type { InventoryItem } from "./types";
 
-export async function listInventory(params?: {
-  next?: string;
-  q?: string;
-  kind?: string;
-  signal?: AbortSignal;
-}): Promise<ListPage<InventoryItem>> {
-  return listObjects<InventoryItem>("inventory", params);
-}
+export const InventoryAPI = {
+  list: (opts: { limit?: number; next?: string; order?: "asc" | "desc" } = {}) =>
+    listObjects<InventoryItem>("product", { ...opts, kind: "good" }),
+  get: (id: string) => getObject<InventoryItem>("product", id),
+  create: (body: Partial<InventoryItem>) => createObject<InventoryItem>("product", { kind: "good", ...body }),
+  update: (id: string, patch: Partial<InventoryItem>) => updateObject<InventoryItem>("product", id, patch),
+};
 
-export async function getInventory(id: string, signal?: AbortSignal): Promise<InventoryItem> {
-  return getObject<InventoryItem>("inventory", id, signal);
-}
-
-export async function createInventory(input: Partial<InventoryItem>, signal?: AbortSignal): Promise<InventoryItem> {
-  const body = { ...input, type: "inventory" };
-  return createObject<InventoryItem>("inventory", body, signal);
-}
-
-export async function updateInventory(id: string, patch: Partial<InventoryItem>, signal?: AbortSignal): Promise<InventoryItem> {
-  const body = { ...patch, type: "inventory" };
-  return updateObject<InventoryItem>("inventory", id, body, signal);
-}
+export type InventoryPage = ListPage<InventoryItem>;

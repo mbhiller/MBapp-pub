@@ -27,10 +27,10 @@ export function RolesProvider({
 
   const has = (r: Role) => roles.includes(r);
   const can = (req: Role | Role[]) => {
-    const needs = Array.isArray(req) ? req : [req];
-    return needs.some((r) => roles.includes(r));
-  };
-
+  const needs = Array.isArray(req) ? req : [req];
+  if (needs.length === 0) return true;      // <-- allow-all for []
+  return needs.some((r) => roles.includes(r));
+};
   const allowedModules = useMemo(
     () => MODULES.filter((m) => can(m.required)),
     [roles]

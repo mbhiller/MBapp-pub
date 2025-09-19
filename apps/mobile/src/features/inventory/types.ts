@@ -1,7 +1,15 @@
-// apps/mobile/src/features/inventory/types.ts
-export type InventoryId = string;
+export type InventoryItem = {
+  id: string;
+  type: "product";
+  sku?: string;
+  name?: string;
+  kind?: "good";
+  price?: number;
+  createdAt?: string;
+  updatedAt?: string;
+};
 
-export interface InventoryItem {
+/*export interface InventoryItem {
   id: InventoryId;
   tenantId?: string;
 
@@ -19,9 +27,4 @@ export interface InventoryItem {
   createdAt?: string;
   updatedAt?: string;
   metadata?: Record<string, unknown>;
-}
-
-export interface ListPage<T> {
-  items: T[];
-  next?: string;
-}
+}*/

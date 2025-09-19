@@ -1,82 +1,53 @@
-// apps/mobile/src/screens/ObjectsListScreen.tsx
-import React, { useCallback } from "react";
-import { ActivityIndicator, FlatList, Text, TouchableOpacity, View } from "react-native";
-import type { RootStackScreenProps } from "../navigation/types";
-import { listObjects, type MbObject } from "../api/client";
-import { useTheme } from "../providers/ThemeProvider";
-import { Fab } from "../ui/Fab";
-import { useInfiniteQuery, type InfiniteData } from "@tanstack/react-query";
-import { useFocusEffect } from "@react-navigation/native";
+import React from "react";
+import { View, FlatList, Text, Pressable, RefreshControl, TextInput } from "react-native";
+import { ObjectsAPI } from "../features/objects/api";
+import { useColors } from "../providers/useColors";
+import { useRefetchOnFocus } from "../features/_shared/useRefetchOnFocus";
 
-type Props = RootStackScreenProps<"ObjectsList">;
-type Page = { items: MbObject[]; next?: string };
 
-export default function ObjectsListScreen({ navigation, route }: Props) {
-  const t = useTheme();
-  const type = route.params?.type || "horse";
+export default function ObjectsListScreen({ navigation }: any) {
+  const t = useColors();
+  
+  const [type, setType] = React.useState("client");
+  const [data, setData] = React.useState<{ items: any[]; next?: string } | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  
 
-  const q = useInfiniteQuery<
-    Page,                           // TQueryFnData
-    Error,                          // TError
-    InfiniteData<Page>,             // TData
-    ["objects", string],            // TQueryKey
-    string | undefined              // TPageParam
-  >({
-    queryKey: ["objects", type],
-    queryFn: ({ pageParam }) => listObjects(type, { cursor: pageParam, limit: 50 }),
-    getNextPageParam: (last) => last?.next ?? undefined,
-    initialPageParam: undefined,
-  });
+  const load = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const page = await ObjectsAPI.list(type, { limit: 20 });
+      setData(page);
+    } finally { setLoading(false); }
+  }, [type]);
 
-  useFocusEffect(useCallback(() => { q.refetch(); }, [q]));
-
-  // While loading first page, just show spinner (no error read here to avoid TS narrowing to never)
-  if (q.isLoading && !q.data) {
-    return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: t.colors.bg }}>
-        <ActivityIndicator />
-      </View>
-    );
-  }
-
-  const items = q.data?.pages.flatMap((p) => p?.items ?? []) ?? [];
-
+  React.useEffect(() => { load(); }, [load]);
+  useRefetchOnFocus(load);
   return (
-    <View style={{ flex: 1, padding: 10, backgroundColor: t.colors.bg }}>
-      {q.isError ? (
-        <Text style={{ color: t.colors.danger, marginBottom: 8 }}>
-          {q.error?.message ?? "Failed to load"}
-        </Text>
-      ) : null}
-
+    <View style={{ flex: 1, backgroundColor: t.colors.background, padding: 8 }}>
+      <Text style={{ color: t.colors.muted, marginBottom: 6 }}>Type</Text>
+      <TextInput value={type} onChangeText={setType}
+        style={{ borderWidth: 1, borderColor: t.colors.border, borderRadius: 8, padding: 10, color: t.colors.text, backgroundColor: t.colors.card, marginBottom: 8 }} />
       <FlatList
-        data={items}
-        keyExtractor={(o) => o.id}
-        ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
-        onEndReached={() => q.hasNextPage && !q.isFetchingNextPage && q.fetchNextPage()}
-        refreshing={q.isRefetching || q.isFetching}
-        onRefresh={() => q.refetch()}
+        data={data?.items ?? []}
+        keyExtractor={(item) => item.id}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}
         renderItem={({ item }) => (
-          <TouchableOpacity
-            onPress={() => navigation.navigate("ObjectDetail", { type, id: item.id })}
-            style={{
-              padding: 14,
-              borderRadius: 12,
-              backgroundColor: t.colors.card,
-              borderWidth: 1,
-              borderColor: t.colors.border,
-            }}
-          >
-            <Text style={{ fontWeight: "700" as const, color: t.colors.text }}>
-              {item.name || "(no name)"}
-            </Text>
-            <Text style={{ color: t.colors.textMuted, marginTop: 4 }}>{item.id}</Text>
-          </TouchableOpacity>
+          <Pressable onPress={() => navigation.navigate("ObjectDetail", { type, id: item.id })} style={{ padding: 12 }}>
+            <Text style={{ color: t.colors.text, fontSize: 16, fontWeight: "700" }}>{`${item.type}: ${item.id}`}</Text>
+            <Text style={{ color: t.colors.muted, marginTop: 2 }}>{item.name || JSON.stringify(item).slice(0, 80)}</Text>
+          </Pressable>
         )}
+        ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: t.colors.border }} />}
       />
-
-      {/* For objects, FAB = Scan */}
-      <Fab label="Scan" onPress={() => navigation.navigate("Scan", { intent: "navigate" })} />
+      <Pressable
+        onPress={() => navigation.navigate("ObjectDetail", { type, id: undefined })}
+        style={{ position: "absolute", right: 16, bottom: 16, backgroundColor: t.colors.primary, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 999 }}
+      >
+        <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>+ New</Text>
+      </Pressable>
     </View>
   );
+  
 }
+

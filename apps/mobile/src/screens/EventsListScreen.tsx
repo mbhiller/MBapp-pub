@@ -1,56 +1,36 @@
-import React, { useCallback } from "react";
-import { ActivityIndicator, FlatList, Text, TouchableOpacity, View } from "react-native";
-import { useFocusEffect } from "@react-navigation/native";
-import type { RootStackScreenProps } from "../navigation/types";
-import { useTheme } from "../providers/ThemeProvider";
-import { Fab } from "../ui/Fab";
-import { listEvents, type Event } from "../features/events/api";
-import { useInfiniteQuery, type InfiniteData } from "@tanstack/react-query";
+import React from "react";
+import { View, FlatList, Text, Pressable, RefreshControl } from "react-native";
+import { Events } from "../features/events/hooks";
+import { useColors } from "../providers/useColors";
+import { useRefetchOnFocus } from "../features/_shared/useRefetchOnFocus";
 
-type Props = RootStackScreenProps<"EventsList">;
-type Page = { items: Event[]; next?: string };
-
-export default function EventsListScreen({ navigation }: Props) {
-  const t = useTheme();
-
-  const q = useInfiniteQuery<
-    Page, Error, InfiniteData<Page>, ["events","list"], string | undefined
-  >({
-    queryKey: ["events", "list"],
-    queryFn: ({ pageParam }) => listEvents({ next: pageParam }),
-    getNextPageParam: (last) => last?.next ?? undefined,
-    initialPageParam: undefined,
-  });
-
-  useFocusEffect(useCallback(() => { q.refetch(); }, []));
-  const items = q.data?.pages.flatMap(p => p?.items ?? []) ?? [];
+export default function EventsListScreen({ navigation }: any) {
+  const t = useColors();
+  const { data, isLoading, refetch } = Events.useList({ limit: 20 });
+  useRefetchOnFocus(() => refetch());
 
   return (
-    <View style={{ flex: 1, backgroundColor: t.colors.bg, padding: 12 }}>
-      {q.isLoading && items.length === 0 ? <ActivityIndicator /> : null}
-      {q.isError ? <Text style={{ color: t.colors.danger, marginBottom: 8 }}>{q.error.message}</Text> : null}
-
+    <View style={{ flex: 1, backgroundColor: t.colors.background, padding: 8 }}>
       <FlatList
-        data={items}
-        keyExtractor={(it) => it.id}
-        onEndReached={() => q.hasNextPage && !q.isFetchingNextPage && q.fetchNextPage()}
-        refreshing={q.isRefetching || q.isFetching}
-        onRefresh={() => q.refetch()}
+        data={data?.items ?? []}
+        keyExtractor={(item) => item.id}
+        refreshControl={<RefreshControl refreshing={isLoading} onRefresh={refetch} />}
         renderItem={({ item }) => (
-          <TouchableOpacity
-            onPress={() => navigation.navigate("EventDetail", { id: item.id })}
-            style={{ backgroundColor: t.colors.card, borderRadius: 10, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: t.colors.border }}
-          >
-            <Text style={{ fontWeight: "700", color: t.colors.text }}>{item.name || "(no name)"}</Text>
-            <Text style={{ color: t.colors.textMuted, marginTop: 4 }}>
-              {item.startsAt ?? "unscheduled"} → {item.endsAt ?? "—"}
+          <Pressable onPress={() => navigation.navigate("EventDetail", { id: item.id })} style={{ padding: 12 }}>
+            <Text style={{ color: t.colors.text, fontSize: 16, fontWeight: "700" }}>{item.name || "(no title)"}</Text>
+            <Text style={{ color: t.colors.muted, marginTop: 2 }}>
+              {item.startDate ? new Date(item.startDate).toLocaleString() : item.id}
             </Text>
-            <Text style={{ color: t.colors.textMuted, marginTop: 4 }}>{item.id}</Text>
-          </TouchableOpacity>
+          </Pressable>
         )}
+        ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: t.colors.border }} />}
       />
-
-      <Fab label="New Event" onPress={() => navigation.navigate("EventDetail", { mode: "new" })} />
+      <Pressable
+        onPress={() => navigation.navigate("EventDetail", { id: undefined })}
+        style={{ position: "absolute", right: 16, bottom: 16, backgroundColor: t.colors.primary, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 999 }}
+      >
+        <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>+ New</Text>
+      </Pressable>
     </View>
   );
 }

@@ -1,171 +1,85 @@
 // apps/api/src/index.ts
-import { preflight, notimpl } from "./common/responses";
+import { preflight, notimpl, ok, error } from "./common/responses";
 import * as ObjCreate from "./objects/create";
 import * as ObjUpdate from "./objects/update";
 import * as ObjGet from "./objects/get";
 import * as ObjList from "./objects/list";
 import * as ObjSearch from "./objects/search";
 
+// Accept both HTTP API v2 and REST v1 shapes (keep types loose to avoid build issues)
 type ApiEvt = {
   rawPath?: string;
-  path?: string; // REST API
-  requestContext?: { http?: { method?: string } };
+  path?: string;
+  requestContext?: { http?: { method?: string; path?: string } };
+  httpMethod?: string;
   queryStringParameters?: Record<string, string | undefined>;
   pathParameters?: Record<string, string | undefined>;
   headers?: Record<string, string | undefined>;
-  body?: string;
-  isBase64Encoded?: boolean;
 };
 
-function withParams(evt: ApiEvt, add: Record<string, string | undefined>): ApiEvt {
-  return { ...evt, pathParameters: { ...(evt.pathParameters || {}), ...add } };
+function methodOf(evt: ApiEvt): string {
+  return (evt.requestContext?.http?.method || evt.httpMethod || "GET").toUpperCase();
 }
-function withQuery(evt: ApiEvt, add: Record<string, string | undefined>): ApiEvt {
-  return { ...evt, queryStringParameters: { ...(evt.queryStringParameters || {}), ...add } };
+function pathOf(evt: ApiEvt): string {
+  const p = evt.requestContext?.http?.path || evt.rawPath || evt.path || "/";
+  return p.startsWith("/") ? p : `/${p}`;
 }
-function withPath(evt: ApiEvt, newPath: string): ApiEvt {
-  // also update rawPath so downstream libs that read it won't choke
-  return { ...evt, path: newPath, rawPath: newPath };
-}
-function json(code: number, body: unknown) {
-  return { statusCode: code, headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
+function withParams<T extends ApiEvt>(evt: T, params: Record<string, string | undefined>): T {
+  return { ...evt, pathParameters: { ...(evt.pathParameters ?? {}), ...params } };
 }
 
-function norm(raw: string | undefined): string {
-  const r = (raw || "/").split("?")[0];
-  const noTrail = r.replace(/\/+$/, "") || "/";
-  if (noTrail === "/") return "/";
+// ----- Alias → canonical (/objects/:type)
+const aliasToType: Record<string, string> = {
+  "/clients": "client",
+  "/resources": "resource",
+  "/employees": "employee",
+  "/vendors": "vendor",
+  "/reservations": "reservation",
+  "/events": "event",
+  "/products": "product",
+  "/registrations": "registration",
+};
 
-  const parts = noTrail.split("/").filter(Boolean); // ["nonprod","products"] or ["products"]
-  const KNOWN = new Set(["objects", "products", "events", "registrations", "__echo"]);
-  if (KNOWN.has(parts[0])) return "/" + parts.join("/");
+function rewriteAlias(path: string): string {
+  for (const alias of Object.keys(aliasToType)) {
+    if (path === alias || path.startsWith(alias + "/")) {
+      const suffix = path.slice(alias.length); // "" or "/{id}" or "/list"
+      return `/objects/${aliasToType[alias]}${suffix}`;
+    }
+  }
+  // INVENTORY convenience: treat as products
+  if (path === "/inventory" || path.startsWith("/inventory/")) {
+    const suffix = path.slice("/inventory".length);
+    return `/objects/product${suffix}`;
+  }
+  // /events/:id/registrations -> /objects/registration?eventId=:id
+  if (/^\/events\/[^/]+\/registrations$/.test(path)) {
+    const id = path.split("/")[2];
+    return `/objects/registration?eventId=${encodeURIComponent(id)}`;
+  }
+  return path;
+}
 
-  // If first looks like a stage, strip it when the next is known
-  if (parts.length > 1 && KNOWN.has(parts[1])) return "/" + parts.slice(1).join("/");
-  return "/" + parts.join("/");
+function splitObjectsPath(path: string): { type?: string; tail: string[] } {
+  const parts = path.split("/").filter(Boolean);
+  if (parts[0] !== "objects") return { tail: parts.slice() };
+  const type = parts[1];
+  const tail = parts.slice(2); // [], ["list"], [":id"]
+  return { type, tail };
 }
 
 export const handler = async (evt: ApiEvt) => {
-  const method = (evt?.requestContext?.http?.method ?? "GET").toUpperCase();
-  if (method === "OPTIONS") return preflight();
-
-  const raw = evt.rawPath || (evt as any).path || "/";
-  const path = norm(raw);
-
+  const method = methodOf(evt);
   try {
-    // ---------- DEBUG: echo what the router sees ----------
-    if (path.startsWith("/__echo")) {
-      return json(200, {
-        method,
-        rawPath: raw,
-        normalized: path,
-        queryString: evt.queryStringParameters || {},
-        pathParameters: evt.pathParameters || {},
-      });
-    }
+    if (method === "OPTIONS") return preflight();
 
-    // --------------------- PRODUCTS aliases ---------------------
-    // POST /products  -> /objects/product
-    if (path === "/products" && method === "POST") {
-      const patched = withPath(withParams(evt, { type: "product" }), "/objects/product");
-      return ObjCreate.handler(patched as any);
-    }
-    // GET /products    -> /objects/product (list)
-    if (path === "/products" && method === "GET") {
-      const patched = withPath(withParams(evt, { type: "product" }), "/objects/product");
-      return ObjList.handler(patched as any);
-    }
-    // GET /products/search -> search with type=product
-    if (path === "/products/search" && method === "GET") {
-      const patched = withPath(withQuery(evt, { type: "product" }), "/objects");
-      return ObjSearch.handler(patched as any);
-    }
-    // GET|PUT /products/:id -> /objects/product/:id
-    {
-      const m = /^\/products\/([^/]+)$/.exec(path);
-      if (m && method === "GET") {
-        const patched = withPath(withParams(evt, { type: "product", id: m[1] }), `/objects/product/${m[1]}`);
-        return ObjGet.handler(patched as any);
-      }
-      if (m && method === "PUT") {
-        const patched = withPath(withParams(evt, { type: "product", id: m[1] }), `/objects/product/${m[1]}`);
-        return ObjUpdate.handler(patched as any);
-      }
-    }
+    const rawPath = pathOf(evt);
+    if (rawPath === "/health") return ok({ ok: true });
 
-    // ----------------------- EVENTS aliases ---------------------
-    // POST /events  -> /objects/event
-    if (path === "/events" && method === "POST") {
-      const patched = withPath(withParams(evt, { type: "event" }), "/objects/event");
-      return ObjCreate.handler(patched as any);
-    }
-    // GET /events    -> /objects/event (list)
-    if (path === "/events" && method === "GET") {
-      const patched = withPath(withParams(evt, { type: "event" }), "/objects/event");
-      return ObjList.handler(patched as any);
-    }
-    // GET|PUT /events/:id -> /objects/event/:id
-    {
-      const m = /^\/events\/([^/]+)$/.exec(path);
-      if (m && method === "GET") {
-        const patched = withPath(withParams(evt, { type: "event", id: m[1] }), `/objects/event/${m[1]}`);
-        return ObjGet.handler(patched as any);
-      }
-      if (m && method === "PUT") {
-        const patched = withPath(withParams(evt, { type: "event", id: m[1] }), `/objects/event/${m[1]}`);
-        return ObjUpdate.handler(patched as any);
-      }
-    }
-    // GET /events/:id/registrations -> /objects/registration?eventId=...
-    {
-      const m = /^\/events\/([^/]+)\/registrations$/.exec(path);
-      if (m && method === "GET") {
-        const patched = withPath(
-          withQuery(withParams(evt, { type: "registration" }), { eventId: m[1] }),
-          "/objects/registration"
-        );
-        return ObjList.handler(patched as any);
-      }
-    }
+    const path = rewriteAlias(rawPath);
 
-    // ------------------- REGISTRATIONS aliases ------------------
-    // POST /registrations -> /objects/registration
-    if (path === "/registrations" && method === "POST") {
-      const patched = withPath(withParams(evt, { type: "registration" }), "/objects/registration");
-      return ObjCreate.handler(patched as any);
-    }
-    // GET /registrations   -> /objects/registration (list)
-    if (path === "/registrations" && method === "GET") {
-      const patched = withPath(withParams(evt, { type: "registration" }), "/objects/registration");
-      return ObjList.handler(patched as any);
-    }
-    // GET|PUT /registrations/:id -> /objects/registration/:id
-    {
-      const m = /^\/registrations\/([^/]+)$/.exec(path);
-      if (m && method === "GET") {
-        const patched = withPath(withParams(evt, { type: "registration", id: m[1] }), `/objects/registration/${m[1]}`);
-        return ObjGet.handler(patched as any);
-      }
-      if (m && method === "PUT") {
-        const patched = withPath(withParams(evt, { type: "registration", id: m[1] }), `/objects/registration/${m[1]}`);
-        return ObjUpdate.handler(patched as any);
-      }
-    }
-
-    // --------------------- Native /objects routes ----------------
-    {
-      const m = /^\/objects\/([^/]+)$/.exec(path);
-      if (m && method === "POST") return ObjCreate.handler(withParams(evt, { type: m[1] }) as any);
-      if (m && method === "GET")  return ObjList.handler(withParams(evt, { type: m[1] }) as any);
-    }
-    {
-      const m = /^\/objects\/([^/]+)\/([^/]+)$/.exec(path);
-      if (m && method === "GET") return ObjGet.handler(withParams(evt, { type: m[1], id: m[2] }) as any);
-      if (m && method === "PUT") return ObjUpdate.handler(withParams(evt, { type: m[1], id: m[2] }) as any);
-    }
-
-    // Legacy: GET /objects?id=...&type=...
-    if (path === "/objects" && method === "GET") {
+    // /objects/search (and allow ?type=&id= to fall through to GET by id)
+    if (path === "/objects/search" && method === "GET") {
       const qs = evt.queryStringParameters ?? {};
       if (qs?.id && qs?.type) {
         return ObjGet.handler(withParams(evt, { type: String(qs.type), id: String(qs.id) }) as any);
@@ -173,9 +87,48 @@ export const handler = async (evt: ApiEvt) => {
       return ObjSearch.handler(evt as any);
     }
 
+    // Canonical /objects/:type router
+    if (path.startsWith("/objects/")) {
+      const { type, tail } = splitObjectsPath(path);
+      if (!type) return notimpl(`${method} ${path} (missing type)`);
+
+      // POST /objects/:type
+      if (method === "POST" && tail.length === 0) {
+        return ObjCreate.handler(withParams(evt, { type }) as any);
+      }
+
+      // PUT /objects/:type/:id
+      if (method === "PUT" && tail.length === 1) {
+        return ObjUpdate.handler(withParams(evt, { type, id: tail[0] }) as any);
+      }
+
+      // GET /objects/:type/:id
+      if (method === "GET" && tail.length === 1 && tail[0] !== "list") {
+        return ObjGet.handler(withParams(evt, { type, id: tail[0] }) as any);
+      }
+
+      // GET /objects/:type/list
+      if (method === "GET" && tail.length === 1 && tail[0] === "list") {
+        return ObjList.handler(withParams(evt, { type }) as any);
+      }
+
+      // GET /objects/:type  (treat as list)
+      if (method === "GET" && tail.length === 0) {
+        return ObjList.handler(withParams(evt, { type }) as any);
+      }
+
+      return notimpl(`${method} ${path}`);
+    }
+
+    // Fallback (legacy explicit routes can be handled elsewhere)
     return notimpl(`${method} ${path}`);
   } catch (e: any) {
-    console.error("router error", { method, raw, normalized: path, err: e?.message, stack: e?.stack });
-    return json(500, { error: "router", method, rawPath: raw, normalized: path, message: e?.message });
+    console.error("router error", {
+      err: e?.message,
+      stack: e?.stack,
+      method,
+      rawPath: pathOf(evt),
+    });
+    return error(e?.message || "router");
   }
 };

@@ -1,169 +1,171 @@
-import React, { useEffect, useState } from "react";
-import {
-  View, Text, TextInput, TouchableOpacity, ActivityIndicator,
-  KeyboardAvoidingView, Platform, ScrollView, Alert
-} from "react-native";
-import type { ViewStyle, TextStyle } from "react-native";
-import { useTheme } from "../providers/ThemeProvider";
-import type { RootStackScreenProps } from "../navigation/types";
-import { createEvent, getEvent, updateEvent } from "../features/events/api";
+import React from "react";
+import { ScrollView, View, Text, TextInput, Pressable, Alert, Platform } from "react-native";
+import DateTimePicker from "@react-native-community/datetimepicker";
+import { Events } from "../features/events/hooks";
+import { useColors } from "../providers/useColors";
 
-type Props = RootStackScreenProps<"EventDetail">;
-
-export default function EventDetailScreen({ route, navigation }: Props) {
-  const t = useTheme();
-  const id = route?.params?.id;
-  const isCreate = route?.params?.mode === "new" || !id;
-
-  const [name, setName] = useState("");
-  const [startsAt, setStartsAt] = useState("");
-  const [endsAt, setEndsAt] = useState("");
-  const [status, setStatus] = useState("");
-  const [loading, setLoading] = useState(!isCreate);
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!isCreate && id) {
-      (async () => {
-        try {
-          setLoading(true);
-          const e = await getEvent(id);
-          setName(e.name ?? "");
-          setStartsAt(e.startsAt ?? "");
-          setEndsAt(e.endsAt ?? "");
-          setStatus(e.status ?? "");
-        } catch (ex: any) {
-          setErr(ex?.message || String(ex));
-        } finally {
-          setLoading(false);
-        }
-      })();
-    }
-  }, [id, isCreate]);
-
-  // replace your current onSave with this version
-async function onSave() {
-  try {
-    setSaving(true);
-    const payload = {
-      name,
-      startsAt: startsAt || undefined,
-      endsAt: endsAt || undefined,
-      status: status || undefined,
-    };
-    if (isCreate) {
-      await createEvent(payload);
-      Alert.alert("Saved", "Event created", [
-        { text: "OK", onPress: () => navigation.navigate("EventsList" as never) },
-      ]);
-    } else if (id) {
-      await updateEvent(id, payload);
-      Alert.alert("Saved", "Event updated", [
-        { text: "OK", onPress: () => navigation.navigate("EventsList" as never) },
-      ]);
-    }
-  } catch (ex: any) {
-    Alert.alert("Error", ex?.message || String(ex));
-  } finally {
-    setSaving(false);
-  }
+function isoOrEmpty(d?: Date) {
+  return d ? d.toISOString() : "";
+}
+function parseISO(s?: string) {
+  if (!s) return undefined;
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? undefined : d;
 }
 
+export default function EventDetailScreen({ route, navigation }: any) {
+  const id: string | undefined = route?.params?.id;
+  const isCreate = !id;
+
+  const t = useColors();
+  const { data, isLoading } = Events.useGet(id);
+  const update = id ? Events.useUpdate(id) : undefined;
+  const create = Events.useCreate();
+
+  // form state
+  const [name, setName] = React.useState("");
+  const [location, setLocation] = React.useState("");
+
+  const [startAt, setStartAt] = React.useState<Date | undefined>(undefined);
+  const [endAt, setEndAt] = React.useState<Date | undefined>(undefined);
+
+  // hydrate once per-load
+  React.useEffect(() => {
+    if (isCreate && !data) {
+      setName("");
+      setLocation("");
+      setStartAt(undefined);
+      setEndAt(undefined);
+      return;
+    }
+    if (data) {
+      setName(data?.name ?? "");
+      setLocation(data?.location ?? "");
+      setStartAt(parseISO(data?.startDate));
+      setEndAt(parseISO(data?.endDate));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.id]);
+
+  const saving = Boolean(update?.isPending || create.isPending);
+
+  const onSave = async () => {
+    try {
+      const payload = {
+        name: name?.trim() || undefined,
+        location: location?.trim() || undefined,
+        startDate: isoOrEmpty(startAt) || undefined,
+        endDate: isoOrEmpty(endAt) || undefined,
+      };
+      if (id && update) {
+        await update.mutateAsync(payload);
+        navigation.goBack();
+      } else {
+        await create.mutateAsync(payload);
+        navigation.navigate("EventsList");
+      }
+    } catch (e: any) {
+      console.warn("Save failed:", e?.message || e);
+      Alert.alert("Save failed", e?.message ?? "Unknown error");
+    }
+  };
+
+  if (id && isLoading) {
+    return (
+      <View style={{ padding: 16 }}>
+        <Text style={{ color: t.colors.muted }}>Loading…</Text>
+      </View>
+    );
+  }
+
+  const textBox = {
+    borderWidth: 1,
+    borderColor: t.colors.border,
+    borderRadius: 8,
+    padding: 10,
+    color: t.colors.text,
+    backgroundColor: t.colors.card,
+  } as const;
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.select({ ios: "padding", android: undefined })}
-      style={{ flex: 1 }}
-    >
-      <ScrollView style={{ flex: 1, backgroundColor: t.colors.bg }} contentContainerStyle={{ padding: 14 }}>
-        {loading ? <ActivityIndicator /> : null}
-        {err ? <Text style={{ color: t.colors.danger, marginBottom: 8 }}>{err}</Text> : null}
+    <ScrollView style={{ flex: 1, backgroundColor: t.colors.background, padding: 16 }}>
+      <Labeled label="Name">
+        <TextInput value={name} onChangeText={setName} style={textBox} />
+      </Labeled>
 
-        <Text style={{ color: t.colors.text, marginBottom: 6 }}>Name</Text>
-        <TextInput
-          value={name}
-          onChangeText={setName}
-          placeholder="Spring Classic"
-          placeholderTextColor={t.colors.textMuted}
-          style={styles.input(t)}
+      <Labeled label="Start">
+        <DateTimePicker
+          value={startAt ?? new Date()}
+          mode="datetime"
+          display={Platform.OS === "ios" ? "inline" : "default"}
+          onChange={(_, d) => d && setStartAt(d)}
         />
+        {/* ISO preview */}
+        <Text style={{ color: t.colors.muted, marginTop: 6 }}>{isoOrEmpty(startAt) || "—"}</Text>
+      </Labeled>
 
-        <Text style={{ color: t.colors.text, marginVertical: 6 }}>Starts At (ISO)</Text>
-        <TextInput
-          value={startsAt}
-          onChangeText={setStartsAt}
-          placeholder="2025-11-26T09:00:00Z"
-          placeholderTextColor={t.colors.textMuted}
-          style={styles.input(t)}
+      <Labeled label="End">
+        <DateTimePicker
+          value={endAt ?? (startAt ?? new Date())}
+          mode="datetime"
+          display={Platform.OS === "ios" ? "inline" : "default"}
+          onChange={(_, d) => d && setEndAt(d)}
         />
+        <Text style={{ color: t.colors.muted, marginTop: 6 }}>{isoOrEmpty(endAt) || "—"}</Text>
+      </Labeled>
 
-        <Text style={{ color: t.colors.text, marginVertical: 6 }}>Ends At (ISO)</Text>
-        <TextInput
-          value={endsAt}
-          onChangeText={setEndsAt}
-          placeholder="2025-11-30T16:00:00Z"
-          placeholderTextColor={t.colors.textMuted}
-          style={styles.input(t)}
-        />
+      <Labeled label="Location">
+        <TextInput value={location} onChangeText={setLocation} style={textBox} />
+      </Labeled>
 
-        <Text style={{ color: t.colors.text, marginVertical: 6 }}>Status</Text>
-        <TextInput
-          value={status}
-          onChangeText={setStatus}
-          placeholder="draft | published | closed"
-          placeholderTextColor={t.colors.textMuted}
-          style={styles.input(t)}
-        />
+      {/* NEW: Link to registrations for this event (only on edit mode) */}
+      {!isCreate && (
+        <Pressable
+          onPress={() => navigation.navigate("RegistrationsList", { eventId: id })}
+          style={{
+            padding: 12,
+            borderRadius: 10,
+            alignItems: "center",
+            marginTop: 8,
+            borderWidth: 1,
+            borderColor: t.colors.border,
+            backgroundColor: t.colors.card,
+          }}
+        >
+          <Text style={{ color: t.colors.text, fontWeight: "600" }}>View Registrations</Text>
+        </Pressable>
+      )}
 
-        <TouchableOpacity disabled={saving} onPress={onSave} style={styles.primaryBtn(t)}>
-          <Text style={styles.primaryBtnText(t)}>{isCreate ? "Create" : "Save"}</Text>
-        </TouchableOpacity>
-
-        {!isCreate && id ? (
-          <TouchableOpacity
-            onPress={() => navigation.navigate("RegistrationsList", { eventId: id, eventName: name })}
-            style={styles.secondaryBtn(t)}
-          >
-            <Text style={styles.secondaryBtnText(t)}>View Registrations</Text>
-          </TouchableOpacity>
-        ) : null}
-      </ScrollView>
-    </KeyboardAvoidingView>
+      <PrimaryButton title={saving ? "Saving…" : "Save"} disabled={saving} onPress={onSave} />
+    </ScrollView>
   );
 }
 
-const styles = {
-  input: (t: ReturnType<typeof useTheme>): TextStyle => ({
-    borderWidth: 1,
-    borderColor: t.colors.border,
-    backgroundColor: t.colors.card,
-    padding: 10,
-    borderRadius: 10,
-    color: t.colors.text,
-  }),
-  primaryBtn: (t: ReturnType<typeof useTheme>): ViewStyle => ({
-    marginTop: 14,
-    paddingVertical: 12,
-    borderRadius: 10,
-    alignItems: "center",
-    backgroundColor: t.colors.primary,
-  }),
-  primaryBtnText: (t: ReturnType<typeof useTheme>): TextStyle => ({
-    color: t.colors.headerText,
-    fontWeight: "700" as TextStyle["fontWeight"],
-  }),
-  secondaryBtn: (t: ReturnType<typeof useTheme>): ViewStyle => ({
-    marginTop: 10,
-    paddingVertical: 12,
-    borderRadius: 10,
-    alignItems: "center",
-    backgroundColor: t.colors.card,
-    borderWidth: 1,
-    borderColor: t.colors.border,
-  }),
-  secondaryBtnText: (t: ReturnType<typeof useTheme>): TextStyle => ({
-    color: t.colors.text,
-    fontWeight: "700" as TextStyle["fontWeight"],
-  }),
-} as const;
+function Labeled({ label, children }: React.PropsWithChildren<{ label: string }>) {
+  const t = useColors();
+  return (
+    <View style={{ marginBottom: 12 }}>
+      <Text style={{ color: t.colors.muted, marginBottom: 6 }}>{label}</Text>
+      {children}
+    </View>
+  );
+}
+
+function PrimaryButton({ title, onPress, disabled }: any) {
+  const t = useColors();
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      style={{
+        backgroundColor: disabled ? t.colors.disabled : t.colors.primary,
+        padding: 14,
+        borderRadius: 10,
+        alignItems: "center",
+        marginTop: 4,
+      }}
+    >
+      <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>{title}</Text>
+    </Pressable>
+  );
+}
