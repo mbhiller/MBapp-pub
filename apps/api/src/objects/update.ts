@@ -21,7 +21,10 @@ export const handler = async (evt: any) => {
     if (!typeParam) return bad("type is required");
     if (!id) return bad("id is required");
 
-    const bodyText = evt?.isBase64Encoded ? Buffer.from(evt.body ?? "", "base64").toString("utf8") : (evt?.body ?? "{}");
+    const bodyText = evt?.isBase64Encoded
+      ? Buffer.from(evt.body ?? "", "base64").toString("utf8")
+      : (evt?.body ?? "{}");
+
     let patch: any = {};
     try { patch = JSON.parse(bodyText || "{}"); } catch { patch = {}; }
 
@@ -60,7 +63,7 @@ export const handler = async (evt: any) => {
       }
     }
 
-    setIf("name", name, "#name"); 
+    setIf("name", name, "#name");
     setIf("name_lc", name_lc);
     setIf("price", price);
     setIf("sku", sku);
@@ -68,36 +71,61 @@ export const handler = async (evt: any) => {
     setIf("taxCode", taxCode);
     setIf("kind", kind);
 
-    // If SKU changed on a product, we must migrate the uniq token atomically
+    // If SKU changed on a product, migrate the uniq token atomically
     const curSkuLc = (cur?.sku ?? "").toLowerCase() || undefined;
     const willChangeSku = typeParam === "product" && sku_lc && sku_lc !== curSkuLc;
 
     if (willChangeSku) {
-      const newToken = { pk: uniqPk(tenantId, sku_lc!), sk: "UNIQ", tenant: tenantId, entity: "uniq", domain: "product", field: "sku", value: sku_lc, refId: id, createdAt: now };
+      const newTokenKey = { pk: uniqPk(tenantId, sku_lc!), sk: "UNIQ" };
+      const newTokenItem = {
+        ...newTokenKey,
+        tenant: tenantId,
+        entity: "uniq",
+        domain: "product",
+        field: "sku",
+        value: sku_lc,
+        refId: id,
+        createdAt: now,
+      };
       const oldTokenKey = curSkuLc ? { pk: uniqPk(tenantId, curSkuLc), sk: "UNIQ" } : undefined;
 
-      await ddb.send(new TransactWriteCommand({
-        TransactItems: [
-          { // assert new token is free
-            ConditionCheck: { TableName: tableObjects, Key: { pk: newToken.pk, sk: newToken.sk }, ConditionExpression: "attribute_not_exists(pk)" }
+      // FIX: Remove ConditionCheck on the SAME key as Put. Use conditional Put instead.
+      // Order: Put new token (conditional) -> Update product -> Delete old token (if any).
+      const TransactItems: any[] = [
+        {
+          Put: {
+            TableName: tableObjects,
+            Item: newTokenItem,
+            ConditionExpression: "attribute_not_exists(pk)", // reserve new token
           },
-          ...(oldTokenKey ? [{ Delete: { TableName: tableObjects, Key: oldTokenKey } }] : []),
-          { Put: { TableName: tableObjects, Item: newToken } },
-          {
-            Update: {
-              TableName: tableObjects,
-              Key: { pk: id, sk: `${tenantId}|${typeParam}` },
-              UpdateExpression: `SET ${setParts.join(", ")}`,
-              ExpressionAttributeNames: Object.keys(names).length ? names : undefined,
-              ExpressionAttributeValues: values,
-            }
+        },
+        {
+          Update: {
+            TableName: tableObjects,
+            Key: { pk: id, sk: `${tenantId}|${typeParam}` },
+            UpdateExpression: `SET ${setParts.join(", ")}`,
+            ExpressionAttributeNames: Object.keys(names).length ? names : undefined,
+            ExpressionAttributeValues: values,
+            ConditionExpression: "attribute_exists(pk)", // harden: item must exist
           },
-        ],
-      }));
+        },
+      ];
+
+      if (oldTokenKey) {
+        TransactItems.push({
+          Delete: {
+            TableName: tableObjects,
+            Key: oldTokenKey,
+            // optional: ConditionExpression: "attribute_exists(pk)"
+          },
+        });
+      }
+
+      await ddb.send(new TransactWriteCommand({ TransactItems }));
       return ok({ ...cur, ...patch, updatedAt: now, sku });
     }
 
-    // Simple update
+    // Simple update (no SKU change)
     const r = await ddb.send(new UpdateCommand({
       TableName: tableObjects,
       Key: { pk: id, sk: `${tenantId}|${typeParam}` },
@@ -108,7 +136,9 @@ export const handler = async (evt: any) => {
     }));
     return ok((r.Attributes ?? {}) as any);
   } catch (e: any) {
-    if ((e?.name || "").includes("ConditionalCheckFailed")) return conflict("SKU already exists for this tenant");
+    if ((e?.name || "").includes("ConditionalCheckFailed")) {
+      return conflict("SKU already exists for this tenant");
+    }
     return errResp(e);
   }
 };

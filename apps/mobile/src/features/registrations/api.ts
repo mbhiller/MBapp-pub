@@ -1,12 +1,16 @@
-import { listObjects, getObject, createObject, updateObject, type ListPage } from "../../api/client";
-import type { Registration } from "./types";
+import { listObjects, getObject, createObject, updateObject } from "../../api/client";
+import type { Registration, RegistrationListOpts } from "./types";
 
-export const RegistrationsAPI = {
-  list: (opts: { limit?: number; next?: string; eventId?: string; clientId?: string; order?: "asc" | "desc" } = {}) =>
-    listObjects<Registration>("registration", opts),
-  get: (id: string) => getObject<Registration>("registration", id),
-  create: (body: Partial<Registration>) => createObject<Registration>("registration", body),
-  update: (id: string, patch: Partial<Registration>) => updateObject<Registration>("registration", id, patch),
-};
+const TYPE = "registration";
 
-export type RegistrationsPage = ListPage<Registration>;
+export const list = (opts: RegistrationListOpts = {}) =>
+  listObjects<Registration>(TYPE, opts); // opts may contain eventId, limit, next, order
+
+export const get = (id: string) =>
+  getObject<Registration>(TYPE, id);
+
+export const create = (body: Partial<Registration>) =>
+  createObject<Registration>(TYPE, body);
+
+export const update = (id: string, body: Partial<Registration>) =>
+  updateObject<Registration>(TYPE, id, body);

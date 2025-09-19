@@ -34,5 +34,12 @@
     "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.6.2",
     "typescript": "^5.9.2"
-  }
+  },
+  "overrides": {
+  "react": "19.1.0",
+  "react-dom": "19.1.0",
+  "simple-swizzle": "0.2.2"
+}
+
+
 }
