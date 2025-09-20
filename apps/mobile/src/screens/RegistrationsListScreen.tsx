@@ -1,54 +1,80 @@
 import React from "react";
 import { View, FlatList, Text, Pressable, RefreshControl } from "react-native";
 import { Registrations } from "../features/registrations/hooks";
-import type { Registration } from "../features/registrations/types";
-import { useRefetchOnFocus } from "../features/_shared/useRefetchOnFocus";
 import { useColors } from "../providers/useColors";
+import { useRefetchOnFocus } from "../features/_shared/useRefetchOnFocus";
 
 export default function RegistrationsListScreen({ route, navigation }: any) {
+  const eventId: string | undefined = route?.params?.eventId; // prefilled when navigated from Event
   const t = useColors();
-  const eventId: string | undefined = route?.params?.eventId;
 
-  // Match Events list: use isLoading for the refresh control
-  const { data, isLoading, refetch } = Registrations.useList({ limit: 20, eventId });
+  const q = Registrations.useList({ eventId, limit: 20 });
+  const { data, isLoading, isRefetching, refetch, error } = q;
 
-  // Same focus refetch behavior
-  useRefetchOnFocus(() => refetch());
+  const refetchStable = React.useCallback(() => {
+    if (!q.isRefetching && !q.isLoading) refetch();
+  }, [refetch, q.isRefetching, q.isLoading]);
 
-  const items = data?.items ?? [];
+  useRefetchOnFocus(refetchStable);
+
+  // v5-safe defensive access
+  const items = Array.isArray(data?.items) ? data!.items : [];
+  const refreshing = isLoading; // spinner only when user pulls; focus refetch is silent
 
   return (
-    <View style={{ flex: 1, backgroundColor: t.colors.background, padding: 8 }}>
+    <View style={{ flex: 1, backgroundColor: t.colors.background, padding: 12 }}>
+      {!!error && (
+        <View
+          style={{
+            backgroundColor: t.colors.card,
+            borderColor: t.colors.border,
+            borderWidth: 1,
+            padding: 8,
+            borderRadius: 8,
+            marginBottom: 8,
+          }}
+        >
+          <Text style={{ color: t.colors.muted }}>Failed to load registrations.</Text>
+        </View>
+      )}
+
       <FlatList
         data={items}
-        keyExtractor={(item: Registration) => item.id}
-        // Use RefreshControl (prevents "always refreshing" look)
-        refreshControl={<RefreshControl refreshing={!!isLoading} onRefresh={refetch} />}
+        keyExtractor={(item) => item.id}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refetchStable} />}
         renderItem={({ item }) => (
           <Pressable
-            onPress={() => navigation.navigate("RegistrationDetail", { id: item.id })}
-            style={{ padding: 12 }}
+            onPress={() => navigation.navigate("RegistrationDetail", { id: item.id, eventId })}
+            style={{
+              backgroundColor: t.colors.card,
+              borderColor: t.colors.border,
+              borderWidth: 1,
+              borderRadius: 12,
+              padding: 12,
+              marginBottom: 10,
+            }}
           >
             <Text style={{ color: t.colors.text, fontSize: 16, fontWeight: "700" }}>
-              {item.name || "(Unnamed Registration)"}
+              {item.name || item.clientId || "(no name)"}
             </Text>
-            {!!item.eventId && (
-              <Text style={{ color: t.colors.muted, marginTop: 2 }}>
-                Event: {item.eventId}
-              </Text>
-            )}
-            {!!item.status && (
-              <Text style={{ color: t.colors.muted, marginTop: 2 }}>
-                Status: {item.status}
-              </Text>
-            )}
+            <Text style={{ color: t.colors.muted, marginTop: 2 }}>
+              {item.status ? `Status: ${item.status}` : "—"}
+              {item.eventId ? ` • Event: ${item.eventId}` : ""}
+            </Text>
           </Pressable>
         )}
-        ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: t.colors.border }} />}
+        ListEmptyComponent={
+          !refreshing ? (
+            <Text style={{ color: t.colors.muted, textAlign: "center", marginTop: 24 }}>
+              No registrations yet.
+            </Text>
+          ) : null
+        }
+        contentContainerStyle={{ paddingBottom: 72 }}
       />
 
       <Pressable
-        onPress={() => navigation.navigate("RegistrationDetail", { mode: "new", eventId })}
+        onPress={() => navigation.navigate("RegistrationDetail", { id: undefined, eventId })}
         style={{
           position: "absolute",
           right: 16,

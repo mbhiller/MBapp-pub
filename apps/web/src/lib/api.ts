@@ -1,42 +1,43 @@
-// apps/web/src/lib/api.ts — canonical + compatibility bundle for legacy App.tsx
+// apps/web/src/lib/api.ts — canonical client with legacy compatibility bundle
 
 const API_BASE = import.meta.env.VITE_API_BASE!;
 const TENANT   = import.meta.env.VITE_TENANT ?? "DemoTenant";
 
-export type ListPage<T> = { items: T[]; next?: string };
+export type Page<T> = { items: T[]; next?: string };
+type Order = "asc" | "desc";
 
 async function req<T = any>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: {
-      "x-tenant-id": TENANT,
-      "content-type": "application/json",
-      ...(init.headers || {}),
-    },
-  });
-  const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+  const hasBody = init.body != null && init.method && init.method !== "GET";
+  const headers: Record<string, string> = {
+    "x-tenant-id": TENANT,
+    ...(hasBody ? { "content-type": "application/json" } : {}),
+    ...(init.headers as Record<string, string> | undefined),
+  };
+  const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
   if (!res.ok) {
-    const err = new Error(`HTTP ${res.status}`) as Error & { status?: number; data?: any };
-    (err as any).status = res.status;
-    (err as any).data = data;
-    throw err;
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = await res.json();
+      msg = (j?.message as string) || msg;
+    } catch {}
+    throw new Error(msg);
   }
-  return data as T;
+  const ct = res.headers.get("content-type") || "";
+  return ct.includes("application/json") ? res.json() : (undefined as T);
 }
 
-// ---------- Canonical generic objects (/objects/:type) ----------
+/** ---------- Canonical Objects API ---------- **/
+
 export function listObjects<T>(
   type: string,
-  opts: { limit?: number; next?: string; sort?: "asc" | "desc"; [k: string]: any } = {}
-): Promise<ListPage<T>> {
+  opts: { limit?: number; next?: string | null; sku?: string; q?: string; order?: Order } = {}
+): Promise<Page<T>> {
   const p = new URLSearchParams();
   if (opts.limit != null) p.set("limit", String(opts.limit));
   if (opts.next) p.set("next", opts.next);
-  if (opts.sort) p.set("sort", opts.sort);
-  Object.entries(opts).forEach(([k, v]) => {
-    if (!["limit", "next", "sort"].includes(k) && v != null) p.set(k, String(v));
-  });
+  if (opts.sku) p.set("sku", opts.sku);
+  if (opts.q) p.set("q", opts.q);
+  if (opts.order) p.set("order", opts.order);
   const qs = p.toString();
   return req(`/objects/${encodeURIComponent(type)}${qs ? `?${qs}` : ""}`);
 }
@@ -45,16 +46,12 @@ export function getObject<T>(type: string, id: string): Promise<T> {
   return req(`/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}`);
 }
 
-// Overload to support BOTH canonical (type, body) and legacy (type, name, tag)
+/** Create supports BOTH canonical (body) and legacy (name, tag) overloads */
 export function createObject<T>(type: string, body: any): Promise<T>;
 export function createObject(type: string, name?: string, tag?: string): Promise<{ id?: string }>;
 export function createObject(type: string, a?: any, b?: any): Promise<any> {
-  const isBody = typeof a === "object" && a !== null;
-  const body = isBody ? a : { ...(a ? { name: a } : {}), ...(b ? { tag: b } : {}) };
-  return req(`/objects/${encodeURIComponent(type)}`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+  const body = typeof a === "object" && a !== null ? a : { ...(a ? { name: a } : {}), ...(b ? { tag: b } : {}) };
+  return req(`/objects/${encodeURIComponent(type)}`, { method: "POST", body: JSON.stringify(body) });
 }
 
 export function updateObject<T>(type: string, id: string, patch: any): Promise<T> {
@@ -68,99 +65,35 @@ export function deleteObject(type: string, id: string): Promise<{ ok: true }> {
   return req(`/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
-// ---------- Products alias (/products, /products/search, /products/:id) ----------
-export type Product = {
-  id: string;
-  tenant?: string;
-  type: "product";
-  name?: string;
-  sku?: string;
-  price?: number;
-  uom?: string;
-  taxCode?: string;
-  kind?: "good" | "service";
-  createdAt?: string;
-  updatedAt?: string;
-};
+/** ---------- Legacy helpers kept for existing demo UI ---------- **/
 
-export function listProducts(opts: {
-  limit?: number; next?: string; order?: "asc" | "desc";
-} = {}): Promise<ListPage<Product>> {
-  const p = new URLSearchParams();
-  if (opts.limit != null) p.set("limit", String(opts.limit));
-  if (opts.next) p.set("next", opts.next);
-  if (opts.order) p.set("order", opts.order);
-  const qs = p.toString();
-  return req(`/products${qs ? `?${qs}` : ""}`);
+// NOTE: Canonical GET is by path; this legacy function keeps ?id= for older demos.
+export function getObjectByQuery<T>(type: string, id: string): Promise<T> {
+  const p = new URLSearchParams({ id });
+  return req(`/objects/${encodeURIComponent(type)}?${p.toString()}`);
 }
 
-export function searchProducts(opts: {
-  sku?: string; q?: string; limit?: number; order?: "asc" | "desc";
-} = {}): Promise<ListPage<Product>> {
-  const p = new URLSearchParams();
-  if (opts.sku) p.set("sku", opts.sku);
-  if (opts.q) p.set("q", opts.q);
-  if (opts.limit != null) p.set("limit", String(opts.limit));
-  if (opts.order) p.set("order", opts.order);
-  const qs = p.toString();
-  return req(`/products/search${qs ? `?${qs}` : ""}`);
+export function getObjectByPath<T>(type: string, id: string): Promise<T> {
+  return getObject<T>(type, id);
 }
 
-export function getProduct(id: string): Promise<Product> {
-  return req(`/products/${encodeURIComponent(id)}`);
-}
-export function createProduct(body: Partial<Product>): Promise<Product> {
-  return req(`/products`, { method: "POST", body: JSON.stringify(body) });
-}
-export function updateProduct(id: string, patch: Partial<Product>): Promise<Product> {
-  return req(`/products/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(patch) });
-}
+type LegacyPage<T> = { items: T[]; cursor?: string; next?: string };
 
-// ---------- Tenants (best-effort) ----------
-export async function getTenants(): Promise<Array<{ key: string; name?: string }>> {
-  try {
-    const r = await req<Array<{ key: string; name?: string }>>(`/tenants`);
-    if (Array.isArray(r) && r.length) return r;
-  } catch { /* ignore */ }
-  // Fallback so demo keeps working
-  return [{ key: TENANT, name: TENANT }];
-}
-
-// ---------- Legacy compatibility helpers used by existing App.tsx ----------
-type LegacyPage<T> = { items: T[]; cursor?: string | null; next?: string | null };
-
-// getObjectByQuery(type, id): try path, then legacy query shape
-export async function getObjectByQuery<T>(type: string, id: string): Promise<T> {
-  try {
-    return await getObject<T>(type, id);
-  } catch {
-    const p = new URLSearchParams({ type, id });
-    const data = await req<{ items?: T[]; item?: T; cursor?: string; next?: string }>(`/objects?${p.toString()}`);
-    if ((data as any)?.item) return (data as any).item as T;
-    if ((data as any)?.items?.length) return (data as any).items[0] as T;
-    throw new Error("Not found");
-  }
-}
-
-// getObjectByPath(type, id): direct path wrapper
-export const getObjectByPath = getObject;
-
-// listByType(type, limit=5, cursor?) — keep null in the signature to satisfy App.tsx’s conditional arg
+// Legacy listByType(type, limit, cursor) → normalizes `next` into `cursor`
 export async function listByType<T>(
   type: string,
   limit = 5,
   cursor?: string | null
 ): Promise<LegacyPage<T>> {
-  const p = new URLSearchParams();
-  if (limit != null) p.set("limit", String(limit));
-  if (cursor) p.set("cursor", cursor);
-  const data = await req<LegacyPage<T>>(`/objects/${encodeURIComponent(type)}/list?${p.toString()}`);
-  // Normalize: if only `next` exists, surface it as `cursor` too
-  if (data && !data.cursor && (data as any).next) (data as any).cursor = (data as any).next;
-  return data;
+  const page = await listObjects<T>(type, { limit, next: cursor || undefined });
+  const legacy: LegacyPage<T> = { items: page.items ?? [] };
+  if (page.next) legacy.cursor = page.next; // keep legacy name for App.tsx
+  return legacy;
 }
 
-// searchByTag(tag, limit=5, cursor?) — same null-friendly signature + normalization
+// Legacy global tag search — retained so App.tsx works without changes.
+// If your API supports /objects/search?tag=, this will hit it; otherwise you can
+// redirect it server-side to the new canonical search semantics.
 export async function searchByTag<T>(
   tag: string,
   limit = 5,
@@ -168,64 +101,96 @@ export async function searchByTag<T>(
 ): Promise<LegacyPage<T>> {
   const p = new URLSearchParams({ tag });
   if (limit != null) p.set("limit", String(limit));
-  if (cursor) p.set("cursor", cursor);
+  if (cursor) p.set("next", cursor); // prefer `next` on newer backends
   const data = await req<LegacyPage<T>>(`/objects/search?${p.toString()}`);
+  // normalize if backend returns only `next`
   if (data && !data.cursor && (data as any).next) (data as any).cursor = (data as any).next;
   return data;
 }
 
-// ---- Clients
+/** ---------- Tenants ---------- **/
+export async function getTenants(): Promise<Array<{ key: string; name?: string }>> {
+  try {
+    const r = await req<Array<{ key: string; name?: string }>>(`/tenants`);
+    if (Array.isArray(r) && r.length) return r;
+  } catch {}
+  // Fallback so demo keeps working even if /tenants is not wired
+  return [{ key: TENANT, name: TENANT }];
+}
+
+/** ---------- Typed convenience built on canonical objects ---------- **/
+
+// Products (resolve to objects/product)
+export type Product = {
+  id: string;
+  type: "product";
+  tenant?: string;
+  sku?: string;
+  name?: string;
+  kind?: "good" | "service";
+  price?: number;
+  uom?: string;
+  tags?: string[];
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export const listProducts = (opts: { limit?: number; next?: string | null; sku?: string; q?: string; order?: Order } = {}) =>
+  listObjects<Product>("product", opts);
+export const searchProducts = (opts: { limit?: number; next?: string | null; sku?: string; q?: string; order?: Order } = {}) =>
+  listObjects<Product>("product", opts);
+export const getProduct = (id: string) => getObject<Product>("product", id);
+export const createProduct = (body: Partial<Product>) => createObject<Product>("product", body);
+export const updateProduct = (id: string, patch: Partial<Product>) => updateObject<Product>("product", id, patch);
+
+// Clients (resolve to objects/client)
 export type Client = {
-  id: string; type: "client"; tenant?: string;
-  name?: string; email?: string; phone?: string; status?: "active"|"blocked"; tags?: string[];
-  createdAt?: string; updatedAt?: string;
+  id: string;
+  type: "client";
+  tenant?: string;
+  name?: string;
+  email?: string;
+  phone?: string;
+  status?: "active" | "inactive";
+  createdAt?: string;
+  updatedAt?: string;
 };
-export function listClients(opts: { limit?:number; next?:string; q?:string; email?:string; order?:"asc"|"desc" } = {}) {
-  const p = new URLSearchParams();
-  if (opts.limit!=null) p.set("limit", String(opts.limit));
-  if (opts.next) p.set("next", opts.next);
-  if (opts.q) p.set("q", opts.q);
-  if (opts.email) p.set("email", opts.email);
-  if (opts.order) p.set("order", opts.order);
-  return req(`/objects/client?${p.toString()}`);
-}
-export const getClient = (id: string) => req(`/objects/client/${encodeURIComponent(id)}`);
-export const createClient = (body: Partial<Client>) => req(`/objects/client`, { method:"POST", body: JSON.stringify(body) });
-export const updateClient = (id: string, patch: Partial<Client>) =>
-  req(`/objects/client/${encodeURIComponent(id)}`, { method:"PUT", body: JSON.stringify(patch) });
+export const listClients = (opts: { limit?: number; next?: string | null; q?: string; order?: Order } = {}) =>
+  listObjects<Client>("client", opts);
+export const getClient = (id: string) => getObject<Client>("client", id);
+export const createClient = (body: Partial<Client>) => createObject<Client>("client", body);
+export const updateClient = (id: string, patch: Partial<Client>) => updateObject<Client>("client", id, patch);
 
-// ---- Resources
+// Resources (resolve to objects/resource)
 export type Resource = {
-  id: string; type: "resource"; tenant?: string;
-  name?: string; resourceType?: string; location?: string; capacity?: number; status?: string; tags?: string[];
-  createdAt?: string; updatedAt?: string;
+  id: string;
+  type: "resource";
+  tenant?: string;
+  name?: string;
+  resourceType?: string;
+  location?: string;
+  capacity?: number;
+  status?: string;
+  tags?: string[];
+  createdAt?: string;
+  updatedAt?: string;
 };
-export function listResources(opts: { limit?:number; next?:string; q?:string; resourceType?:string; location?:string; order?:"asc"|"desc" } = {}) {
-  const p = new URLSearchParams();
-  if (opts.limit!=null) p.set("limit", String(opts.limit));
-  if (opts.next) p.set("next", opts.next);
-  if (opts.q) p.set("q", opts.q);
-  if (opts.resourceType) p.set("resourceType", opts.resourceType);
-  if (opts.location) p.set("location", opts.location);
-  if (opts.order) p.set("order", opts.order);
-  return req(`/objects/resource?${p.toString()}`);
-}
-export const getResource = (id: string) => req(`/objects/resource/${encodeURIComponent(id)}`);
-export const createResource = (body: Partial<Resource>) => req(`/objects/resource`, { method:"POST", body: JSON.stringify(body) });
-export const updateResource = (id: string, patch: Partial<Resource>) =>
-  req(`/objects/resource/${encodeURIComponent(id)}`, { method:"PUT", body: JSON.stringify(patch) });
+export const listResources = (opts: { limit?: number; next?: string | null; q?: string; order?: Order } = {}) =>
+  listObjects<Resource>("resource", opts);
+export const getResource = (id: string) => getObject<Resource>("resource", id);
+export const createResource = (body: Partial<Resource>) => createObject<Resource>("resource", body);
+export const updateResource = (id: string, patch: Partial<Resource>) => updateObject<Resource>("resource", id, patch);
 
-
-
-// ---------- Convenience: bundle for `import { api } from "./lib/api"`
+/** ---------- Bundle for `import { api } from "./lib/api"` ---------- **/
 export const api = {
-  // canonical
+  // canonical core
   listObjects, getObject, createObject, updateObject, deleteObject,
+  // products/clients/resources typed helpers
   listProducts, searchProducts, getProduct, createProduct, updateProduct,
-  getTenants,
-  // legacy helpers kept for App.tsx
-  getObjectByQuery, getObjectByPath, listByType, searchByTag,
-   //Clients and Resources
   listClients, getClient, createClient, updateClient,
   listResources, getResource, createResource, updateResource,
+  // tenants
+  getTenants,
+  // legacy shims used by current App.tsx
+  getObjectByQuery, getObjectByPath, listByType, searchByTag,
 };

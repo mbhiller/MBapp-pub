@@ -27,6 +27,7 @@
     "@aws-sdk/lib-dynamodb": "^3.882.0",
     "@types/node": "^24.4.0",
     "@types/react": "^19.1.12",
+    "@types/react-dom": "^19.1.5",
     "@typescript-eslint/eslint-plugin": "^8.42.0",
     "@typescript-eslint/parser": "^8.42.0",
     "esbuild": "^0.25.9",
@@ -36,10 +37,8 @@
     "typescript": "^5.9.2"
   },
   "overrides": {
-  "react": "19.1.0",
-  "react-dom": "19.1.0",
-  "simple-swizzle": "0.2.2"
-}
-
-
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "simple-swizzle": "0.2.2"
+  }
 }

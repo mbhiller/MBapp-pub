@@ -1,24 +1,18 @@
-export type ProductKind = "good" | "service" | string;
+// apps/mobile/src/features/products/types.ts
 export type Product = {
   id: string;
   type: "product";
+  tenantId?: string;
+
   sku?: string;
   name?: string;
-  kind?: ProductKind;
-  price?: number;
-  createdAt?: string;
-  updatedAt?: string;
-};
-/* export type Product = {
-  id: string;
-  type: "product";
-  name: string;
-  sku?: string;
+  kind?: "good" | "service";
   price?: number;
   uom?: string;
   taxCode?: string;
-  kind?: "good" | "service";
-  tenantId?: string;
+
   createdAt?: string;
   updatedAt?: string;
-};*/
+};
+
+export type Page<T> = { items: T[]; next?: string };

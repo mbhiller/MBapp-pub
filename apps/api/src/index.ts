@@ -1,10 +1,12 @@
 // apps/api/src/index.ts
+import type { APIGatewayProxyResult, Context } from "aws-lambda";
 import { preflight, notimpl, ok, error } from "./common/responses";
 import * as ObjCreate from "./objects/create";
 import * as ObjUpdate from "./objects/update";
 import * as ObjGet from "./objects/get";
 import * as ObjList from "./objects/list";
 import * as ObjSearch from "./objects/search";
+import { withCors } from "./cors";
 
 // Accept both HTTP API v2 and REST v1 shapes (keep types loose to avoid build issues)
 type ApiEvt = {
@@ -68,13 +70,15 @@ function splitObjectsPath(path: string): { type?: string; tail: string[] } {
   return { type, tail };
 }
 
-export const handler = async (evt: ApiEvt) => {
+export const baseHandler = async (evt: ApiEvt, _ctx?: Context): Promise<APIGatewayProxyResult> => {
   const method = methodOf(evt);
   try {
-    if (method === "OPTIONS") return preflight();
-
+    // Health first, always succeeds (useful for smoke tests)
     const rawPath = pathOf(evt);
-    if (rawPath === "/health") return ok({ ok: true });
+    if (method === "GET" && rawPath === "/health") return ok({ ok: true });
+
+    // Short-circuit OPTIONS; withCors will also add headers on responses
+    if (method === "OPTIONS") return preflight();
 
     const path = rewriteAlias(rawPath);
 
@@ -132,3 +136,6 @@ export const handler = async (evt: ApiEvt) => {
     return error(e?.message || "router");
   }
 };
+
+// Cast to satisfy a looser event type expected by withCors (prevents TS mismatch)
+export const handler = withCors(baseHandler as any);
