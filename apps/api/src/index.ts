@@ -6,6 +6,7 @@ import * as ObjUpdate from "./objects/update";
 import * as ObjGet from "./objects/get";
 import * as ObjList from "./objects/list";
 import * as ObjSearch from "./objects/search";
+import * as ObjDelete from "./objects/delete";
 import { withCors } from "./cors";
 
 // Accept both HTTP API v2 and REST v1 shapes (keep types loose to avoid build issues)
@@ -40,7 +41,10 @@ const aliasToType: Record<string, string> = {
   "/events": "event",
   "/products": "product",
   "/registrations": "registration",
+  "/accounts": "account",          
+  // "/tenants": "tenant",         // optional: only if you persist tenants in /objects/tenant
 };
+
 
 function rewriteAlias(path: string): string {
   for (const alias of Object.keys(aliasToType)) {
@@ -120,6 +124,12 @@ export const baseHandler = async (evt: ApiEvt, _ctx?: Context): Promise<APIGatew
       if (method === "GET" && tail.length === 0) {
         return ObjList.handler(withParams(evt, { type }) as any);
       }
+
+      // DELETE /objects/:type/:id
+      if (method === "DELETE" && /^\/objects\/[^/]+\/[^/]+$/.test(path)) {
+        return await ObjDelete.handler(evt);
+      }
+
 
       return notimpl(`${method} ${path}`);
     }

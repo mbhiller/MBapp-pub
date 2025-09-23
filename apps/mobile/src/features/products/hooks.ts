@@ -1,44 +1,48 @@
 // apps/mobile/src/features/products/hooks.ts
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-  keepPreviousData,
-  type UseQueryResult,
-} from "@tanstack/react-query";
+  listProducts as _list,
+  getProduct as _get,
+  createProduct as _create,
+  updateProduct as _update,
+} from "./api";
 import type { Product, Page } from "./types";
-import { listProducts, getProduct, createProduct, updateProduct } from "./api";
 
 const keys = {
-  list: () => ["products", "list"] as const,
-  byId: (id?: string) => ["products", "byId", id] as const,
+  list: (limit?: number, next?: string, q?: string) =>
+    ["products", "list", limit ?? 20, next ?? "", q ?? ""] as const,
+  byId: (id?: string) => ["products", "byId", id ?? ""] as const,
 };
 
 export const Products = {
-  useList(opts: { limit?: number } = { limit: 20 }): UseQueryResult<Page<Product>, Error> {
-    return useQuery<Page<Product>, Error>({
-      queryKey: keys.list(),
-      queryFn: () => listProducts({ limit: opts.limit }),
-      staleTime: 60_000,
-      placeholderData: keepPreviousData, // v5 replacement for keepPreviousData: true
+  useList(opts: { limit?: number; next?: string | null; q?: string } = {}) {
+    const limit = opts.limit ?? 20;
+    const next = opts.next ?? null;
+    const q = opts.q ?? "";
+
+    return useQuery<Page<Product>>({
+      queryKey: keys.list(limit, next ?? undefined, q),
+      queryFn: () => _list({ limit, next, q }),
+      // Explicit typing avoids TS7006 implicit-any
+      placeholderData: (prev: Page<Product> | undefined) => prev,
     });
   },
 
-  useGet(id?: string): UseQueryResult<Product | undefined, Error> {
-    return useQuery<Product | undefined, Error>({
+  useGet(id?: string) {
+    return useQuery<Product | undefined>({
       queryKey: keys.byId(id),
-      queryFn: () => getProduct(id),
-      enabled: !!id,
-      staleTime: 60_000,
+      queryFn: () => (id ? _get(id) : Promise.resolve(undefined)),
+      enabled: Boolean(id),
+      placeholderData: (prev: Product | undefined) => prev,
     });
   },
 
   useCreate() {
     const qc = useQueryClient();
     return useMutation({
-      mutationFn: (body: Partial<Product>) => createProduct(body),
+      mutationFn: (body: Partial<Product>) => _create(body),
       onSuccess: () => {
-        qc.invalidateQueries({ queryKey: keys.list() });
+        qc.invalidateQueries({ queryKey: ["products"] });
       },
     });
   },
@@ -46,10 +50,10 @@ export const Products = {
   useUpdate(id: string) {
     const qc = useQueryClient();
     return useMutation({
-      mutationFn: (patch: Partial<Product>) => updateProduct(id, patch),
+      mutationFn: (patch: Partial<Product>) => _update(id, patch),
       onSuccess: (updated) => {
-        qc.invalidateQueries({ queryKey: keys.list() });
         qc.setQueryData(keys.byId(id), updated);
+        qc.invalidateQueries({ queryKey: ["products"] });
       },
     });
   },

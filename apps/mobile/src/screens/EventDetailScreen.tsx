@@ -1,343 +1,255 @@
 // apps/mobile/src/screens/EventDetailScreen.tsx
 import React from "react";
-import { ScrollView, View, Text, TextInput, Pressable, Alert } from "react-native";
-import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
+import { View, Text, TextInput, Pressable, Alert } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 import { Events } from "../features/events/hooks";
+import { useColors } from "../features/_shared/useColors";
+import FormScreen from "../features/_shared/FormScreen";
+import DateTimeField from "../features/_shared/DateTimeField";
 import { useRegistrationsCount } from "../features/registrations/useRegistrationsCount";
-import { useColors } from "../providers/useColors";
+import type { Event } from "../features/events/types";
 
-function iso(d?: string) { return d ? new Date(d).toLocaleString() : "—"; }
-function toIsoOrUndefined(d?: Date | null) { return d ? d.toISOString() : undefined; }
-function fromIsoOrNow(s?: string) { return s ? new Date(s) : new Date(); }
-function fmtDate(d?: string) {
-  if (!d) return "";
-  try { return new Date(d).toLocaleDateString(); } catch { return ""; }
-}
-function fmtTime(d?: string) {
-  if (!d) return "";
-  try { return new Date(d).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); } catch { return ""; }
-}
-
-type PickerTarget = null | { field: "start" | "end"; mode: "date" | "time" };
+const STATUS_VALUES = ["available", "unavailable", "maintenance"] as const;
+type Status = typeof STATUS_VALUES[number];
 
 export default function EventDetailScreen({ route, navigation }: any) {
-  const id: string | undefined = route?.params?.id;
-  const isCreate = !id;
-
   const t = useColors();
-  const get = Events.useGet(id);
+  const id: string | undefined = route?.params?.id;
+  const initial = (route?.params?.initial ?? {}) as Partial<Event> & { notes?: string };
+
+  const { data, refetch, isFetching } = Events.useGet(id);
   const create = Events.useCreate();
-  const update = id ? Events.useUpdate(id) : undefined;
+  const update = Events.useUpdate(id ?? "");
 
-  const [name, setName] = React.useState("");
-  const [location, setLocation] = React.useState("");
-  const [startDate, setStartDate] = React.useState<string | undefined>(undefined);
-  const [endDate, setEndDate] = React.useState<string | undefined>(undefined);
+  // Controlled local state
+  const [name, setName] = React.useState(String(initial?.name ?? ""));
+  const [description, setDescription] = React.useState(String((initial as any)?.description ?? ""));
+  const [location, setLocation] = React.useState(String((initial as any)?.location ?? ""));
+  const [startsAt, setStartsAt] = React.useState<string | undefined>((initial as any)?.startsAt ?? undefined);
+  const [endsAt, setEndsAt] = React.useState<string | undefined>((initial as any)?.endsAt ?? undefined);
+  const [status, setStatus] = React.useState<string>(String((initial as any)?.status ?? "available"));
+  const [capacity, setCapacity] = React.useState(String((initial as any)?.capacity ?? ""));
+  const [notes, setNotes] = React.useState(String((initial as any)?.notes ?? ""));
 
-  // registrations badge
-  const regCountQ = useRegistrationsCount(id);
-  const regCount = typeof regCountQ.data === "number" ? regCountQ.data : undefined;
+  // Registrations count
+  const countsQ = useRegistrationsCount(id ? [id] : [], { enabled: Boolean(id) });
+  const regCount = id ? (countsQ.data?.[id] ?? 0) : 0;
 
-  // minimized pickers (only show when an icon is tapped)
-  const [picker, setPicker] = React.useState<PickerTarget>(null);
+  // Track if the user has edited status this session
+  const statusTouched = React.useRef(false);
 
-  // hydrate for edit
-  React.useEffect(() => {
-    if (isCreate) {
-      setName(""); setLocation("");
-      setStartDate(undefined); setEndDate(undefined);
-      return;
-    }
-    if (get.data) {
-      setName(get.data.name ?? "");
-      setLocation(get.data.location ?? "");
-      setStartDate(get.data.startDate);
-      setEndDate(get.data.endDate);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [get.data?.id]);
-
-  const saving = Boolean(update?.isPending || create.isPending);
-
-  const onSave = async () => {
-    const payload = {
-      name: (name || "").trim() || undefined,
-      location: (location || "").trim() || undefined,
-      startDate,
-      endDate,
-    };
-    if (!payload.name) {
-      Alert.alert("Validation", "Event name is required.");
-      return;
-    }
-    try {
-      if (id && update) {
-        await update.mutateAsync(payload);
-        Alert.alert("Saved", "Event updated.");
-        navigation.goBack();
-      } else {
-        const created = await create.mutateAsync(payload);
-        Alert.alert("Saved", "Event created.");
-        navigation.navigate("EventDetail", { id: created.id });
-      }
-    } catch (e: any) {
-      Alert.alert("Save failed", e?.message ?? "Unknown error");
-    }
-  };
-
-  // merge in only the date part from a picker selection
-  const applyDatePart = (origIso: string | undefined, picked: Date) => {
-    const base = origIso ? new Date(origIso) : new Date();
-    const out = new Date(base);
-    out.setFullYear(picked.getFullYear(), picked.getMonth(), picked.getDate());
-    return out;
-  };
-  // merge in only the time part
-  const applyTimePart = (origIso: string | undefined, picked: Date) => {
-    const base = origIso ? new Date(origIso) : new Date();
-    const out = new Date(base);
-    out.setHours(picked.getHours(), picked.getMinutes(), 0, 0);
-    return out;
-  };
-
-  const onChangePicker = (e: DateTimePickerEvent, selected?: Date) => {
-    if (e.type === "dismissed") { setPicker(null); return; }
-    if (!picker || !selected) { setPicker(null); return; }
-
-    if (picker.field === "start") {
-      if (picker.mode === "date") {
-        const d = applyDatePart(startDate, selected);
-        setStartDate(toIsoOrUndefined(d));
-      } else {
-        const d = applyTimePart(startDate, selected);
-        setStartDate(toIsoOrUndefined(d));
-      }
-    } else {
-      if (picker.mode === "date") {
-        const d = applyDatePart(endDate, selected);
-        setEndDate(toIsoOrUndefined(d));
-      } else {
-        const d = applyTimePart(endDate, selected);
-        setEndDate(toIsoOrUndefined(d));
-      }
-    }
-    setPicker(null);
-  };
-
-  const inputStyle = {
-    borderWidth: 1,
-    borderColor: t.colors.border,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: t.colors.text,
-    backgroundColor: t.colors.background,
-  } as const;
-
-  const RowField = ({
-    label,
-    value,
-    onPressCalendar,
-    onPressClock,
-    placeholder,
-  }: {
-    label: string;
-    value: string;
-    onPressCalendar: () => void;
-    onPressClock: () => void;
-    placeholder?: string;
-  }) => (
-    <Labeled label={label}>
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          borderWidth: 1,
-          borderColor: t.colors.border,
-          borderRadius: 10,
-          paddingHorizontal: 10,
-          paddingVertical: 6,
-          backgroundColor: t.colors.background,
-        }}
-      >
-        <TextInput
-          style={{ flex: 1, color: t.colors.text, paddingVertical: 6 }}
-          value={value}
-          placeholder={placeholder}
-          placeholderTextColor={t.colors.muted}
-          editable={false}
-        />
-        <Pressable onPress={onPressCalendar} hitSlop={6} style={{ paddingHorizontal: 8, paddingVertical: 6 }}>
-          <Text style={{ color: t.colors.primary, fontSize: 16 }}>📅</Text>
-        </Pressable>
-        <Pressable onPress={onPressClock} hitSlop={6} style={{ paddingLeft: 4, paddingVertical: 6 }}>
-          <Text style={{ color: t.colors.primary, fontSize: 16 }}>⏰</Text>
-        </Pressable>
-      </View>
-    </Labeled>
+  // ✨ On focus: just refetch; DON'T clear fields (prevents losing hydration when returning)
+  useFocusEffect(
+    React.useCallback(() => {
+      statusTouched.current = false;
+      if (id) refetch();
+    }, [id, refetch])
   );
 
-  if (id && get.isLoading) {
-    return (
-      <View style={{ padding: 16, flex: 1, backgroundColor: t.colors.background }}>
-        <Text style={{ color: t.colors.muted }}>Loading…</Text>
-      </View>
-    );
-  }
+  // Merge fresh server data into any still-empty fields; status hydrates unless user typed
+  React.useEffect(() => {
+    if (!data) return;
+
+    if (name === "") setName(String(data?.name ?? ""));
+    if (description === "") setDescription(String((data as any)?.description ?? ""));
+    if (location === "") setLocation(String((data as any)?.location ?? ""));
+    if (!startsAt && (data as any)?.startsAt) setStartsAt((data as any).startsAt);
+    if (!endsAt && (data as any)?.endsAt) setEndsAt((data as any).endsAt);
+
+    const serverStatus = String((data as any)?.status ?? "available");
+    if (!statusTouched.current) setStatus(serverStatus);
+
+    if (capacity === "") {
+      const cap = (data as any)?.capacity;
+      setCapacity(cap != null ? String(cap) : "");
+    }
+    if (notes === "") setNotes(String((data as any)?.notes ?? ""));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+
+  const onSave = async () => {
+    if (!name.trim()) { Alert.alert("Name is required"); return; }
+
+    // Coerce status to enum on save
+    const normalized = (status ?? "").trim().toLowerCase();
+    const statusEnum: Status = (STATUS_VALUES as readonly string[]).includes(normalized as Status)
+      ? (normalized as Status)
+      : "available";
+
+    const capNum = capacity.trim() === "" ? undefined : Number.parseInt(capacity, 10);
+    const capacityClean = Number.isFinite(capNum as number) ? (capNum as number) : undefined;
+
+    const payload: Partial<Event> & { notes?: string } = {
+      id,
+      type: "event",
+      name: name.trim(),
+      description: description.trim() || undefined,
+      location: location.trim() || undefined,
+      startsAt, endsAt,
+      status: statusEnum,
+      ...(capacityClean != null ? { capacity: capacityClean } : {}),
+      ...(notes.trim() ? { notes: notes.trim() } : {}),
+    };
+
+    try {
+      if (id) await update.mutateAsync(payload as any);
+      else     await create.mutateAsync(payload as any);
+      navigation.goBack();
+    } catch (e: any) {
+      Alert.alert("Error", e?.message ?? "Failed to save");
+    }
+  };
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: t.colors.background }} contentContainerStyle={{ padding: 16, paddingBottom: 80 }}>
-      {/* Header + Registrations */}
-      <Card>
-        <SectionTitle title={isCreate ? "New Event" : "Edit Event"} />
-
-        {!isCreate && (
+    <FormScreen>
+      <View
+        style={{
+          backgroundColor: t.colors.card,
+          borderRadius: 12,
+          borderWidth: 1,
+          borderColor: t.colors.border,
+          padding: 16,
+          marginBottom: 12,
+        }}
+      >
+        {/* 🔝 View registrations at top */}
+        {id && (
           <Pressable
             onPress={() => navigation.navigate("RegistrationsList", { eventId: id })}
             style={{
-              alignSelf: "flex-start",
+              marginBottom: 12,
               backgroundColor: t.colors.card,
-              borderWidth: 1,
               borderColor: t.colors.border,
-              borderRadius: 999,
-              paddingVertical: 6,
-              paddingHorizontal: 12,
+              borderWidth: 1,
+              borderRadius: 10,
+              padding: 12,
               flexDirection: "row",
+              justifyContent: "space-between",
               alignItems: "center",
-              marginBottom: 6,
             }}
           >
-            <Text style={{ color: t.colors.text, fontWeight: "700" }}>View Registrations</Text>
+            <Text style={{ color: t.colors.text, fontWeight: "700" }}>View registrations</Text>
             <View
               style={{
-                backgroundColor: t.colors.primary,
+                minWidth: 28,
                 paddingHorizontal: 8,
-                paddingVertical: 2,
+                paddingVertical: 4,
                 borderRadius: 999,
-                marginLeft: 8,
-                minWidth: 24,
+                backgroundColor: t.colors.primary,
                 alignItems: "center",
               }}
             >
               <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>
-                {typeof regCount === "number" ? regCount : "—"}
+                {countsQ.isLoading ? "…" : regCount}
               </Text>
             </View>
           </Pressable>
         )}
 
-        {/* Name */}
-        <Labeled label="Name">
-          <TextInput
-            value={name}
-            onChangeText={setName}
-            placeholder="Event name"
-            placeholderTextColor={t.colors.muted}
-            style={inputStyle}
-          />
-        </Labeled>
+        <Field label="Name *" value={name} onChangeText={setName} />
+        <Field label="Description" value={description} onChangeText={setDescription} multiline />
+        <Field label="Location" value={location} onChangeText={setLocation} />
 
-        {/* Location */}
-        <Labeled label="Location">
-          <TextInput
-            value={location}
-            onChangeText={setLocation}
-            placeholder="Location"
-            placeholderTextColor={t.colors.muted}
-            style={inputStyle}
-          />
-        </Labeled>
+        <DateTimeField label="Starts at" value={startsAt} onChange={setStartsAt} mode="datetime" />
+        <DateTimeField label="Ends at" value={endsAt} onChange={setEndsAt} mode="datetime" />
 
-        {/* Start (minimized pickers) */}
-        <RowField
-          label="Start"
-          value={`${fmtDate(startDate)} ${startDate ? "• " + fmtTime(startDate) : ""}`.trim()}
-          placeholder="Pick date/time"
-          onPressCalendar={() => setPicker({ field: "start", mode: "date" })}
-          onPressClock={() => setPicker({ field: "start", mode: "time" })}
+        {/* Status as selectable pill buttons */}
+        <Label text='Status'/>
+        <PillGroup
+          options={STATUS_VALUES as unknown as string[]}
+          value={status}
+          onChange={(v) => { statusTouched.current = true; setStatus(v); }}
         />
 
-        {/* End (minimized pickers) */}
-        <RowField
-          label="End"
-          value={`${fmtDate(endDate)} ${endDate ? "• " + fmtTime(endDate) : ""}`.trim()}
-          placeholder="Pick date/time"
-          onPressCalendar={() => setPicker({ field: "end", mode: "date" })}
-          onPressClock={() => setPicker({ field: "end", mode: "time" })}
-        />
+        <Field label="Capacity" value={capacity} onChangeText={setCapacity} keyboardType="numeric" />
+        <Field label="Notes" value={notes} onChangeText={setNotes} multiline />
 
-        {!isCreate && (
-          <View style={{ marginTop: 6 }}>
-            <Text style={{ color: t.colors.muted, fontSize: 12 }}>
-              Created: {iso(get.data?.createdAt)} • Updated: {iso(get.data?.updatedAt)}
-            </Text>
-          </View>
-        )}
-
-        <PrimaryButton title={saving ? "Saving…" : "Save"} disabled={saving} onPress={onSave} />
-      </Card>
-
-      {/* Native minimized picker; only mounts when user taps an icon */}
-      {picker && (
-        <DateTimePicker
-          testID="event-datetime"
-          mode={picker.mode}
-          value={picker.field === "start" ? fromIsoOrNow(startDate) : fromIsoOrNow(endDate)}
-          display="default"
-          onChange={onChangePicker}
-        />
-      )}
-    </ScrollView>
+        <Pressable
+          onPress={onSave}
+          style={{ marginTop: 12, backgroundColor: t.colors.primary, padding: 14, borderRadius: 10, alignItems: "center" }}
+        >
+          <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>
+            {id ? (isFetching ? "Saving…" : "Save") : "Create"}
+          </Text>
+        </Pressable>
+      </View>
+    </FormScreen>
   );
 }
 
-/* ——— Themed bits (same style as clients/events) ——— */
+function Label({ text }: { text: string }) {
+  const t = useColors();
+  return <Text style={{ marginBottom: 6, color: t.colors.muted }}>{text}</Text>;
+}
 
-function Card({ children }: { children: React.ReactNode }) {
-  const t = useColors();
-  return (
-    <View
-      style={{
-        backgroundColor: t.colors.card,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: t.colors.border,
-        padding: 16,
-        gap: 12,
-      }}
-    >
-      {children}
-    </View>
-  );
-}
-function SectionTitle({ title }: { title: string }) {
-  const t = useColors();
-  return <Text style={{ color: t.colors.text, fontSize: 18, fontWeight: "700" }}>{title}</Text>;
-}
-function Labeled({ label, children }: React.PropsWithChildren<{ label: string }>) {
+function Field({
+  label, value, onChangeText, multiline, keyboardType,
+}:{
+  label: string; value?: any; onChangeText: (v: any) => void; multiline?: boolean; keyboardType?: any;
+}) {
   const t = useColors();
   return (
     <View style={{ marginBottom: 10 }}>
-      <Text style={{ color: t.colors.muted, marginBottom: 6 }}>{label}</Text>
-      {children}
+      <Text style={{ marginBottom: 6, color: t.colors.muted }}>{label}</Text>
+      <TextInput
+        value={String(value ?? "")}
+        onChangeText={onChangeText}
+        multiline={multiline}
+        keyboardType={keyboardType}
+        autoCapitalize="none"
+        autoCorrect={false}
+        blurOnSubmit={false}
+        returnKeyType="done"
+        style={{
+          backgroundColor: t.colors.bg,
+          color: t.colors.text,
+          borderColor: t.colors.border,
+          borderWidth: 1,
+          borderRadius: 8,
+          padding: 12,
+          minHeight: multiline ? 80 : undefined,
+        }}
+        placeholderTextColor={t.colors.muted}
+      />
     </View>
   );
 }
-function PrimaryButton({ title, onPress, disabled }: any) {
+
+function PillGroup({
+  options,
+  value,
+  onChange,
+}: {
+  options: string[];
+  value?: string;
+  onChange: (v: string) => void;
+}) {
   const t = useColors();
   return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      style={{
-        backgroundColor: disabled ? t.colors.disabled : t.colors.primary,
-        padding: 14,
-        borderRadius: 10,
-        alignItems: "center",
-        marginTop: 4,
-      }}
-    >
-      <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>{title}</Text>
-    </Pressable>
+    <View style={{ flexDirection: "row", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+      {options.map((opt) => {
+        const selected = String(value ?? "") === opt;
+        return (
+          <Pressable
+            key={opt}
+            onPress={() => onChange(opt)}
+            style={{
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              borderRadius: 999,
+              borderWidth: 1,
+              borderColor: selected ? t.colors.primary : t.colors.border,
+              backgroundColor: selected ? t.colors.primary : t.colors.card,
+              marginRight: 8,
+              marginBottom: 8,
+            }}
+          >
+            <Text style={{ color: selected ? t.colors.buttonText : t.colors.text, fontWeight: "600" }}>
+              {opt}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }

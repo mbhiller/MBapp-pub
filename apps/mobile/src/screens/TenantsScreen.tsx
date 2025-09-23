@@ -1,6 +1,6 @@
 import React from "react";
 import { View, Text } from "react-native";
-import { useColors } from "../providers/useColors";
+import { useColors } from "../features/_shared/useColors";
 
 export default function TenantsScreen() {
   const t = useColors();

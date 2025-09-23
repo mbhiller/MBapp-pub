@@ -1,32 +1,90 @@
 // apps/mobile/src/features/_shared/useRefetchOnFocus.ts
 import * as React from "react";
-import { useNavigation, NavigationProp } from "@react-navigation/native";
+import { AppState, AppStateStatus } from "react-native";
+import { useFocusEffect, useIsFocused } from "@react-navigation/native";
+
+type Opts = {
+  /** Delay (ms) before calling refetch after focus/foreground. Default: 0 */
+  debounceMs?: number;
+  /** Also refetch when app returns to foreground (screen must be focused). Default: true */
+  onAppForeground?: boolean;
+  /** Fire on the initial mount-focus as well. Default: true */
+  fireOnMount?: boolean;
+};
 
 /**
- * Calls the provided refetch function once whenever the screen gains focus.
- * - Subscribes exactly once (no listener accumulation)
- * - Uses a ref to keep the latest callback without changing the listener
- * - Optional debounce to avoid overlapping with mount renders
+ * Calls `refetch` whenever the screen becomes focused.
+ * - Optional debounce (to avoid double work during rapid nav).
+ * - Optional foreground refetch when app comes back to ACTIVE.
+ * - No memory leaks: all timers/listeners are cleaned up.
  */
-export function useRefetchOnFocus(refetch: () => void, options?: { debounceMs?: number }) {
-  const navigation = useNavigation<NavigationProp<any>>();
-  const ref = React.useRef(refetch);
-  const debounceMs = options?.debounceMs ?? 0;
+export function useRefetchOnFocus(
+  refetch: () => void | Promise<unknown>,
+  opts: Opts = {}
+) {
+  const { debounceMs = 0, onAppForeground = true, fireOnMount = true } = opts;
 
-  // Keep latest callback without changing listener identity
+  // Keep the latest refetch without re-subscribing listeners
+  const refetchRef = React.useRef(refetch);
   React.useEffect(() => {
-    ref.current = refetch;
+    refetchRef.current = refetch;
   }, [refetch]);
 
-  // Subscribe once
+  // Utility: run (debounced) once
+  const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const run = React.useCallback(() => {
+    // clear any pending timer first
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    if (debounceMs > 0) {
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null;
+        refetchRef.current?.();
+      }, debounceMs);
+    } else {
+      refetchRef.current?.();
+    }
+  }, [debounceMs]);
+
+  // Refetch when the screen gains focus
+  useFocusEffect(
+    React.useCallback(() => {
+      if (fireOnMount) run();
+
+      // Cleanup clears any in-flight debounce timer
+      return () => {
+        if (timerRef.current) {
+          clearTimeout(timerRef.current);
+          timerRef.current = null;
+        }
+      };
+    }, [run, fireOnMount])
+  );
+
+  // Optionally refetch when app foregrounds, but only if this screen is focused
+  const isFocused = useIsFocused();
   React.useEffect(() => {
-    const unsub = navigation.addListener("focus", () => {
-      if (debounceMs > 0) {
-        const t = setTimeout(() => ref.current?.(), debounceMs);
-        return;
+    if (!onAppForeground) return;
+
+    const onChange = (state: AppStateStatus) => {
+      if (state === "active" && isFocused) {
+        run();
       }
-      ref.current?.();
-    });
-    return unsub;
-  }, [navigation, debounceMs]);
+    };
+
+    const sub = AppState.addEventListener("change", onChange);
+    return () => sub.remove();
+  }, [onAppForeground, isFocused, run]);
+
+  // Also clear any timer on unmount (belt & suspenders)
+  React.useEffect(() => {
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, []);
 }

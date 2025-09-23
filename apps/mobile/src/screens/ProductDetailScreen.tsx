@@ -1,226 +1,220 @@
 import React from "react";
-import { ScrollView, View, Text, TextInput, Pressable, Alert } from "react-native";
+import { View, Text, TextInput, Pressable, Alert } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 import { Products } from "../features/products/hooks";
-import { useColors } from "../providers/useColors";
+import { useColors } from "../features/_shared/useColors";
+import FormScreen from "../features/_shared/FormScreen";
+import type { Product } from "../features/products/types";
 
-function iso(d?: string) { return d ? new Date(d).toLocaleString() : "—"; }
+const STATUS_VALUES = ["active", "inactive", "archived"] as const;
+const KIND_VALUES = ["good", "service"] as const;
+type Status = typeof STATUS_VALUES[number];
+type Kind = typeof KIND_VALUES[number];
 
 export default function ProductDetailScreen({ route, navigation }: any) {
-  const id: string | undefined = route?.params?.id;
-  const isCreate = !id;
-
   const t = useColors();
-  const get = Products.useGet(id);
+  const id: string | undefined = route?.params?.id;
+  const initial = (route?.params?.initial ?? {}) as Partial<Product> & { notes?: string; taxCode?: string };
+
+  const { data, refetch, isFetching } = Products.useGet(id);
   const create = Products.useCreate();
-  const update = id ? Products.useUpdate(id) : undefined;
+  const update = Products.useUpdate(id ?? "");
 
-  const [sku, setSku] = React.useState("");
-  const [name, setName] = React.useState("");
-  const [kind, setKind] = React.useState<"good" | "service">("good");
-  const [price, setPrice] = React.useState<string>("");
-  const [uom, setUom] = React.useState("");
-  const [taxCode, setTaxCode] = React.useState("");
+  // Controlled local state (string-coerced)
+  const [name, setName] = React.useState(String(initial?.name ?? ""));
+  const [sku, setSku] = React.useState(String((initial as any)?.sku ?? ""));
+  const [price, setPrice] = React.useState(String((initial as any)?.price ?? ""));
+  const [taxCode, setTaxCode] = React.useState(String((initial as any)?.taxCode ?? ""));
+  const [notes, setNotes] = React.useState(String((initial as any)?.notes ?? ""));
+  const [status, setStatus] = React.useState<string>(String((initial as any)?.status ?? "active"));
+  const [kind, setKind] = React.useState<string>(String((initial as any)?.kind ?? "good"));
 
+  // Track if the user has tapped pills this session
+  const statusTouched = React.useRef(false);
+  const kindTouched = React.useRef(false);
+
+  // Refetch on focus, but do NOT clear local state (prevents hydration flicker)
+  useFocusEffect(
+    React.useCallback(() => {
+      statusTouched.current = false;
+      kindTouched.current = false;
+      if (id) refetch();
+    }, [id, refetch])
+  );
+
+  // Merge fresh server data into any still-empty fields; status/kind hydrate unless touched
   React.useEffect(() => {
-    if (isCreate) {
-      setSku(""); setName(""); setKind("good"); setPrice(""); setUom(""); setTaxCode("");
-      return;
-    }
-    if (get.data) {
-      setSku(get.data.sku ?? "");
-      setName(get.data.name ?? "");
-      setKind((get.data.kind as any) ?? "good");
-      setPrice(typeof get.data.price === "number" ? String(get.data.price) : "");
-      setUom(get.data.uom ?? "");
-      setTaxCode(get.data.taxCode ?? "");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [get.data?.id]);
+    if (!data) return;
+    const d = data as Product & { notes?: string; taxCode?: string };
 
-  const saving = Boolean(update?.isPending || create.isPending);
+    if (name === "") setName(String(d?.name ?? ""));
+    if (sku === "") setSku(String((d as any)?.sku ?? ""));
+    if (price === "") setPrice(d?.price != null ? String(d.price) : "");
+    if (taxCode === "") setTaxCode(String((d as any)?.taxCode ?? ""));
+    if (notes === "") setNotes(String((d as any)?.notes ?? ""));
+
+    const serverStatus = String((d as any)?.status ?? "active");
+    if (!statusTouched.current) setStatus(serverStatus);
+
+    const serverKind = String((d as any)?.kind ?? "good");
+    if (!kindTouched.current) setKind(serverKind);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
 
   const onSave = async () => {
-    const trimmedName = name.trim();
-    const trimmedSku = sku.trim();
+    if (!name.trim()) { Alert.alert("Name is required"); return; }
+
+    // Coerce enums + numbers
+    const normalizedStatus = (status ?? "").trim().toLowerCase();
+    const statusEnum: Status = (STATUS_VALUES as readonly string[]).includes(normalizedStatus as Status)
+      ? (normalizedStatus as Status) : "active";
+
+    const normalizedKind = (kind ?? "").trim().toLowerCase();
+    const kindEnum: Kind = (KIND_VALUES as readonly string[]).includes(normalizedKind as Kind)
+      ? (normalizedKind as Kind) : "good";
+
     const priceNum = price.trim() === "" ? undefined : Number(price);
-    if (!trimmedName && !trimmedSku) {
-      Alert.alert("Validation", "Either Name or SKU is required.");
-      return;
-    }
+    const payload: Partial<Product> & { notes?: string; taxCode?: string } = {
+      id,
+      type: "product",
+      name: name.trim(),
+      sku: sku.trim() || undefined,
+      price: Number.isFinite(priceNum as number) ? (priceNum as number) : undefined,
+      taxCode: taxCode.trim() || undefined,
+      notes: notes.trim() || undefined,
+      status: statusEnum,
+      kind: kindEnum,
+    };
+
     try {
-      const payload = {
-        sku: trimmedSku || undefined,
-        name: trimmedName || undefined,
-        kind,
-        price: typeof priceNum === "number" && !isNaN(priceNum) ? priceNum : undefined,
-        uom: uom.trim() || undefined,
-        taxCode: taxCode.trim() || undefined,
-      };
-      if (id && update) {
-        await update.mutateAsync(payload);
-        Alert.alert("Saved", "Product updated.");
-        navigation.goBack();
-      } else {
-        await create.mutateAsync(payload);
-        Alert.alert("Saved", "Product created.");
-        navigation.navigate("ProductsList");
-      }
+      if (id) await update.mutateAsync(payload as any);
+      else     await create.mutateAsync(payload as any);
+      navigation.goBack();
     } catch (e: any) {
-      Alert.alert("Save failed", e?.message ?? "Unknown error");
+      Alert.alert("Error", e?.message ?? "Failed to save");
     }
   };
 
-  const inputStyle = {
-    borderWidth: 1,
-    borderColor: t.colors.border,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: t.colors.text,
-    backgroundColor: t.colors.background,
-  } as const;
+  return (
+    <FormScreen>
+      <View
+        style={{
+          backgroundColor: t.colors.card,
+          borderRadius: 12,
+          borderWidth: 1,
+          borderColor: t.colors.border,
+          padding: 16,
+          marginBottom: 12,
+        }}
+      >
+        <Field label="Name *" value={name} onChangeText={setName} />
+        <Field label="SKU" value={sku} onChangeText={setSku} />
+        <Field label="Price" value={price} onChangeText={setPrice} keyboardType="numeric" />
 
-  const KindPill = ({ value }: { value: "good" | "service" }) => (
-    <Pressable
-      onPress={() => setKind(value)}
-      style={{
-        paddingVertical: 8,
-        paddingHorizontal: 12,
-        borderRadius: 999,
-        borderWidth: 1,
-        borderColor: kind === value ? t.colors.primary : t.colors.border,
-        backgroundColor: kind === value ? t.colors.primary : t.colors.card,
-        marginRight: 8,
-      }}
-    >
-      <Text style={{ color: kind === value ? t.colors.buttonText : t.colors.text, fontWeight: "700" }}>{value}</Text>
-    </Pressable>
-  );
+        <Label text="Kind" />
+        <PillGroup
+          options={KIND_VALUES as unknown as string[]}
+          value={kind}
+          onChange={(v) => { kindTouched.current = true; setKind(v); }}
+        />
 
-  if (id && get.isLoading) {
-    return (
-      <View style={{ padding: 16, flex: 1, backgroundColor: t.colors.background }}>
-        <Text style={{ color: t.colors.muted }}>Loading…</Text>
+        <Field label="Tax Code" value={taxCode} onChangeText={setTaxCode} />
+
+        <Label text="Status" />
+        <PillGroup
+          options={STATUS_VALUES as unknown as string[]}
+          value={status}
+          onChange={(v) => { statusTouched.current = true; setStatus(v); }}
+        />
+
+        <Field label="Notes" value={notes} onChangeText={setNotes} multiline />
+
+        <Pressable
+          onPress={onSave}
+          style={{ marginTop: 12, backgroundColor: t.colors.primary, padding: 14, borderRadius: 10, alignItems: "center" }}
+        >
+          <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>
+            {id ? (isFetching ? "Saving…" : "Save") : "Create"}
+          </Text>
+        </Pressable>
       </View>
-    );
-  }
-
-  return (
-    <ScrollView style={{ flex: 1, backgroundColor: t.colors.background }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
-      <Card>
-        <SectionTitle title={isCreate ? "New Product" : "Edit Product"} />
-
-        <Labeled label="Name">
-          <TextInput
-            value={name}
-            onChangeText={setName}
-            placeholder="Product name"
-            placeholderTextColor={t.colors.muted}
-            style={inputStyle}
-          />
-        </Labeled>
-
-        <Labeled label="SKU">
-          <TextInput
-            value={sku}
-            onChangeText={setSku}
-            placeholder="ABC-123"
-            placeholderTextColor={t.colors.muted}
-            style={inputStyle}
-            autoCapitalize="characters"
-          />
-        </Labeled>
-
-        <Labeled label="Kind">
-          <View style={{ flexDirection: "row" }}>
-            <KindPill value="good" />
-            <KindPill value="service" />
-          </View>
-        </Labeled>
-
-        <Labeled label="Price">
-          <TextInput
-            value={price}
-            onChangeText={setPrice}
-            placeholder="0.00"
-            placeholderTextColor={t.colors.muted}
-            style={inputStyle}
-            keyboardType="decimal-pad"
-          />
-        </Labeled>
-
-        <Labeled label="UOM">
-          <TextInput
-            value={uom}
-            onChangeText={setUom}
-            placeholder="ea, hr, box"
-            placeholderTextColor={t.colors.muted}
-            style={inputStyle}
-            autoCapitalize="none"
-          />
-        </Labeled>
-
-        <Labeled label="Tax Code">
-          <TextInput
-            value={taxCode}
-            onChangeText={setTaxCode}
-            placeholder="TAX-001"
-            placeholderTextColor={t.colors.muted}
-            style={inputStyle}
-            autoCapitalize="characters"
-          />
-        </Labeled>
-
-        {!isCreate && (
-          <View style={{ marginTop: 6 }}>
-            <Text style={{ color: t.colors.muted, fontSize: 12 }}>
-              Created: {iso(get.data?.createdAt)} • Updated: {iso(get.data?.updatedAt)}
-            </Text>
-          </View>
-        )}
-
-        <PrimaryButton title={saving ? "Saving…" : "Save"} disabled={saving} onPress={onSave} />
-      </Card>
-    </ScrollView>
+    </FormScreen>
   );
 }
 
-function Card({ children }: { children: React.ReactNode }) {
+function Label({ text }: { text: string }) {
   const t = useColors();
-  return (
-    <View style={{ backgroundColor: t.colors.card, borderRadius: 12, borderWidth: 1, borderColor: t.colors.border, padding: 16, gap: 12 }}>
-      {children}
-    </View>
-  );
+  return <Text style={{ marginBottom: 6, color: t.colors.muted }}>{text}</Text>;
 }
-function SectionTitle({ title }: { title: string }) {
-  const t = useColors();
-  return <Text style={{ color: t.colors.text, fontSize: 18, fontWeight: "700" }}>{title}</Text>;
-}
-function Labeled({ label, children }: React.PropsWithChildren<{ label: string }>) {
+
+function Field({
+  label, value, onChangeText, multiline, keyboardType,
+}:{
+  label: string; value?: any; onChangeText: (v: any) => void; multiline?: boolean; keyboardType?: any;
+}) {
   const t = useColors();
   return (
     <View style={{ marginBottom: 10 }}>
-      <Text style={{ color: t.colors.muted, marginBottom: 6 }}>{label}</Text>
-      {children}
+      <Text style={{ marginBottom: 6, color: t.colors.muted }}>{label}</Text>
+      <TextInput
+        value={String(value ?? "")}
+        onChangeText={onChangeText}
+        multiline={multiline}
+        keyboardType={keyboardType}
+        autoCapitalize="none"
+        autoCorrect={false}
+        blurOnSubmit={false}
+        returnKeyType="done"
+        style={{
+          backgroundColor: t.colors.bg,
+          color: t.colors.text,
+          borderColor: t.colors.border,
+          borderWidth: 1,
+          borderRadius: 8,
+          padding: 12,
+          minHeight: multiline ? 80 : undefined,
+        }}
+        placeholderTextColor={t.colors.muted}
+      />
     </View>
   );
 }
-function PrimaryButton({ title, onPress, disabled }: any) {
+
+function PillGroup({
+  options,
+  value,
+  onChange,
+}: {
+  options: string[];
+  value?: string;
+  onChange: (v: string) => void;
+}) {
   const t = useColors();
   return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      style={{
-        backgroundColor: disabled ? t.colors.disabled : t.colors.primary,
-        padding: 14,
-        borderRadius: 10,
-        alignItems: "center",
-        marginTop: 4,
-      }}
-    >
-      <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>{title}</Text>
-    </Pressable>
+    <View style={{ flexDirection: "row", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+      {options.map((opt) => {
+        const selected = String(value ?? "") === opt;
+        return (
+          <Pressable
+            key={opt}
+            onPress={() => onChange(opt)}
+            style={{
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              borderRadius: 999,
+              borderWidth: 1,
+              borderColor: selected ? t.colors.primary : t.colors.border,
+              backgroundColor: selected ? t.colors.primary : t.colors.card,
+              marginRight: 8,
+              marginBottom: 8,
+            }}
+          >
+            <Text style={{ color: selected ? t.colors.buttonText : t.colors.text, fontWeight: "600" }}>
+              {opt}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }

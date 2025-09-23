@@ -1,3 +1,5 @@
+// apps/mobile/src/ui/theme.ts
+
 export type Theme = {
   colors: {
     bg: string;

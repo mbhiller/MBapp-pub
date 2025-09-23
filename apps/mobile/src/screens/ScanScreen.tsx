@@ -4,7 +4,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/types";
 import { getObject } from "../api/client";
-import { useColors } from "../providers/useColors";
+import { useColors } from "../features/_shared/useColors";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Scan">;
 

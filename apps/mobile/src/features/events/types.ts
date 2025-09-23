@@ -1,24 +1,5 @@
-export type Event = {
-  id: string;
-  type: "event";
-  name?: string;
-  startDate?: string; // ISO
-  endDate?: string;   // ISO
-  location?: string;
-  createdAt?: string;
-  updatedAt?: string;
-};
-/*
-export type Event = {
-  id: string;
-  type: "event";
-  name: string;
-  startsAt?: string;
-  endsAt?: string;
-  status?: string;
-  tenantId?: string;
-  createdAt?: string;
-  updatedAt?: string;
-};
-*/
-
+// apps/mobile/src/features/events/types.ts
+import type { components } from "../../api/generated-types";
+type Schemas = components["schemas"];
+export type Event = Schemas["Event"];
+export type Page<T> = { items: T[]; next?: string | null; limit?: number };

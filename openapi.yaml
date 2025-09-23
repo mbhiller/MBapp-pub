@@ -1,0 +1,413 @@
+openapi: 3.0.3
+info:
+  title: MBapp Objects API
+  version: 1.0.0
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://api.mbhiller.com
+    description: Production
+  - url: http://ap.mbhiller.com:3000
+    description: Local dev
+
+# Global auth (satisfies "security-defined" for all ops)
+security:
+  - bearerAuth: []
+
+paths:
+  /objects/{type}:
+    get:
+      operationId: listObjects
+      summary: List objects
+      parameters:
+        - in: path
+          name: type
+          required: true
+          schema: { type: string }
+          description: Object type key (e.g., product, client, account, inventory, resource, event, registration, reservation, vendor, employee)
+        - in: query
+          name: q
+          schema: { type: string }
+          description: Free-text search
+        - in: query
+          name: by
+          schema:
+            type: string
+            enum: [updatedAt, createdAt, name]
+            default: updatedAt
+        - in: query
+          name: sort
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, minimum: 1, maximum: 200 }
+        - in: query
+          name: next
+          schema: { type: string, nullable: true }
+        - in: query
+          name: eventId
+          schema: { type: string }
+          description: Filter registrations by event (when type=registration)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ListPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+    post:
+      operationId: upsertObject
+      summary: Upsert (create or update by id)
+      description: |
+        POST behaves as **upsert**. If `id` is provided, updates the object;
+        otherwise creates a new one.
+      parameters:
+        - in: path
+          name: type
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AnyObject" }
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AnyObject" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /objects/{type}/{id}:
+    get:
+      operationId: getObjectById
+      summary: Get one object
+      parameters:
+        - in: path
+          name: type
+          required: true
+          schema: { type: string }
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AnyObject" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  # ---------- Error payload ----------
+  schemas:
+    Error:
+      type: object
+      properties:
+        code:    { type: string, example: VALIDATION_ERROR }
+        message: { type: string, example: "Invalid 'eventId' parameter" }
+        details:
+          type: object
+          additionalProperties: true
+
+    # ---------- Base & paging ----------
+    Base:
+      type: object
+      required: [id, type, createdAt, updatedAt]
+      properties:
+        id:         { type: string, description: UUID }
+        type:       { type: string }
+        createdAt:  { type: string, format: date-time }
+        updatedAt:  { type: string, format: date-time }
+        externalId: { type: string }
+
+    ListPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AnyObject" }
+        next:   { type: string, nullable: true }
+        limit:  { type: integer, default: 20 }
+
+    # ---------- Core domain objects ----------
+    Client:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - type: object
+          properties:
+            type: { type: string, enum: [client] }
+            name: { type: string }
+            displayName: { type: string }
+            firstName: { type: string }
+            lastName: { type: string }
+            email: { type: string, format: email }
+            phone: { type: string }
+            status:
+              type: string
+              enum: [active, inactive, archived]
+              default: active
+            notes: { type: string }
+          required: [type, id, createdAt, updatedAt, name]
+
+    Account:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - type: object
+          properties:
+            type: { type: string, enum: [account] }
+            name: { type: string }
+            number: { type: string }
+            currency: { type: string }
+            accountType: { type: string, description: "e.g., asset, liability, revenue" }
+            balance: { type: number, description: "Current balance (display only)" }
+            status:
+              type: string
+              enum: [active, inactive, archived]
+              default: active
+          required: [type, id, createdAt, updatedAt, name]
+
+    Product:
+      allOf:
+        - $ref: "#/components/schemas/Base"
+        - type: object
+          required: [type, name]
+          properties:
+            type:    { type: string, enum: [product] }
+            name:    { type: string }
+            kind:    { type: string, enum: [good, service] }
+            sku:     { type: string }
+            price:   { type: number }
+            taxCode: { type: string }
+            status:  { type: string, enum: [active, inactive, archived], default: active }
+            notes:   { type: string }
+
+    InventoryItem:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - type: object
+          properties:
+            type:
+              type: string
+              enum: [inventory]
+            productId:
+              type: string
+              description: 'Optional link to a product'
+            name:
+              type: string
+            sku:
+              type: string
+            quantity:
+              type: number
+            uom:
+              type: string
+              description: 'Unit of measure'
+            location:
+              type: string
+            minQty:
+              type: number
+            maxQty:
+              type: number
+            status:
+              type: string
+              enum: [active, inactive, archived]
+              default: active
+            notes:
+              type: string
+
+
+    Resource:
+      allOf:
+        - $ref: "#/components/schemas/Base"
+        - type: object
+          required: [type, name]
+          properties:
+            type:      { type: string, enum: [resource] }
+            name:      { type: string }
+            code:      { type: string }
+            url:       { type: string, format: uri }
+            expiresAt: { type: string, format: date-time }
+
+    Event:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - type: object
+          properties:
+            type: { type: string, enum: [event] }
+            name: { type: string }
+            description: { type: string }
+            location: { type: string }
+            startsAt: { type: string, format: date-time }
+            endsAt: { type: string, format: date-time }
+            status:
+              type: string
+              enum: [available, unavailable, maintenance]
+              default: available
+            capacity: { type: number }
+            notes: { type: string }
+          required: [type, id, createdAt, updatedAt, name, startsAt]
+
+    Registration:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - type: object
+          required: [eventId]
+          properties:
+            type:
+              type: string
+              enum: [registration]
+            eventId:
+              type: string
+            clientId:
+              type: string
+            startsAt:
+              type: string
+              format: date-time
+            endsAt:
+              type: string
+              format: date-time
+            status:
+              type: string
+              enum: [pending, confirmed, cancelled, checked_in, completed]
+              default: pending
+            registeredAt:
+              type: string
+              format: date-time
+            notes:
+              type: string
+
+    Reservation:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - type: object
+          required: [resourceId]
+          properties:
+            type:
+              type: string
+              enum: [reservation]
+            resourceId:
+              type: string
+            start:
+              type: string
+              format: date-time
+              description: Alias of startsAt
+            end:
+              type: string
+              format: date-time
+              description: Alias of endsAt
+            startsAt:
+              type: string
+              format: date-time
+            endsAt:
+              type: string
+              format: date-time
+            clientId:
+              type: string
+            status:
+              type: string
+              enum: [pending, confirmed, cancelled, checked_in, completed]
+              default: pending
+            notes:
+              type: string
+
+    Vendor:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - type: object
+          required: [name]
+          properties:
+            type:
+              type: string
+              enum: [vendor]
+            name:
+              type: string
+            displayName:
+              type: string
+            email:
+              type: string
+              format: email
+            phone:
+              type: string
+            notes:
+              type: string
+            status:
+              type: string
+              enum: [active, inactive, archived]
+              default: active
+
+    Employee:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - type: object
+          properties:
+            type: { type: string, enum: [employee] }
+            displayName: { type: string }
+            email: { type: string, format: email }
+            phone: { type: string }
+            role: { type: string }
+            status:
+              type: string
+              enum: [active, inactive, terminated]
+              default: active
+            hiredAt: { type: string, format: date-time }
+            startDate:
+              type: string
+              format: date-time
+              description: Alias of hiredAt for UI consistency
+            terminatedAt: { type: string, format: date-time }
+            notes: { type: string }
+          required: [type, id, createdAt, updatedAt, displayName]
+
+    AnyObject:
+      oneOf:
+        - $ref: "#/components/schemas/Client"
+        - $ref: "#/components/schemas/Account"
+        - $ref: "#/components/schemas/Product"
+        - $ref: "#/components/schemas/InventoryItem"
+        - $ref: "#/components/schemas/Resource"
+        - $ref: "#/components/schemas/Event"
+        - $ref: "#/components/schemas/Registration"
+        - $ref: "#/components/schemas/Reservation"
+        - $ref: "#/components/schemas/Vendor"
+        - $ref: "#/components/schemas/Employee"
+
+  # ---------- HTTP error responses ----------
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    ValidationError:
+      description: Validation error
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }

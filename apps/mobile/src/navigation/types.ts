@@ -1,52 +1,63 @@
-import type { NativeStackScreenProps } from "@react-navigation/native-stack";
+// apps/mobile/src/navigation/types.ts
 
 export type RootStackParamList = {
-  // Hub & utilities
+  // Hub / global
   Hub: undefined;
-
-  // Scan supports optional intents (used in ScanScreen)
-  Scan:
-    | {
-        intent?: "navigate" | "attach-epc";
-        attachTo?: { type: string; id: string };
-      }
-    | undefined;
-
-  // Tenants
   Tenants: undefined;
+  Scan: { intent?: "navigate" | "attach-epc" } | undefined;
 
-  // Objects (generic)
-  // allow optional "type" to satisfy callers that pass it
-  ObjectsList: { type?: string } | undefined;
-  ObjectDetail:
-    | { id?: string; mode?: "new" | "edit"; type?: string }
-    | undefined;
-
+  DevEventsTools: undefined;
   // Products
   ProductsList: undefined;
-  ProductDetail: { id?: string; mode?: "new" | "edit" } | undefined;
+  ProductDetail: { id?: string; mode?: "new" | "edit" };
 
-  // Events
-  EventsList: undefined;
-  EventDetail: { id?: string; mode?: "new" | "edit" } | undefined;
+  // Objects (generic manager for /objects/{type})
+  ObjectsList: undefined;
+  ObjectDetail: { type: string; id?: string };
 
-  // Registrations (✅ align with your list screen usage)
-  RegistrationsList: { eventId?: string; eventName?: string } | undefined;
-  RegistrationDetail: { id: string } | undefined;
+  // Clients
+  ClientsList: undefined;
+  ClientDetail: { id?: string; mode?: "new" | "edit" };
+
+  // Accounts
+  AccountsList: undefined;
+  AccountDetail: { id?: string; mode?: "new" | "edit" };
 
   // Inventory
   InventoryList: undefined;
-  InventoryDetail: { id?: string; mode?: "new" | "edit" } | undefined;
-  
-  //Clients
-  ClientsList: undefined;
-  ClientDetail: { id?: string; mode?: "new" | "edit" } | undefined;
-  
-  //Resources
-  ResourcesList: undefined;
-  ResourceDetail: { id?: string; mode?: "new" | "edit" } | undefined;
-};
+  InventoryDetail: { id?: string; mode?: "new" | "edit" };
 
-// Convenience prop helper used by many screens
-export type RootStackScreenProps<RouteName extends keyof RootStackParamList> =
-  NativeStackScreenProps<RootStackParamList, RouteName>;
+  // Events (+ deep link to registrations)
+  EventsList: undefined;
+  EventDetail: { id?: string; mode?: "new" | "edit"; event?: any };
+
+  // Registrations (supports event-scoped filter)
+  RegistrationsList: { eventId?: string } | undefined;
+  RegistrationDetail: { id?: string; mode?: "new" | "edit" };
+
+  // Reservations
+  ReservationsList: undefined;
+  ReservationDetail: { id?: string; mode?: "new" | "edit" };
+
+  // Vendors & Employees
+  VendorsList: undefined;
+  VendorDetail: { id?: string; mode?: "new" | "edit" };
+  EmployeesList: undefined;
+  EmployeeDetail: { id?: string; mode?: "new" | "edit" };
+
+  // Resources
+  ResourcesList: undefined;
+  ResourceDetail: { id?: string; mode?: "new" | "edit" };
+
+  PurchaseOrdersList: undefined;
+  PurchaseOrderDetail: { id?: string; mode?: "new"|"edit" };
+
+  SalesOrdersList: undefined;
+  SalesOrderDetail: { id?: string; mode?: "new"|"edit" };
+
+  IntegrationsList: undefined;
+  IntegrationDetail: { id?: string; mode?: "new"|"edit" };
+  // Optional:
+  IntegrationRunsList: { integrationId: string } | undefined;
+
+};

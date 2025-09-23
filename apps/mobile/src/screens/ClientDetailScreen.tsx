@@ -1,180 +1,162 @@
 import React from "react";
-import { ScrollView, View, Text, TextInput, Pressable, Alert } from "react-native";
+import { View, Text, TextInput, Pressable, Alert } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 import { Clients } from "../features/clients/hooks";
-import { useColors } from "../providers/useColors";
+import { useColors } from "../features/_shared/useColors";
+import FormScreen from "../features/_shared/FormScreen";
+import type { Client } from "../features/clients/types";
 
-function iso(d?: string) { return d ? new Date(d).toLocaleString() : "—"; }
+const STATUS_VALUES = ["active","inactive","archived"] as const;
+type CStatus = typeof STATUS_VALUES[number];
 
 export default function ClientDetailScreen({ route, navigation }: any) {
-  const id: string | undefined = route?.params?.id;
-  const isCreate = !id;
-
   const t = useColors();
-  const get = Clients.useGet(id);
-  const create = Clients.useCreate();
-  const update = id ? Clients.useUpdate(id) : undefined;
+  const id: string | undefined = route?.params?.id;
+  const initial = (route?.params?.initial ?? {}) as Partial<Client>;
 
-  const [name, setName]   = React.useState("");
-  const [email, setEmail] = React.useState("");
-  const [phone, setPhone] = React.useState("");
+  const q = Clients.useGet(id);
+  const save = Clients.useSave();
 
-  // hydrate on load/edit
+  // controlled local state (string-coerced)
+  const [name, setName] = React.useState(String((initial as any)?.name ?? ""));
+  const [displayName, setDisplayName] = React.useState(String((initial as any)?.displayName ?? ""));
+  const [firstName, setFirstName] = React.useState(String((initial as any)?.firstName ?? ""));
+  const [lastName, setLastName] = React.useState(String((initial as any)?.lastName ?? ""));
+  const [email, setEmail] = React.useState(String((initial as any)?.email ?? ""));
+  const [phone, setPhone] = React.useState(String((initial as any)?.phone ?? ""));
+  const [status, setStatus] = React.useState<string>(String((initial as any)?.status ?? "active"));
+  const [notes, setNotes] = React.useState(String((initial as any)?.notes ?? ""));
+
+  const statusTouched = React.useRef(false);
+
+  useFocusEffect(React.useCallback(() => {
+    statusTouched.current = false;
+    if (id) q.refetch();
+  }, [id, q.refetch]));
+
+  // lazy hydrate to avoid clobbering user typing
   React.useEffect(() => {
-    if (isCreate) {
-      setName(""); setEmail(""); setPhone("");
-      return;
-    }
-    if (get.data) {
-      setName(get.data.name ?? "");
-      setEmail(get.data.email ?? "");
-      setPhone(get.data.phone ?? "");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [get.data?.id]);
+    const data = q.data as Client | undefined;
+    if (!data) return;
 
-  const saving = Boolean(update?.isPending || create.isPending);
+    if (name === "") setName(String((data as any)?.name ?? ""));
+    if (displayName === "") setDisplayName(String((data as any)?.displayName ?? ""));
+    if (firstName === "") setFirstName(String((data as any)?.firstName ?? ""));
+    if (lastName === "") setLastName(String((data as any)?.lastName ?? ""));
+    if (email === "") setEmail(String((data as any)?.email ?? ""));
+    if (phone === "") setPhone(String((data as any)?.phone ?? ""));
+
+    const serverStatus = String((data as any)?.status ?? "active");
+    if (!statusTouched.current) setStatus(serverStatus);
+
+    if (notes === "") setNotes(String((data as any)?.notes ?? ""));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q.data]);
 
   const onSave = async () => {
-    const trimmed = {
-      name:  name?.trim() || undefined,
-      email: email?.trim() || undefined,
-      phone: phone?.trim() || undefined,
+    if (!name.trim()) { Alert.alert("Name is required"); return; }
+
+    const normalized = (status ?? "").trim();
+    const statusEnum: CStatus = (STATUS_VALUES as readonly string[]).includes(normalized as CStatus)
+      ? (normalized as CStatus)
+      : "active";
+
+    const payload: Partial<Client> = {
+      id, type: "client",
+      name: name.trim(),
+      displayName: displayName.trim() || undefined,
+      firstName: firstName.trim() || undefined,
+      lastName: lastName.trim() || undefined,
+      email: email.trim() || undefined,
+      phone: phone.trim() || undefined,
+      status: statusEnum as any,
+      notes: notes.trim() || undefined,
     };
-    if (!trimmed.name) {
-      Alert.alert("Validation", "Client name is required.");
-      return;
-    }
+
     try {
-      if (id && update) {
-        await update.mutateAsync(trimmed);
-        Alert.alert("Saved", "Client updated.");
-        navigation.goBack();
-      } else {
-        await create.mutateAsync(trimmed);
-        Alert.alert("Saved", "Client created.");
-        navigation.navigate("ClientsList");
-      }
+      await save.mutateAsync(payload as any);
+      navigation.goBack();
     } catch (e: any) {
-      Alert.alert("Save failed", e?.message ?? "Unknown error");
+      Alert.alert("Error", e?.message ?? "Failed to save");
     }
   };
 
-  if (id && get.isLoading) {
-    return (
-      <View style={{ padding: 16, flex: 1, backgroundColor: t.colors.background }}>
-        <Text style={{ color: t.colors.muted }}>Loading…</Text>
+  return (
+    <FormScreen>
+      <View style={{ backgroundColor: t.colors.card, borderRadius: 12, borderWidth: 1, borderColor: t.colors.border, padding: 16 }}>
+        <Field label="Name *" value={name} onChangeText={setName} />
+        <Field label="Display name" value={displayName} onChangeText={setDisplayName} />
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <View style={{ flex: 1 }}><Field label="First name" value={firstName} onChangeText={setFirstName} /></View>
+          <View style={{ flex: 1 }}><Field label="Last name" value={lastName} onChangeText={setLastName} /></View>
+        </View>
+        <Field label="Email" value={email} onChangeText={setEmail} keyboardType="email-address" />
+        <Field label="Phone" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
+
+        <Label text="Status" />
+        <PillGroup
+          options={STATUS_VALUES as unknown as string[]}
+          value={status}
+          onChange={(v) => { statusTouched.current = true; setStatus(v); }}
+        />
+
+        <Field label="Notes" value={notes} onChangeText={setNotes} multiline />
+
+        <Pressable onPress={onSave}
+          style={{ marginTop: 12, backgroundColor: t.colors.primary, padding: 14, borderRadius: 10, alignItems: "center" }}>
+          <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>{id ? "Save" : "Create"}</Text>
+        </Pressable>
       </View>
-    );
-  }
-
-  const inputStyle = {
-    borderWidth: 1,
-    borderColor: t.colors.border,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: t.colors.text,
-    backgroundColor: t.colors.background,
-  } as const;
-
-  return (
-    <ScrollView style={{ flex: 1, backgroundColor: t.colors.background }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
-      <Card>
-        <SectionTitle title={isCreate ? "New Client" : "Edit Client"} />
-
-        <Labeled label="Name">
-          <TextInput
-            value={name}
-            onChangeText={setName}
-            placeholder="Client name"
-            placeholderTextColor={t.colors.muted}
-            style={inputStyle}
-            autoCapitalize="words"
-          />
-        </Labeled>
-
-        <Labeled label="Email">
-          <TextInput
-            value={email}
-            onChangeText={setEmail}
-            placeholder="name@example.com"
-            placeholderTextColor={t.colors.muted}
-            style={inputStyle}
-            autoCapitalize="none"
-            keyboardType="email-address"
-          />
-        </Labeled>
-
-        <Labeled label="Phone">
-          <TextInput
-            value={phone}
-            onChangeText={setPhone}
-            placeholder="(555) 123-4567"
-            placeholderTextColor={t.colors.muted}
-            style={inputStyle}
-            keyboardType="phone-pad"
-          />
-        </Labeled>
-
-        {!isCreate && (
-          <View style={{ marginTop: 6 }}>
-            <Text style={{ color: t.colors.muted, fontSize: 12 }}>
-              Created: {iso(get.data?.createdAt)} • Updated: {iso(get.data?.updatedAt)}
-            </Text>
-          </View>
-        )}
-
-        <PrimaryButton title={saving ? "Saving…" : "Save"} disabled={saving} onPress={onSave} />
-      </Card>
-    </ScrollView>
+    </FormScreen>
   );
 }
 
-function Card({ children }: { children: React.ReactNode }) {
+function Label({ text }: { text: string }) {
   const t = useColors();
-  return (
-    <View
-      style={{
-        backgroundColor: t.colors.card,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: t.colors.border,
-        padding: 16,
-        gap: 12,
-      }}
-    >
-      {children}
-    </View>
-  );
+  return <Text style={{ marginBottom: 6, color: t.colors.muted }}>{text}</Text>;
 }
-function SectionTitle({ title }: { title: string }) {
-  const t = useColors();
-  return <Text style={{ color: t.colors.text, fontSize: 18, fontWeight: "700" }}>{title}</Text>;
-}
-function Labeled({ label, children }: React.PropsWithChildren<{ label: string }>) {
+function Field({ label, value, onChangeText, multiline, keyboardType }:{
+  label: string; value?: any; onChangeText: (v: any) => void; multiline?: boolean; keyboardType?: any;
+}) {
   const t = useColors();
   return (
     <View style={{ marginBottom: 10 }}>
-      <Text style={{ color: t.colors.muted, marginBottom: 6 }}>{label}</Text>
-      {children}
+      <Text style={{ marginBottom: 6, color: t.colors.muted }}>{label}</Text>
+      <TextInput
+        value={String(value ?? "")}
+        onChangeText={onChangeText}
+        multiline={multiline}
+        keyboardType={keyboardType}
+        autoCapitalize="none"
+        autoCorrect={false}
+        blurOnSubmit={false}
+        returnKeyType="done"
+        style={{
+          backgroundColor: t.colors.bg, color: t.colors.text,
+          borderColor: t.colors.border, borderWidth: 1, borderRadius: 8, padding: 12,
+          minHeight: multiline ? 80 : undefined,
+        }}
+        placeholderTextColor={t.colors.muted}
+      />
     </View>
   );
 }
-function PrimaryButton({ title, onPress, disabled }: any) {
+function PillGroup({ options, value, onChange }: { options: string[]; value?: string; onChange: (v: string) => void; }) {
   const t = useColors();
   return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      style={{
-        backgroundColor: disabled ? t.colors.disabled : t.colors.primary,
-        padding: 14,
-        borderRadius: 10,
-        alignItems: "center",
-        marginTop: 4,
-      }}
-    >
-      <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>{title}</Text>
-    </Pressable>
+    <View style={{ flexDirection: "row", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+      {options.map((opt) => {
+        const selected = String(value ?? "") === opt;
+        return (
+          <Pressable key={opt} onPress={() => onChange(opt)} style={{
+            paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1,
+            borderColor: selected ? t.colors.primary : t.colors.border,
+            backgroundColor: selected ? t.colors.primary : t.colors.card, marginRight: 8, marginBottom: 8,
+          }}>
+            <Text style={{ color: selected ? t.colors.buttonText : t.colors.text, fontWeight: "600" }}>{opt}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }

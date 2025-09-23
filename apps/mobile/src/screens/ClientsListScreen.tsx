@@ -1,79 +1,64 @@
 import React from "react";
 import { View, FlatList, Text, Pressable, RefreshControl } from "react-native";
 import { Clients } from "../features/clients/hooks";
-import { useColors } from "../providers/useColors";
+import { useColors } from "../features/_shared/useColors";
 import { useRefetchOnFocus } from "../features/_shared/useRefetchOnFocus";
 
 export default function ClientsListScreen({ navigation }: any) {
   const t = useColors();
-  const q = Clients.useList({ limit: 20 });
-  const { data, isLoading, isRefetching, refetch, error } = q;
+  const ql = Clients.useList({ limit: 20 });
+  const { data, refetch } = ql;
 
-  // Silent background refresh on focus (no spinner)
+  const [pulling, setPulling] = React.useState(false);
   const refetchStable = React.useCallback(() => {
-    if (!q.isRefetching && !q.isLoading) refetch();
-  }, [refetch, q.isRefetching, q.isLoading]);
-  useRefetchOnFocus(refetchStable);
+    if (!ql.isRefetching && !ql.isLoading) refetch();
+  }, [refetch, ql.isRefetching, ql.isLoading]);
+  useRefetchOnFocus(refetchStable, { debounceMs: 150 });
+
+  const onPull = React.useCallback(async () => {
+    setPulling(true);
+    try { await refetch(); } finally { setPulling(false); }
+  }, [refetch]);
 
   const items = data?.items ?? [];
-  const refreshing = isLoading; // <-- only show spinner on user pull, not isRefetching
 
   return (
     <View style={{ flex: 1, backgroundColor: t.colors.background, padding: 12 }}>
-      {!!error && (
-        <View style={{ backgroundColor: t.colors.card, borderColor: t.colors.border, borderWidth: 1, padding: 8, borderRadius: 8, marginBottom: 8 }}>
-          <Text style={{ color: t.colors.muted }}>Failed to load clients.</Text>
-        </View>
-      )}
-
       <FlatList
         data={items}
-        keyExtractor={(item) => item.id}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refetchStable} />}
-        renderItem={({ item }) => (
-          <Pressable
-            onPress={() => navigation.navigate("ClientDetail", { id: item.id })}
-            style={{
-              backgroundColor: t.colors.card,
-              borderColor: t.colors.border,
-              borderWidth: 1,
-              borderRadius: 12,
-              padding: 12,
-              marginBottom: 10,
-            }}
-          >
-            <Text style={{ color: t.colors.text, fontSize: 16, fontWeight: "700" }}>
-              {item.name || "(no name)"}
-            </Text>
-            {!!item.email && (
-              <Text style={{ color: t.colors.muted, marginTop: 2 }}>{item.email}</Text>
-            )}
-            {!!item.phone && (
-              <Text style={{ color: t.colors.muted, marginTop: 2 }}>{item.phone}</Text>
-            )}
-          </Pressable>
-        )}
-        ListEmptyComponent={
-          !refreshing ? (
-            <Text style={{ color: t.colors.muted, textAlign: "center", marginTop: 24 }}>
-              No clients yet.
-            </Text>
-          ) : null
-        }
+        keyExtractor={(i, idx) => String(i.id ?? idx)}
+        refreshControl={<RefreshControl refreshing={pulling} onRefresh={onPull} />}
+        renderItem={({ item }) => {
+          const status = (item as any)?.status ? String((item as any).status) : undefined;
+          const subtitle = [
+            (item as any)?.displayName && `Display: ${(item as any).displayName}`,
+            (item as any)?.email && `Email: ${(item as any).email}`,
+            status && `Status: ${status}`,
+          ].filter(Boolean).join(" • ");
+
+          return (
+            <Pressable
+              onPress={() => navigation.navigate("ClientDetail", { id: String(item.id), mode: "edit" })}
+              style={{
+                backgroundColor: t.colors.card,
+                borderColor: t.colors.border,
+                borderWidth: 1, borderRadius: 12,
+                marginBottom: 10, padding: 12,
+              }}
+            >
+              <Text style={{ color: t.colors.text, fontWeight: "700", fontSize: 16 }}>
+                {item.name}
+              </Text>
+              {!!subtitle && <Text style={{ color: t.colors.muted, marginTop: 2 }}>{subtitle}</Text>}
+            </Pressable>
+          );
+        }}
+        ListEmptyComponent={<Text style={{ color: t.colors.muted, textAlign: "center", marginTop: 24 }}>No clients yet.</Text>}
         contentContainerStyle={{ paddingBottom: 72 }}
       />
-
       <Pressable
-        onPress={() => navigation.navigate("ClientDetail", { id: undefined })}
-        style={{
-          position: "absolute",
-          right: 16,
-          bottom: 16,
-          backgroundColor: t.colors.primary,
-          paddingHorizontal: 16,
-          paddingVertical: 12,
-          borderRadius: 999,
-        }}
+        onPress={() => navigation.navigate("ClientDetail", { mode: "new" })}
+        style={{ position: "absolute", right: 16, bottom: 16, backgroundColor: t.colors.primary, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 999 }}
       >
         <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>+ New</Text>
       </Pressable>

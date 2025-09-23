@@ -1,79 +1,33 @@
 // apps/mobile/src/features/registrations/hooks.ts
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-  keepPreviousData,
-  type UseQueryResult,
-} from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { listRegistrations, getRegistration, upsertRegistration } from "./api";
 import type { Registration, Page } from "./types";
-import {
-  listRegistrations,
-  getRegistration,
-  createRegistration,
-  updateRegistration,
-  getRegistrationsCount,
-} from "./api";
 
 const keys = {
-  list: (eventId?: string) => ["registrations", "list", { eventId: eventId ?? null }] as const,
-  byId: (id?: string) => ["registrations", "byId", id] as const,
-  count: (eventId?: string) => ["registrations", "count", eventId ?? ""] as const,
+  list: (limit?: number, next?: string, q?: string, eventId?: string) =>
+    ["registrations", "list", limit ?? 20, next ?? "", q ?? "", eventId ?? ""] as const,
+  byId: (id?: string) => ["registrations", "byId", id ?? ""] as const,
 };
 
 export const Registrations = {
-  useList(opts: { eventId?: string; limit?: number } = {}): UseQueryResult<Page<Registration>, Error> {
-    return useQuery<Page<Registration>, Error>({
-      queryKey: keys.list(opts.eventId),
-      queryFn: () => listRegistrations({ eventId: opts.eventId, limit: opts.limit ?? 20 }),
-      staleTime: 30_000,
-      placeholderData: keepPreviousData, // v5 replacement
+  useList(o?: { limit?: number; next?: string | null; q?: string; eventId?: string }) {
+    return useQuery({
+      queryKey: keys.list(o?.limit, o?.next ?? undefined, o?.q, o?.eventId),
+      queryFn: () => listRegistrations(o) as Promise<Page<Registration>>,
+      placeholderData: (p) => p,
     });
   },
-
-  useGet(id?: string): UseQueryResult<Registration | undefined, Error> {
-    return useQuery<Registration | undefined, Error>({
-      queryKey: keys.byId(id),
-      queryFn: () => getRegistration(id),
-      enabled: !!id,
-      staleTime: 60_000,
-    });
+  useGet(id?: string) {
+    return useQuery({ enabled: !!id, queryKey: keys.byId(id), queryFn: () => getRegistration(id!) });
   },
-
-  useCreate() {
+  useSave() {
     const qc = useQueryClient();
     return useMutation({
-      mutationFn: (body: Partial<Registration>) => createRegistration(body),
-      onSuccess: (created) => {
-        qc.invalidateQueries({ queryKey: keys.list(created.eventId) });
-        if (created.eventId) qc.invalidateQueries({ queryKey: keys.count(created.eventId) });
+      mutationFn: (b: Partial<Registration>) => upsertRegistration(b),
+      onSuccess: (saved) => {
+        qc.setQueryData(keys.byId(saved.id), saved);
+        qc.invalidateQueries({ queryKey: ["registrations"] });
       },
-    });
-  },
-
-  useUpdate(id: string) {
-    const qc = useQueryClient();
-    return useMutation({
-      mutationFn: (patch: Partial<Registration>) => updateRegistration(id, patch),
-      onSuccess: (updated) => {
-        qc.invalidateQueries({ queryKey: keys.list(updated.eventId) });
-        if (updated.eventId) qc.invalidateQueries({ queryKey: keys.count(updated.eventId) });
-        qc.setQueryData(keys.byId(id), updated);
-      },
-    });
-  },
-
-  useCount(eventId?: string): UseQueryResult<number, Error> {
-    return useQuery<number, Error>({
-      queryKey: keys.count(eventId),
-      queryFn: () => (eventId ? getRegistrationsCount(eventId) : Promise.resolve(0)),
-      enabled: !!eventId,
-      staleTime: 10_000,
     });
   },
 };
-
-// convenience export to match your earlier import style
-export function useRegistrationsCount(eventId?: string) {
-  return Registrations.useCount(eventId);
-}

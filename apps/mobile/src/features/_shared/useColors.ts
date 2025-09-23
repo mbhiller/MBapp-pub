@@ -1,5 +1,5 @@
-// apps/mobile/src/providers/useColors.ts
-import { useTheme } from "./ThemeProvider";
+// apps/mobile/src/features/_shared/useColors.ts
+import { useTheme } from "../../providers/ThemeProvider";
 
 export function useColors() {
   const t = useTheme();

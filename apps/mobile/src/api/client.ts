@@ -59,6 +59,11 @@ export async function updateObject<T>(type: string, id: string, patch: Partial<T
   return request<T>(`/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}`, "PUT", patch);
 }
 
+export async function deleteObject<T>(type: string, id: string): Promise<{ id: string; type: string; deleted: boolean }> {
+  return apiClient.del(`/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}`);
+}
+
+
 export const apiClient = {
   get: <T>(p: string) => request<T>(p, "GET"),
   post: <T>(p: string, b: any) => request<T>(p, "POST", b),

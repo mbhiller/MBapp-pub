@@ -5,33 +5,68 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "./types";
 import { useTheme } from "../providers/ThemeProvider";
 
-import ModuleHubScreen from "../screens/ModuleHubScreen";
 
+// Hub / global
+import ModuleHubScreen from "../screens/ModuleHubScreen";
+import ScanScreen from "../screens/ScanScreen";
+
+import TenantsScreen from "../screens/TenantsScreen";
+
+
+// Products
 import ProductsListScreen from "../screens/ProductsListScreen";
 import ProductDetailScreen from "../screens/ProductDetailScreen";
 
+// Objects (management for all object types)
 import ObjectsListScreen from "../screens/ObjectsListScreen";
 import ObjectDetailScreen from "../screens/ObjectDetailScreen";
 
-import TenantsScreen from "../screens/TenantsScreen";
-import ScanScreen from "../screens/ScanScreen";
-
+// Clients
 import ClientsListScreen from "../screens/ClientsListScreen";
 import ClientDetailScreen from "../screens/ClientDetailScreen";
 
-import ResourcesListScreen from "../screens/ResourcesListScreen";
-import ResourceDetailScreen from "../screens/ResourceDetailScreen";
+// Accounts
+import AccountsListScreen from "../screens/AccountsListScreen";
+import AccountDetailScreen from "../screens/AccountDetailScreen";
 
-// Events
+// Inventory
+import InventoryListScreen from "../screens/InventoryListScreen";
+import InventoryDetailScreen from "../screens/InventoryDetailScreen";
+
+// Events / Registrations
 import EventsListScreen from "../screens/EventsListScreen";
 import EventDetailScreen from "../screens/EventDetailScreen";
-
 import RegistrationsListScreen from "../screens/RegistrationsListScreen";
 import RegistrationDetailScreen from "../screens/RegistrationDetailScreen";
 
-// ✅ Inventory (NEW)
-import InventoryListScreen from "../screens/InventoryListScreen";
-import InventoryDetailScreen from "../screens/InventoryDetailScreen";
+// Reservations
+import ReservationsListScreen from "../screens/ReservationsListScreen";
+import ReservationDetailScreen from "../screens/ReservationDetailScreen";
+
+// Vendors / Employees
+import VendorsListScreen from "../screens/VendorsListScreen";
+import VendorDetailScreen from "../screens/VendorDetailScreen";
+import EmployeesListScreen from "../screens/EmployeesListScreen";
+import EmployeeDetailScreen from "../screens/EmployeeDetailScreen";
+
+// Resources
+import ResourcesListScreen from "../screens/ResourcesListScreen";
+import ResourceDetailScreen from "../screens/ResourceDetailScreen";
+
+// Purchasing
+import PurchaseOrdersListScreen from "../screens/PurchaseOrdersListScreen";
+import PurchaseOrderDetailScreen from "../screens/PurchaseOrderDetailScreen";
+
+// Sales
+import SalesOrdersListScreen from   "../screens/SalesOrdersListScreen";
+import SalesOrderDetailScreen from  "../screens/SalesOrderDetailScreen";
+
+// Integrations
+import IntegrationsListScreen from  "../screens/IntegrationsListScreen";
+import IntegrationDetailScreen from "../screens/IntegrationDetailScreen";
+import DevEventsToolsScreen from "../screens/DevEventsToolsScreen";
+// optional runs
+// import IntegrationRunsListScreen from "../screens/IntegrationRunsListScreen";
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -54,38 +89,66 @@ export default function RootStack() {
         headerRight: () => <HeaderButton title="Scan" onPress={() => navigation.navigate("Scan")} />,
       })}
     >
-      <Stack.Screen name="Hub" component={ModuleHubScreen} options={{ title: "Hub" }} />
+    
 
+
+      <Stack.Screen name="Hub" component={ModuleHubScreen} options={{ title: "Hub" }} />
+      <Stack.Screen name="DevEventsTools" component={DevEventsToolsScreen} options={{ title: "Dev Tools — Events" }} />
       {/* Products */}
       <Stack.Screen name="ProductsList" component={ProductsListScreen} options={{ title: "Products" }} />
       <Stack.Screen name="ProductDetail" component={ProductDetailScreen} options={{ title: "Product" }} />
 
-      {/* Objects */}
+      {/* Objects (generic manager) */}
       <Stack.Screen name="ObjectsList" component={ObjectsListScreen} options={{ title: "Objects" }} />
       <Stack.Screen name="ObjectDetail" component={ObjectDetailScreen} options={{ title: "Object" }} />
 
-      {/* Tenants & Scan */}
+      {/* Tenants */}
       <Stack.Screen name="Tenants" component={TenantsScreen} options={{ title: "Tenants" }} />
-      <Stack.Screen name="Scan" component={ScanScreen} options={{ title: "Scan" }} />
-
-      {/* Events */}
-      <Stack.Screen name="EventsList" component={EventsListScreen} options={{ title: "Events" }} />
-      <Stack.Screen name="EventDetail" component={EventDetailScreen} options={{ title: "Event" }} />
-      <Stack.Screen name="RegistrationsList" component={RegistrationsListScreen} options={{ title: "Registrations" }} />
-      <Stack.Screen name="RegistrationDetail" component={RegistrationDetailScreen} options={{ title: "Registration" }} />
-      
-      {/* ✅ Inventory */}
-      <Stack.Screen name="InventoryList" component={InventoryListScreen} options={{ title: "Inventory" }} />
-      <Stack.Screen name="InventoryDetail" component={InventoryDetailScreen} options={{ title: "Inventory Item" }} />
 
       {/* Clients */}
       <Stack.Screen name="ClientsList" component={ClientsListScreen} options={{ title: "Clients" }} />
       <Stack.Screen name="ClientDetail" component={ClientDetailScreen} options={{ title: "Client" }} />
 
+      {/* Accounts */}
+      <Stack.Screen name="AccountsList" component={AccountsListScreen} options={{ title: "Accounts" }} />
+      <Stack.Screen name="AccountDetail" component={AccountDetailScreen} options={{ title: "Account" }} />
+
+      {/* Inventory */}
+      <Stack.Screen name="InventoryList" component={InventoryListScreen} options={{ title: "Inventory" }} />
+      <Stack.Screen name="InventoryDetail" component={InventoryDetailScreen} options={{ title: "Inventory Item" }} />
+
+      {/* Events & Registrations */}
+      <Stack.Screen name="EventsList" component={EventsListScreen} options={{ title: "Events" }} />
+      <Stack.Screen name="EventDetail" component={EventDetailScreen} options={{ title: "Event" }} />
+      
+      <Stack.Screen name="RegistrationsList" component={RegistrationsListScreen} options={{ title: "Registrations" }} />
+      <Stack.Screen name="RegistrationDetail" component={RegistrationDetailScreen} options={{ title: "Registration" }} />
+
+      {/* Reservations */}
+      <Stack.Screen name="ReservationsList" component={ReservationsListScreen} options={{ title: "Reservations" }} />
+      <Stack.Screen name="ReservationDetail" component={ReservationDetailScreen} options={{ title: "Reservation" }} />
+
+      {/* Vendors / Employees */}
+      <Stack.Screen name="VendorsList" component={VendorsListScreen} options={{ title: "Vendors" }} />
+      <Stack.Screen name="VendorDetail" component={VendorDetailScreen} options={{ title: "Vendor" }} />
+      <Stack.Screen name="EmployeesList" component={EmployeesListScreen} options={{ title: "Employees" }} />
+      <Stack.Screen name="EmployeeDetail" component={EmployeeDetailScreen} options={{ title: "Employee" }} />
+
       {/* Resources */}
       <Stack.Screen name="ResourcesList" component={ResourcesListScreen} options={{ title: "Resources" }} />
       <Stack.Screen name="ResourceDetail" component={ResourceDetailScreen} options={{ title: "Resource" }} />
 
+  
+      <Stack.Screen name="PurchaseOrdersList" component={PurchaseOrdersListScreen} options={{ title: "Purchasing" }} />
+      <Stack.Screen name="PurchaseOrderDetail" component={PurchaseOrderDetailScreen} options={{ title: "Purchase Order" }} />
+
+      <Stack.Screen name="SalesOrdersList" component={SalesOrdersListScreen} options={{ title: "Sales" }} />
+      <Stack.Screen name="SalesOrderDetail" component={SalesOrderDetailScreen} options={{ title: "Sales Order" }} />
+
+      <Stack.Screen name="IntegrationsList" component={IntegrationsListScreen} options={{ title: "Integrations" }} />
+      <Stack.Screen name="IntegrationDetail" component={IntegrationDetailScreen} options={{ title: "Integration" }} />
+    {/* <Stack.Screen name="IntegrationRunsList" component={IntegrationRunsListScreen} options={{ title: "Runs" }} /> */}
     </Stack.Navigator>
   );
 }
+

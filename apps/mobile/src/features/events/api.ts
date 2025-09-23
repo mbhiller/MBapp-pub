@@ -1,12 +1,31 @@
-import { listObjects, getObject, createObject, updateObject, type ListPage } from "../../api/client";
-import type { Event } from "./types";
+// apps/mobile/src/features/events/api.ts
+import { listObjects, getObject, createObject, updateObject } from "../../api/client";
+import type { Event, Page } from "./types";
 
-export const EventsAPI = {
-  list: (opts: { limit?: number; next?: string; order?: "asc" | "desc" } = {}) =>
-    listObjects<Event>("event", opts),
-  get: (id: string) => getObject<Event>("event", id),
-  create: (body: Partial<Event>) => createObject<Event>("event", body),
-  update: (id: string, patch: Partial<Event>) => updateObject<Event>("event", id, patch),
-};
+const TYPE = "event";
 
-export type EventsPage = ListPage<Event>;
+function toClientOpts(opts?: { limit?: number; next?: string | null; q?: string }) {
+  const out: { limit?: number; next?: string; sort?: "asc" | "desc"; by?: string; q?: string } = {};
+  if (opts?.limit != null) out.limit = opts.limit;
+  if (opts?.next) out.next = opts.next;
+  if (opts?.q) out.q = opts.q;
+  out.by = "updatedAt";
+  out.sort = "desc";
+  return out;
+}
+
+export function listEvents(opts: { limit?: number; next?: string | null; q?: string } = {}): Promise<Page<Event>> {
+  return listObjects<Event>(TYPE, toClientOpts(opts)) as unknown as Promise<Page<Event>>;
+}
+
+export function getEvent(id: string): Promise<Event> {
+  return getObject<Event>(TYPE, id);
+}
+
+export function createEvent(body: Partial<Event>): Promise<Event> {
+  return createObject<Event>(TYPE, body);
+}
+
+export function updateEvent(id: string, patch: Partial<Event>): Promise<Event> {
+  return updateObject<Event>(TYPE, id, patch);
+}

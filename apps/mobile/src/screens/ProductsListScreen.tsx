@@ -1,90 +1,89 @@
-// apps/mobile/src/screens/ProductsListScreen.tsx
 import React from "react";
 import { View, FlatList, Text, Pressable, RefreshControl } from "react-native";
 import { Products } from "../features/products/hooks";
-import { useColors } from "../providers/useColors";
+import { useColors } from "../features/_shared/useColors";
 import { useRefetchOnFocus } from "../features/_shared/useRefetchOnFocus";
 
 export default function ProductsListScreen({ navigation }: any) {
   const t = useColors();
-  const q = Products.useList({ limit: 20 });
-  const { data, isLoading, isRefetching, refetch, error } = q;
+  const ql = Products.useList({ limit: 20 });
+  const { data, refetch } = ql;
 
+  const [pulling, setPulling] = React.useState(false);
   const refetchStable = React.useCallback(() => {
-    if (!q.isRefetching && !q.isLoading) refetch();
-  }, [refetch, q.isRefetching, q.isLoading]);
+    if (!ql.isRefetching && !ql.isLoading) refetch();
+  }, [refetch, ql.isRefetching, ql.isLoading]);
+  useRefetchOnFocus(refetchStable, { debounceMs: 150 });
 
-  useRefetchOnFocus(refetchStable);
+  const onPull = React.useCallback(async () => {
+    setPulling(true);
+    try { await refetch(); } finally { setPulling(false); }
+  }, [refetch]);
 
-  const items = Array.isArray(data?.items) ? data!.items : [];
-  const refreshing = isLoading;
+  const items = data?.items ?? [];
 
   return (
     <View style={{ flex: 1, backgroundColor: t.colors.background, padding: 12 }}>
-      {!!error && (
-        <View style={{ backgroundColor: t.colors.card, borderColor: t.colors.border, borderWidth: 1, padding: 8, borderRadius: 8, marginBottom: 8 }}>
-          <Text style={{ color: t.colors.muted }}>Failed to load products.</Text>
-        </View>
-      )}
-
       <FlatList
         data={items}
-        keyExtractor={(item) => item.id}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refetchStable} />}
-        renderItem={({ item }) => (
-          <Pressable
-            onPress={() => navigation.navigate("ProductDetail", { id: item.id })}
-            style={{
-              backgroundColor: t.colors.card,
-              borderColor: t.colors.border,
-              borderWidth: 1,
-              borderRadius: 12,
-              padding: 12,
-              marginBottom: 10,
-            }}
-          >
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-              <Text style={{ color: t.colors.text, fontSize: 16, fontWeight: "700" }}>
-                {item.name || item.sku || "(unnamed)"}
-              </Text>
-              {!!item.kind && (
-                <View
-                  style={{
-                    backgroundColor: t.colors.primary,
-                    paddingHorizontal: 8,
-                    paddingVertical: 2,
-                    borderRadius: 999,
-                    marginLeft: 8,
-                  }}
-                >
-                  <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>{item.kind}</Text>
+        keyExtractor={(i, idx) => String((i as any)?.id ?? idx)}
+        refreshControl={<RefreshControl refreshing={pulling} onRefresh={onPull} />}
+        renderItem={({ item }) => {
+          const id = String((item as any)?.id ?? "");
+          const status = (item as any)?.status ? String((item as any).status) : undefined;
+          const sku = (item as any)?.sku ? String((item as any).sku) : undefined;
+          const price = (item as any)?.price != null ? String((item as any).price) : undefined;
+
+          return (
+            <Pressable
+              onPress={() => navigation.navigate("ProductDetail", { id, mode: "edit" })}
+              style={{
+                backgroundColor: t.colors.card,
+                borderColor: t.colors.border,
+                borderWidth: 1, borderRadius: 12,
+                marginBottom: 10, padding: 12,
+              }}
+            >
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                <View style={{ flexShrink: 1, paddingRight: 12 }}>
+                  <Text style={{ color: t.colors.text, fontWeight: "700", fontSize: 16 }}>
+                    {(item as any)?.name ?? "—"}
+                  </Text>
+
+                  <Text style={{ color: t.colors.muted, marginTop: 2 }}>
+                    {status ? `Status: ${status}` : "Status: —"}
+                  </Text>
+
+                  {sku ? (
+                    <Text style={{ color: t.colors.muted, marginTop: 2 }}>
+                      SKU: {sku}
+                    </Text>
+                  ) : null}
+
+                  {price ? (
+                    <Text style={{ color: t.colors.muted, marginTop: 2 }}>
+                      Price: {price}
+                    </Text>
+                  ) : null}
                 </View>
-              )}
-            </View>
-            <Text style={{ color: t.colors.muted, marginTop: 2 }}>
-              {item.sku ? `SKU: ${item.sku}` : "—"}{typeof item.price === "number" ? ` • $${item.price.toFixed(2)}` : ""}
-            </Text>
-          </Pressable>
-        )}
+              </View>
+            </Pressable>
+          );
+        }}
         ListEmptyComponent={
-          !refreshing ? (
-            <Text style={{ color: t.colors.muted, textAlign: "center", marginTop: 24 }}>
-              No products yet.
-            </Text>
-          ) : null
+          <Text style={{ color: t.colors.muted, textAlign: "center", marginTop: 24 }}>
+            No products yet.
+          </Text>
         }
         contentContainerStyle={{ paddingBottom: 72 }}
       />
-
       <Pressable
-        onPress={() => navigation.navigate("ProductDetail", { id: undefined })}
+        onPress={() => navigation.navigate("ProductDetail", { mode: "new" })}
         style={{
           position: "absolute",
-          right: 16,
-          bottom: 16,
+          right: 16, bottom: 16,
           backgroundColor: t.colors.primary,
-          paddingHorizontal: 16,
-          paddingVertical: 12,
+          paddingHorizontal: 16, paddingVertical: 12,
           borderRadius: 999,
         }}
       >

@@ -1,33 +1,36 @@
 // apps/mobile/src/features/products/api.ts
-import { apiClient } from "../../api/client";
+import { listObjects, getObject, createObject, updateObject } from "../../api/client";
 import type { Product, Page } from "./types";
 
-export async function listProducts(opts: { limit?: number; next?: string | null } = {}): Promise<Page<Product>> {
-  const p = new URLSearchParams();
-  if (opts.limit != null) p.set("limit", String(opts.limit));
-  if (opts.next) p.set("next", opts.next);
-  const q = p.toString();
-  return apiClient.get<Page<Product>>(`/objects/product${q ? `?${q}` : ""}`);
+const TYPE = "product";
+
+// Match your client's options shape:
+// - `next` is string (no null)
+// - uses `sort` instead of `order`
+// - add `by: "updatedAt"` so newest items stay on top
+function toClientOpts(opts?: { limit?: number; next?: string | null; q?: string }) {
+  const out: { limit?: number; next?: string; sort?: "asc" | "desc"; by?: string; [k: string]: any } = {};
+  if (opts?.limit != null) out.limit = opts.limit;
+  if (opts?.next) out.next = opts.next; // only pass if truthy; avoids null
+  if (opts?.q) out.q = opts.q;
+  out.sort = "desc";
+  out.by = "updatedAt";
+  return out;
 }
 
-export async function getProduct(id?: string): Promise<Product | undefined> {
-  if (!id) return undefined;
-  return apiClient.get<Product>(`/objects/product/${encodeURIComponent(id)}`);
+// --- Named exports to mirror Events module ---
+export function listProducts(opts: { limit?: number; next?: string | null; q?: string } = {}): Promise<Page<Product>> {
+  return listObjects<Product>(TYPE, toClientOpts(opts)) as unknown as Promise<Page<Product>>;
 }
 
-export async function createProduct(body: Partial<Product>): Promise<Product> {
-  // guard rails
-  if (!body.name && !body.sku) {
-    throw new Error("Either SKU or Name is required.");
-  }
-  const payload: Partial<Product> = {
-    ...body,
-    kind: (body.kind as any) || "good",
-  };
-  return apiClient.post<Product>(`/objects/product`, payload);
+export function getProduct(id: string): Promise<Product> {
+  return getObject<Product>(TYPE, id);
 }
 
-export async function updateProduct(id: string, patch: Partial<Product>): Promise<Product> {
-  if (!id) throw new Error("id required");
-  return apiClient.put<Product>(`/objects/product/${encodeURIComponent(id)}`, patch);
+export function createProduct(body: Partial<Product>): Promise<Product> {
+  return createObject<Product>(TYPE, body);
+}
+
+export function updateProduct(id: string, patch: Partial<Product>): Promise<Product> {
+  return updateObject<Product>(TYPE, id, patch);
 }

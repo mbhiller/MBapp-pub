@@ -14,7 +14,11 @@ const config: ExpoConfig = {
   jsEngine: "hermes",
   platforms: ["ios", "android"],
   ios: { supportsTablet: true },
-  android: { adaptiveIcon: { foregroundImage: "./assets/adaptive-icon.png", backgroundColor: "#FFFFFF" } },
+  android: {
+    adaptiveIcon: { foregroundImage: "./assets/adaptive-icon.png", backgroundColor: "#FFFFFF" },
+    // 👇 Critical for keyboard avoidance on Android (adjusts layout instead of overlaying)
+    softwareKeyboardLayoutMode: "resize",
+  },
   extra: {
     // These are readable via process.env.* at runtime in your code
     EXPO_PUBLIC_API_BASE:

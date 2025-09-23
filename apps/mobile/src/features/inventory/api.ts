@@ -1,12 +1,17 @@
-import { listObjects, getObject, createObject, updateObject, type ListPage } from "../../api/client";
-import type { InventoryItem } from "./types";
+// apps/mobile/src/features/inventory/api.ts
+import { listObjects, getObject, createObject } from "../../api/client";
+import type { InventoryItem, Page } from "./types";
+const TYPE = "inventory";
 
-export const InventoryAPI = {
-  list: (opts: { limit?: number; next?: string; order?: "asc" | "desc" } = {}) =>
-    listObjects<InventoryItem>("product", { ...opts, kind: "good" }),
-  get: (id: string) => getObject<InventoryItem>("product", id),
-  create: (body: Partial<InventoryItem>) => createObject<InventoryItem>("product", { kind: "good", ...body }),
-  update: (id: string, patch: Partial<InventoryItem>) => updateObject<InventoryItem>("product", id, patch),
-};
+const toOpts = (o?: { limit?: number; next?: string | null; q?: string }) => ({
+  by: "updatedAt" as const, sort: "desc" as const,
+  ...(o?.limit != null ? { limit: o.limit } : {}),
+  ...(o?.next != null ? { next: o.next ?? "" } : {}),
+  ...(o?.q ? { q: o.q } : {}),
+});
 
-export type InventoryPage = ListPage<InventoryItem>;
+export const listInventory = (o?: { limit?: number; next?: string | null; q?: string }) =>
+  listObjects<InventoryItem>(TYPE, toOpts(o)) as unknown as Promise<Page<InventoryItem>>;
+export const getInventoryItem = (id: string) => getObject<InventoryItem>(TYPE, id);
+export const upsertInventoryItem = (body: Partial<InventoryItem>) =>
+  createObject<InventoryItem>(TYPE, { ...body, type: "inventory" });

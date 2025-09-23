@@ -1,3 +1,4 @@
+// apps/mobile/src/ui/Fab.tsx
 import React from "react";
 import { Text, TouchableOpacity, ViewStyle } from "react-native";
 import { useTheme } from "../providers/ThemeProvider";

@@ -1,208 +1,154 @@
 import React from "react";
-import { ScrollView, View, Text, TextInput, Pressable, Alert } from "react-native";
+import { View, Text, TextInput, Pressable, Alert } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 import { Registrations } from "../features/registrations/hooks";
-import { useColors } from "../providers/useColors";
+import { useColors } from "../features/_shared/useColors";
+import FormScreen from "../features/_shared/FormScreen";
+import DateTimeField from "../features/_shared/DateTimeField";
+import type { Registration } from "../features/registrations/types";
 
-function iso(d?: string) { return d ? new Date(d).toLocaleString() : "—"; }
+const STATUS_VALUES = ["pending","confirmed","cancelled","checked_in","completed"] as const;
+type RStatus = typeof STATUS_VALUES[number];
 
 export default function RegistrationDetailScreen({ route, navigation }: any) {
-  const id: string | undefined = route?.params?.id;
-  const passedEventId: string | undefined = route?.params?.eventId;
-  const isCreate = !id;
-
   const t = useColors();
-  const get = Registrations.useGet(id);
-  const create = Registrations.useCreate();
-  const update = id ? Registrations.useUpdate(id) : undefined;
+  const id: string | undefined = route?.params?.id;
+  const initial = (route?.params?.initial ?? {}) as Partial<Registration>;
 
-  const [eventId, setEventId] = React.useState(passedEventId ?? "");
-  const [clientId, setClientId] = React.useState("");
-  const [name, setName] = React.useState("");
-  const [status, setStatus] = React.useState("");
-  const [notes, setNotes] = React.useState("");
+  const q = Registrations.useGet(id);
+  const save = Registrations.useSave();
+
+  const [eventId, setEventId] = React.useState(String((initial as any)?.eventId ?? ""));
+  const [clientId, setClientId] = React.useState(String((initial as any)?.clientId ?? ""));
+  const [startsAt, setStartsAt] = React.useState<string | undefined>((initial as any)?.startsAt ?? undefined);
+  const [endsAt, setEndsAt] = React.useState<string | undefined>((initial as any)?.endsAt ?? undefined);
+  const [registeredAt, setRegisteredAt] = React.useState<string | undefined>((initial as any)?.registeredAt ?? undefined);
+  const [status, setStatus] = React.useState<string>(String((initial as any)?.status ?? "pending"));
+  const [notes, setNotes] = React.useState(String((initial as any)?.notes ?? ""));
+
+  const statusTouched = React.useRef(false);
+
+  useFocusEffect(React.useCallback(() => {
+    statusTouched.current = false;
+    if (id) q.refetch();
+  }, [id, q.refetch]));
 
   React.useEffect(() => {
-    if (isCreate) {
-      setEventId(passedEventId ?? "");
-      setClientId(""); setName(""); setStatus(""); setNotes("");
-      return;
-    }
-    if (get.data) {
-      setEventId(get.data.eventId ?? passedEventId ?? "");
-      setClientId(get.data.clientId ?? "");
-      setName(get.data.name ?? "");
-      setStatus(get.data.status ?? "");
-      setNotes(get.data.notes ?? "");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [get.data?.id, passedEventId]);
+    const data = q.data as Registration | undefined;
+    if (!data) return;
 
-  const saving = Boolean(update?.isPending || create.isPending);
+    if (eventId === "") setEventId(String((data as any)?.eventId ?? ""));
+    if (clientId === "") setClientId(String((data as any)?.clientId ?? ""));
+    if (!startsAt && (data as any)?.startsAt) setStartsAt((data as any).startsAt);
+    if (!endsAt && (data as any)?.endsAt) setEndsAt((data as any).endsAt);
+    if (!registeredAt && (data as any)?.registeredAt) setRegisteredAt((data as any).registeredAt);
+
+    const serverStatus = String((data as any)?.status ?? "pending");
+    if (!statusTouched.current) setStatus(serverStatus);
+
+    if (notes === "") setNotes(String((data as any)?.notes ?? ""));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q.data]);
 
   const onSave = async () => {
-    const payload = {
-      eventId: (eventId || "").trim() || undefined,
-      clientId: (clientId || "").trim() || undefined,
-      name: (name || "").trim() || undefined,
-      status: (status || "").trim() || undefined,
-      notes: (notes || "").trim() || undefined,
+    if (!eventId.trim()) { Alert.alert("eventId is required"); return; }
+
+    const normalized = (status ?? "").trim();
+    const statusEnum: RStatus = (STATUS_VALUES as readonly string[]).includes(normalized as RStatus)
+      ? (normalized as RStatus)
+      : "pending";
+
+    const payload: Partial<Registration> = {
+      id, type: "registration",
+      eventId: eventId.trim(),
+      clientId: clientId.trim() || undefined,
+      startsAt, endsAt, registeredAt,
+      status: statusEnum as any,
+      notes: notes.trim() || undefined,
     };
-    if (!payload.eventId) {
-      Alert.alert("Validation", "eventId is required.");
-      return;
-    }
+
     try {
-      if (id && update) {
-        await update.mutateAsync(payload);
-        Alert.alert("Saved", "Registration updated.");
-        navigation.goBack();
-      } else {
-        await create.mutateAsync(payload);
-        Alert.alert("Saved", "Registration created.");
-        // return to the list for this event (if present)
-        navigation.navigate("RegistrationsList", { eventId: payload.eventId });
-      }
+      await save.mutateAsync(payload as any);
+      navigation.goBack();
     } catch (e: any) {
-      Alert.alert("Save failed", e?.message ?? "Unknown error");
+      Alert.alert("Error", e?.message ?? "Failed to save");
     }
   };
 
-  const inputStyle = {
-    borderWidth: 1,
-    borderColor: t.colors.border,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: t.colors.text,
-    backgroundColor: t.colors.background,
-  } as const;
+  return (
+    <FormScreen>
+      <View style={{ backgroundColor: t.colors.card, borderRadius: 12, borderWidth: 1, borderColor: t.colors.border, padding: 16 }}>
+        <Field label="Event ID *" value={eventId} onChangeText={setEventId} />
+        <Field label="Client ID" value={clientId} onChangeText={setClientId} />
 
-  if (id && get.isLoading) {
-    return (
-      <View style={{ padding: 16, flex: 1, backgroundColor: t.colors.background }}>
-        <Text style={{ color: t.colors.muted }}>Loading…</Text>
+        <DateTimeField label="Starts at" value={startsAt} onChange={setStartsAt} mode="datetime" />
+        <DateTimeField label="Ends at" value={endsAt} onChange={setEndsAt} mode="datetime" />
+        <DateTimeField label="Registered at" value={registeredAt} onChange={setRegisteredAt} mode="datetime" />
+
+        <Label text="Status" />
+        <PillGroup
+          options={STATUS_VALUES as unknown as string[]}
+          value={status}
+          onChange={(v) => { statusTouched.current = true; setStatus(v); }}
+        />
+
+        <Field label="Notes" value={notes} onChangeText={setNotes} multiline />
+
+        <Pressable onPress={onSave}
+          style={{ marginTop: 12, backgroundColor: t.colors.primary, padding: 14, borderRadius: 10, alignItems: "center" }}>
+          <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>{id ? "Save" : "Create"}</Text>
+        </Pressable>
       </View>
-    );
-  }
-
-  return (
-    <ScrollView style={{ flex: 1, backgroundColor: t.colors.background }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
-      <Card>
-        <SectionTitle title={isCreate ? "New Registration" : "Edit Registration"} />
-
-        {/* If we were deep-linked from an event, show eventId read-only */}
-        {passedEventId ? (
-          <Labeled label="Event">
-            <View style={{ paddingVertical: 10 }}>
-              <Text style={{ color: t.colors.text, fontWeight: "700" }}>{passedEventId}</Text>
-            </View>
-          </Labeled>
-        ) : (
-          <Labeled label="Event Id">
-            <TextInput
-              value={eventId}
-              onChangeText={setEventId}
-              placeholder="event id"
-              placeholderTextColor={t.colors.muted}
-              style={inputStyle}
-              autoCapitalize="none"
-            />
-          </Labeled>
-        )}
-
-        <Labeled label="Client Id">
-          <TextInput
-            value={clientId}
-            onChangeText={setClientId}
-            placeholder="client id"
-            placeholderTextColor={t.colors.muted}
-            style={inputStyle}
-            autoCapitalize="none"
-          />
-        </Labeled>
-
-        <Labeled label="Name">
-          <TextInput
-            value={name}
-            onChangeText={setName}
-            placeholder="Attendee name"
-            placeholderTextColor={t.colors.muted}
-            style={inputStyle}
-          />
-        </Labeled>
-
-        <Labeled label="Status">
-          <TextInput
-            value={status}
-            onChangeText={setStatus}
-            placeholder="e.g. confirmed, canceled, waitlist"
-            placeholderTextColor={t.colors.muted}
-            style={inputStyle}
-            autoCapitalize="none"
-          />
-        </Labeled>
-
-        <Labeled label="Notes">
-          <TextInput
-            value={notes}
-            onChangeText={setNotes}
-            placeholder="notes"
-            placeholderTextColor={t.colors.muted}
-            style={[inputStyle, { minHeight: 80 }]}
-            multiline
-          />
-        </Labeled>
-
-        {!isCreate && (
-          <View style={{ marginTop: 6 }}>
-            <Text style={{ color: t.colors.muted, fontSize: 12 }}>
-              Created: {iso(get.data?.createdAt)} • Updated: {iso(get.data?.updatedAt)}
-            </Text>
-          </View>
-        )}
-
-        <PrimaryButton title={saving ? "Saving…" : "Save"} disabled={saving} onPress={onSave} />
-      </Card>
-    </ScrollView>
+    </FormScreen>
   );
 }
 
-function Card({ children }: { children: React.ReactNode }) {
+function Label({ text }: { text: string }) {
   const t = useColors();
-  return (
-    <View style={{ backgroundColor: t.colors.card, borderRadius: 12, borderWidth: 1, borderColor: t.colors.border, padding: 16, gap: 12 }}>
-      {children}
-    </View>
-  );
+  return <Text style={{ marginBottom: 6, color: t.colors.muted }}>{text}</Text>;
 }
-function SectionTitle({ title }: { title: string }) {
-  const t = useColors();
-  return <Text style={{ color: t.colors.text, fontSize: 18, fontWeight: "700" }}>{title}</Text>;
-}
-function Labeled({ label, children }: React.PropsWithChildren<{ label: string }>) {
+function Field({ label, value, onChangeText, multiline, keyboardType }:{
+  label: string; value?: any; onChangeText: (v: any) => void; multiline?: boolean; keyboardType?: any;
+}) {
   const t = useColors();
   return (
     <View style={{ marginBottom: 10 }}>
-      <Text style={{ color: t.colors.muted, marginBottom: 6 }}>{label}</Text>
-      {children}
+      <Text style={{ marginBottom: 6, color: t.colors.muted }}>{label}</Text>
+      <TextInput
+        value={String(value ?? "")}
+        onChangeText={onChangeText}
+        multiline={multiline}
+        keyboardType={keyboardType}
+        autoCapitalize="none"
+        autoCorrect={false}
+        blurOnSubmit={false}
+        returnKeyType="done"
+        style={{
+          backgroundColor: t.colors.bg, color: t.colors.text,
+          borderColor: t.colors.border, borderWidth: 1, borderRadius: 8, padding: 12,
+          minHeight: multiline ? 80 : undefined,
+        }}
+        placeholderTextColor={t.colors.muted}
+      />
     </View>
   );
 }
-function PrimaryButton({ title, onPress, disabled }: any) {
+function PillGroup({ options, value, onChange }: { options: string[]; value?: string; onChange: (v: string) => void; }) {
   const t = useColors();
   return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      style={{
-        backgroundColor: disabled ? t.colors.disabled : t.colors.primary,
-        padding: 14,
-        borderRadius: 10,
-        alignItems: "center",
-        marginTop: 4,
-      }}
-    >
-      <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>{title}</Text>
-    </Pressable>
+    <View style={{ flexDirection: "row", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+      {options.map((opt) => {
+        const selected = String(value ?? "") === opt;
+        return (
+          <Pressable key={opt} onPress={() => onChange(opt)} style={{
+            paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1,
+            borderColor: selected ? t.colors.primary : t.colors.border,
+            backgroundColor: selected ? t.colors.primary : t.colors.card, marginRight: 8, marginBottom: 8,
+          }}>
+            <Text style={{ color: selected ? t.colors.buttonText : t.colors.text, fontWeight: "600" }}>{opt}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }

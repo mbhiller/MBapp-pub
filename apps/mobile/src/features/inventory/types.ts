@@ -1,30 +1,7 @@
-export type InventoryItem = {
-  id: string;
-  type: "product";
-  sku?: string;
-  name?: string;
-  kind?: "good";
-  price?: number;
-  createdAt?: string;
-  updatedAt?: string;
-};
-
-/*export interface InventoryItem {
-  id: InventoryId;
-  tenantId?: string;
-
-  // core
-  type: "inventory";
-  productId?: string;
-  sku?: string;
-  name?: string;
-  qtyOnHand: number;
-  uom?: string;
-  cost?: number;
-  location?: string;
-  kind?: string;
-
-  createdAt?: string;
-  updatedAt?: string;
-  metadata?: Record<string, unknown>;
-}*/
+// apps/mobile/src/features/inventory/types.ts
+import type { components } from "../../api/generated-types";
+type Schemas = components["schemas"];
+export type InventoryItem = Schemas["InventoryItem"];
+// convenience alias so either name compiles
+export type Inventory = Schemas["InventoryItem"];
+export type Page<T> = { items: T[]; next?: string | null; limit?: number };

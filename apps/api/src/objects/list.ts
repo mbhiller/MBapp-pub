@@ -1,26 +1,25 @@
 // apps/api/src/objects/list.ts
-// GSI-backed list with fast count support:
-//   GET /objects/:type?limit=&next=&sort=(asc|desc)
-//   GET /objects/registration?eventId=...&count=1  ->  { count }
-
 import { QueryCommand } from "@aws-sdk/lib-dynamodb";
-import { ddb, tableObjects, GSI1_NAME } from "../common/ddb";
+import { ddb, tableObjects } from "../common/ddb";
 import { ok, bad, error as errResp } from "../common/responses";
 import { getTenantId } from "../common/env";
 
-const MAX_LIST_LIMIT = Math.max(1, parseInt(process.env.MAX_LIST_LIMIT ?? "100", 10) || 100);
+/**
+ * GET /objects/{type}?limit=&next=&by=createdAt|updatedAt&sort=asc|desc&fields=a,b,c
+ * - Returns full items by default (no projection).
+ * - Optional projection via ?fields=...
+ * - Simple filter for registrations: ?eventId=...
+ */
 
-type Key = { pk: string; sk: string };
+const GSI1_NAME = "gsi1"; // adjust if your index name differs
 
-function enc(k?: any) {
-  if (!k) return undefined;
-  try { return Buffer.from(JSON.stringify(k)).toString("base64"); }
-  catch { return undefined; }
+function decodeNext(next?: string) {
+  if (!next) return undefined;
+  try { return JSON.parse(Buffer.from(next, "base64").toString("utf8")); } catch { return undefined; }
 }
-function dec(s?: string) {
-  if (!s) return undefined;
-  try { return JSON.parse(Buffer.from(String(s), "base64").toString("utf8")); }
-  catch { return undefined; }
+function encodeNext(lek: any | undefined) {
+  if (!lek) return undefined;
+  return Buffer.from(JSON.stringify(lek), "utf8").toString("base64");
 }
 
 export const handler = async (evt: any) => {
@@ -32,78 +31,81 @@ export const handler = async (evt: any) => {
     if (!typeParam) return bad("type is required");
 
     const qs = evt?.queryStringParameters ?? {};
-    const countOnly = qs.count === "1";
-    const limit = Math.min(
-      MAX_LIST_LIMIT,
-      Math.max(1, parseInt(String(qs.limit ?? "25"), 10) || 25)
-    );
-    const nextIn = dec(qs.next);
+    const limit = Math.max(1, Math.min(200, Number(qs.limit ?? 20)));
+    const nextToken = typeof qs.next === "string" && qs.next ? qs.next : undefined;
+    const by = (qs.by as string) === "updatedAt" ? "updatedAt" : "createdAt";
+    const sort = (qs.sort as string) === "asc" ? "asc" : "desc";
 
-    // sort param (optional): "asc" | "desc"
-    const sort = String(qs.sort ?? "").toLowerCase();
-    // Default sort: products & events => DESC (newest first), others => ASC
-    let scanForward = typeParam === "product" || typeParam === "event" ? false : true;
-    if (sort === "asc") scanForward = true;
-    if (sort === "desc") scanForward = false;
+    // Optional projection
+    const fieldsParam = (qs.fields as string | undefined)?.trim();
+    let ProjectionExpression: string | undefined;
+    let ExpressionAttributeNames: Record<string, string> | undefined;
 
-    // Optional filter for registrations
-    const eventIdFilter =
-      typeParam === "registration" && qs?.eventId ? String(qs.eventId) : undefined;
-
-    // ----- Build base Query on GSI1: gsi1pk = `${tenantId}|${type}` -----
-    const baseValues: Record<string, any> = { ":pk": `${tenantId}|${typeParam}` };
-    const baseNames: Record<string, string> = { "#pk": "gsi1pk" };
-
-    // COUNT branch (registrations)
-    if (countOnly && typeParam === "registration") {
-      const countParams: any = {
-        TableName: tableObjects,
-        IndexName: GSI1_NAME,
-        KeyConditionExpression: "#pk = :pk",
-        ExpressionAttributeValues: { ...baseValues },
-        ExpressionAttributeNames: { ...baseNames },
-        Select: "COUNT",
-      };
-      if (eventIdFilter) {
-        countParams.FilterExpression = "#eventId = :e";
-        countParams.ExpressionAttributeNames["#eventId"] = "eventId";
-        countParams.ExpressionAttributeValues[":e"] = eventIdFilter;
+    if (fieldsParam) {
+      const raw = fieldsParam.split(",").map(s => s.trim()).filter(Boolean);
+      if (raw.length) {
+        const base = new Set(["pk","sk","id","type","tenantId","createdAt","updatedAt"]);
+        raw.forEach(f => base.add(f));
+        const names: Record<string,string> = {};
+        const parts: string[] = [];
+        for (const f of base) {
+          const key = `#${f.replace(/[^A-Za-z0-9_]/g, "_")}`;
+          names[key] = f;
+          parts.push(key);
+        }
+        ExpressionAttributeNames = names;
+        ProjectionExpression = parts.join(", ");
       }
-      const r = await ddb.send(new QueryCommand(countParams));
-      return ok({ count: r?.Count ?? 0 });
     }
 
-    // LIST branch
-    const listParams: any = {
+    const gsiPk = `${tenantId}|${typeParam}`;
+
+    const queryInput: any = {
       TableName: tableObjects,
       IndexName: GSI1_NAME,
-      KeyConditionExpression: "#pk = :pk",
-      ExpressionAttributeValues: { ...baseValues },
-      ExpressionAttributeNames: { ...baseNames },
+      // We don't need aliasing here; avoid unused names errors.
+      KeyConditionExpression: "gsi1pk = :pk",
+      ExpressionAttributeValues: { ":pk": gsiPk },
+      ScanIndexForward: sort === "asc",
       Limit: limit,
-      ExclusiveStartKey: nextIn,
-      ScanIndexForward: scanForward,
+      ExclusiveStartKey: decodeNext(nextToken),
+      ...(ProjectionExpression ? { ProjectionExpression } : {}),
+      ...(ExpressionAttributeNames ? { ExpressionAttributeNames } : {}),
     };
-    if (eventIdFilter) {
-      listParams.FilterExpression = "#eventId = :e";
-      listParams.ExpressionAttributeNames["#eventId"] = "eventId";
-      listParams.ExpressionAttributeValues[":e"] = eventIdFilter;
+
+    // Optional server-side filters
+    const namesForFilter: Record<string,string> = {};
+    const filterValues: Record<string, any> = {};
+    const filterParts: string[] = [];
+
+    if (typeParam === "registration" && typeof qs.eventId === "string" && qs.eventId.trim()) {
+      namesForFilter["#eventId"] = "eventId";
+      filterValues[":eid"] = qs.eventId.trim();
+      filterParts.push("#eventId = :eid");
     }
 
-    const r = await ddb.send(new QueryCommand(listParams));
-    const items = (r.Items || []).map((it: any) => {
-      if (typeParam === "product") {
-        return {
-          id: it.id, type: it.type,
-          name: it.name, price: it.price, sku: it.sku, uom: it.uom, taxCode: it.taxCode, kind: it.kind,
-          createdAt: it.createdAt, updatedAt: it.updatedAt,
-        };
-      }
-      return it;
-    });
+    if (filterParts.length) {
+      queryInput.FilterExpression = filterParts.join(" AND ");
+      queryInput.ExpressionAttributeNames = {
+        ...(queryInput.ExpressionAttributeNames ?? {}),
+        ...namesForFilter,
+      };
+      queryInput.ExpressionAttributeValues = {
+        ...queryInput.ExpressionAttributeValues,
+        ...filterValues,
+      };
+    }
 
-    return ok({ items, next: enc(r.LastEvaluatedKey as Key | undefined) });
-  } catch (e) {
+    const res = await ddb.send(new QueryCommand(queryInput));
+    let items = (res.Items ?? []) as any[];
+
+    if (by === "updatedAt") {
+      items.sort((a, b) => String(b.updatedAt ?? "").localeCompare(String(a.updatedAt ?? "")));
+      if (sort === "asc") items.reverse();
+    }
+
+    return ok({ items, next: encodeNext(res.LastEvaluatedKey) });
+  } catch (e: any) {
     return errResp(e);
   }
 };
