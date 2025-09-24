@@ -21,12 +21,14 @@
     "lambda:build": "pwsh -File ./scripts/lambda-build.ps1",
     "lambda:deploy": "pwsh -File ./scripts/lambda-deploy.ps1 -SetHandlerAndRuntime",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "gen:types:mobile": "openapi-typescript ./openapi.yaml -o ./apps/mobile/src/api/generated-types.ts"
-
+    "gen:types:mobile": "openapi-typescript ./openapi.yaml -o ./apps/mobile/src/api/generated-types.ts",
+    "spec:bundle": "redocly bundle spec/MBapp-Modules.yaml -o openapi.yaml",
+    "spec:types:mobile": "npm run spec:bundle && openapi-typescript ./openapi.yaml -o ./apps/mobile/src/api/generated-types.ts"
   },
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "^3.882.0",
     "@aws-sdk/lib-dynamodb": "^3.882.0",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.4.0",
     "@types/react": "^19.1.12",
     "@types/react-dom": "^19.1.5",
@@ -35,13 +37,17 @@
     "esbuild": "^0.25.9",
     "eslint": "^9.34.0",
     "eslint-config-prettier": "^10.1.8",
-    "openapi-typescript": "^7.3.0",
     "prettier": "^3.6.2",
     "typescript": "^5.9.2"
   },
   "overrides": {
     "react": "19.1.0",
     "react-dom": "19.1.0",
-    "simple-swizzle": "0.2.2"
+    "simple-swizzle": "0.2.2",
+    "@redocly/cli": "^1.15.0",
+    "openapi-typescript": "^7.4.0"
+  },
+  "dependencies": {
+    "jsonwebtoken": "^9.0.2"
   }
 }

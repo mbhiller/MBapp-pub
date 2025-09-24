@@ -9,6 +9,10 @@ import * as ObjSearch from "./objects/search";
 import * as ObjDelete from "./objects/delete";
 import { withCors } from "./cors";
 
+// NEW: auth endpoints
+import { getPolicy } from "./auth/policy";
+import { devLogin } from "./auth/login";
+
 // Accept both HTTP API v2 and REST v1 shapes (keep types loose to avoid build issues)
 type ApiEvt = {
   rawPath?: string;
@@ -41,10 +45,9 @@ const aliasToType: Record<string, string> = {
   "/events": "event",
   "/products": "product",
   "/registrations": "registration",
-  "/accounts": "account",          
-  // "/tenants": "tenant",         // optional: only if you persist tenants in /objects/tenant
+  "/accounts": "account",
+  // "/tenants": "tenant", // optional: only if you persist tenants in /objects/tenant
 };
-
 
 function rewriteAlias(path: string): string {
   for (const alias of Object.keys(aliasToType)) {
@@ -53,15 +56,12 @@ function rewriteAlias(path: string): string {
       return `/objects/${aliasToType[alias]}${suffix}`;
     }
   }
-  // INVENTORY convenience: treat as products
-  if (path === "/inventory" || path.startsWith("/inventory/")) {
-    const suffix = path.slice("/inventory".length);
-    return `/objects/product${suffix}`;
-  }
+  // REMOVED: legacy inventory→products alias
   // /events/:id/registrations -> /objects/registration?eventId=:id
   if (/^\/events\/[^/]+\/registrations$/.test(path)) {
     const id = path.split("/")[2];
     return `/objects/registration?eventId=${encodeURIComponent(id)}`;
+    // NOTE: handler below will treat this as /objects/registration list with eventId in query
   }
   return path;
 }
@@ -70,12 +70,15 @@ function splitObjectsPath(path: string): { type?: string; tail: string[] } {
   const parts = path.split("/").filter(Boolean);
   if (parts[0] !== "objects") return { tail: parts.slice() };
   const type = parts[1];
-  const tail = parts.slice(2); // [], ["list"], [":id"]
+  const tail = parts.slice(2); // [], ["list"], [":id"], ["search"]
   return { type, tail };
 }
 
+
 export const baseHandler = async (evt: ApiEvt, _ctx?: Context): Promise<APIGatewayProxyResult> => {
+  
   const method = methodOf(evt);
+  
   try {
     // Health first, always succeeds (useful for smoke tests)
     const rawPath = pathOf(evt);
@@ -83,6 +86,15 @@ export const baseHandler = async (evt: ApiEvt, _ctx?: Context): Promise<APIGatew
 
     // Short-circuit OPTIONS; withCors will also add headers on responses
     if (method === "OPTIONS") return preflight();
+
+    // --- Auth endpoints (mounted before any rewrites)
+    if (method === "GET" && rawPath === "/auth/policy") {
+      // cast to any to satisfy APIGateway V1/V2 unions
+      return await (getPolicy as any)(evt);
+    }
+    if (method === "POST" && rawPath === "/auth/login") {
+      return await (devLogin as any)(evt);
+    }
 
     const path = rewriteAlias(rawPath);
 
@@ -100,6 +112,11 @@ export const baseHandler = async (evt: ApiEvt, _ctx?: Context): Promise<APIGatew
       const { type, tail } = splitObjectsPath(path);
       if (!type) return notimpl(`${method} ${path} (missing type)`);
 
+      // GET /objects/:type/search
+      if (method === "GET" && tail.length === 1 && tail[0] === "search") {
+        return ObjSearch.handler(withParams(evt, { type }) as any);
+      }
+
       // POST /objects/:type
       if (method === "POST" && tail.length === 0) {
         return ObjCreate.handler(withParams(evt, { type }) as any);
@@ -111,7 +128,7 @@ export const baseHandler = async (evt: ApiEvt, _ctx?: Context): Promise<APIGatew
       }
 
       // GET /objects/:type/:id
-      if (method === "GET" && tail.length === 1 && tail[0] !== "list") {
+      if (method === "GET" && tail.length === 1 && tail[0] !== "list" && tail[0] !== "search") {
         return ObjGet.handler(withParams(evt, { type, id: tail[0] }) as any);
       }
 
@@ -126,10 +143,9 @@ export const baseHandler = async (evt: ApiEvt, _ctx?: Context): Promise<APIGatew
       }
 
       // DELETE /objects/:type/:id
-      if (method === "DELETE" && /^\/objects\/[^/]+\/[^/]+$/.test(path)) {
-        return await ObjDelete.handler(evt);
+      if (method === "DELETE" && tail.length === 1) {
+        return ObjDelete.handler(withParams(evt, { type, id: tail[0] }) as any);
       }
-
 
       return notimpl(`${method} ${path}`);
     }

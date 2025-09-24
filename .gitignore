@@ -38,3 +38,21 @@ apps/api/mbapp-api.zip
 apps/api/lambdas/
 
 apps/api/dist.zip
+
+# make sure we don't commit secrets or build artifacts
+ni .gitignore -Force -Value @"
+# env & secrets
+*.env
+apps/api/.env
+
+# local artifacts
+apps/api/dist/
+apps/api/artifacts/
+*.zip
+*.log
+
+# OS/IDE
+.DS_Store
+Thumbs.db
+.vscode/
+"@
