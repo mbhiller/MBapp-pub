@@ -29,7 +29,7 @@ export const MODULES: readonly ModuleEntry[] = [
   { key: "resources",    title: "Resources",      screen: "ResourcesList",    icon: "warehouse" },
   { key: "vendors",      title: "Vendors",        screen: "VendorsList",      icon: "store" },
   { key: "employees",    title: "Employees",      screen: "EmployeesList",    icon: "user-tie" },
-  { key: "purchaseOrders", title: "Purchasing",   screen: "PurchaseOrdersList", icon: "cart-arrow-down" },
+  { key: "purchaseOrders", title: "Purchasing",   screen: "PurchaseOrdersList", icon: "cart-arrowdown" },
   { key: "salesOrders",    title: "Sales",        screen: "SalesOrdersList",    icon: "cart-plus" },
   { key: "integrations",   title: "Integrations", screen: "IntegrationsList",   icon: "plug" },
 ] as const;
