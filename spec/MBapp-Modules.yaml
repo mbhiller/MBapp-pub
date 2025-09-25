@@ -1,0 +1,586 @@
+openapi: 3.0.3
+info:
+  title: MBapp API
+  version: 2025-09-23
+  description: >
+    Master spec (single source of truth). Bundle to root openapi.yaml for tooling and codegen.
+
+servers:
+  - url: https://api.example.com
+
+tags:
+  - name: Objects
+  - name: Auth
+  - name: Views
+  - name: Workspaces
+  - name: Integrations
+
+paths:
+  /objects/{type}:
+    get:
+      tags: [Objects]
+      summary: List objects (alias; same as /objects/{type}/list)
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/TypePath'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Next'
+        - $ref: '#/components/parameters/By'
+        - $ref: '#/components/parameters/Sort'
+        - $ref: '#/components/parameters/Fields'
+        - $ref: '#/components/parameters/Q'
+        - $ref: '#/components/parameters/EventId'
+      responses:
+        '200': { $ref: '#/components/responses/ListPage' }
+    post:
+      tags: [Objects]
+      summary: Create object
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/TypePath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AnyObject' }
+      responses:
+        '200':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnyObject' }
+
+  /objects/{type}/list:
+    get:
+      tags: [Objects]
+      summary: List objects
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/TypePath'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Next'
+        - $ref: '#/components/parameters/By'
+        - $ref: '#/components/parameters/Sort'
+        - $ref: '#/components/parameters/Fields'
+        - $ref: '#/components/parameters/Q'
+        - $ref: '#/components/parameters/EventId'
+      responses:
+        '200': { $ref: '#/components/responses/ListPage' }
+
+  /objects/{type}/search:
+    get:
+      tags: [Objects]
+      summary: Search objects (lightweight query + in-page filter)
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/TypePath'
+        - $ref: '#/components/parameters/Q'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Next'
+        - $ref: '#/components/parameters/Fields'
+      responses:
+        '200': { $ref: '#/components/responses/ListPage' }
+
+  /objects/{type}/{id}:
+    get:
+      tags: [Objects]
+      summary: Get object by id
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/TypePath'
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/Fields'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnyObject' }
+    put:
+      tags: [Objects]
+      summary: Update object
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/TypePath'
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AnyObject' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnyObject' }
+    delete:
+      tags: [Objects]
+      summary: Delete object
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/TypePath'
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  type: { type: string }
+                  deleted: { type: boolean }
+
+  /auth/policy:
+    get:
+      tags: [Auth]
+      summary: Get RBAC policy for current user & tenant
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Policy' }
+
+components:
+  parameters:
+    TenantHeader:
+      name: x-tenant-id
+      in: header
+      required: true
+      schema: { type: string }
+    TypePath:
+      name: type
+      in: path
+      required: true
+      schema: { type: string, description: "Module/object type key (e.g., product, inventory, event)" }
+    IdPath:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 20 }
+    Next:
+      name: next
+      in: query
+      schema: { type: string, description: "opaque cursor" }
+    By:
+      name: by
+      in: query
+      schema: { type: string, enum: [createdAt, updatedAt], default: createdAt }
+    Sort:
+      name: sort
+      in: query
+      schema: { type: string, enum: [asc, desc], default: desc }
+    Fields:
+      name: fields
+      in: query
+      schema: { type: string, description: "comma-separated projection: id,name,sku" }
+    Q:
+      name: q
+      in: query
+      schema: { type: string }
+    EventId:
+      name: eventId
+      in: query
+      schema: { type: string }
+
+  responses:
+    ListPage:
+      description: Cursor-paged list
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              items:
+                type: array
+                items: { $ref: '#/components/schemas/AnyObject' }
+              next:
+                type: string
+                nullable: true
+
+  schemas:
+    # ---- Base & shared enums
+    Base:
+      type: object
+      properties:
+        id: { type: string }
+        type: { type: string }
+        tenantId: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    StatusActiveInactiveArchived:
+      type: string
+      enum: [active, inactive, archived]
+
+    StatusEvent:
+      type: string
+      enum: [available, unavailable, maintenance]
+
+    StatusRegRes:
+      type: string
+      enum: [pending, confirmed, cancelled, checked_in, completed]
+
+    StatusEmployee:
+      type: string
+      enum: [active, inactive, terminated]
+
+    KindProduct:
+      type: string
+      enum: [good, service]
+
+    # ---- Core module schemas you already use
+    Product:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - type: object
+          properties:
+            name: { type: string }
+            sku: { type: string }
+            price: { type: number }
+            uom: { type: string }
+            kind: { $ref: '#/components/schemas/KindProduct' }
+            status: { $ref: '#/components/schemas/StatusActiveInactiveArchived' }
+
+    Inventory:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - type: object
+          properties:
+            productId: { type: string, nullable: true, description: "Optional link to product" }
+            name: { type: string }
+            sku: { type: string }
+            quantity: { type: number }
+            uom: { type: string }
+            location: { type: string }
+            minQty: { type: number }
+            maxQty: { type: number }
+            status: { $ref: '#/components/schemas/StatusActiveInactiveArchived' }
+
+    Event:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - type: object
+          properties:
+            name: { type: string }
+            description: { type: string }
+            location: { type: string }
+            capacity: { type: number }
+            startsAt: { type: string, format: date-time }
+            endsAt: { type: string, format: date-time }
+            status: { $ref: '#/components/schemas/StatusEvent' }
+
+    Registration:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - type: object
+          properties:
+            eventId: { type: string }
+            clientId: { type: string }
+            status: { $ref: '#/components/schemas/StatusRegRes' }
+            startsAt: { type: string, format: date-time }
+            endsAt: { type: string, format: date-time }
+
+    Reservation:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - type: object
+          properties:
+            resourceType: { type: string }
+            resourceId: { type: string }
+            startsAt: { type: string, format: date-time }
+            endsAt: { type: string, format: date-time }
+            capacity: { type: number }
+            status: { $ref: '#/components/schemas/StatusRegRes' }
+            routeId: { type: string, nullable: true, description: "For transport reservations" }
+            stopId: { type: string, nullable: true }
+
+    Vendor:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - type: object
+          properties:
+            name: { type: string }
+            status: { $ref: '#/components/schemas/StatusActiveInactiveArchived' }
+
+    Employee:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - type: object
+          properties:
+            name: { type: string }
+            email: { type: string }
+            status: { $ref: '#/components/schemas/StatusEmployee' }
+
+    Account:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - type: object
+          properties:
+            name: { type: string }
+            code: { type: string }
+
+    Client:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - type: object
+          properties:
+            name: { type: string }
+            status: { $ref: '#/components/schemas/StatusActiveInactiveArchived' }
+
+    # ---- Ledger & Ops
+    InventoryEvent:
+      type: object
+      properties:
+        id: { type: string }
+        tenantId: { type: string }
+        inventoryId: { type: string, nullable: true }
+        productId: { type: string, nullable: true }
+        kind:
+          type: string
+          enum: [receive, allocate, fulfill, adjust]
+        qty: { type: number }
+        reason: { type: string }
+        refType: { type: string }
+        refId: { type: string }
+        occurredAt: { type: string, format: date-time }
+
+    PurchaseOrder:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - type: object
+          properties:
+            vendorId: { type: string }
+            status:
+              type: string
+              enum: [draft, submitted, approved, received, closed, canceled]
+            orderedAt: { type: string, format: date-time }
+            expectedAt: { type: string, format: date-time, nullable: true }
+            totals: { type: object, additionalProperties: true }
+            notes: { type: string }
+            documents:
+              type: array
+              items: { $ref: '#/components/schemas/DocumentRef' }
+
+    PurchaseOrderLine:
+      type: object
+      properties:
+        id: { type: string }
+        purchaseOrderId: { type: string }
+        inventoryId: { type: string, nullable: true }
+        productId: { type: string, nullable: true }
+        quantity: { type: number }
+        price: { type: number }
+        receivedQty: { type: number, default: 0 }
+
+    Receipt:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - type: object
+          properties:
+            purchaseOrderId: { type: string }
+            occurredAt: { type: string, format: date-time }
+            lines:
+              type: array
+              items:
+                type: object
+                properties:
+                  lineId: { type: string }
+                  receivedQty: { type: number }
+            documents:
+              type: array
+              items: { $ref: '#/components/schemas/DocumentRef' }
+
+    SalesOrder:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - type: object
+          properties:
+            clientId: { type: string }
+            status:
+              type: string
+              enum: [draft, open, fulfilled, canceled]
+            orderedAt: { type: string, format: date-time }
+            totals: { type: object, additionalProperties: true }
+            notes: { type: string }
+            documents:
+              type: array
+              items: { $ref: '#/components/schemas/DocumentRef' }
+
+    SalesOrderLine:
+      type: object
+      properties:
+        id: { type: string }
+        salesOrderId: { type: string }
+        inventoryId: { type: string, nullable: true }
+        productId: { type: string, nullable: true }
+        quantity: { type: number }
+        price: { type: number }
+        fulfilledQty: { type: number, default: 0 }
+
+    Fulfillment:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - type: object
+          properties:
+            salesOrderId: { type: string }
+            occurredAt: { type: string, format: date-time }
+            lines:
+              type: array
+              items:
+                type: object
+                properties:
+                  lineId: { type: string }
+                  fulfilledQty: { type: number }
+            shipping:
+              type: object
+              additionalProperties: true
+            documents:
+              type: array
+              items: { $ref: '#/components/schemas/DocumentRef' }
+
+    # ---- Saved Views (per-module) & Workspaces (cross-module)
+    View:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - type: object
+          properties:
+            ownerId: { type: string, nullable: true }
+            shared: { type: boolean, default: false }
+            moduleKey: { type: string, description: "products|inventory|events|..." }
+            name: { type: string }
+            query:
+              type: object
+              properties:
+                q: { type: string }
+                filters: { type: object, additionalProperties: true }
+                by: { type: string, enum: [createdAt, updatedAt] }
+                sort: { type: string, enum: [asc, desc] }
+                columns:
+                  type: array
+                  items: { type: string }
+            isDefault: { type: boolean, default: false }
+
+    WorkspaceTile:
+      type: object
+      properties:
+        moduleKey: { type: string }
+        viewId: { type: string, nullable: true }
+        inlineQuery:
+          type: object
+          additionalProperties: true
+        layout:
+          type: object
+          additionalProperties: true
+
+    Workspace:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - type: object
+          properties:
+            ownerId: { type: string, nullable: true }
+            shared: { type: boolean, default: false }
+            name: { type: string }
+            tiles:
+              type: array
+              items: { $ref: '#/components/schemas/WorkspaceTile' }
+
+    # ---- Integrations
+    Integration:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - type: object
+          properties:
+            provider:
+              type: string
+              enum: [shopify, woocommerce, quickbooks, xero, rfid, webhook, custom, mux, ivs, vimeo, stripe, square, shippo, easypost, gdrive]
+            status: { type: string, enum: [inactive, active, error] }
+            configJSON: { type: object, additionalProperties: true }
+            scopes:
+              type: array
+              items: { type: string }
+            lastRun: { type: string, format: date-time, nullable: true }
+
+    IntegrationRun:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - type: object
+          properties:
+            integrationId: { type: string }
+            type: { type: string, enum: [sync-in, sync-out] }
+            scope: { type: string }
+            startedAt: { type: string, format: date-time }
+            finishedAt: { type: string, format: date-time, nullable: true }
+            status: { type: string, enum: [queued, running, success, partial, failed] }
+            stats: { type: object, additionalProperties: true }
+            errors:
+              type: array
+              items: { type: string }
+
+    # ---- Docs & Policy
+    DocumentRef:
+      type: object
+      properties:
+        provider: { type: string, enum: [gdrive] }
+        fileId: { type: string }
+        name: { type: string }
+
+    Policy:
+      type: object
+      properties:
+        user:
+          type: object
+          properties:
+            id: { type: string }
+            email: { type: string }
+        tenants:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              default: { type: boolean }
+        roles:
+          type: array
+          items: { type: string }
+        permissions:
+          type: array
+          items: { type: string }
+        scopes:
+          type: object
+          additionalProperties: true
+        version: { type: integer }
+        issuedAt: { type: string, format: date-time }
+
+    # ---- Union for AnyObject (keeps current clients happy)
+    AnyObject:
+      oneOf:
+        - $ref: '#/components/schemas/Product'
+        - $ref: '#/components/schemas/Inventory'
+        - $ref: '#/components/schemas/Event'
+        - $ref: '#/components/schemas/Registration'
+        - $ref: '#/components/schemas/Reservation'
+        - $ref: '#/components/schemas/Vendor'
+        - $ref: '#/components/schemas/Employee'
+        - $ref: '#/components/schemas/Account'
+        - $ref: '#/components/schemas/Client'
+        - $ref: '#/components/schemas/InventoryEvent'
+        - $ref: '#/components/schemas/PurchaseOrder'
+        - $ref: '#/components/schemas/PurchaseOrderLine'
+        - $ref: '#/components/schemas/Receipt'
+        - $ref: '#/components/schemas/SalesOrder'
+        - $ref: '#/components/schemas/SalesOrderLine'
+        - $ref: '#/components/schemas/Fulfillment'
+        - $ref: '#/components/schemas/View'
+        - $ref: '#/components/schemas/Workspace'
+        - $ref: '#/components/schemas/Integration'
+        - $ref: '#/components/schemas/IntegrationRun'

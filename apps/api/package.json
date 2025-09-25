@@ -8,17 +8,23 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/index.js",
-    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true}); require('fs').rmSync('dist.zip',{force:true})\""
+    "build:index": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/index.js",
+    "build:bootstrap": "esbuild src/bootstrap.ts --bundle --platform=node --target=node18 --format=cjs --outfile=dist/bootstrap.js",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true}); require('fs').rmSync('dist.zip',{force:true})\"",
+    "tools:ping": "node apps/tools/seed/ping.mjs",
+    "tools:seed": "node apps/tools/seed/seed.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.891.0",
     "@aws-sdk/lib-dynamodb": "^3.891.0",
     "@aws-sdk/util-dynamodb": "^3.888.0",
+    "dotenv": "^17.2.2",
+    "jsonwebtoken": "^9.0.2",
     "uuid": "^9.0.1"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.152",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20.19.14",
     "esbuild": "^0.23.1",
     "ts-node": "^10.9.2",
