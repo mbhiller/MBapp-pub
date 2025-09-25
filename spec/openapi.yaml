@@ -1,10 +1,9 @@
 openapi: 3.0.3
 info:
   title: MBapp API
-  version: 2025-09-23
-  description: >
-    Master spec (single source of truth). Bundle to root openapi.yaml for
-    tooling and codegen.
+  version: '2025-09-23'
+  description: |
+    Master spec (single source of truth). Bundle to root openapi.yaml for tooling and codegen.
 servers:
   - url: https://api.example.com
 tags:
@@ -20,119 +19,119 @@ paths:
         - Objects
       summary: List objects (alias; same as /objects/{type}/list)
       parameters:
-        - $ref: "#/components/parameters/TenantHeader"
-        - $ref: "#/components/parameters/TypePath"
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Next"
-        - $ref: "#/components/parameters/By"
-        - $ref: "#/components/parameters/Sort"
-        - $ref: "#/components/parameters/Fields"
-        - $ref: "#/components/parameters/Q"
-        - $ref: "#/components/parameters/EventId"
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/TypePath'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Next'
+        - $ref: '#/components/parameters/By'
+        - $ref: '#/components/parameters/Sort'
+        - $ref: '#/components/parameters/Fields'
+        - $ref: '#/components/parameters/Q'
+        - $ref: '#/components/parameters/EventId'
       responses:
-        "200":
-          $ref: "#/components/responses/ListPage"
+        '200':
+          $ref: '#/components/responses/ListPage'
     post:
       tags:
         - Objects
       summary: Create object
       parameters:
-        - $ref: "#/components/parameters/TenantHeader"
-        - $ref: "#/components/parameters/TypePath"
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/TypePath'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/AnyObject"
+              $ref: '#/components/schemas/AnyObject'
       responses:
-        "200":
+        '200':
           description: Created
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AnyObject"
+                $ref: '#/components/schemas/AnyObject'
   /objects/{type}/list:
     get:
       tags:
         - Objects
       summary: List objects
       parameters:
-        - $ref: "#/components/parameters/TenantHeader"
-        - $ref: "#/components/parameters/TypePath"
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Next"
-        - $ref: "#/components/parameters/By"
-        - $ref: "#/components/parameters/Sort"
-        - $ref: "#/components/parameters/Fields"
-        - $ref: "#/components/parameters/Q"
-        - $ref: "#/components/parameters/EventId"
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/TypePath'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Next'
+        - $ref: '#/components/parameters/By'
+        - $ref: '#/components/parameters/Sort'
+        - $ref: '#/components/parameters/Fields'
+        - $ref: '#/components/parameters/Q'
+        - $ref: '#/components/parameters/EventId'
       responses:
-        "200":
-          $ref: "#/components/responses/ListPage"
+        '200':
+          $ref: '#/components/responses/ListPage'
   /objects/{type}/search:
     get:
       tags:
         - Objects
       summary: Search objects (lightweight query + in-page filter)
       parameters:
-        - $ref: "#/components/parameters/TenantHeader"
-        - $ref: "#/components/parameters/TypePath"
-        - $ref: "#/components/parameters/Q"
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Next"
-        - $ref: "#/components/parameters/Fields"
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/TypePath'
+        - $ref: '#/components/parameters/Q'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Next'
+        - $ref: '#/components/parameters/Fields'
       responses:
-        "200":
-          $ref: "#/components/responses/ListPage"
+        '200':
+          $ref: '#/components/responses/ListPage'
   /objects/{type}/{id}:
     get:
       tags:
         - Objects
       summary: Get object by id
       parameters:
-        - $ref: "#/components/parameters/TenantHeader"
-        - $ref: "#/components/parameters/TypePath"
-        - $ref: "#/components/parameters/IdPath"
-        - $ref: "#/components/parameters/Fields"
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/TypePath'
+        - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/Fields'
       responses:
-        "200":
+        '200':
           description: OK
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AnyObject"
+                $ref: '#/components/schemas/AnyObject'
     put:
       tags:
         - Objects
       summary: Update object
       parameters:
-        - $ref: "#/components/parameters/TenantHeader"
-        - $ref: "#/components/parameters/TypePath"
-        - $ref: "#/components/parameters/IdPath"
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/TypePath'
+        - $ref: '#/components/parameters/IdPath'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/AnyObject"
+              $ref: '#/components/schemas/AnyObject'
       responses:
-        "200":
+        '200':
           description: Updated
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AnyObject"
+                $ref: '#/components/schemas/AnyObject'
     delete:
       tags:
         - Objects
       summary: Delete object
       parameters:
-        - $ref: "#/components/parameters/TenantHeader"
-        - $ref: "#/components/parameters/TypePath"
-        - $ref: "#/components/parameters/IdPath"
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/TypePath'
+        - $ref: '#/components/parameters/IdPath'
       responses:
-        "200":
+        '200':
           description: Deleted
           content:
             application/json:
@@ -151,14 +150,14 @@ paths:
         - Auth
       summary: Get RBAC policy for current user & tenant
       parameters:
-        - $ref: "#/components/parameters/TenantHeader"
+        - $ref: '#/components/parameters/TenantHeader'
       responses:
-        "200":
+        '200':
           description: OK
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Policy"
+                $ref: '#/components/schemas/Policy'
 components:
   parameters:
     TenantHeader:
@@ -217,7 +216,7 @@ components:
       in: query
       schema:
         type: string
-        description: "comma-separated projection: id,name,sku"
+        description: 'comma-separated projection: id,name,sku'
     Q:
       name: q
       in: query
@@ -234,31 +233,31 @@ components:
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ListPage"
+            $ref: '#/components/schemas/ListPage'
     BadRequest:
       description: Bad request
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/Error"
+            $ref: '#/components/schemas/Error'
     Unauthorized:
       description: Unauthorized
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/Error"
+            $ref: '#/components/schemas/Error'
     NotFound:
       description: Not found
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/Error"
+            $ref: '#/components/schemas/Error'
     ValidationError:
       description: Validation error
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/Error"
+            $ref: '#/components/schemas/Error'
   schemas:
     Error:
       type: object
@@ -301,7 +300,7 @@ components:
         items:
           type: array
           items:
-            $ref: "#/components/schemas/AnyObject"
+            $ref: '#/components/schemas/AnyObject'
         next:
           type: string
           nullable: true
@@ -310,7 +309,7 @@ components:
           default: 20
     Client:
       allOf:
-        - $ref: "#/components/schemas/Base"
+        - $ref: '#/components/schemas/Base'
         - type: object
           properties:
             type:
@@ -347,7 +346,7 @@ components:
             - name
     Account:
       allOf:
-        - $ref: "#/components/schemas/Base"
+        - $ref: '#/components/schemas/Base'
         - type: object
           properties:
             type:
@@ -381,7 +380,7 @@ components:
             - name
     Product:
       allOf:
-        - $ref: "#/components/schemas/Base"
+        - $ref: '#/components/schemas/Base'
         - type: object
           required:
             - type
@@ -415,7 +414,7 @@ components:
               type: string
     InventoryItem:
       allOf:
-        - $ref: "#/components/schemas/Base"
+        - $ref: '#/components/schemas/Base'
         - type: object
           properties:
             type:
@@ -451,7 +450,7 @@ components:
               type: string
     Resource:
       allOf:
-        - $ref: "#/components/schemas/Base"
+        - $ref: '#/components/schemas/Base'
         - type: object
           required:
             - type
@@ -473,7 +472,7 @@ components:
               format: date-time
     Event:
       allOf:
-        - $ref: "#/components/schemas/Base"
+        - $ref: '#/components/schemas/Base'
         - type: object
           properties:
             type:
@@ -512,7 +511,7 @@ components:
             - startsAt
     Registration:
       allOf:
-        - $ref: "#/components/schemas/Base"
+        - $ref: '#/components/schemas/Base'
         - type: object
           required:
             - eventId
@@ -547,7 +546,7 @@ components:
               type: string
     Reservation:
       allOf:
-        - $ref: "#/components/schemas/Base"
+        - $ref: '#/components/schemas/Base'
         - type: object
           required:
             - resourceId
@@ -587,7 +586,7 @@ components:
               type: string
     Vendor:
       allOf:
-        - $ref: "#/components/schemas/Base"
+        - $ref: '#/components/schemas/Base'
         - type: object
           required:
             - name
@@ -616,7 +615,7 @@ components:
               default: active
     Employee:
       allOf:
-        - $ref: "#/components/schemas/Base"
+        - $ref: '#/components/schemas/Base'
         - type: object
           properties:
             type:
@@ -673,13 +672,13 @@ components:
         - permissions
     AnyObject:
       oneOf:
-        - $ref: "#/components/schemas/Client"
-        - $ref: "#/components/schemas/Account"
-        - $ref: "#/components/schemas/Product"
-        - $ref: "#/components/schemas/InventoryItem"
-        - $ref: "#/components/schemas/Resource"
-        - $ref: "#/components/schemas/Event"
-        - $ref: "#/components/schemas/Registration"
-        - $ref: "#/components/schemas/Reservation"
-        - $ref: "#/components/schemas/Vendor"
-        - $ref: "#/components/schemas/Employee"
+        - $ref: '#/components/schemas/Client'
+        - $ref: '#/components/schemas/Account'
+        - $ref: '#/components/schemas/Product'
+        - $ref: '#/components/schemas/InventoryItem'
+        - $ref: '#/components/schemas/Resource'
+        - $ref: '#/components/schemas/Event'
+        - $ref: '#/components/schemas/Registration'
+        - $ref: '#/components/schemas/Reservation'
+        - $ref: '#/components/schemas/Vendor'
+        - $ref: '#/components/schemas/Employee'

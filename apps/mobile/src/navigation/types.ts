@@ -42,6 +42,7 @@ export type RootStackParamList = {
   // Vendors & Employees
   VendorsList: undefined;
   VendorDetail: { id?: string; mode?: "new" | "edit" };
+  
   EmployeesList: undefined;
   EmployeeDetail: { id?: string; mode?: "new" | "edit" };
 

@@ -11,16 +11,138 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List objects */
-        get: operations["listObjects"];
+        /** List objects (alias; same as /objects/{type}/list) */
+        get: {
+            parameters: {
+                query?: {
+                    limit?: components["parameters"]["Limit"];
+                    next?: components["parameters"]["Next"];
+                    by?: components["parameters"]["By"];
+                    sort?: components["parameters"]["Sort"];
+                    fields?: components["parameters"]["Fields"];
+                    q?: components["parameters"]["Q"];
+                    eventId?: components["parameters"]["EventId"];
+                };
+                header: {
+                    "x-tenant-id": components["parameters"]["TenantHeader"];
+                };
+                path: {
+                    type: components["parameters"]["TypePath"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: components["responses"]["ListPage"];
+            };
+        };
         put?: never;
-        /**
-         * Upsert (create or update by id)
-         * @description POST behaves as **upsert**. If `id` is provided, updates the object;
-         *     otherwise creates a new one.
-         *
-         */
-        post: operations["upsertObject"];
+        /** Create object */
+        post: {
+            parameters: {
+                query?: never;
+                header: {
+                    "x-tenant-id": components["parameters"]["TenantHeader"];
+                };
+                path: {
+                    type: components["parameters"]["TypePath"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AnyObject"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AnyObject"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/objects/{type}/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List objects */
+        get: {
+            parameters: {
+                query?: {
+                    limit?: components["parameters"]["Limit"];
+                    next?: components["parameters"]["Next"];
+                    by?: components["parameters"]["By"];
+                    sort?: components["parameters"]["Sort"];
+                    fields?: components["parameters"]["Fields"];
+                    q?: components["parameters"]["Q"];
+                    eventId?: components["parameters"]["EventId"];
+                };
+                header: {
+                    "x-tenant-id": components["parameters"]["TenantHeader"];
+                };
+                path: {
+                    type: components["parameters"]["TypePath"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: components["responses"]["ListPage"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/objects/{type}/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search objects (lightweight query + in-page filter) */
+        get: {
+            parameters: {
+                query?: {
+                    q?: components["parameters"]["Q"];
+                    limit?: components["parameters"]["Limit"];
+                    next?: components["parameters"]["Next"];
+                    fields?: components["parameters"]["Fields"];
+                };
+                header: {
+                    "x-tenant-id": components["parameters"]["TenantHeader"];
+                };
+                path: {
+                    type: components["parameters"]["TypePath"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: components["responses"]["ListPage"];
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -34,8 +156,130 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get one object */
-        get: operations["getObjectById"];
+        /** Get object by id */
+        get: {
+            parameters: {
+                query?: {
+                    fields?: components["parameters"]["Fields"];
+                };
+                header: {
+                    "x-tenant-id": components["parameters"]["TenantHeader"];
+                };
+                path: {
+                    type: components["parameters"]["TypePath"];
+                    id: components["parameters"]["IdPath"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AnyObject"];
+                    };
+                };
+            };
+        };
+        /** Update object */
+        put: {
+            parameters: {
+                query?: never;
+                header: {
+                    "x-tenant-id": components["parameters"]["TenantHeader"];
+                };
+                path: {
+                    type: components["parameters"]["TypePath"];
+                    id: components["parameters"]["IdPath"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AnyObject"];
+                };
+            };
+            responses: {
+                /** @description Updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AnyObject"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Delete object */
+        delete: {
+            parameters: {
+                query?: never;
+                header: {
+                    "x-tenant-id": components["parameters"]["TenantHeader"];
+                };
+                path: {
+                    type: components["parameters"]["TypePath"];
+                    id: components["parameters"]["IdPath"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Deleted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            id?: string;
+                            type?: string;
+                            deleted?: boolean;
+                        };
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get RBAC policy for current user & tenant */
+        get: {
+            parameters: {
+                query?: never;
+                header: {
+                    "x-tenant-id": components["parameters"]["TenantHeader"];
+                };
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Policy"];
+                    };
+                };
+            };
+        };
         put?: never;
         post?: never;
         delete?: never;
@@ -253,9 +497,22 @@ export interface components {
             terminatedAt?: string;
             notes?: string;
         };
+        Policy: {
+            roles: string[];
+            permissions: string[];
+        };
         AnyObject: components["schemas"]["Client"] | components["schemas"]["Account"] | components["schemas"]["Product"] | components["schemas"]["InventoryItem"] | components["schemas"]["Resource"] | components["schemas"]["Event"] | components["schemas"]["Registration"] | components["schemas"]["Reservation"] | components["schemas"]["Vendor"] | components["schemas"]["Employee"];
     };
     responses: {
+        /** @description Paginated list response */
+        ListPage: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ListPage"];
+            };
+        };
         /** @description Bad request */
         BadRequest: {
             headers: {
@@ -293,98 +550,21 @@ export interface components {
             };
         };
     };
-    parameters: never;
+    parameters: {
+        TenantHeader: string;
+        TypePath: string;
+        IdPath: string;
+        Limit: number;
+        Next: string;
+        By: "createdAt" | "updatedAt";
+        Sort: "asc" | "desc";
+        Fields: string;
+        Q: string;
+        EventId: string;
+    };
     requestBodies: never;
     headers: never;
     pathItems: never;
 }
 export type $defs = Record<string, never>;
-export interface operations {
-    listObjects: {
-        parameters: {
-            query?: {
-                /** @description Free-text search */
-                q?: string;
-                by?: "updatedAt" | "createdAt" | "name";
-                sort?: "asc" | "desc";
-                limit?: number;
-                next?: string | null;
-                /** @description Filter registrations by event (when type=registration) */
-                eventId?: string;
-            };
-            header?: never;
-            path: {
-                /** @description Object type key (e.g., product, client, account, inventory, resource, event, registration, reservation, vendor, employee) */
-                type: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ListPage"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-        };
-    };
-    upsertObject: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                type: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AnyObject"];
-            };
-        };
-        responses: {
-            /** @description Saved */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AnyObject"];
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-        };
-    };
-    getObjectById: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                type: string;
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AnyObject"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-}
+export type operations = Record<string, never>;

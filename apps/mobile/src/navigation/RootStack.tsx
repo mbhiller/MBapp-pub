@@ -46,6 +46,7 @@ import ReservationDetailScreen from "../screens/ReservationDetailScreen";
 // Vendors / Employees
 import VendorsListScreen from "../screens/VendorsListScreen";
 import VendorDetailScreen from "../screens/VendorDetailScreen";
+
 import EmployeesListScreen from "../screens/EmployeesListScreen";
 import EmployeeDetailScreen from "../screens/EmployeeDetailScreen";
 
@@ -131,6 +132,7 @@ export default function RootStack() {
       {/* Vendors / Employees */}
       <Stack.Screen name="VendorsList" component={VendorsListScreen} options={{ title: "Vendors" }} />
       <Stack.Screen name="VendorDetail" component={VendorDetailScreen} options={{ title: "Vendor" }} />
+      
       <Stack.Screen name="EmployeesList" component={EmployeesListScreen} options={{ title: "Employees" }} />
       <Stack.Screen name="EmployeeDetail" component={EmployeeDetailScreen} options={{ title: "Employee" }} />
 
