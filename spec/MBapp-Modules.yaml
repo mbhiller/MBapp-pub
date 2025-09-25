@@ -229,6 +229,12 @@ components:
       schema:
         type: string
   responses:
+    ListPage:
+      description: Paginated list response
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ListPage"
     BadRequest:
       description: Bad request
       content:
@@ -651,6 +657,20 @@ components:
             - createdAt
             - updatedAt
             - displayName
+    Policy:
+      type: object
+      properties:
+        roles:
+          type: array
+          items:
+            type: string
+        permissions:
+          type: array
+          items:
+            type: string
+      required:
+        - roles
+        - permissions
     AnyObject:
       oneOf:
         - $ref: "#/components/schemas/Client"
