@@ -25,7 +25,7 @@
     "spec:bundle": "redocly bundle spec/MBapp-Modules.yaml -o spec/openapi.yaml",
     "spec:types:mobile": "npm run spec:bundle && npx openapi-typescript spec/openapi.yaml -o apps/mobile/src/api/generated-types.ts",
     "tools:ping": "node apps/tools/seed/ping.mjs",
-    "tools:seed": "node apps/tools/seed/seed.mjs"
+    "tools:seed": "node apps/tools/seed/seed.mjs
   },
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "^3.882.0",
