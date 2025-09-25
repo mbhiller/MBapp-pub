@@ -1,9 +1,0 @@
-{
-  "name": "@mbapp/common",
-  "version": "0.1.0",
-  "private": true,
-  "scripts": {
-    "build": "echo \"Skipping common build (no sources yet)\"",
-    "test": "echo \"(no tests)\""
-  }
-}
