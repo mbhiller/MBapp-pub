@@ -11,138 +11,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List objects (alias; same as /objects/{type}/list) */
-        get: {
-            parameters: {
-                query?: {
-                    limit?: components["parameters"]["Limit"];
-                    next?: components["parameters"]["Next"];
-                    by?: components["parameters"]["By"];
-                    sort?: components["parameters"]["Sort"];
-                    fields?: components["parameters"]["Fields"];
-                    q?: components["parameters"]["Q"];
-                    eventId?: components["parameters"]["EventId"];
-                };
-                header: {
-                    "x-tenant-id": components["parameters"]["TenantHeader"];
-                };
-                path: {
-                    type: components["parameters"]["TypePath"];
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                200: components["responses"]["ListPage"];
-            };
-        };
-        put?: never;
-        /** Create object */
-        post: {
-            parameters: {
-                query?: never;
-                header: {
-                    "x-tenant-id": components["parameters"]["TenantHeader"];
-                };
-                path: {
-                    type: components["parameters"]["TypePath"];
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["AnyObject"];
-                };
-            };
-            responses: {
-                /** @description Created */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["AnyObject"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/objects/{type}/list": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
         /** List objects */
-        get: {
-            parameters: {
-                query?: {
-                    limit?: components["parameters"]["Limit"];
-                    next?: components["parameters"]["Next"];
-                    by?: components["parameters"]["By"];
-                    sort?: components["parameters"]["Sort"];
-                    fields?: components["parameters"]["Fields"];
-                    q?: components["parameters"]["Q"];
-                    eventId?: components["parameters"]["EventId"];
-                };
-                header: {
-                    "x-tenant-id": components["parameters"]["TenantHeader"];
-                };
-                path: {
-                    type: components["parameters"]["TypePath"];
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                200: components["responses"]["ListPage"];
-            };
-        };
+        get: operations["listObjects"];
         put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/objects/{type}/search": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Search objects (lightweight query + in-page filter) */
-        get: {
-            parameters: {
-                query?: {
-                    q?: components["parameters"]["Q"];
-                    limit?: components["parameters"]["Limit"];
-                    next?: components["parameters"]["Next"];
-                    fields?: components["parameters"]["Fields"];
-                };
-                header: {
-                    "x-tenant-id": components["parameters"]["TenantHeader"];
-                };
-                path: {
-                    type: components["parameters"]["TypePath"];
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                200: components["responses"]["ListPage"];
-            };
-        };
-        put?: never;
-        post?: never;
+        /**
+         * Upsert (create or update by id)
+         * @description POST behaves as **upsert**. If `id` is provided, updates the object;
+         *     otherwise creates a new one.
+         *
+         */
+        post: operations["upsertObject"];
         delete?: never;
         options?: never;
         head?: never;
@@ -156,130 +34,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get object by id */
-        get: {
-            parameters: {
-                query?: {
-                    fields?: components["parameters"]["Fields"];
-                };
-                header: {
-                    "x-tenant-id": components["parameters"]["TenantHeader"];
-                };
-                path: {
-                    type: components["parameters"]["TypePath"];
-                    id: components["parameters"]["IdPath"];
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description OK */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["AnyObject"];
-                    };
-                };
-            };
-        };
-        /** Update object */
-        put: {
-            parameters: {
-                query?: never;
-                header: {
-                    "x-tenant-id": components["parameters"]["TenantHeader"];
-                };
-                path: {
-                    type: components["parameters"]["TypePath"];
-                    id: components["parameters"]["IdPath"];
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["AnyObject"];
-                };
-            };
-            responses: {
-                /** @description Updated */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["AnyObject"];
-                    };
-                };
-            };
-        };
-        post?: never;
-        /** Delete object */
-        delete: {
-            parameters: {
-                query?: never;
-                header: {
-                    "x-tenant-id": components["parameters"]["TenantHeader"];
-                };
-                path: {
-                    type: components["parameters"]["TypePath"];
-                    id: components["parameters"]["IdPath"];
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Deleted */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            id?: string;
-                            type?: string;
-                            deleted?: boolean;
-                        };
-                    };
-                };
-            };
-        };
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/auth/policy": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get RBAC policy for current user & tenant */
-        get: {
-            parameters: {
-                query?: never;
-                header: {
-                    "x-tenant-id": components["parameters"]["TenantHeader"];
-                };
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description OK */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Policy"];
-                    };
-                };
-            };
-        };
+        /** Get one object */
+        get: operations["getObjectById"];
         put?: never;
         post?: never;
         delete?: never;
@@ -292,299 +48,343 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        Base: {
-            id?: string;
-            type?: string;
-            tenantId?: string;
-            /** Format: date-time */
-            createdAt?: string;
-            /** Format: date-time */
-            updatedAt?: string;
+        Error: {
+            /** @example VALIDATION_ERROR */
+            code?: string;
+            /** @example Invalid 'eventId' parameter */
+            message?: string;
+            details?: {
+                [key: string]: unknown;
+            };
         };
-        /** @enum {string} */
-        StatusActiveInactiveArchived: "active" | "inactive" | "archived";
-        /** @enum {string} */
-        StatusEvent: "available" | "unavailable" | "maintenance";
-        /** @enum {string} */
-        StatusRegRes: "pending" | "confirmed" | "cancelled" | "checked_in" | "completed";
-        /** @enum {string} */
-        StatusEmployee: "active" | "inactive" | "terminated";
-        /** @enum {string} */
-        KindProduct: "good" | "service";
+        Base: {
+            /** @description UUID */
+            id: string;
+            type: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            externalId?: string;
+        };
+        ListPage: {
+            items: components["schemas"]["AnyObject"][];
+            next?: string | null;
+            /** @default 20 */
+            limit: number;
+        };
+        Client: components["schemas"]["Base"] & {
+            /** @enum {string} */
+            type: "client";
+            name: string;
+            displayName?: string;
+            firstName?: string;
+            lastName?: string;
+            /** Format: email */
+            email?: string;
+            phone?: string;
+            /**
+             * @default active
+             * @enum {string}
+             */
+            status: "active" | "inactive" | "archived";
+            notes?: string;
+        };
+        Account: components["schemas"]["Base"] & {
+            /** @enum {string} */
+            type: "account";
+            name: string;
+            number?: string;
+            currency?: string;
+            /** @description e.g., asset, liability, revenue */
+            accountType?: string;
+            /** @description Current balance (display only) */
+            balance?: number;
+            /**
+             * @default active
+             * @enum {string}
+             */
+            status: "active" | "inactive" | "archived";
+        };
         Product: components["schemas"]["Base"] & {
-            name?: string;
+            /** @enum {string} */
+            type: "product";
+            name: string;
+            /** @enum {string} */
+            kind?: "good" | "service";
             sku?: string;
             price?: number;
-            uom?: string;
-            kind?: components["schemas"]["KindProduct"];
-            status?: components["schemas"]["StatusActiveInactiveArchived"];
+            taxCode?: string;
+            /**
+             * @default active
+             * @enum {string}
+             */
+            status: "active" | "inactive" | "archived";
+            notes?: string;
         };
-        Inventory: components["schemas"]["Base"] & {
-            /** @description Optional link to product */
-            productId?: string | null;
+        InventoryItem: components["schemas"]["Base"] & {
+            /** @enum {string} */
+            type?: "inventory";
+            /** @description Optional link to a product */
+            productId?: string;
             name?: string;
             sku?: string;
             quantity?: number;
+            /** @description Unit of measure */
             uom?: string;
             location?: string;
             minQty?: number;
             maxQty?: number;
-            status?: components["schemas"]["StatusActiveInactiveArchived"];
+            /**
+             * @default active
+             * @enum {string}
+             */
+            status: "active" | "inactive" | "archived";
+            notes?: string;
+        };
+        Resource: components["schemas"]["Base"] & {
+            /** @enum {string} */
+            type: "resource";
+            name: string;
+            code?: string;
+            /** Format: uri */
+            url?: string;
+            /** Format: date-time */
+            expiresAt?: string;
         };
         Event: components["schemas"]["Base"] & {
-            name?: string;
+            /** @enum {string} */
+            type: "event";
+            name: string;
             description?: string;
             location?: string;
-            capacity?: number;
             /** Format: date-time */
-            startsAt?: string;
+            startsAt: string;
             /** Format: date-time */
             endsAt?: string;
-            status?: components["schemas"]["StatusEvent"];
+            /**
+             * @default available
+             * @enum {string}
+             */
+            status: "available" | "unavailable" | "maintenance";
+            capacity?: number;
+            notes?: string;
         };
         Registration: components["schemas"]["Base"] & {
-            eventId?: string;
+            /** @enum {string} */
+            type?: "registration";
+            eventId: string;
             clientId?: string;
-            status?: components["schemas"]["StatusRegRes"];
             /** Format: date-time */
             startsAt?: string;
             /** Format: date-time */
             endsAt?: string;
+            /**
+             * @default pending
+             * @enum {string}
+             */
+            status: "pending" | "confirmed" | "cancelled" | "checked_in" | "completed";
+            /** Format: date-time */
+            registeredAt?: string;
+            notes?: string;
         };
         Reservation: components["schemas"]["Base"] & {
-            resourceType?: string;
-            resourceId?: string;
+            /** @enum {string} */
+            type?: "reservation";
+            resourceId: string;
+            /**
+             * Format: date-time
+             * @description Alias of startsAt
+             */
+            start?: string;
+            /**
+             * Format: date-time
+             * @description Alias of endsAt
+             */
+            end?: string;
             /** Format: date-time */
             startsAt?: string;
             /** Format: date-time */
             endsAt?: string;
-            capacity?: number;
-            status?: components["schemas"]["StatusRegRes"];
-            /** @description For transport reservations */
-            routeId?: string | null;
-            stopId?: string | null;
+            clientId?: string;
+            /**
+             * @default pending
+             * @enum {string}
+             */
+            status: "pending" | "confirmed" | "cancelled" | "checked_in" | "completed";
+            notes?: string;
         };
         Vendor: components["schemas"]["Base"] & {
-            name?: string;
-            status?: components["schemas"]["StatusActiveInactiveArchived"];
+            /** @enum {string} */
+            type?: "vendor";
+            name: string;
+            displayName?: string;
+            /** Format: email */
+            email?: string;
+            phone?: string;
+            notes?: string;
+            /**
+             * @default active
+             * @enum {string}
+             */
+            status: "active" | "inactive" | "archived";
         };
         Employee: components["schemas"]["Base"] & {
-            name?: string;
+            /** @enum {string} */
+            type: "employee";
+            displayName: string;
+            /** Format: email */
             email?: string;
-            status?: components["schemas"]["StatusEmployee"];
-        };
-        Account: components["schemas"]["Base"] & {
-            name?: string;
-            code?: string;
-        };
-        Client: components["schemas"]["Base"] & {
-            name?: string;
-            status?: components["schemas"]["StatusActiveInactiveArchived"];
-        };
-        InventoryEvent: {
-            id?: string;
-            tenantId?: string;
-            inventoryId?: string | null;
-            productId?: string | null;
-            /** @enum {string} */
-            kind?: "receive" | "allocate" | "fulfill" | "adjust";
-            qty?: number;
-            reason?: string;
-            refType?: string;
-            refId?: string;
+            phone?: string;
+            role?: string;
+            /**
+             * @default active
+             * @enum {string}
+             */
+            status: "active" | "inactive" | "terminated";
             /** Format: date-time */
-            occurredAt?: string;
-        };
-        PurchaseOrder: components["schemas"]["Base"] & {
-            vendorId?: string;
-            /** @enum {string} */
-            status?: "draft" | "submitted" | "approved" | "received" | "closed" | "canceled";
+            hiredAt?: string;
+            /**
+             * Format: date-time
+             * @description Alias of hiredAt for UI consistency
+             */
+            startDate?: string;
             /** Format: date-time */
-            orderedAt?: string;
-            /** Format: date-time */
-            expectedAt?: string | null;
-            totals?: {
-                [key: string]: unknown;
-            };
+            terminatedAt?: string;
             notes?: string;
-            documents?: components["schemas"]["DocumentRef"][];
         };
-        PurchaseOrderLine: {
-            id?: string;
-            purchaseOrderId?: string;
-            inventoryId?: string | null;
-            productId?: string | null;
-            quantity?: number;
-            price?: number;
-            /** @default 0 */
-            receivedQty: number;
-        };
-        Receipt: components["schemas"]["Base"] & {
-            purchaseOrderId?: string;
-            /** Format: date-time */
-            occurredAt?: string;
-            lines?: {
-                lineId?: string;
-                receivedQty?: number;
-            }[];
-            documents?: components["schemas"]["DocumentRef"][];
-        };
-        SalesOrder: components["schemas"]["Base"] & {
-            clientId?: string;
-            /** @enum {string} */
-            status?: "draft" | "open" | "fulfilled" | "canceled";
-            /** Format: date-time */
-            orderedAt?: string;
-            totals?: {
-                [key: string]: unknown;
-            };
-            notes?: string;
-            documents?: components["schemas"]["DocumentRef"][];
-        };
-        SalesOrderLine: {
-            id?: string;
-            salesOrderId?: string;
-            inventoryId?: string | null;
-            productId?: string | null;
-            quantity?: number;
-            price?: number;
-            /** @default 0 */
-            fulfilledQty: number;
-        };
-        Fulfillment: components["schemas"]["Base"] & {
-            salesOrderId?: string;
-            /** Format: date-time */
-            occurredAt?: string;
-            lines?: {
-                lineId?: string;
-                fulfilledQty?: number;
-            }[];
-            shipping?: {
-                [key: string]: unknown;
-            };
-            documents?: components["schemas"]["DocumentRef"][];
-        };
-        View: components["schemas"]["Base"] & {
-            ownerId?: string | null;
-            /** @default false */
-            shared: boolean;
-            /** @description products|inventory|events|... */
-            moduleKey?: string;
-            name?: string;
-            query?: {
-                q?: string;
-                filters?: {
-                    [key: string]: unknown;
-                };
-                /** @enum {string} */
-                by?: "createdAt" | "updatedAt";
-                /** @enum {string} */
-                sort?: "asc" | "desc";
-                columns?: string[];
-            };
-            /** @default false */
-            isDefault: boolean;
-        };
-        WorkspaceTile: {
-            moduleKey?: string;
-            viewId?: string | null;
-            inlineQuery?: {
-                [key: string]: unknown;
-            };
-            layout?: {
-                [key: string]: unknown;
-            };
-        };
-        Workspace: components["schemas"]["Base"] & {
-            ownerId?: string | null;
-            /** @default false */
-            shared: boolean;
-            name?: string;
-            tiles?: components["schemas"]["WorkspaceTile"][];
-        };
-        Integration: components["schemas"]["Base"] & {
-            /** @enum {string} */
-            provider?: "shopify" | "woocommerce" | "quickbooks" | "xero" | "rfid" | "webhook" | "custom" | "mux" | "ivs" | "vimeo" | "stripe" | "square" | "shippo" | "easypost" | "gdrive";
-            /** @enum {string} */
-            status?: "inactive" | "active" | "error";
-            configJSON?: {
-                [key: string]: unknown;
-            };
-            scopes?: string[];
-            /** Format: date-time */
-            lastRun?: string | null;
-        };
-        IntegrationRun: components["schemas"]["Base"] & {
-            integrationId?: string;
-            /** @enum {string} */
-            type?: "sync-in" | "sync-out";
-            scope?: string;
-            /** Format: date-time */
-            startedAt?: string;
-            /** Format: date-time */
-            finishedAt?: string | null;
-            /** @enum {string} */
-            status?: "queued" | "running" | "success" | "partial" | "failed";
-            stats?: {
-                [key: string]: unknown;
-            };
-            errors?: string[];
-        };
-        DocumentRef: {
-            /** @enum {string} */
-            provider?: "gdrive";
-            fileId?: string;
-            name?: string;
-        };
-        Policy: {
-            user?: {
-                id?: string;
-                email?: string;
-            };
-            tenants?: {
-                id?: string;
-                default?: boolean;
-            }[];
-            roles?: string[];
-            permissions?: string[];
-            scopes?: {
-                [key: string]: unknown;
-            };
-            version?: number;
-            /** Format: date-time */
-            issuedAt?: string;
-        };
-        AnyObject: components["schemas"]["Product"] | components["schemas"]["Inventory"] | components["schemas"]["Event"] | components["schemas"]["Registration"] | components["schemas"]["Reservation"] | components["schemas"]["Vendor"] | components["schemas"]["Employee"] | components["schemas"]["Account"] | components["schemas"]["Client"] | components["schemas"]["InventoryEvent"] | components["schemas"]["PurchaseOrder"] | components["schemas"]["PurchaseOrderLine"] | components["schemas"]["Receipt"] | components["schemas"]["SalesOrder"] | components["schemas"]["SalesOrderLine"] | components["schemas"]["Fulfillment"] | components["schemas"]["View"] | components["schemas"]["Workspace"] | components["schemas"]["Integration"] | components["schemas"]["IntegrationRun"];
+        AnyObject: components["schemas"]["Client"] | components["schemas"]["Account"] | components["schemas"]["Product"] | components["schemas"]["InventoryItem"] | components["schemas"]["Resource"] | components["schemas"]["Event"] | components["schemas"]["Registration"] | components["schemas"]["Reservation"] | components["schemas"]["Vendor"] | components["schemas"]["Employee"];
     };
     responses: {
-        /** @description Cursor-paged list */
-        ListPage: {
+        /** @description Bad request */
+        BadRequest: {
             headers: {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    items?: components["schemas"]["AnyObject"][];
-                    next?: string | null;
-                };
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Unauthorized */
+        Unauthorized: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Not found */
+        NotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Validation error */
+        ValidationError: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
             };
         };
     };
-    parameters: {
-        TenantHeader: string;
-        TypePath: string;
-        IdPath: string;
-        Limit: number;
-        Next: string;
-        By: "createdAt" | "updatedAt";
-        Sort: "asc" | "desc";
-        Fields: string;
-        Q: string;
-        EventId: string;
-    };
+    parameters: never;
     requestBodies: never;
     headers: never;
     pathItems: never;
 }
 export type $defs = Record<string, never>;
-export type operations = Record<string, never>;
+export interface operations {
+    listObjects: {
+        parameters: {
+            query?: {
+                /** @description Free-text search */
+                q?: string;
+                by?: "updatedAt" | "createdAt" | "name";
+                sort?: "asc" | "desc";
+                limit?: number;
+                next?: string | null;
+                /** @description Filter registrations by event (when type=registration) */
+                eventId?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Object type key (e.g., product, client, account, inventory, resource, event, registration, reservation, vendor, employee) */
+                type: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListPage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    upsertObject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                type: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnyObject"];
+            };
+        };
+        responses: {
+            /** @description Saved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnyObject"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    getObjectById: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                type: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnyObject"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+}
