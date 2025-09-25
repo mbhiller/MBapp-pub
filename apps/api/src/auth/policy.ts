@@ -11,3 +11,14 @@ export async function getPolicy(event: APIGatewayProxyEventV2): Promise<APIGatew
   const body = { user: "dev", roles, tenants, scopes: ["*:*"], version: 1, issuedAt: new Date().toISOString() };
   return { statusCode: 200, headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
 }
+
+/*import { authMiddleware } from "./middleware";
+
+export async function getPolicy(event: APIGatewayProxyEventV2) {
+  const ctx = await authMiddleware(event);
+  return {
+    statusCode: 200,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(ctx.policy)
+  };
+}*/

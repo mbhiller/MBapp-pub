@@ -1,0 +1,20 @@
+area:spec:
+  - "spec/**"
+  - "openapi.yaml"
+area:api:
+  - "apps/api/**"
+area:mobile:
+  - "apps/mobile/**"
+area:docs:
+  - "docs/**"
+
+# .github/workflows/labeler.yml
+name: PR Labeler
+on: [pull_request_target]
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/labeler@v5
+        with:
+          configuration-path: .github/labeler.yml
