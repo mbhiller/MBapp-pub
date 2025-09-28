@@ -1,231 +1,156 @@
-// apps/api/src/index.ts
-import type { APIGatewayProxyEventV2, Context } from "aws-lambda";
-import { preflight, notimpl, ok, error } from "./common/responses";
+// apps/src/api/index.ts
+import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
+import { getAuth, requirePerm, policyFromAuth } from "../../api/src/auth/middleware";
 
+/* Routes */
+// Views
+import * as ViewsList   from "./views/list";
+import * as ViewsGet    from "./views/get";
+import * as ViewsCreate from "./views/create";
+import * as ViewsUpdate from "./views/update";
+import * as ViewsDelete from "./views/delete";
+// Workspaces
+import * as WsList   from "./workspaces/list";
+import * as WsGet    from "./workspaces/get";
+import * as WsCreate from "./workspaces/create";
+import * as WsUpdate from "./workspaces/update";
+import * as WsDelete from "./workspaces/delete";
+// Objects
+import * as ObjList   from "./objects/list";
+import * as ObjGet    from "./objects/get";
 import * as ObjCreate from "./objects/create";
 import * as ObjUpdate from "./objects/update";
-import * as ObjGet from "./objects/get";
-import * as ObjList from "./objects/list";
-import * as ObjSearch from "./objects/search";
 import * as ObjDelete from "./objects/delete";
+import * as ObjSearch from "./objects/search";
+// Dev auth
+import * as DevLogin from "./auth/dev-login";
 
-import { withCors } from "./cors";
+/* Helpers */
+const json = (statusCode: number, body: unknown): APIGatewayProxyResultV2 => ({
+  statusCode,
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify(body),
+});
+const notFound = () => json(404, { message: "Not Found" });
+const methodNotAllowed = () => json(405, { message: "Method Not Allowed" });
+const match = (re: RegExp, s: string) => s.match(re)?.slice(1) ?? null;
 
-// Auth endpoints you already have
-import { getPolicy } from "./auth/policy";
-import { devLogin } from "./auth/login";
-
-// Use your existing middleware (no util/http or requireAuth)
-import { authMiddleware /* , requirePerm */ } from "./auth/middleware";
-
-// ---------------- helpers ----------------
-function pathOf(evt: APIGatewayProxyEventV2): string {
-  return (evt as any).rawPath || evt.requestContext?.http?.path || "/";
-}
-function methodOf(evt: APIGatewayProxyEventV2): string {
-  return evt.requestContext?.http?.method || (evt as any).requestContext?.httpMethod || "GET";
-}
-
-function isHealth(evt: APIGatewayProxyEventV2) {
-  const p = pathOf(evt);
-  const m = methodOf(evt);
-  return (m === "GET" && (p === "/health" || p === "/tools/ping"));
-}
-
-// Make a shallow-cloned event with a different path (so we can reuse object handlers)
-function withPath(evt: APIGatewayProxyEventV2, newPath: string): APIGatewayProxyEventV2 {
-  const rc = evt.requestContext as any;
-  return {
-    ...evt,
-    rawPath: newPath,
-    requestContext: {
-      ...evt.requestContext,
-      http: rc?.http ? { ...rc.http, path: newPath } : (rc || {}),
-    } as any,
+function injectPreAuth(
+  event: APIGatewayProxyEventV2,
+  auth: { userId: string; tenantId: string; roles: string[]; policy: any }
+) {
+  const anyEvt = event as any;
+  anyEvt.requestContext = anyEvt.requestContext || {};
+  anyEvt.requestContext.authorizer = anyEvt.requestContext.authorizer || {};
+  anyEvt.requestContext.authorizer.mbapp = {
+    userId: auth.userId,
+    tenantId: auth.tenantId,
+    roles: auth.roles,
+    policy: auth.policy,
   };
 }
 
-// A resilient dispatcher so we don't assume specific exported names from your object modules
-async function dispatch(mod: any, evt: APIGatewayProxyEventV2, ctx?: any) {
-  const candidates = ["handle", "handler", "main", "router", "default"];
-  for (const k of candidates) {
-    if (typeof mod?.[k] === "function") {
-      try {
-        return mod[k].length >= 2 ? await mod[k](evt, ctx) : await mod[k](evt);
-      } catch (e: any) {
-        return error(e?.message || "handler_error");
-      }
-    }
-  }
-  return notimpl("module handler not found");
+/** Back-compat adapter: ensure handlers see type/id in query/path params */
+function withTypeId(
+  event: APIGatewayProxyEventV2,
+  opts: { type?: string; id?: string }
+): APIGatewayProxyEventV2 {
+  const e: any = { ...event };
+  e.queryStringParameters = { ...(event.queryStringParameters || {}) };
+  e.pathParameters = { ...(event.pathParameters || {}) };
+  if (opts.type && !e.queryStringParameters.type) e.queryStringParameters.type = opts.type;
+  if (opts.type && !e.pathParameters.type) e.pathParameters.type = opts.type;
+  if (opts.id && !e.pathParameters.id) e.pathParameters.id = opts.id;
+  return e;
 }
 
-// ---------------- tools (inline handlers) ----------------
-async function toolsEcho(evt: APIGatewayProxyEventV2) {
-  const body = evt.body ? JSON.parse(evt.body) : {};
-  return ok({ ok: true, now: new Date().toISOString(), received: body });
+/** Map object method→permission (e.g., product:read / product:write) */
+function permForObject(method: string, typeRaw: string) {
+  const type = (typeRaw || "").toLowerCase();
+  if (method === "GET") return `${type}:read`;
+  if (method === "POST" || method === "PUT" || method === "DELETE") return `${type}:write`;
+  return "";
 }
 
-// NOTE: placeholder safe reset; wire to real purgeTenant when ready.
-async function toolsReset(_evt: APIGatewayProxyEventV2) {
-  return ok({ ok: true, cleared: 0, note: "reset is a no-op placeholder; implement purge when ready" });
-}
-
-// ---------------- actions (inline handler) ----------------
-/**
- * POST /objects/{type}/{id}/actions/{action}
- * Minimal scaffold: validates & echoes request.
- * Replace with Purchasing/Sales/Integrations FSM logic as you implement.
- */
-async function objectAction(evt: APIGatewayProxyEventV2) {
-  const m = pathOf(evt).match(/^\/objects\/([^/]+)\/([^/]+)\/actions\/([^/]+)$/);
-  if (!m) return notimpl("invalid action route");
-  const [, type, id, action] = m;
-  const payload = evt.body ? JSON.parse(evt.body) : {};
-  // Example of RBAC when you’re ready:
-  // const ctx = await authMiddleware(evt);
-  // requirePerm(ctx, `action:${type}:${action}`);
-  return ok({ ok: true, type, id, action, payload, at: new Date().toISOString() });
-}
-
-// ---------------- alias helpers for Views & Workspaces ----------------
-// We reuse the generic objects engine by rewriting the path.
-async function routeViews(evt: APIGatewayProxyEventV2, authCtx: any) {
-  const path = pathOf(evt);
-  const method = methodOf(evt);
-
-  // POST /views -> POST /objects/view
-  if (method === "POST" && path === "/views") {
-    return dispatch(ObjCreate, withPath(evt, "/objects/view"), authCtx);
-  }
-
-  // GET /views -> GET /objects/view/list
-  if (method === "GET" && path === "/views") {
-    return dispatch(ObjList, withPath(evt, "/objects/view/list"), authCtx);
-  }
-
-  // /views/{id}
-  const idMatch = path.match(/^\/views\/([^/]+)$/);
-  if (idMatch) {
-    const idPath = idMatch[1];
-    if (method === "GET")  return dispatch(ObjGet,    withPath(evt, `/objects/view/${idPath}`), authCtx);
-    if (method === "PUT")  return dispatch(ObjUpdate, withPath(evt, `/objects/view/${idPath}`), authCtx);
-    if (method === "PATCH")return dispatch(ObjUpdate, withPath(evt, `/objects/view/${idPath}`), authCtx); // passthrough
-    if (method === "DELETE")return dispatch(ObjDelete, withPath(evt, `/objects/view/${idPath}`), authCtx);
-  }
-
-  return undefined; // not a /views route
-}
-
-async function routeWorkspaces(evt: APIGatewayProxyEventV2, authCtx: any) {
-  const path = pathOf(evt);
-  const method = methodOf(evt);
-
-  // POST /workspaces -> POST /objects/workspace
-  if (method === "POST" && path === "/workspaces") {
-    return dispatch(ObjCreate, withPath(evt, "/objects/workspace"), authCtx);
-  }
-
-  // GET /workspaces -> GET /objects/workspace/list
-  if (method === "GET" && path === "/workspaces") {
-    return dispatch(ObjList, withPath(evt, "/objects/workspace/list"), authCtx);
-  }
-
-  // /workspaces/{id}
-  const idMatch = path.match(/^\/workspaces\/([^/]+)$/);
-  if (idMatch) {
-    const idPath = idMatch[1];
-    if (method === "GET")   return dispatch(ObjGet,    withPath(evt, `/objects/workspace/${idPath}`), authCtx);
-    if (method === "PUT")   return dispatch(ObjUpdate, withPath(evt, `/objects/workspace/${idPath}`), authCtx);
-    if (method === "PATCH") return dispatch(ObjUpdate, withPath(evt, `/objects/workspace/${idPath}`), authCtx); // passthrough
-    if (method === "DELETE")return dispatch(ObjDelete, withPath(evt, `/objects/workspace/${idPath}`), authCtx);
-  }
-
-  return undefined; // not a /workspaces route
-}
-
-// ---------------- router ----------------
-// NOTE: we intentionally type this as Promise<any> to avoid APIGatewayProxyResult vs V2 mismatches
-const baseHandler = async (evt: APIGatewayProxyEventV2, _ctx: Context): Promise<any> => {
-  const path = pathOf(evt);
-  const method = methodOf(evt);
-
+export async function handler(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   try {
-    // CORS preflight
-    if (method === "OPTIONS") return preflight();
+    const method = event.requestContext.http.method;
+    const path = event.rawPath || event.requestContext.http.path;
 
-    // Public/dev auth endpoints (they may return V2-shaped results)
-    if (path === "/auth/login" && method === "POST") return await devLogin(evt) as any;
-    // ---- health check (public) ----
-    if (isHealth(evt)) {
-      return ok({ ok: true, ts: new Date().toISOString(), route: path });
+    // Public
+    if (method === "GET" && (path === "/health" || path === "/")) {
+      return json(200, { ok: true, service: "mbapp-api", now: new Date().toISOString() });
     }
-    if (path === "/auth/policy" && method === "GET") return await getPolicy(evt) as any;
-    // AuthN (have context ready for later checks if desired)
-    const authCtx = await authMiddleware(evt);
-
-    // -------- Tools --------
-    if (path === "/tools/echo" && method === "POST") return await toolsEcho(evt);
-    if (path === "/tools/reset" && method === "POST") {
-      // Example: gate behind admin if desired
-      // requirePerm(authCtx, "admin:write");
-      return await toolsReset(evt);
+    if (method === "POST" && path === "/auth/dev-login") {
+      return DevLogin.handle(event); // gated by DEV_LOGIN_ENABLED
     }
 
-    // -------- Views & Workspaces (aliases to generic objects engine) --------
-    const v = await routeViews(evt, authCtx);
-    if (v) return v;
-    const w = await routeWorkspaces(evt, authCtx);
-    if (w) return w;
+    // Authenticated
+    const auth = await getAuth(event);
+    injectPreAuth(event, auth);
 
-    // -------- Object Actions --------
-    if (method === "POST" && /^\/objects\/[^/]+\/[^/]+\/actions\/[^/]+$/.test(path)) {
-      return await objectAction(evt);
+    if (method === "GET" && path === "/auth/policy") {
+      return json(200, policyFromAuth(auth));
     }
 
-    // -------- Objects CRUD + list/search (existing flow) --------
-    // Create: POST /objects/{type}
-    if (method === "POST" && /^\/objects\/[^/]+$/.test(path)) {
-      return await dispatch(ObjCreate, evt, authCtx);
+    // Views
+    if (path === "/views") {
+      if (method === "GET")  { requirePerm(auth, "view:read");  return ViewsList.handle(event); }
+      if (method === "POST") { requirePerm(auth, "view:write"); return ViewsCreate.handle(event); }
+      return methodNotAllowed();
+    }
+    if (match(/^\/views\/([^/]+)$/i, path)) {
+      if (method === "GET")    { requirePerm(auth, "view:read");  return ViewsGet.handle(event); }
+      if (method === "PUT")    { requirePerm(auth, "view:write"); return ViewsUpdate.handle(event); }
+      if (method === "DELETE") { requirePerm(auth, "view:write"); return ViewsDelete.handle(event); }
+      return methodNotAllowed();
     }
 
-    // Get: GET /objects/{type}/{id}
-    if (method === "GET" && /^\/objects\/[^/]+\/[^/]+$/.test(path)) {
-      return await dispatch(ObjGet, evt, authCtx);
+    // Workspaces
+    if (path === "/workspaces") {
+      if (method === "GET")  { requirePerm(auth, "workspace:read");  return WsList.handle(event); }
+      if (method === "POST") { requirePerm(auth, "workspace:write"); return WsCreate.handle(event); }
+      return methodNotAllowed();
+    }
+    if (match(/^\/workspaces\/([^/]+)$/i, path)) {
+      if (method === "GET")    { requirePerm(auth, "workspace:read");  return WsGet.handle(event); }
+      if (method === "PUT")    { requirePerm(auth, "workspace:write"); return WsUpdate.handle(event); }
+      if (method === "DELETE") { requirePerm(auth, "workspace:write"); return WsDelete.handle(event); }
+      return methodNotAllowed();
     }
 
-    // Update: PUT /objects/{type}/{id} (PATCH also routed to update module)
-    if ((method === "PUT" || method === "PATCH") && /^\/objects\/[^/]+\/[^/]+$/.test(path)) {
-      return await dispatch(ObjUpdate, evt, authCtx);
+    /* ========= Objects ========= */
+
+    // /objects/:type/search
+    const searchParts = match(/^\/objects\/([^/]+)\/search$/i, path);
+    if (searchParts) {
+      const [type] = searchParts;
+      requirePerm(auth, permForObject("GET", type));
+      return ObjSearch.handle(withTypeId(event, { type }));
     }
 
-    // Delete: DELETE /objects/{type}/{id}
-    if (method === "DELETE" && /^\/objects\/[^/]+\/[^/]+$/.test(path)) {
-      return await dispatch(ObjDelete, evt, authCtx);
+    // /objects/:type (list or create)
+    const collParts = match(/^\/objects\/([^/]+)$/i, path);
+    if (collParts) {
+      const [type] = collParts;
+      if (method === "GET")  { requirePerm(auth, permForObject("GET", type));  return ObjList.handle(withTypeId(event, { type })); }
+      if (method === "POST") { requirePerm(auth, permForObject("POST", type)); return ObjCreate.handle(withTypeId(event, { type })); }
+      return methodNotAllowed();
     }
 
-    // List: GET /objects/{type}/list
-    if (method === "GET" && /^\/objects\/[^/]+\/list$/.test(path)) {
-      return await dispatch(ObjList, evt, authCtx);
+    // /objects/:type/:id (get/update/delete)
+    const itemParts = match(/^\/objects\/([^/]+)\/([^/]+)$/i, path);
+    if (itemParts) {
+      const [type, id] = itemParts;
+      if (method === "GET")    { requirePerm(auth, permForObject("GET", type));    return ObjGet.handle(withTypeId(event, { type, id })); }
+      if (method === "PUT")    { requirePerm(auth, permForObject("PUT", type));    return ObjUpdate.handle(withTypeId(event, { type, id })); }
+      if (method === "DELETE") { requirePerm(auth, permForObject("DELETE", type)); return ObjDelete.handle(withTypeId(event, { type, id })); }
+      return methodNotAllowed();
     }
 
-    // Search: GET /objects/{type}/search
-    if (method === "GET" && /^\/objects\/[^/]+\/search$/.test(path)) {
-      return await dispatch(ObjSearch, evt, authCtx);
-    }
-
-    // no match
-    return notimpl(`${method} ${path}`);
+    return notFound();
   } catch (e: any) {
-    console.error("router error", {
-      err: e?.message,
-      stack: e?.stack,
-      method,
-      rawPath: pathOf(evt),
-    });
-    return error(e?.message || "router");
+    const status = e?.statusCode ?? 500;
+    return json(status, { message: e?.message ?? "Internal Server Error" });
   }
-};
-
-// Cast to satisfy any wrapper expectations
-export const handler = withCors(baseHandler as any);
+}
