@@ -2,8 +2,10 @@ name: Spec & Types
 
 on:
   pull_request:
-  push:
-    branches: [ main ]
+    paths:
+      - "spec/**"
+      - "apps/api/src/**"
+      - ".github/workflows/spec-ci.yml"
 
 jobs:
   spec:
@@ -16,33 +18,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 18
-
-      - name: Install root deps
-        run: npm ci
-        
-      - name: Install Redocly CLI
-        run: npm install -g @redocly/cli
-
-      # Bundle master spec -> root openapi.yaml
-      - name: Bundle spec
-        run: npm run spec:bundle
-
-      # Fail if openapi.yaml changed but not committed
-      - name: Ensure openapi.yaml is committed
-        run: |
-          git diff --exit-code -- openapi.yaml || (echo "::error ::openapi.yaml changed — run npm run spec:bundle and commit" && exit 1)
-
-      # Generate mobile types (ensures spec isn’t broken)
-      - name: Generate mobile types
-        run: npm run spec:types:mobile
-
-      # Fail if typegen would change files
-      - name: Ensure generated types are committed
-        run: |
-          git diff --exit-code -- apps/mobile/src/api/generated-types.ts || (echo "::error ::generated types changed — commit them" && exit 1)
-
-      # Optional: build API/mobile if scripts exist (non-fatal if they don't)
-      - name: Build API (optional)
-        run: npm -w apps/api run build || echo "API build script not present — skipping"
-      - name: Build Mobile (optional)
-        run: npm -w apps/mobile run build || echo "Mobile build script not present — skipping"
+      
+      - run: npm ci
+      - run: npm ci
+      - run: npm run spec:lint
+      - run: npm run spec:bundle
+      - run: npm run spec:types:api
+      - run: npm run spec:types:mobile
+      - run: npm run api:build

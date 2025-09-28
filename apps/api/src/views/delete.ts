@@ -1,21 +1,20 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { ok, bad, notfound, error } from "../common/responses";
 import { authMiddleware } from "../auth/middleware";
-import { getObject, deleteObject } from "./store";
+import { getObject, deleteObject } from "../objects/store";
 
 export async function handle(evt: APIGatewayProxyEventV2) {
   try {
     const ctx = await authMiddleware(evt);
-    const type = evt.pathParameters?.type;
     const id = evt.pathParameters?.id;
-    if (!type || !id) return bad("type and id are required");
+    if (!id) return bad("id required");
 
-    const existing = await getObject(ctx.tenantId, type, id);
+    const existing = await getObject(ctx.tenantId, "view", id);
     if (!existing) return notfound();
 
-    await deleteObject(ctx.tenantId, type, id);
-    return ok({ deleted: true, id, type });
+    await deleteObject(ctx.tenantId, "view", id);
+    return ok({ deleted: true, id });
   } catch (e: any) {
-    return error(e?.message || "delete_failed");
+    return error(e?.message || "delete_view_failed");
   }
 }

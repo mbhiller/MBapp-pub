@@ -1,7 +1,7 @@
 // apps/mobile/src/features/objects/types.ts
 import type { components } from "../../api/generated-types";
 type Schemas = components["schemas"];
-export type Base = Schemas["Base"];
+export type Base = Schemas["ObjectBase"];
 export type AnyObject =
   | Schemas["Product"]
   | Schemas["Client"]

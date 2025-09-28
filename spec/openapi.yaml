@@ -1,40 +1,59 @@
 openapi: 3.0.3
 info:
   title: MBapp API
-  version: '2025-09-23'
-  description: |
-    Master spec (single source of truth). Bundle to root openapi.yaml for tooling and codegen.
+  version: '2025-09-25'
+  description: Single-source-of-truth API for MBapp objects, views, workspaces, and tools.
+  license:
+    url: https://license.mbapp.dev
+    name: MIT
 servers:
-  - url: https://api.example.com
+  - url: https://api.mbapp.dev
+security:
+  - bearerAuth: []
 tags:
   - name: Objects
+    description: Generic object CRUD, list, search, and actions by type.
   - name: Auth
+    description: Authentication and policy.
   - name: Views
+    description: Saved per-module user views (filters/sorts/columns).
   - name: Workspaces
-  - name: Integrations
+    description: Role-aware cross-module compositions (tiles).
+  - name: Tools
+    description: Dev/ops helpers for non-prod use.
+  - name: Admin
+    description: Administrative and audit endpoints.
 paths:
   /objects/{type}:
     get:
       tags:
         - Objects
-      summary: List objects (alias; same as /objects/{type}/list)
+      operationId: listObjects
+      security:
+        - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/TypePath'
+        - $ref: '#/components/parameters/Q'
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Next'
-        - $ref: '#/components/parameters/By'
-        - $ref: '#/components/parameters/Sort'
         - $ref: '#/components/parameters/Fields'
-        - $ref: '#/components/parameters/Q'
-        - $ref: '#/components/parameters/EventId'
       responses:
         '200':
           $ref: '#/components/responses/ListPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Get Objects by Type
     post:
       tags:
         - Objects
-      summary: Create object
+      operationId: createObject
+      security:
+        - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/TypePath'
@@ -47,33 +66,44 @@ paths:
       responses:
         '200':
           description: Created
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AnyObject'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Post Objects
   /objects/{type}/list:
     get:
       tags:
         - Objects
-      summary: List objects
+      operationId: listObjectsExplicit
+      security:
+        - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/TypePath'
+        - $ref: '#/components/parameters/Q'
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Next'
-        - $ref: '#/components/parameters/By'
-        - $ref: '#/components/parameters/Sort'
         - $ref: '#/components/parameters/Fields'
-        - $ref: '#/components/parameters/Q'
-        - $ref: '#/components/parameters/EventId'
       responses:
         '200':
           $ref: '#/components/responses/ListPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Get Objects List
   /objects/{type}/search:
     get:
       tags:
         - Objects
-      summary: Search objects (lightweight query + in-page filter)
+      operationId: searchObjects
+      security:
+        - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/TypePath'
@@ -84,11 +114,20 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/ListPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Search Objects by Type
   /objects/{type}/{id}:
     get:
       tags:
         - Objects
-      summary: Get object by id
+      operationId: getObject
+      security:
+        - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/TypePath'
@@ -97,14 +136,19 @@ paths:
       responses:
         '200':
           description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AnyObject'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      summary: Get Objects by Type and ID
     put:
       tags:
         - Objects
-      summary: Update object
+      operationId: replaceObject
+      security:
+        - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/TypePath'
@@ -118,37 +162,42 @@ paths:
       responses:
         '200':
           description: Updated
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AnyObject'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      summary: Update Objects
     delete:
       tags:
         - Objects
-      summary: Delete object
+      operationId: deleteObject
+      security:
+        - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/TypePath'
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '200':
+        '204':
           description: Deleted
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  id:
-                    type: string
-                  type:
-                    type: string
-                  deleted:
-                    type: boolean
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      summary: Delete Objects
   /auth/policy:
     get:
       tags:
         - Auth
-      summary: Get RBAC policy for current user & tenant
+      operationId: getPolicy
+      security:
+        - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
       responses:
@@ -158,7 +207,421 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Policy'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Get AUTH
+  /views:
+    get:
+      tags:
+        - Views
+      operationId: listViews
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - name: moduleKey
+          in: query
+          schema:
+            type: string
+        - name: ownerId
+          in: query
+          schema:
+            type: string
+        - name: shared
+          in: query
+          schema:
+            type: boolean
+        - name: isDefault
+          in: query
+          schema:
+            type: boolean
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Next'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ViewList'
+        '400':
+          description: Bad request
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: List Views (role-aware)
+    post:
+      tags:
+        - Views
+      operationId: createView
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/View'
+      responses:
+        '200':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/View'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Create a View
+  /views/{id}:
+    get:
+      tags:
+        - Views
+      operationId: getView
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/View'
+        '400':
+          description: Bad request
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      summary: Get a View
+    put:
+      tags:
+        - Views
+      operationId: replaceView
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/View'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/View'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      summary: Replace a View
+    patch:
+      tags:
+        - Views
+      operationId: updateView
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              $ref: '#/components/schemas/View'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/View'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      summary: Update a View (partial)
+    delete:
+      tags:
+        - Views
+      operationId: deleteView
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted
+        '400':
+          description: Bad request
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      summary: Delete a View
+  /workspaces:
+    get:
+      tags:
+        - Workspaces
+      operationId: listWorkspaces
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - name: ownerId
+          in: query
+          schema:
+            type: string
+        - name: shared
+          in: query
+          schema:
+            type: boolean
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Next'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceList'
+        '400':
+          description: Bad request
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: List Workspaces (role-aware)
+    post:
+      tags:
+        - Workspaces
+      operationId: createWorkspace
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Workspace'
+      responses:
+        '200':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspace'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Create a Workspace
+  /workspaces/{id}:
+    get:
+      tags:
+        - Workspaces
+      operationId: getWorkspace
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspace'
+        '400':
+          description: Bad request
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      summary: Get a Workspace
+    put:
+      tags:
+        - Workspaces
+      operationId: replaceWorkspace
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Workspace'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspace'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      summary: Replace a Workspace
+    patch:
+      tags:
+        - Workspaces
+      operationId: updateWorkspace
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspace'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      summary: Update a Workspace (partial)
+    delete:
+      tags:
+        - Workspaces
+      operationId: deleteWorkspace
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted
+        '400':
+          description: Bad request
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      summary: Delete a Workspace
+  /admin/audit:
+    get:
+      tags:
+        - Admin
+      operationId: listAudit
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - name: since
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Admin Audit
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   parameters:
     TenantHeader:
       name: x-tenant-id
@@ -172,7 +635,6 @@ components:
       required: true
       schema:
         type: string
-        description: Module/object type key (e.g., product, inventory, event)
     IdPath:
       name: id
       in: path
@@ -186,102 +648,61 @@ components:
         type: integer
         minimum: 1
         maximum: 200
-        default: 20
+        default: 50
     Next:
       name: next
       in: query
       schema:
         type: string
-        description: opaque cursor
-    By:
-      name: by
-      in: query
-      schema:
-        type: string
-        enum:
-          - createdAt
-          - updatedAt
-        default: createdAt
-    Sort:
-      name: sort
-      in: query
-      schema:
-        type: string
-        enum:
-          - asc
-          - desc
-        default: desc
-    Fields:
-      name: fields
-      in: query
-      schema:
-        type: string
-        description: 'comma-separated projection: id,name,sku'
     Q:
       name: q
       in: query
       schema:
         type: string
-    EventId:
-      name: eventId
+    Fields:
+      name: fields
       in: query
       schema:
         type: string
+        description: Comma-separated field projection
   responses:
     ListPage:
-      description: Paginated list response
+      description: Paged list of objects
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ListPage'
+            type: object
+            properties:
+              items:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AnyObject'
+              next:
+                type: string
+                nullable: true
     BadRequest:
       description: Bad request
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/Error'
+            type: object
+            properties:
+              error:
+                type: string
     Unauthorized:
       description: Unauthorized
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Forbidden
     NotFound:
       description: Not found
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
-    ValidationError:
-      description: Validation error
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
   schemas:
-    Error:
+    ObjectBase:
       type: object
-      properties:
-        code:
-          type: string
-          example: VALIDATION_ERROR
-        message:
-          type: string
-          example: Invalid 'eventId' parameter
-        details:
-          type: object
-          additionalProperties: true
-    Base:
-      type: object
-      required:
-        - id
-        - type
-        - createdAt
-        - updatedAt
       properties:
         id:
           type: string
-          description: UUID
+        tenantId:
+          type: string
         type:
           type: string
         createdAt:
@@ -290,26 +711,153 @@ components:
         updatedAt:
           type: string
           format: date-time
-        externalId:
-          type: string
-    ListPage:
-      type: object
+        metadata:
+          type: object
+          additionalProperties: true
       required:
-        - items
+        - id
+        - tenantId
+        - createdAt
+        - updatedAt
+    AnyObject:
+      type: object
+      additionalProperties: true
+    View:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          properties:
+            type:
+              type: string
+              enum:
+                - view
+            moduleKey:
+              type: string
+              description: e.g., products, inventory, events
+            name:
+              type: string
+            queryJSON:
+              type: object
+              additionalProperties: true
+            ownerId:
+              type: string
+              nullable: true
+            shared:
+              type: boolean
+            isDefault:
+              type: boolean
+          required:
+            - type
+            - moduleKey
+            - name
+            - queryJSON
+    ViewList:
+      type: object
       properties:
         items:
           type: array
           items:
-            $ref: '#/components/schemas/AnyObject'
+            $ref: '#/components/schemas/View'
         next:
           type: string
           nullable: true
-        limit:
-          type: integer
-          default: 20
+    WorkspaceTile:
+      type: object
+      properties:
+        moduleKey:
+          type: string
+        viewId:
+          type: string
+          nullable: true
+        inlineQuery:
+          type: object
+          additionalProperties: true
+          nullable: true
+        layout:
+          type: object
+          additionalProperties: true
+      required:
+        - moduleKey
+    Workspace:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          properties:
+            type:
+              type: string
+              enum:
+                - workspace
+            name:
+              type: string
+            tiles:
+              type: array
+              items:
+                $ref: '#/components/schemas/WorkspaceTile'
+            ownerId:
+              type: string
+              nullable: true
+            shared:
+              type: boolean
+          required:
+            - type
+            - name
+            - tiles
+    WorkspaceList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Workspace'
+        next:
+          type: string
+          nullable: true
+    Policy:
+      type: object
+      properties:
+        tenantId:
+          type: string
+        userId:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
+        permissions:
+          type: array
+          items:
+            type: string
+        ui:
+          type: object
+          properties:
+            allowedModuleKeys:
+              type: array
+              items:
+                type: string
+            allowedViews:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  moduleKey:
+                    type: string
+            allowedWorkspaces:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+      required:
+        - permissions
+        - roles
     Client:
       allOf:
-        - $ref: '#/components/schemas/Base'
+        - $ref: '#/components/schemas/ObjectBase'
         - type: object
           properties:
             type:
@@ -340,13 +888,10 @@ components:
               type: string
           required:
             - type
-            - id
-            - createdAt
-            - updatedAt
             - name
     Account:
       allOf:
-        - $ref: '#/components/schemas/Base'
+        - $ref: '#/components/schemas/ObjectBase'
         - type: object
           properties:
             type:
@@ -374,17 +919,14 @@ components:
               default: active
           required:
             - type
-            - id
-            - createdAt
-            - updatedAt
             - name
     Product:
       allOf:
-        - $ref: '#/components/schemas/Base'
+        - $ref: '#/components/schemas/ObjectBase'
         - type: object
           required:
-            - type
             - name
+            - type
           properties:
             type:
               type: string
@@ -414,8 +956,11 @@ components:
               type: string
     InventoryItem:
       allOf:
-        - $ref: '#/components/schemas/Base'
+        - $ref: '#/components/schemas/ObjectBase'
         - type: object
+          required:
+            - type
+            - name
           properties:
             type:
               type: string
@@ -450,11 +995,11 @@ components:
               type: string
     Resource:
       allOf:
-        - $ref: '#/components/schemas/Base'
+        - $ref: '#/components/schemas/ObjectBase'
         - type: object
           required:
-            - type
             - name
+            - type
           properties:
             type:
               type: string
@@ -472,7 +1017,7 @@ components:
               format: date-time
     Event:
       allOf:
-        - $ref: '#/components/schemas/Base'
+        - $ref: '#/components/schemas/ObjectBase'
         - type: object
           properties:
             type:
@@ -504,14 +1049,11 @@ components:
               type: string
           required:
             - type
-            - id
-            - createdAt
-            - updatedAt
             - name
             - startsAt
     Registration:
       allOf:
-        - $ref: '#/components/schemas/Base'
+        - $ref: '#/components/schemas/ObjectBase'
         - type: object
           required:
             - eventId
@@ -546,7 +1088,7 @@ components:
               type: string
     Reservation:
       allOf:
-        - $ref: '#/components/schemas/Base'
+        - $ref: '#/components/schemas/ObjectBase'
         - type: object
           required:
             - resourceId
@@ -586,7 +1128,7 @@ components:
               type: string
     Vendor:
       allOf:
-        - $ref: '#/components/schemas/Base'
+        - $ref: '#/components/schemas/ObjectBase'
         - type: object
           required:
             - name
@@ -615,7 +1157,7 @@ components:
               default: active
     Employee:
       allOf:
-        - $ref: '#/components/schemas/Base'
+        - $ref: '#/components/schemas/ObjectBase'
         - type: object
           properties:
             type:
@@ -652,33 +1194,255 @@ components:
               type: string
           required:
             - type
-            - id
-            - createdAt
-            - updatedAt
             - displayName
-    Policy:
+    PurchaseOrderLine:
       type: object
       properties:
-        roles:
-          type: array
-          items:
-            type: string
-        permissions:
-          type: array
-          items:
-            type: string
+        productId:
+          type: string
+        sku:
+          type: string
+        qty:
+          type: number
+        uom:
+          type: string
+          example: each
+        unitPrice:
+          type: number
+        receivedQty:
+          type: number
+          default: 0
       required:
-        - roles
-        - permissions
-    AnyObject:
-      oneOf:
-        - $ref: '#/components/schemas/Client'
-        - $ref: '#/components/schemas/Account'
-        - $ref: '#/components/schemas/Product'
-        - $ref: '#/components/schemas/InventoryItem'
-        - $ref: '#/components/schemas/Resource'
-        - $ref: '#/components/schemas/Event'
-        - $ref: '#/components/schemas/Registration'
-        - $ref: '#/components/schemas/Reservation'
-        - $ref: '#/components/schemas/Vendor'
-        - $ref: '#/components/schemas/Employee'
+        - productId
+        - qty
+        - unitPrice
+    PurchaseOrder:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          properties:
+            type:
+              type: string
+              enum:
+                - purchaseOrder
+            vendorId:
+              type: string
+            status:
+              type: string
+              enum:
+                - draft
+                - submitted
+                - approved
+                - partially_received
+                - received
+                - canceled
+            currency:
+              type: string
+              example: USD
+            lines:
+              type: array
+              items:
+                $ref: '#/components/schemas/PurchaseOrderLine'
+            totals:
+              type: object
+              properties:
+                subtotal:
+                  type: number
+                tax:
+                  type: number
+                shipping:
+                  type: number
+                total:
+                  type: number
+          required:
+            - type
+            - vendorId
+            - status
+    Receipt:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          properties:
+            type:
+              type: string
+              enum:
+                - receipt
+            purchaseOrderId:
+              type: string
+            lines:
+              type: array
+              items:
+                type: object
+                properties:
+                  productId:
+                    type: string
+                  qty:
+                    type: number
+                  locationId:
+                    type: string
+            note:
+              type: string
+          required:
+            - type
+            - purchaseOrderId
+            - lines
+    SalesOrderLine:
+      type: object
+      properties:
+        productId:
+          type: string
+        sku:
+          type: string
+        qty:
+          type: number
+        uom:
+          type: string
+          example: each
+        unitPrice:
+          type: number
+        allocatedQty:
+          type: number
+          default: 0
+        fulfilledQty:
+          type: number
+          default: 0
+      required:
+        - productId
+        - qty
+        - unitPrice
+    SalesOrder:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          properties:
+            type:
+              type: string
+              enum:
+                - salesOrder
+            clientId:
+              type: string
+            status:
+              type: string
+              enum:
+                - draft
+                - reserved
+                - partially_fulfilled
+                - fulfilled
+                - canceled
+            currency:
+              type: string
+              example: USD
+            lines:
+              type: array
+              items:
+                $ref: '#/components/schemas/SalesOrderLine'
+            totals:
+              type: object
+              properties:
+                subtotal:
+                  type: number
+                tax:
+                  type: number
+                shipping:
+                  type: number
+                total:
+                  type: number
+          required:
+            - type
+            - clientId
+            - status
+    Fulfillment:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          properties:
+            type:
+              type: string
+              enum:
+                - fulfillment
+            salesOrderId:
+              type: string
+            lines:
+              type: array
+              items:
+                type: object
+                properties:
+                  productId:
+                    type: string
+                  qty:
+                    type: number
+                  fromLocationId:
+                    type: string
+            carrier:
+              type: string
+            tracking:
+              type: string
+          required:
+            - type
+            - salesOrderId
+            - lines
+    Integration:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          properties:
+            type:
+              type: string
+              enum:
+                - integration
+            provider:
+              type: string
+              enum:
+                - shopify
+                - quickbooks
+                - rfid
+                - webhook
+                - streaming
+            status:
+              type: string
+              enum:
+                - disabled
+                - enabled
+            config:
+              type: object
+              additionalProperties: true
+          required:
+            - type
+            - provider
+            - status
+    IntegrationRun:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          properties:
+            type:
+              type: string
+              enum:
+                - integrationRun
+            integrationId:
+              type: string
+            startedAt:
+              type: string
+              format: date-time
+            finishedAt:
+              type: string
+              format: date-time
+              nullable: true
+            status:
+              type: string
+              enum:
+                - queued
+                - running
+                - success
+                - error
+            stats:
+              type: object
+              additionalProperties: true
+            error:
+              type: string
+              nullable: true
+          required:
+            - type
+            - integrationId
+            - startedAt
+            - status

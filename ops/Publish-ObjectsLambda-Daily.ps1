@@ -44,6 +44,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+Set-Location "C:\users\bryan\MBapp-pub"
 
 function Get-Handler {
   (aws lambda get-function-configuration `
@@ -308,6 +309,6 @@ Upload-And-Wait -zipPath $zipPath
 Smoke-Test
 if ($AuthSmoke) { Auth-Smoke }
 
-Write-Host "✓ Daily deploy complete." -ForegroundColor Green
+# Write-Host "✓ Daily deploy complete." -ForegroundColor Green
 
 if ($ObjectsSmoke) { Objects-Smoke }

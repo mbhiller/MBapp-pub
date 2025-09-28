@@ -1,156 +1,220 @@
 // apps/api/src/index.ts
-import type { APIGatewayProxyResult, Context } from "aws-lambda";
+import type { APIGatewayProxyEventV2, Context } from "aws-lambda";
 import { preflight, notimpl, ok, error } from "./common/responses";
+
 import * as ObjCreate from "./objects/create";
 import * as ObjUpdate from "./objects/update";
 import * as ObjGet from "./objects/get";
 import * as ObjList from "./objects/list";
 import * as ObjSearch from "./objects/search";
 import * as ObjDelete from "./objects/delete";
+
 import { withCors } from "./cors";
 
-// NEW: auth endpoints
+// Auth endpoints you already have
 import { getPolicy } from "./auth/policy";
 import { devLogin } from "./auth/login";
 
-// Accept both HTTP API v2 and REST v1 shapes (keep types loose to avoid build issues)
-type ApiEvt = {
-  rawPath?: string;
-  path?: string;
-  requestContext?: { http?: { method?: string; path?: string } };
-  httpMethod?: string;
-  queryStringParameters?: Record<string, string | undefined>;
-  pathParameters?: Record<string, string | undefined>;
-  headers?: Record<string, string | undefined>;
-};
+// Use your existing middleware (no util/http or requireAuth)
+import { authMiddleware /* , requirePerm */ } from "./auth/middleware";
 
-function methodOf(evt: ApiEvt): string {
-  return (evt.requestContext?.http?.method || evt.httpMethod || "GET").toUpperCase();
+// ---------------- helpers ----------------
+function pathOf(evt: APIGatewayProxyEventV2): string {
+  return (evt as any).rawPath || evt.requestContext?.http?.path || "/";
 }
-function pathOf(evt: ApiEvt): string {
-  const p = evt.requestContext?.http?.path || evt.rawPath || evt.path || "/";
-  return p.startsWith("/") ? p : `/${p}`;
-}
-function withParams<T extends ApiEvt>(evt: T, params: Record<string, string | undefined>): T {
-  return { ...evt, pathParameters: { ...(evt.pathParameters ?? {}), ...params } };
+function methodOf(evt: APIGatewayProxyEventV2): string {
+  return evt.requestContext?.http?.method || (evt as any).requestContext?.httpMethod || "GET";
 }
 
-// ----- Alias → canonical (/objects/:type)
-const aliasToType: Record<string, string> = {
-  "/clients": "client",
-  "/resources": "resource",
-  "/employees": "employee",
-  "/vendors": "vendor",
-  "/reservations": "reservation",
-  "/events": "event",
-  "/products": "product",
-  "/registrations": "registration",
-  "/accounts": "account",
-  // "/tenants": "tenant", // optional: only if you persist tenants in /objects/tenant
-};
+function isHealth(evt: APIGatewayProxyEventV2) {
+  const p = pathOf(evt);
+  const m = methodOf(evt);
+  return (m === "GET" && (p === "/health" || p === "/tools/ping"));
+}
 
-function rewriteAlias(path: string): string {
-  for (const alias of Object.keys(aliasToType)) {
-    if (path === alias || path.startsWith(alias + "/")) {
-      const suffix = path.slice(alias.length); // "" or "/{id}" or "/list"
-      return `/objects/${aliasToType[alias]}${suffix}`;
+// Make a shallow-cloned event with a different path (so we can reuse object handlers)
+function withPath(evt: APIGatewayProxyEventV2, newPath: string): APIGatewayProxyEventV2 {
+  const rc = evt.requestContext as any;
+  return {
+    ...evt,
+    rawPath: newPath,
+    requestContext: {
+      ...evt.requestContext,
+      http: rc?.http ? { ...rc.http, path: newPath } : (rc || {}),
+    } as any,
+  };
+}
+
+// A resilient dispatcher so we don't assume specific exported names from your object modules
+async function dispatch(mod: any, evt: APIGatewayProxyEventV2, ctx?: any) {
+  const candidates = ["handle", "handler", "main", "router", "default"];
+  for (const k of candidates) {
+    if (typeof mod?.[k] === "function") {
+      try {
+        return mod[k].length >= 2 ? await mod[k](evt, ctx) : await mod[k](evt);
+      } catch (e: any) {
+        return error(e?.message || "handler_error");
+      }
     }
   }
-  // REMOVED: legacy inventory→products alias
-  // /events/:id/registrations -> /objects/registration?eventId=:id
-  if (/^\/events\/[^/]+\/registrations$/.test(path)) {
-    const id = path.split("/")[2];
-    return `/objects/registration?eventId=${encodeURIComponent(id)}`;
-    // NOTE: handler below will treat this as /objects/registration list with eventId in query
-  }
-  return path;
+  return notimpl("module handler not found");
 }
 
-function splitObjectsPath(path: string): { type?: string; tail: string[] } {
-  const parts = path.split("/").filter(Boolean);
-  if (parts[0] !== "objects") return { tail: parts.slice() };
-  const type = parts[1];
-  const tail = parts.slice(2); // [], ["list"], [":id"], ["search"]
-  return { type, tail };
+// ---------------- tools (inline handlers) ----------------
+async function toolsEcho(evt: APIGatewayProxyEventV2) {
+  const body = evt.body ? JSON.parse(evt.body) : {};
+  return ok({ ok: true, now: new Date().toISOString(), received: body });
 }
 
+// NOTE: placeholder safe reset; wire to real purgeTenant when ready.
+async function toolsReset(_evt: APIGatewayProxyEventV2) {
+  return ok({ ok: true, cleared: 0, note: "reset is a no-op placeholder; implement purge when ready" });
+}
 
-export const baseHandler = async (evt: ApiEvt, _ctx?: Context): Promise<APIGatewayProxyResult> => {
-  
+// ---------------- actions (inline handler) ----------------
+/**
+ * POST /objects/{type}/{id}/actions/{action}
+ * Minimal scaffold: validates & echoes request.
+ * Replace with Purchasing/Sales/Integrations FSM logic as you implement.
+ */
+async function objectAction(evt: APIGatewayProxyEventV2) {
+  const m = pathOf(evt).match(/^\/objects\/([^/]+)\/([^/]+)\/actions\/([^/]+)$/);
+  if (!m) return notimpl("invalid action route");
+  const [, type, id, action] = m;
+  const payload = evt.body ? JSON.parse(evt.body) : {};
+  // Example of RBAC when you’re ready:
+  // const ctx = await authMiddleware(evt);
+  // requirePerm(ctx, `action:${type}:${action}`);
+  return ok({ ok: true, type, id, action, payload, at: new Date().toISOString() });
+}
+
+// ---------------- alias helpers for Views & Workspaces ----------------
+// We reuse the generic objects engine by rewriting the path.
+async function routeViews(evt: APIGatewayProxyEventV2, authCtx: any) {
+  const path = pathOf(evt);
   const method = methodOf(evt);
-  
-  try {
-    // Health first, always succeeds (useful for smoke tests)
-    const rawPath = pathOf(evt);
-    if (method === "GET" && rawPath === "/health") return ok({ ok: true });
 
-    // Short-circuit OPTIONS; withCors will also add headers on responses
+  // POST /views -> POST /objects/view
+  if (method === "POST" && path === "/views") {
+    return dispatch(ObjCreate, withPath(evt, "/objects/view"), authCtx);
+  }
+
+  // GET /views -> GET /objects/view/list
+  if (method === "GET" && path === "/views") {
+    return dispatch(ObjList, withPath(evt, "/objects/view/list"), authCtx);
+  }
+
+  // /views/{id}
+  const idMatch = path.match(/^\/views\/([^/]+)$/);
+  if (idMatch) {
+    const idPath = idMatch[1];
+    if (method === "GET")  return dispatch(ObjGet,    withPath(evt, `/objects/view/${idPath}`), authCtx);
+    if (method === "PUT")  return dispatch(ObjUpdate, withPath(evt, `/objects/view/${idPath}`), authCtx);
+    if (method === "PATCH")return dispatch(ObjUpdate, withPath(evt, `/objects/view/${idPath}`), authCtx); // passthrough
+    if (method === "DELETE")return dispatch(ObjDelete, withPath(evt, `/objects/view/${idPath}`), authCtx);
+  }
+
+  return undefined; // not a /views route
+}
+
+async function routeWorkspaces(evt: APIGatewayProxyEventV2, authCtx: any) {
+  const path = pathOf(evt);
+  const method = methodOf(evt);
+
+  // POST /workspaces -> POST /objects/workspace
+  if (method === "POST" && path === "/workspaces") {
+    return dispatch(ObjCreate, withPath(evt, "/objects/workspace"), authCtx);
+  }
+
+  // GET /workspaces -> GET /objects/workspace/list
+  if (method === "GET" && path === "/workspaces") {
+    return dispatch(ObjList, withPath(evt, "/objects/workspace/list"), authCtx);
+  }
+
+  // /workspaces/{id}
+  const idMatch = path.match(/^\/workspaces\/([^/]+)$/);
+  if (idMatch) {
+    const idPath = idMatch[1];
+    if (method === "GET")   return dispatch(ObjGet,    withPath(evt, `/objects/workspace/${idPath}`), authCtx);
+    if (method === "PUT")   return dispatch(ObjUpdate, withPath(evt, `/objects/workspace/${idPath}`), authCtx);
+    if (method === "PATCH") return dispatch(ObjUpdate, withPath(evt, `/objects/workspace/${idPath}`), authCtx); // passthrough
+    if (method === "DELETE")return dispatch(ObjDelete, withPath(evt, `/objects/workspace/${idPath}`), authCtx);
+  }
+
+  return undefined; // not a /workspaces route
+}
+
+// ---------------- router ----------------
+// NOTE: we intentionally type this as Promise<any> to avoid APIGatewayProxyResult vs V2 mismatches
+const baseHandler = async (evt: APIGatewayProxyEventV2, _ctx: Context): Promise<any> => {
+  const path = pathOf(evt);
+  const method = methodOf(evt);
+
+  try {
+    // CORS preflight
     if (method === "OPTIONS") return preflight();
 
-    // --- Auth endpoints (mounted before any rewrites)
-    if (method === "GET" && rawPath === "/auth/policy") {
-      // cast to any to satisfy APIGateway V1/V2 unions
-      return await (getPolicy as any)(evt);
+    // Public/dev auth endpoints (they may return V2-shaped results)
+    if (path === "/auth/login" && method === "POST") return await devLogin(evt) as any;
+    // ---- health check (public) ----
+    if (isHealth(evt)) {
+      return ok({ ok: true, ts: new Date().toISOString(), route: path });
     }
-    if (method === "POST" && rawPath === "/auth/login") {
-      return await (devLogin as any)(evt);
-    }
+    if (path === "/auth/policy" && method === "GET") return await getPolicy(evt) as any;
+    // AuthN (have context ready for later checks if desired)
+    const authCtx = await authMiddleware(evt);
 
-    const path = rewriteAlias(rawPath);
-
-    // /objects/search (and allow ?type=&id= to fall through to GET by id)
-    if (path === "/objects/search" && method === "GET") {
-      const qs = evt.queryStringParameters ?? {};
-      if (qs?.id && qs?.type) {
-        return ObjGet.handler(withParams(evt, { type: String(qs.type), id: String(qs.id) }) as any);
-      }
-      return ObjSearch.handler(evt as any);
+    // -------- Tools --------
+    if (path === "/tools/echo" && method === "POST") return await toolsEcho(evt);
+    if (path === "/tools/reset" && method === "POST") {
+      // Example: gate behind admin if desired
+      // requirePerm(authCtx, "admin:write");
+      return await toolsReset(evt);
     }
 
-    // Canonical /objects/:type router
-    if (path.startsWith("/objects/")) {
-      const { type, tail } = splitObjectsPath(path);
-      if (!type) return notimpl(`${method} ${path} (missing type)`);
+    // -------- Views & Workspaces (aliases to generic objects engine) --------
+    const v = await routeViews(evt, authCtx);
+    if (v) return v;
+    const w = await routeWorkspaces(evt, authCtx);
+    if (w) return w;
 
-      // GET /objects/:type/search
-      if (method === "GET" && tail.length === 1 && tail[0] === "search") {
-        return ObjSearch.handler(withParams(evt, { type }) as any);
-      }
-
-      // POST /objects/:type
-      if (method === "POST" && tail.length === 0) {
-        return ObjCreate.handler(withParams(evt, { type }) as any);
-      }
-
-      // PUT /objects/:type/:id
-      if (method === "PUT" && tail.length === 1) {
-        return ObjUpdate.handler(withParams(evt, { type, id: tail[0] }) as any);
-      }
-
-      // GET /objects/:type/:id
-      if (method === "GET" && tail.length === 1 && tail[0] !== "list" && tail[0] !== "search") {
-        return ObjGet.handler(withParams(evt, { type, id: tail[0] }) as any);
-      }
-
-      // GET /objects/:type/list
-      if (method === "GET" && tail.length === 1 && tail[0] === "list") {
-        return ObjList.handler(withParams(evt, { type }) as any);
-      }
-
-      // GET /objects/:type  (treat as list)
-      if (method === "GET" && tail.length === 0) {
-        return ObjList.handler(withParams(evt, { type }) as any);
-      }
-
-      // DELETE /objects/:type/:id
-      if (method === "DELETE" && tail.length === 1) {
-        return ObjDelete.handler(withParams(evt, { type, id: tail[0] }) as any);
-      }
-
-      return notimpl(`${method} ${path}`);
+    // -------- Object Actions --------
+    if (method === "POST" && /^\/objects\/[^/]+\/[^/]+\/actions\/[^/]+$/.test(path)) {
+      return await objectAction(evt);
     }
 
-    // Fallback (legacy explicit routes can be handled elsewhere)
+    // -------- Objects CRUD + list/search (existing flow) --------
+    // Create: POST /objects/{type}
+    if (method === "POST" && /^\/objects\/[^/]+$/.test(path)) {
+      return await dispatch(ObjCreate, evt, authCtx);
+    }
+
+    // Get: GET /objects/{type}/{id}
+    if (method === "GET" && /^\/objects\/[^/]+\/[^/]+$/.test(path)) {
+      return await dispatch(ObjGet, evt, authCtx);
+    }
+
+    // Update: PUT /objects/{type}/{id} (PATCH also routed to update module)
+    if ((method === "PUT" || method === "PATCH") && /^\/objects\/[^/]+\/[^/]+$/.test(path)) {
+      return await dispatch(ObjUpdate, evt, authCtx);
+    }
+
+    // Delete: DELETE /objects/{type}/{id}
+    if (method === "DELETE" && /^\/objects\/[^/]+\/[^/]+$/.test(path)) {
+      return await dispatch(ObjDelete, evt, authCtx);
+    }
+
+    // List: GET /objects/{type}/list
+    if (method === "GET" && /^\/objects\/[^/]+\/list$/.test(path)) {
+      return await dispatch(ObjList, evt, authCtx);
+    }
+
+    // Search: GET /objects/{type}/search
+    if (method === "GET" && /^\/objects\/[^/]+\/search$/.test(path)) {
+      return await dispatch(ObjSearch, evt, authCtx);
+    }
+
+    // no match
     return notimpl(`${method} ${path}`);
   } catch (e: any) {
     console.error("router error", {
@@ -163,5 +227,5 @@ export const baseHandler = async (evt: ApiEvt, _ctx?: Context): Promise<APIGatew
   }
 };
 
-// Cast to satisfy a looser event type expected by withCors (prevents TS mismatch)
+// Cast to satisfy any wrapper expectations
 export const handler = withCors(baseHandler as any);
