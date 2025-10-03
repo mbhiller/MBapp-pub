@@ -16,7 +16,6 @@
     "tools:ping": "node apps/src/tools/ping.mjs",
     "tools:seed": "node apps/api/src/tools/seed.mjs",
     "tools:smoke": "node apps/api/src/tools/smoke.mjs",
-
     "spec:bundle": "redocly bundle spec/MBapp-Modules.yaml -o spec/openapi.yaml",
     "spec:types:api": "openapi-typescript spec/openapi.yaml -o apps/api/src/generated/openapi-types.ts",
     "spec:types:mobile": "openapi-typescript spec/openapi.yaml -o apps/mobile/src/api/generated-types.ts",
@@ -24,11 +23,19 @@
     "spec:docs": "redocly build-docs spec/openapi.yaml -o docs/api",
     "api:build": "esbuild apps/api/src/index.ts --bundle --platform=node --target=node20 --outfile=apps/api/dist/bootstrap.js",
     "api:smoke": "node apps/api/scripts/smoke.mjs",
-    "api:deploy": "powershell -ExecutionPolicy Bypass -File ops/Publish-ObjectsLambda-Daily.ps1"
+    "api:deploy": "powershell -ExecutionPolicy Bypass -File ops/Publish-ObjectsLambda-Daily.ps1",
+    "smoke": "tsx ops/smoke.ts",
+    "smoke:all:list": "tsx ops/smoke.ts all list",
+    "smoke:all:create": "tsx ops/smoke.ts all create 3",
+    "smoke:all:test": "tsx ops/smoke.ts all test",
+    "smoke:all:delete": "tsx ops/smoke.ts all delete",
+    "smoke:vendors:list": "tsx ops/smoke.ts vendors list",
+    "smoke:purchaseOrders:flow": "tsx ops/smoke.ts purchaseOrders flow"
   },
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "^3.882.0",
     "@aws-sdk/lib-dynamodb": "^3.882.0",
+    "@redocly/cli": "^1.16.0",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.4.0",
     "@types/react": "^19.1.12",
@@ -40,9 +47,9 @@
     "eslint-config-prettier": "^10.1.8",
     "openapi-typescript": "^7.5.0",
     "prettier": "^3.6.2",
+    "tsx": "^4.20.6",
     "typescript": "^5.9.2",
-    "yaml": "^2.8.1",
-    "@redocly/cli": "^1.16.0"
+    "yaml": "^2.8.1"
   },
   "overrides": {
     "react": "19.1.0",

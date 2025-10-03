@@ -65,7 +65,7 @@ import SalesOrderDetailScreen from  "../screens/SalesOrderDetailScreen";
 // Integrations
 import IntegrationsListScreen from  "../screens/IntegrationsListScreen";
 import IntegrationDetailScreen from "../screens/IntegrationDetailScreen";
-import DevEventsToolsScreen from "../screens/DevEventsToolsScreen";
+import DevDiagnosticsScreen from "../features/dev/DevDiagnosticsScreen";
 // optional runs
 // import IntegrationRunsListScreen from "../screens/IntegrationRunsListScreen";
 
@@ -91,10 +91,11 @@ export default function RootStack() {
       })}
     >
     
-
+      
 
       <Stack.Screen name="Hub" component={ModuleHubScreen} options={{ title: "Hub" }} />
-      <Stack.Screen name="DevEventsTools" component={DevEventsToolsScreen} options={{ title: "Dev Tools — Events" }} />
+      <Stack.Screen name="DevDiagnostics" component={DevDiagnosticsScreen} options={{ title: "Dev Diagnostics" }} />
+   
       {/* Products */}
       <Stack.Screen name="ProductsList" component={ProductsListScreen} options={{ title: "Products" }} />
       <Stack.Screen name="ProductDetail" component={ProductDetailScreen} options={{ title: "Product" }} />

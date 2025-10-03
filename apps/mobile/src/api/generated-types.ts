@@ -168,6 +168,959 @@ export interface paths {
         patch: operations["updateWorkspace"];
         trace?: never;
     };
+    "/inventory/{id}/onhand": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get computed on-hand for an inventory item */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description On-hand computed for the inventory item */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items?: components["schemas"]["InventoryOnHand"][];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inventory/onhand:batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Batch on-hand query */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        ids?: string[];
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items?: components["schemas"]["InventoryOnHand"][];
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inventory/{id}/movements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List movements for an inventory item */
+        get: {
+            parameters: {
+                query?: {
+                    next?: string | null;
+                    limit?: number;
+                    sort?: "asc" | "desc";
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Paged list of inventory movements */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ListPageInventoryMovement"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inventory/{id}/adjust": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Adjust on-hand (creates movement) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["InventoryAdjustmentRequest"];
+                };
+            };
+            responses: {
+                /** @description Adjustment recorded as an inventory movement */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["InventoryMovement"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/purchasing/po/{id}:submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Submit purchase order */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PurchaseOrder"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/purchasing/po/{id}:approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve purchase order */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PurchaseOrder"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/purchasing/po/{id}:receive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Receive against purchase order lines */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @deprecated */
+                        idempotencyKey?: string;
+                        lines?: {
+                            lineId: string;
+                            deltaQty: number;
+                            locationId?: string;
+                            lot?: string;
+                        }[];
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/purchasing/po/{id}:cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel purchase order */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PurchaseOrder"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/purchasing/po/{id}:close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Close purchase order */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PurchaseOrder"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/purchase-orders/{id}/receive-line": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Receive a specific PO line */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        lineId: string;
+                        qty: number;
+                        lot?: string | null;
+                        location?: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PurchaseOrder"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sales/so/{id}:submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Submit sales order */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SalesOrder"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sales/so/{id}:commit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Commit/allocate inventory for a sales order */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SalesOrder"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sales/so/{id}:fulfill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Fulfill items on a sales order */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @deprecated */
+                        idempotencyKey?: string;
+                        lines?: {
+                            lineId: string;
+                            /** @description Quantity shipped/picked (positive) */
+                            deltaQty: number;
+                            locationId?: string;
+                            lot?: string;
+                        }[];
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sales/so/{id}:cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel sales order */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SalesOrder"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sales/so/{id}:close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Close sales order */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SalesOrder"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sales-orders/{id}/fulfill-line": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Fulfill a specific SO line */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        lineId: string;
+                        qty: number;
+                        lot?: string | null;
+                        location?: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SalesOrder"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/events/registration/{id}:cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel a registration */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Updated registration */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Registration"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/events/registration/{id}:checkin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Check in a registration */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Updated registration */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Registration"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/events/registration/{id}:checkout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Check out a registration */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Updated registration */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Registration"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/resources/reservation/{id}:cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel a reservation */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Updated reservation */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Reservation"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/resources/reservation/{id}:start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start a reservation (resource now in use) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Updated reservation */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Reservation"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/resources/reservation/{id}:end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** End a reservation (resource returned) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Updated reservation */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Reservation"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/audit": {
         parameters: {
             query?: never;
@@ -316,6 +1269,10 @@ export interface components {
             productId?: string;
             name: string;
             sku?: string;
+            /**
+             * @deprecated
+             * @description Deprecated – use /inventory/{id}/onhand
+             */
             quantity?: number;
             /** @description Unit of measure */
             uom?: string;
@@ -328,6 +1285,58 @@ export interface components {
              */
             status: "active" | "inactive" | "archived";
             notes?: string;
+        };
+        InventoryMovement: {
+            id?: string;
+            /** @enum {string} */
+            type: "inventoryMovement";
+            /**
+             * Format: date-time
+             * @description Event timestamp
+             */
+            ts: string;
+            /**
+             * Format: date-time
+             * @description Mirror of ts for UI lists
+             */
+            createdAt?: string;
+            /** @description Inventory item id */
+            itemId: string;
+            /** @description Mirror of itemId for client convenience */
+            inventoryId?: string;
+            deltaQty: number;
+            uom: string;
+            locationId?: string | null;
+            lot?: string | null;
+            /**
+             * @description Source document type
+             * @enum {string}
+             */
+            sourceType: "PO" | "SO" | "ADJ";
+            /**
+             * @description Derived from sourceType
+             * @enum {string|null}
+             */
+            kind?: "receive" | "fulfill" | "adjust" | null;
+            sourceId: string;
+            lineId?: string | null;
+            notes?: string | null;
+        };
+        InventoryOnHand: {
+            id: string;
+            qtyOnHand: number;
+            qtyAvailable?: number | null;
+            /** Format: date-time */
+            asOf?: string;
+        };
+        InventoryAdjustmentRequest: {
+            reason: string;
+            deltaQty: number;
+            notes?: string | null;
+        };
+        ListPageInventoryMovement: {
+            items?: components["schemas"]["InventoryMovement"][];
+            next?: string | null;
         };
         Resource: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
@@ -350,6 +1359,17 @@ export interface components {
             /** Format: date-time */
             endsAt?: string;
             /**
+             * Format: date-time
+             * @description Alias of startsAt (deprecated)
+             */
+            start?: string;
+            /**
+             * Format: date-time
+             * @description Alias of endsAt (deprecated)
+             */
+            end?: string;
+            /**
+             * @description Operational availability of the event
              * @default available
              * @enum {string}
              */
@@ -359,47 +1379,63 @@ export interface components {
         };
         Registration: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
-            type?: "registration";
+            type: "registration";
             eventId: string;
-            clientId?: string;
+            clientId: string;
+            clientName?: string | null;
+            /** @default 1 */
+            qty: number;
             /** Format: date-time */
-            startsAt?: string;
+            startsAt?: string | null;
             /** Format: date-time */
-            endsAt?: string;
+            endsAt?: string | null;
+            /**
+             * Format: date-time
+             * @description Alias of startsAt (deprecated)
+             */
+            start?: string | null;
+            /**
+             * Format: date-time
+             * @description Alias of endsAt (deprecated)
+             */
+            end?: string | null;
+            /** Format: date-time */
+            registeredAt?: string | null;
             /**
              * @default pending
              * @enum {string}
              */
-            status: "pending" | "confirmed" | "cancelled" | "checked_in" | "completed";
-            /** Format: date-time */
-            registeredAt?: string;
-            notes?: string;
+            status: "pending" | "confirmed" | "checked_in" | "checked_out" | "cancelled";
+            notes?: string | null;
         };
         Reservation: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
-            type?: "reservation";
+            type: "reservation";
             resourceId: string;
+            resourceName?: string;
+            eventId?: string | null;
+            clientId: string;
+            clientName?: string | null;
+            /** Format: date-time */
+            startsAt: string;
+            /** Format: date-time */
+            endsAt: string;
             /**
              * Format: date-time
-             * @description Alias of startsAt
+             * @description Alias of startsAt (deprecated)
              */
             start?: string;
             /**
              * Format: date-time
-             * @description Alias of endsAt
+             * @description Alias of endsAt (deprecated)
              */
             end?: string;
-            /** Format: date-time */
-            startsAt?: string;
-            /** Format: date-time */
-            endsAt?: string;
-            clientId?: string;
             /**
              * @default pending
              * @enum {string}
              */
-            status: "pending" | "confirmed" | "cancelled" | "checked_in" | "completed";
-            notes?: string;
+            status: "pending" | "confirmed" | "in_use" | "checked_in" | "completed" | "cancelled";
+            notes?: string | null;
         };
         Vendor: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
@@ -440,31 +1476,174 @@ export interface components {
             terminatedAt?: string;
             notes?: string;
         };
-        PurchaseOrderLine: {
-            productId: string;
-            sku?: string;
-            qty: number;
-            /** @example each */
-            uom?: string;
-            unitPrice: number;
-            /** @default 0 */
-            receivedQty: number;
+        MoneyTotals: {
+            subtotal?: number;
+            tax?: number;
+            shipping?: number;
+            discount?: number;
+            total?: number;
         };
-        PurchaseOrder: components["schemas"]["ObjectBase"] & {
+        PurchaseOrderLine: {
+            id?: string;
+            /** @description InventoryItem.id */
+            itemId: string;
+            productId?: string | null;
+            description?: string | null;
+            uom: string;
+            /** @description Ordered quantity */
+            qty: number;
+            /** @default 0 */
+            qtyReceived: number;
+            unitPrice?: number | null;
+            taxRate?: number | null;
+            lineTotal?: number | null;
+            locationId?: string | null;
+            lot?: string | null;
+            /** Format: date-time */
+            expectedDate?: string | null;
+        };
+        PurchaseOrder: {
+            id?: string;
+            tenantId?: string;
             /** @enum {string} */
             type: "purchaseOrder";
-            vendorId: string;
-            /** @enum {string} */
-            status: "draft" | "submitted" | "approved" | "partially_received" | "received" | "canceled";
-            /** @example USD */
-            currency?: string;
-            lines?: components["schemas"]["PurchaseOrderLine"][];
-            totals?: {
-                subtotal?: number;
-                tax?: number;
-                shipping?: number;
-                total?: number;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            updatedAt?: string;
+            metadata?: {
+                [key: string]: unknown;
             };
+        } & {
+            orderNumber?: string;
+            vendorId?: string;
+            vendorName?: string;
+            /** @enum {string} */
+            status?: "draft" | "submitted" | "approved" | "partially_received" | "received" | "cancelled";
+            /** @default USD */
+            currency: string;
+            notes?: string;
+            totals?: components["schemas"]["MoneyTotals"];
+            shipTo?: {
+                name?: string;
+                address1?: string;
+                address2?: string;
+                city?: string;
+                state?: string;
+                postal?: string;
+                country?: string;
+            };
+            billTo?: {
+                name?: string;
+                address1?: string;
+                address2?: string;
+                city?: string;
+                state?: string;
+                postal?: string;
+                country?: string;
+            };
+            lines?: components["schemas"]["PurchaseOrderLine"][];
+        };
+        SalesOrderLine: {
+            id?: string;
+            /** @description InventoryItem.id being sold */
+            itemId: string;
+            productId?: string | null;
+            description?: string | null;
+            uom: string;
+            /** @description Ordered quantity */
+            qty: number;
+            /** @default 0 */
+            qtyFulfilled: number;
+            unitPrice?: number | null;
+            taxRate?: number | null;
+            lineTotal?: number | null;
+            locationId?: string | null;
+            lot?: string | null;
+            /** Format: date-time */
+            expectedDate?: string | null;
+        };
+        SalesOrder: {
+            id?: string;
+            tenantId?: string;
+            /** @enum {string} */
+            type: "salesOrder";
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            updatedAt?: string;
+            metadata?: {
+                [key: string]: unknown;
+            };
+        } & {
+            orderNumber?: string;
+            customerId?: string;
+            customerName?: string;
+            /** @enum {string} */
+            status?: "draft" | "submitted" | "committed" | "partially_fulfilled" | "fulfilled" | "cancelled" | "closed";
+            /** @default USD */
+            currency: string;
+            notes?: string;
+            totals?: components["schemas"]["MoneyTotals"];
+            billTo?: {
+                name?: string;
+                address1?: string;
+                address2?: string;
+                city?: string;
+                state?: string;
+                postal?: string;
+                country?: string;
+            };
+            shipTo?: {
+                name?: string;
+                address1?: string;
+                address2?: string;
+                city?: string;
+                state?: string;
+                postal?: string;
+                country?: string;
+            };
+            lines?: components["schemas"]["SalesOrderLine"][];
+        };
+        GoodsReceiptLine: {
+            lineId: string;
+            deltaQty: number;
+            locationId?: string | null;
+            lot?: string | null;
+        };
+        GoodsReceipt: {
+            id?: string;
+            /** @enum {string} */
+            type: "goodsReceipt";
+            tenantId?: string;
+            poId: string;
+            userId?: string | null;
+            /** Format: date-time */
+            ts: string;
+            lines: components["schemas"]["GoodsReceiptLine"][];
+            notes?: string | null;
+            attachments?: string[];
+        };
+        SalesFulfillmentLine: {
+            lineId: string;
+            deltaQty: number;
+            locationId?: string | null;
+            lot?: string | null;
+        };
+        SalesFulfillment: {
+            id?: string;
+            /** @enum {string} */
+            type: "salesFulfillment";
+            tenantId?: string;
+            soId: string;
+            userId?: string | null;
+            /** Format: date-time */
+            ts: string;
+            lines: components["schemas"]["SalesFulfillmentLine"][];
+            carrier?: string | null;
+            tracking?: string | null;
+            notes?: string | null;
+            attachments?: string[];
         };
         Receipt: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
@@ -476,34 +1655,6 @@ export interface components {
                 locationId?: string;
             }[];
             note?: string;
-        };
-        SalesOrderLine: {
-            productId: string;
-            sku?: string;
-            qty: number;
-            /** @example each */
-            uom?: string;
-            unitPrice: number;
-            /** @default 0 */
-            allocatedQty: number;
-            /** @default 0 */
-            fulfilledQty: number;
-        };
-        SalesOrder: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "salesOrder";
-            clientId: string;
-            /** @enum {string} */
-            status: "draft" | "reserved" | "partially_fulfilled" | "fulfilled" | "canceled";
-            /** @example USD */
-            currency?: string;
-            lines?: components["schemas"]["SalesOrderLine"][];
-            totals?: {
-                subtotal?: number;
-                tax?: number;
-                shipping?: number;
-                total?: number;
-            };
         };
         Fulfillment: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
@@ -545,6 +1696,21 @@ export interface components {
         };
     };
     responses: {
+        /** @description Error response */
+        ErrorResponse: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": {
+                    message?: string;
+                    code?: string;
+                    details?: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
         /** @description Paged list of objects */
         ListPage: {
             headers: {
@@ -591,6 +1757,8 @@ export interface components {
         };
     };
     parameters: {
+        /** @description Optional idempotency key for safe retries. */
+        IdempotencyKey: string;
         TenantHeader: string;
         TypePath: string;
         IdPath: string;
@@ -634,6 +1802,8 @@ export interface operations {
             query?: never;
             header: {
                 "x-tenant-id": components["parameters"]["TenantHeader"];
+                /** @description Optional idempotency key for safe retries. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
                 type: components["parameters"]["TypePath"];
@@ -739,6 +1909,8 @@ export interface operations {
             query?: never;
             header: {
                 "x-tenant-id": components["parameters"]["TenantHeader"];
+                /** @description Optional idempotency key for safe retries. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
                 type: components["parameters"]["TypePath"];
@@ -858,6 +2030,8 @@ export interface operations {
             query?: never;
             header: {
                 "x-tenant-id": components["parameters"]["TenantHeader"];
+                /** @description Optional idempotency key for safe retries. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
             cookie?: never;
@@ -921,6 +2095,8 @@ export interface operations {
             query?: never;
             header: {
                 "x-tenant-id": components["parameters"]["TenantHeader"];
+                /** @description Optional idempotency key for safe retries. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
                 id: string;
@@ -985,6 +2161,8 @@ export interface operations {
             query?: never;
             header: {
                 "x-tenant-id": components["parameters"]["TenantHeader"];
+                /** @description Optional idempotency key for safe retries. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
                 id: string;
@@ -1053,6 +2231,8 @@ export interface operations {
             query?: never;
             header: {
                 "x-tenant-id": components["parameters"]["TenantHeader"];
+                /** @description Optional idempotency key for safe retries. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
             cookie?: never;
@@ -1116,6 +2296,8 @@ export interface operations {
             query?: never;
             header: {
                 "x-tenant-id": components["parameters"]["TenantHeader"];
+                /** @description Optional idempotency key for safe retries. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
                 id: string;
@@ -1180,6 +2362,8 @@ export interface operations {
             query?: never;
             header: {
                 "x-tenant-id": components["parameters"]["TenantHeader"];
+                /** @description Optional idempotency key for safe retries. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
                 id: string;

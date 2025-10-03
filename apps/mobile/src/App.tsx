@@ -7,6 +7,7 @@ import { ThemeProvider } from "./providers/ThemeProvider";
 import { RolesProvider } from "./providers/RolesProvider";
 import { QueryClientProvider } from "@tanstack/react-query";
 
+
 // ✅ use the shared client
 import { queryClient } from "./features/_shared/queryClient";
 

@@ -12,7 +12,7 @@ import {
 type AnyRecord = Record<string, unknown>;
 
 export type ListArgs = {
-  tenantId?: string;        // logical tenant; will be mapped to PK_ATTR
+  tenantId?: string;
   type: string;
   q?: string;
   eventId?: string;
@@ -23,44 +23,41 @@ export type ListArgs = {
 };
 
 export type GetArgs = {
-  tenantId?: string;        // logical tenant; will be mapped to PK_ATTR
+  tenantId?: string;
   type: string;
   id: string;
   fields?: string[];
 };
 
 export type CreateArgs = {
-  tenantId?: string;        // logical tenant; will be mapped to PK_ATTR
+  tenantId?: string;
   type: string;
   body: AnyRecord;
 };
 
 export type ReplaceArgs = {
-  tenantId?: string;        // logical tenant; will be mapped to PK_ATTR
+  tenantId?: string;
   type: string;
   id: string;
   body: AnyRecord;
 };
 
 export type UpdateArgs = {
-  tenantId?: string;        // logical tenant; will be mapped to PK_ATTR
+  tenantId?: string;
   type: string;
   id: string;
   body: AnyRecord;
 };
 
 export type DeleteArgs = {
-  tenantId?: string;        // logical tenant; will be mapped to PK_ATTR
+  tenantId?: string;
   type: string;
   id: string;
 };
 
 // -------- Dynamo config --------
-// Table & key attribute names are configurable via env to match your infra.
-const TABLE   = process.env.MBAPP_OBJECTS_TABLE || "mbapp_objects";
-// Primary key attribute (HASH). Your table uses "pk".
+const TABLE   = process.env.MBAPP_OBJECTS_TABLE || process.env.MBAPP_TABLE || "mbapp_objects";
 const PK_ATTR = process.env.MBAPP_TABLE_PK || "pk";
-// Sort key attribute (RANGE). Your table uses "sk" with `${type}#${id}` pattern.
 const SK_ATTR = process.env.MBAPP_TABLE_SK || "sk";
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
@@ -70,6 +67,7 @@ function nowIso() {
   return new Date().toISOString();
 }
 function newId() {
+  // Simple, fast, collision-resistant enough for dev; swap for UUID if desired
   return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
 }
 
@@ -140,7 +138,7 @@ export async function getObjectById({ tenantId, type, id, fields }: GetArgs) {
 
   const res = await ddb.send(new GetCommand({ TableName: TABLE, Key }));
   if (!res.Item) return null;
-  if ((res.Item as AnyRecord).type !== type) return null; // extra safety
+  if ((res.Item as AnyRecord).type !== type) return null;
   return project(res.Item as AnyRecord, fields);
 }
 
@@ -203,7 +201,6 @@ export async function replaceObject({ tenantId, type, id, body }: ReplaceArgs) {
 }
 
 export async function updateObject({ tenantId, type, id, body }: UpdateArgs) {
-  // dynamic UpdateExpression (ignore identity/system fields)
   const identity = new Set([PK_ATTR, SK_ATTR, "tenantId", "type", "id", "createdAt", "updatedAt"]);
   const sets: string[] = [];
   const names: Record<string, string> = {};
@@ -218,7 +215,6 @@ export async function updateObject({ tenantId, type, id, body }: UpdateArgs) {
     sets.push(`${nk} = ${vk}`);
   }
 
-  // always enforce type + updatedAt
   names["#n_type"] = "type";
   values[":v_type"] = type;
   sets.push("#n_type = :v_type");
@@ -262,7 +258,7 @@ export async function deleteObject({ tenantId, type, id }: DeleteArgs) {
  *   sk = `${tenantId}|${type}|${id}`
  */
 export function normalizeKeys(input: { id?: string; type: string; tenantId: string }) {
-  const id = input.id ?? crypto.randomUUID();
+  const id = input.id ?? newId(); // <-- use newId(), no crypto
   const sk = `${input.tenantId}|${input.type}|${id}`;
   return { id, pk: id, sk, type: input.type };
 }
@@ -275,7 +271,7 @@ export function normalizeKeys(input: { id?: string; type: string; tenantId: stri
  *   type = "product:sku"
  */
 export function buildSkuLock(tenantId: string, productId: string, sku: string) {
-  const now = new Date().toISOString();
+  const now = nowIso();
   return {
     pk: `UNIQ#${tenantId}#product#SKU#${sku}`,
     sk: `${tenantId}|product|${productId}`,

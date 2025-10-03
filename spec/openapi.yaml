@@ -57,6 +57,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/TypePath'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -153,6 +154,7 @@ paths:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/TypePath'
         - $ref: '#/components/parameters/IdPath'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -261,6 +263,7 @@ paths:
         - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         content:
           application/json:
@@ -318,6 +321,7 @@ paths:
         - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
         - name: id
           in: path
           required: true
@@ -352,6 +356,7 @@ paths:
         - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
         - name: id
           in: path
           required: true
@@ -446,6 +451,7 @@ paths:
         - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         content:
           application/json:
@@ -503,6 +509,7 @@ paths:
         - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
         - name: id
           in: path
           required: true
@@ -537,6 +544,7 @@ paths:
         - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
         - name: id
           in: path
           required: true
@@ -589,6 +597,509 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
       summary: Delete a Workspace
+  /inventory/{id}/onhand:
+    get:
+      summary: Get computed on-hand for an inventory item
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: On-hand computed for the inventory item
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/InventoryOnHand'
+  /inventory/onhand:batch:
+    post:
+      tags:
+        - Inventory
+      summary: Batch on-hand query
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ids:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/InventoryOnHand'
+  /inventory/{id}/movements:
+    get:
+      summary: List movements for an inventory item
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: next
+          schema:
+            type: string
+            nullable: true
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 50
+        - in: query
+          name: sort
+          schema:
+            type: string
+            enum:
+              - asc
+              - desc
+            default: desc
+      responses:
+        '200':
+          description: Paged list of inventory movements
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListPageInventoryMovement'
+  /inventory/{id}/adjust:
+    post:
+      summary: Adjust on-hand (creates movement)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InventoryAdjustmentRequest'
+      responses:
+        '200':
+          description: Adjustment recorded as an inventory movement
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InventoryMovement'
+  /purchasing/po/{id}:submit:
+    post:
+      summary: Submit purchase order
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurchaseOrder'
+  /purchasing/po/{id}:approve:
+    post:
+      summary: Approve purchase order
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurchaseOrder'
+  /purchasing/po/{id}:receive:
+    post:
+      summary: Receive against purchase order lines
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                idempotencyKey:
+                  type: string
+                  deprecated: true
+                lines:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - lineId
+                      - deltaQty
+                    properties:
+                      lineId:
+                        type: string
+                      deltaQty:
+                        type: number
+                      locationId:
+                        type: string
+                      lot:
+                        type: string
+      responses:
+        '200':
+          description: OK
+  /purchasing/po/{id}:cancel:
+    post:
+      summary: Cancel purchase order
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurchaseOrder'
+  /purchasing/po/{id}:close:
+    post:
+      summary: Close purchase order
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurchaseOrder'
+  /purchase-orders/{id}/receive-line:
+    post:
+      tags:
+        - Purchasing
+      summary: Receive a specific PO line
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - lineId
+                - qty
+              properties:
+                lineId:
+                  type: string
+                qty:
+                  type: number
+                lot:
+                  type: string
+                  nullable: true
+                location:
+                  type: string
+                  nullable: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurchaseOrder'
+  /sales/so/{id}:submit:
+    post:
+      summary: Submit sales order
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SalesOrder'
+  /sales/so/{id}:commit:
+    post:
+      summary: Commit/allocate inventory for a sales order
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SalesOrder'
+  /sales/so/{id}:fulfill:
+    post:
+      summary: Fulfill items on a sales order
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                idempotencyKey:
+                  type: string
+                  deprecated: true
+                lines:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - lineId
+                      - deltaQty
+                    properties:
+                      lineId:
+                        type: string
+                      deltaQty:
+                        type: number
+                        description: Quantity shipped/picked (positive)
+                      locationId:
+                        type: string
+                      lot:
+                        type: string
+      responses:
+        '200':
+          description: OK
+  /sales/so/{id}:cancel:
+    post:
+      summary: Cancel sales order
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SalesOrder'
+  /sales/so/{id}:close:
+    post:
+      summary: Close sales order
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SalesOrder'
+  /sales-orders/{id}/fulfill-line:
+    post:
+      tags:
+        - Sales
+      summary: Fulfill a specific SO line
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - lineId
+                - qty
+              properties:
+                lineId:
+                  type: string
+                qty:
+                  type: number
+                lot:
+                  type: string
+                  nullable: true
+                location:
+                  type: string
+                  nullable: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SalesOrder'
+  /events/registration/{id}:cancel:
+    post:
+      summary: Cancel a registration
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Updated registration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Registration'
+  /events/registration/{id}:checkin:
+    post:
+      summary: Check in a registration
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Updated registration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Registration'
+  /events/registration/{id}:checkout:
+    post:
+      summary: Check out a registration
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Updated registration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Registration'
+  /resources/reservation/{id}:cancel:
+    post:
+      summary: Cancel a reservation
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Updated reservation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+  /resources/reservation/{id}:start:
+    post:
+      summary: Start a reservation (resource now in use)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Updated reservation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+  /resources/reservation/{id}:end:
+    post:
+      summary: End a reservation (resource returned)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Updated reservation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
   /admin/audit:
     get:
       tags:
@@ -623,6 +1134,13 @@ components:
       scheme: bearer
       bearerFormat: JWT
   parameters:
+    IdempotencyKey:
+      in: header
+      name: Idempotency-Key
+      required: false
+      schema:
+        type: string
+      description: Optional idempotency key for safe retries.
     TenantHeader:
       name: x-tenant-id
       in: header
@@ -666,6 +1184,20 @@ components:
         type: string
         description: Comma-separated field projection
   responses:
+    ErrorResponse:
+      description: Error response
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+              code:
+                type: string
+              details:
+                type: object
+                additionalProperties: true
     ListPage:
       description: Paged list of objects
       content:
@@ -975,6 +1507,8 @@ components:
               type: string
             quantity:
               type: number
+              description: Deprecated – use /inventory/{id}/onhand
+              deprecated: true
             uom:
               type: string
               description: Unit of measure
@@ -993,6 +1527,109 @@ components:
               default: active
             notes:
               type: string
+    InventoryMovement:
+      type: object
+      required:
+        - type
+        - itemId
+        - deltaQty
+        - uom
+        - sourceType
+        - sourceId
+        - ts
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum:
+            - inventoryMovement
+        ts:
+          type: string
+          format: date-time
+          description: Event timestamp
+        createdAt:
+          type: string
+          format: date-time
+          description: Mirror of ts for UI lists
+        itemId:
+          type: string
+          description: Inventory item id
+        inventoryId:
+          type: string
+          description: Mirror of itemId for client convenience
+        deltaQty:
+          type: number
+        uom:
+          type: string
+        locationId:
+          type: string
+          nullable: true
+        lot:
+          type: string
+          nullable: true
+        sourceType:
+          type: string
+          enum:
+            - PO
+            - SO
+            - ADJ
+          description: Source document type
+        kind:
+          type: string
+          enum:
+            - receive
+            - fulfill
+            - adjust
+          nullable: true
+          description: Derived from sourceType
+        sourceId:
+          type: string
+        lineId:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+    InventoryOnHand:
+      type: object
+      required:
+        - id
+        - qtyOnHand
+      properties:
+        id:
+          type: string
+        qtyOnHand:
+          type: number
+        qtyAvailable:
+          type: number
+          nullable: true
+        asOf:
+          type: string
+          format: date-time
+    InventoryAdjustmentRequest:
+      type: object
+      required:
+        - reason
+        - deltaQty
+      properties:
+        reason:
+          type: string
+        deltaQty:
+          type: number
+        notes:
+          type: string
+          nullable: true
+    ListPageInventoryMovement:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/InventoryMovement'
+        next:
+          type: string
+          nullable: true
     Resource:
       allOf:
         - $ref: '#/components/schemas/ObjectBase'
@@ -1036,8 +1673,17 @@ components:
             endsAt:
               type: string
               format: date-time
+            start:
+              type: string
+              format: date-time
+              description: Alias of startsAt (deprecated)
+            end:
+              type: string
+              format: date-time
+              description: Alias of endsAt (deprecated)
             status:
               type: string
+              description: Operational availability of the event
               enum:
                 - available
                 - unavailable
@@ -1055,8 +1701,6 @@ components:
       allOf:
         - $ref: '#/components/schemas/ObjectBase'
         - type: object
-          required:
-            - eventId
           properties:
             type:
               type: string
@@ -1066,32 +1710,56 @@ components:
               type: string
             clientId:
               type: string
+            clientName:
+              type: string
+              nullable: true
+            qty:
+              type: integer
+              default: 1
+              minimum: 1
             startsAt:
               type: string
               format: date-time
+              nullable: true
             endsAt:
               type: string
               format: date-time
+              nullable: true
+            start:
+              type: string
+              format: date-time
+              description: Alias of startsAt (deprecated)
+              nullable: true
+            end:
+              type: string
+              format: date-time
+              description: Alias of endsAt (deprecated)
+              nullable: true
+            registeredAt:
+              type: string
+              format: date-time
+              nullable: true
             status:
               type: string
               enum:
                 - pending
                 - confirmed
-                - cancelled
                 - checked_in
-                - completed
+                - checked_out
+                - cancelled
               default: pending
-            registeredAt:
-              type: string
-              format: date-time
             notes:
               type: string
+              nullable: true
+          required:
+            - type
+            - eventId
+            - clientId
+            - qty
     Reservation:
       allOf:
         - $ref: '#/components/schemas/ObjectBase'
         - type: object
-          required:
-            - resourceId
           properties:
             type:
               type: string
@@ -1099,33 +1767,49 @@ components:
                 - reservation
             resourceId:
               type: string
-            start:
+            resourceName:
               type: string
-              format: date-time
-              description: Alias of startsAt
-            end:
+            eventId:
               type: string
-              format: date-time
-              description: Alias of endsAt
+              nullable: true
+            clientId:
+              type: string
+            clientName:
+              type: string
+              nullable: true
             startsAt:
               type: string
               format: date-time
             endsAt:
               type: string
               format: date-time
-            clientId:
+            start:
               type: string
+              format: date-time
+              description: Alias of startsAt (deprecated)
+            end:
+              type: string
+              format: date-time
+              description: Alias of endsAt (deprecated)
             status:
               type: string
               enum:
                 - pending
                 - confirmed
-                - cancelled
+                - in_use
                 - checked_in
                 - completed
+                - cancelled
               default: pending
             notes:
               type: string
+              nullable: true
+          required:
+            - type
+            - resourceId
+            - clientId
+            - startsAt
+            - endsAt
     Vendor:
       allOf:
         - $ref: '#/components/schemas/ObjectBase'
@@ -1195,37 +1879,96 @@ components:
           required:
             - type
             - displayName
-    PurchaseOrderLine:
+    MoneyTotals:
       type: object
       properties:
+        subtotal:
+          type: number
+        tax:
+          type: number
+        shipping:
+          type: number
+        discount:
+          type: number
+        total:
+          type: number
+    PurchaseOrderLine:
+      type: object
+      required:
+        - itemId
+        - qty
+        - uom
+      properties:
+        id:
+          type: string
+        itemId:
+          type: string
+          description: InventoryItem.id
         productId:
           type: string
-        sku:
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        uom:
           type: string
         qty:
           type: number
-        uom:
-          type: string
-          example: each
-        unitPrice:
-          type: number
-        receivedQty:
+          description: Ordered quantity
+        qtyReceived:
           type: number
           default: 0
-      required:
-        - productId
-        - qty
-        - unitPrice
+        unitPrice:
+          type: number
+          nullable: true
+        taxRate:
+          type: number
+          nullable: true
+        lineTotal:
+          type: number
+          nullable: true
+        locationId:
+          type: string
+          nullable: true
+        lot:
+          type: string
+          nullable: true
+        expectedDate:
+          type: string
+          format: date-time
+          nullable: true
     PurchaseOrder:
       allOf:
-        - $ref: '#/components/schemas/ObjectBase'
         - type: object
+          required:
+            - type
+            - vendorId
+            - status
           properties:
+            id:
+              type: string
+            tenantId:
+              type: string
             type:
               type: string
               enum:
                 - purchaseOrder
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+            metadata:
+              type: object
+              additionalProperties: true
+        - type: object
+          properties:
+            orderNumber:
+              type: string
             vendorId:
+              type: string
+            vendorName:
               type: string
             status:
               type: string
@@ -1235,29 +1978,293 @@ components:
                 - approved
                 - partially_received
                 - received
-                - canceled
+                - cancelled
             currency:
               type: string
-              example: USD
+              default: USD
+            notes:
+              type: string
+            totals:
+              $ref: '#/components/schemas/MoneyTotals'
+            shipTo:
+              type: object
+              properties:
+                name:
+                  type: string
+                address1:
+                  type: string
+                address2:
+                  type: string
+                city:
+                  type: string
+                state:
+                  type: string
+                postal:
+                  type: string
+                country:
+                  type: string
+            billTo:
+              type: object
+              properties:
+                name:
+                  type: string
+                address1:
+                  type: string
+                address2:
+                  type: string
+                city:
+                  type: string
+                state:
+                  type: string
+                postal:
+                  type: string
+                country:
+                  type: string
             lines:
               type: array
               items:
                 $ref: '#/components/schemas/PurchaseOrderLine'
-            totals:
-              type: object
-              properties:
-                subtotal:
-                  type: number
-                tax:
-                  type: number
-                shipping:
-                  type: number
-                total:
-                  type: number
+    SalesOrderLine:
+      type: object
+      required:
+        - itemId
+        - qty
+        - uom
+      properties:
+        id:
+          type: string
+        itemId:
+          type: string
+          description: InventoryItem.id being sold
+        productId:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        uom:
+          type: string
+        qty:
+          type: number
+          description: Ordered quantity
+        qtyFulfilled:
+          type: number
+          default: 0
+        unitPrice:
+          type: number
+          nullable: true
+        taxRate:
+          type: number
+          nullable: true
+        lineTotal:
+          type: number
+          nullable: true
+        locationId:
+          type: string
+          nullable: true
+        lot:
+          type: string
+          nullable: true
+        expectedDate:
+          type: string
+          format: date-time
+          nullable: true
+    SalesOrder:
+      allOf:
+        - type: object
           required:
             - type
-            - vendorId
+            - customerId
             - status
+          properties:
+            id:
+              type: string
+            tenantId:
+              type: string
+            type:
+              type: string
+              enum:
+                - salesOrder
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+            metadata:
+              type: object
+              additionalProperties: true
+        - type: object
+          properties:
+            orderNumber:
+              type: string
+            customerId:
+              type: string
+            customerName:
+              type: string
+            status:
+              type: string
+              enum:
+                - draft
+                - submitted
+                - committed
+                - partially_fulfilled
+                - fulfilled
+                - cancelled
+                - closed
+            currency:
+              type: string
+              default: USD
+            notes:
+              type: string
+            totals:
+              $ref: '#/components/schemas/MoneyTotals'
+            billTo:
+              type: object
+              properties:
+                name:
+                  type: string
+                address1:
+                  type: string
+                address2:
+                  type: string
+                city:
+                  type: string
+                state:
+                  type: string
+                postal:
+                  type: string
+                country:
+                  type: string
+            shipTo:
+              type: object
+              properties:
+                name:
+                  type: string
+                address1:
+                  type: string
+                address2:
+                  type: string
+                city:
+                  type: string
+                state:
+                  type: string
+                postal:
+                  type: string
+                country:
+                  type: string
+            lines:
+              type: array
+              items:
+                $ref: '#/components/schemas/SalesOrderLine'
+    GoodsReceiptLine:
+      type: object
+      required:
+        - lineId
+        - deltaQty
+      properties:
+        lineId:
+          type: string
+        deltaQty:
+          type: number
+        locationId:
+          type: string
+          nullable: true
+        lot:
+          type: string
+          nullable: true
+    GoodsReceipt:
+      type: object
+      required:
+        - type
+        - poId
+        - ts
+        - lines
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum:
+            - goodsReceipt
+        tenantId:
+          type: string
+        poId:
+          type: string
+        userId:
+          type: string
+          nullable: true
+        ts:
+          type: string
+          format: date-time
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/GoodsReceiptLine'
+        notes:
+          type: string
+          nullable: true
+        attachments:
+          type: array
+          items:
+            type: string
+    SalesFulfillmentLine:
+      type: object
+      required:
+        - lineId
+        - deltaQty
+      properties:
+        lineId:
+          type: string
+        deltaQty:
+          type: number
+        locationId:
+          type: string
+          nullable: true
+        lot:
+          type: string
+          nullable: true
+    SalesFulfillment:
+      type: object
+      required:
+        - type
+        - soId
+        - ts
+        - lines
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum:
+            - salesFulfillment
+        tenantId:
+          type: string
+        soId:
+          type: string
+        userId:
+          type: string
+          nullable: true
+        ts:
+          type: string
+          format: date-time
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/SalesFulfillmentLine'
+        carrier:
+          type: string
+          nullable: true
+        tracking:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        attachments:
+          type: array
+          items:
+            type: string
     Receipt:
       allOf:
         - $ref: '#/components/schemas/ObjectBase'
@@ -1286,71 +2293,6 @@ components:
             - type
             - purchaseOrderId
             - lines
-    SalesOrderLine:
-      type: object
-      properties:
-        productId:
-          type: string
-        sku:
-          type: string
-        qty:
-          type: number
-        uom:
-          type: string
-          example: each
-        unitPrice:
-          type: number
-        allocatedQty:
-          type: number
-          default: 0
-        fulfilledQty:
-          type: number
-          default: 0
-      required:
-        - productId
-        - qty
-        - unitPrice
-    SalesOrder:
-      allOf:
-        - $ref: '#/components/schemas/ObjectBase'
-        - type: object
-          properties:
-            type:
-              type: string
-              enum:
-                - salesOrder
-            clientId:
-              type: string
-            status:
-              type: string
-              enum:
-                - draft
-                - reserved
-                - partially_fulfilled
-                - fulfilled
-                - canceled
-            currency:
-              type: string
-              example: USD
-            lines:
-              type: array
-              items:
-                $ref: '#/components/schemas/SalesOrderLine'
-            totals:
-              type: object
-              properties:
-                subtotal:
-                  type: number
-                tax:
-                  type: number
-                shipping:
-                  type: number
-                total:
-                  type: number
-          required:
-            - type
-            - clientId
-            - status
     Fulfillment:
       allOf:
         - $ref: '#/components/schemas/ObjectBase'

@@ -1,41 +1,71 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
+import {
+  DynamoDBDocumentClient,
+  PutCommand,
+  DeleteCommand,
+} from "@aws-sdk/lib-dynamodb";
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+
 import { ok, bad, notfound, error } from "../common/responses";
-import { authMiddleware } from "../auth/middleware";
-import { getObject, putObject } from "./store";
-import { normalizeKeys, buildSkuLock } from "./repo";
+import { getObjectById, updateObject, buildSkuLock } from "./repo";
+import { getAuth, requirePerm } from "../auth/middleware";
 
-export async function handle(evt: APIGatewayProxyEventV2) {
+// Match repo.ts envs
+const TABLE = process.env.MBAPP_OBJECTS_TABLE || process.env.MBAPP_TABLE || "mbapp_objects";
+const PK    = process.env.MBAPP_TABLE_PK || "pk";
+const SK    = process.env.MBAPP_TABLE_SK || "sk";
+
+const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+
+export async function handle(event: APIGatewayProxyEventV2) {
   try {
-    const ctx = await authMiddleware(evt);
-    const type = evt.pathParameters?.type;
-    const id = evt.pathParameters?.id;
-    if (!type || !id) return bad("type and id are required");
+    const auth = await getAuth(event);
+    const type = event.pathParameters?.type;
+    const id   = event.pathParameters?.id;
+    if (!type || !id) return bad("Missing type or id");
 
-    const existing = await getObject(ctx.tenantId, type, id);
-    if (!existing) return notfound();
+    requirePerm(auth, `${type}:write`);
 
-    const body = evt.body ? JSON.parse(evt.body) : {};
-    if (body.type && body.type !== type) return bad(`body.type must be '${type}'`);
+    const patch = event.body ? JSON.parse(event.body) : {};
+    const existing = await getObjectById({ tenantId: auth.tenantId, type, id });
+    if (!existing) return notfound("Not Found");
 
-    const keys = normalizeKeys({ id, type, tenantId: ctx.tenantId });
+    // === SKU uniqueness (products only) on change ===
+    if (type === "product") {
+      const oldSku = (existing as any)?.sku;
+      const newSku = patch?.sku;
 
-    const item = {
-      ...existing,
-      ...body,
-      ...keys,
-      updatedAt: new Date().toISOString(),
-    };
+      if (newSku && newSku !== oldSku) {
+        // Acquire new lock (fail if taken)
+        const newLock = buildSkuLock(auth.tenantId, id, String(newSku));
+        await ddb.send(new PutCommand({
+          TableName: TABLE,
+          Item: newLock,
+          ConditionExpression: `attribute_not_exists(#pk) AND attribute_not_exists(#sk)`,
+          ExpressionAttributeNames: { "#pk": PK, "#sk": SK },
+        })).catch((e: any) => {
+          if (e?.name === "ConditionalCheckFailedException") {
+            throw Object.assign(new Error(`SKU already exists: ${newSku}`), { statusCode: 409 });
+          }
+          throw e;
+        });
 
-    await putObject(item);
-
-    // If SKU changes, replace lock
-    if (type === "product" && body.sku && body.sku !== existing.sku) {
-      const lock = buildSkuLock(ctx.tenantId, id, body.sku);
-      await putObject(lock);
+        // Release old lock if there was one
+        if (oldSku) {
+          await ddb.send(new DeleteCommand({
+            TableName: TABLE,
+            Key: {
+              [PK]: `UNIQ#${auth.tenantId}#product#SKU#${oldSku}`,
+              [SK]: `${auth.tenantId}|product|${id}`,
+            },
+          })).catch(() => {});
+        }
+      }
     }
 
-    return ok(item);
+    const updated = await updateObject({ tenantId: auth.tenantId, type, id, body: patch });
+    return ok(updated);
   } catch (e: any) {
-    return error(e?.message || "update_failed");
+    return error(e);
   }
 }

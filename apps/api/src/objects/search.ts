@@ -1,22 +1,25 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { ok, bad, error } from "../common/responses";
-import { authMiddleware } from "../auth/middleware";
-import { searchObjects } from "./store";
+import { searchObjects } from "./repo";
+import { getAuth, requirePerm } from "../auth/middleware";
 
-export async function handle(evt: APIGatewayProxyEventV2) {
+export async function handle(event: APIGatewayProxyEventV2) {
   try {
-    const ctx = await authMiddleware(evt);
-    const type = evt.pathParameters?.type;
-    if (!type) return bad("type is required");
+    const auth = await getAuth(event);
+    const type = event.pathParameters?.type;
+    if (!type) return bad("Missing type");
 
-    const q = evt.queryStringParameters?.q ?? "";
-    const { items, next } = await searchObjects(ctx.tenantId, type, q, {
-      next: evt.queryStringParameters?.next,
-      limit: Number(evt.queryStringParameters?.limit ?? 50),
-    });
+    requirePerm(auth, `${type}:read`);
 
-    return ok({ items, next });
+    const body   = event.body ? JSON.parse(event.body) : {};
+    const q      = body.q ?? "";
+    const next   = body.next ?? undefined;
+    const limit  = Number(body.limit ?? 20);
+    const fields = Array.isArray(body.fields) ? body.fields : undefined;
+
+    const page = await searchObjects({ tenantId: auth.tenantId, type, q, next, limit, fields });
+    return ok(page);
   } catch (e: any) {
-    return error(e?.message || "search_failed");
+    return error(e);
   }
 }

@@ -1,64 +1,75 @@
 // apps/mobile/src/navigation/types.ts
 
-export type RootStackParamList = {
-  // Hub / global
-  Hub: undefined;
-  Tenants: undefined;
-  Scan: { intent?: "navigate" | "attach-epc" } | undefined;
+// Generic shape for detail screens: open by id or start with initial payload.
+// We also support a small "mode" hint for your Scan/List screens ("new" | "edit").
+export type DetailParams<T = any> = {
+  id?: string;
+  initial?: Partial<T>;
+  mode?: "new" | "edit";
+};
 
-  DevEventsTools: undefined;
+// Optional params used by Scan to decide what to do after a scan.
+export type ScanParams = {
+  intent?: "navigate" | "attach_epc" | string;
+};
+
+export type RootStackParamList = {
+  // Hub / Global
+  Hub: undefined;
+  Scan: ScanParams | undefined;          // <-- allow params (fixes route.params?.intent)
+  DevDiagnostics: undefined;
+  // Tenants
+  Tenants: undefined;
+
+  // Objects (generic manager)
+  ObjectsList: undefined;
+  ObjectDetail: DetailParams;
+
   // Products
   ProductsList: undefined;
-  ProductDetail: { id?: string; mode?: "new" | "edit" };
-
-  // Objects (generic manager for /objects/{type})
-  ObjectsList: undefined;
-  ObjectDetail: { type: string; id?: string };
+  ProductDetail: DetailParams;
 
   // Clients
   ClientsList: undefined;
-  ClientDetail: { id?: string; mode?: "new" | "edit" };
+  ClientDetail: DetailParams;
 
   // Accounts
   AccountsList: undefined;
-  AccountDetail: { id?: string; mode?: "new" | "edit" };
+  AccountDetail: DetailParams;
 
   // Inventory
   InventoryList: undefined;
-  InventoryDetail: { id?: string; mode?: "new" | "edit" };
+  InventoryDetail: DetailParams;
 
-  // Events (+ deep link to registrations)
+  // Events & Registrations
   EventsList: undefined;
-  EventDetail: { id?: string; mode?: "new" | "edit"; event?: any };
-
-  // Registrations (supports event-scoped filter)
+  EventDetail: DetailParams;
   RegistrationsList: { eventId?: string } | undefined;
-  RegistrationDetail: { id?: string; mode?: "new" | "edit" };
+  RegistrationDetail: DetailParams;
 
   // Reservations
   ReservationsList: undefined;
-  ReservationDetail: { id?: string; mode?: "new" | "edit" };
-
-  // Vendors & Employees
-  VendorsList: undefined;
-  VendorDetail: { id?: string; mode?: "new" | "edit" };
-  
-  EmployeesList: undefined;
-  EmployeeDetail: { id?: string; mode?: "new" | "edit" };
+  ReservationDetail: DetailParams;
 
   // Resources
   ResourcesList: undefined;
-  ResourceDetail: { id?: string; mode?: "new" | "edit" };
+  ResourceDetail: DetailParams;
 
+  // Vendors / Employees
+  VendorsList: undefined;
+  VendorDetail: DetailParams;
+  EmployeesList: undefined;
+  EmployeeDetail: DetailParams;
+
+  // Purchasing
   PurchaseOrdersList: undefined;
-  PurchaseOrderDetail: { id?: string; mode?: "new"|"edit" };
+  PurchaseOrderDetail: DetailParams;
 
+  // Sales
   SalesOrdersList: undefined;
-  SalesOrderDetail: { id?: string; mode?: "new"|"edit" };
+  SalesOrderDetail: DetailParams;
 
+  // Integrations
   IntegrationsList: undefined;
-  IntegrationDetail: { id?: string; mode?: "new"|"edit" };
-  // Optional:
-  IntegrationRunsList: { integrationId: string } | undefined;
-
+  IntegrationDetail: DetailParams;
 };

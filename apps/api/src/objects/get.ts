@@ -1,20 +1,22 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { ok, bad, notfound, error } from "../common/responses";
-import { authMiddleware } from "../auth/middleware";
-import { getObject } from "./store";
+import { getObjectById } from "./repo";
+import { getAuth, requirePerm } from "../auth/middleware";
 
-export async function handle(evt: APIGatewayProxyEventV2) {
+export async function handle(event: APIGatewayProxyEventV2) {
   try {
-    const ctx = await authMiddleware(evt);
-    const type = evt.pathParameters?.type;
-    const id = evt.pathParameters?.id;
-    if (!type || !id) return bad("type and id are required");
+    const auth = await getAuth(event);
+    const type = event.pathParameters?.type;
+    const id   = event.pathParameters?.id;
+    if (!type || !id) return bad("Missing type or id");
 
-    const item = await getObject(ctx.tenantId, type, id);
-    if (!item) return notfound();
+    requirePerm(auth, `${type}:read`);
 
-    return ok(item);
+    const obj = await getObjectById({ tenantId: auth.tenantId, type, id });
+    if (!obj) return notfound("Not Found");
+
+    return ok(obj);
   } catch (e: any) {
-    return error(e?.message || "get_failed");
+    return error(e);
   }
 }

@@ -1,21 +1,48 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
+import {
+  DynamoDBDocumentClient,
+  DeleteCommand,
+} from "@aws-sdk/lib-dynamodb";
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+
 import { ok, bad, notfound, error } from "../common/responses";
-import { authMiddleware } from "../auth/middleware";
-import { getObject, deleteObject } from "./store";
+import { getObjectById, deleteObject } from "./repo";
+import { getAuth, requirePerm } from "../auth/middleware";
 
-export async function handle(evt: APIGatewayProxyEventV2) {
+// Match repo.ts envs
+const TABLE = process.env.MBAPP_OBJECTS_TABLE || process.env.MBAPP_TABLE || "mbapp_objects";
+const PK    = process.env.MBAPP_TABLE_PK || "pk";
+const SK    = process.env.MBAPP_TABLE_SK || "sk";
+
+const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+
+export async function handle(event: APIGatewayProxyEventV2) {
   try {
-    const ctx = await authMiddleware(evt);
-    const type = evt.pathParameters?.type;
-    const id = evt.pathParameters?.id;
-    if (!type || !id) return bad("type and id are required");
+    const auth = await getAuth(event);
+    const type = event.pathParameters?.type;
+    const id   = event.pathParameters?.id;
+    if (!type || !id) return bad("Missing type or id");
 
-    const existing = await getObject(ctx.tenantId, type, id);
-    if (!existing) return notfound();
+    requirePerm(auth, `${type}:write`);
 
-    await deleteObject(ctx.tenantId, type, id);
-    return ok({ deleted: true, id, type });
+    const existing = await getObjectById({ tenantId: auth.tenantId, type, id });
+    if (!existing) return notfound("Not Found");
+
+    // If product has a SKU, release its uniqueness lock
+    if (type === "product" && (existing as any)?.sku) {
+      const sku = String((existing as any).sku);
+      await ddb.send(new DeleteCommand({
+        TableName: TABLE,
+        Key: {
+          [PK]: `UNIQ#${auth.tenantId}#product#SKU#${sku}`,
+          [SK]: `${auth.tenantId}|product|${id}`,
+        },
+      })).catch(() => {});
+    }
+
+    await deleteObject({ tenantId: auth.tenantId, type, id });
+    return ok({ ok: true, id, type, deleted: true });
   } catch (e: any) {
-    return error(e?.message || "delete_failed");
+    return error(e);
   }
 }

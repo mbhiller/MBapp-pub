@@ -1,23 +1,19 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
-import { ok, error } from "../common/responses";
+import { ok, bad, error } from "../common/responses";
+import { listObjects } from "../objects/repo";
 import { getAuth, requirePerm } from "../auth/middleware";
-import { listObjects } from "../objects/store";
 
-export async function handle(evt: APIGatewayProxyEventV2) {
+export async function handle(event: APIGatewayProxyEventV2) {
   try {
-    const ctx = await getAuth(evt);
-    requirePerm(ctx, "workspace:read");
+    const auth = await getAuth(event);
+    const qsp = event.queryStringParameters || {};
+    const limit  = Number(qsp.limit ?? 20);
+    const next   = qsp.next ?? undefined;
+    const q      = qsp.q ?? undefined;
+    const fields = qsp.fields ? String(qsp.fields).split(",").map(s => s.trim()).filter(Boolean) : undefined;
 
-    const limit = Number(evt.queryStringParameters?.limit ?? 50);
-    const next  = evt.queryStringParameters?.next;
-
-    const { items, next: nextToken } = await listObjects(ctx.tenantId, "workspace", {
-      limit,
-      next,
-    });
-
-    return ok({ items, next: nextToken });
-  } catch (e: any) {
-    return error(e?.message || "list_workspaces_failed");
-  }
+    requirePerm(auth, "workspace:read");
+    const page = await listObjects({ tenantId: auth.tenantId, type: "workspace", q, next, limit, fields });
+    return ok(page);
+  } catch (e:any) { return error(e); }
 }

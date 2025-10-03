@@ -24,17 +24,79 @@ import * as ObjDelete from "./objects/delete";
 import * as ObjSearch from "./objects/search";
 // Dev auth
 import * as DevLogin from "./auth/dev-login";
+// Actions (stubs you’ll add)
+import * as PoSubmit   from "./purchasing/po-submit";
+import * as PoApprove  from "./purchasing/po-approve";
+import * as PoReceive  from "./purchasing/po-receive";
+import * as PoCancel   from "./purchasing/po-cancel";
+import * as PoClose    from "./purchasing/po-close";
+import * as SoSubmit   from "./sales/so-submit";
+import * as SoCommit   from "./sales/so-commit";
+import * as SoFulfill  from "./sales/so-fulfill";
+import * as SoCancel   from "./sales/so-cancel";
+import * as SoClose    from "./sales/so-close";
+
+// Inventory on-hand (computed from movements)
+import * as InvOnHandGet from "./inventory/onhand-get";
+import * as InvOnHandBatch from "./inventory/onhand-batch";
+
+// Inventory search (rich)
+import * as InvSearch from "./inventory/search";
+
+// Inventory computed endpoints
+import * as InvMovements from "./inventory/movements";
+
+
+// Registrations & Reservations actions
+import * as RegCancel  from "./events/registration-cancel";
+import * as RegCheckin from "./events/registration-checkin";
+import * as RegCheckout from "./events/registration-checkout";
+import * as ResCancel  from "./resources/reservation-cancel";
+import * as ResStart   from "./resources/reservation-start";
+import * as ResEnd     from "./resources/reservation-end";
+
+import * as GcList   from "./tools/gc-list-type";
+import * as GcDelete from "./tools/gc-delete-type";
+import * as GcListAll   from "./tools/gc-list-all";
+import * as GcDeleteKeys from "./tools/gc-delete-keys";
+
 
 /* Helpers */
 const json = (statusCode: number, body: unknown): APIGatewayProxyResultV2 => ({
   statusCode,
-  headers: { "content-type": "application/json" },
+  headers: {
+    "content-type": "application/json",
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "OPTIONS,GET,POST,PUT,DELETE",
+    "access-control-allow-headers": "Authorization,Content-Type,Idempotency-Key,X-Tenant-Id",
+  },
   body: JSON.stringify(body),
 });
 const notFound = () => json(404, { message: "Not Found" });
 const methodNotAllowed = () => json(405, { message: "Method Not Allowed" });
 const match = (re: RegExp, s: string) => s.match(re)?.slice(1) ?? null;
+ 
+/** Ensure action handlers see { pathParameters: { id } } */
+function withId(event: APIGatewayProxyEventV2, id: string): APIGatewayProxyEventV2 {
+    const e: any = { ...event };
+    e.pathParameters = { ...(event.pathParameters || {}), id };
+    return e;
+}
 
+/** Preflight CORS */
+function isPreflight(e: APIGatewayProxyEventV2) {
+  return e.requestContext.http.method === "OPTIONS";
+}
+const corsOk = (): APIGatewayProxyResultV2 => ({
+  statusCode: 204,
+  headers: {
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "OPTIONS,GET,POST,PUT,DELETE",
+    "access-control-allow-headers": "Authorization,Content-Type,Idempotency-Key,X-Tenant-Id",
+  },
+});
+
+/** Inject pre-auth */
 function injectPreAuth(
   event: APIGatewayProxyEventV2,
   auth: { userId: string; tenantId: string; roles: string[]; policy: any }
@@ -74,6 +136,8 @@ function permForObject(method: string, typeRaw: string) {
 
 export async function handler(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   try {
+    if (isPreflight(event)) return corsOk();
+
     const method = event.requestContext.http.method;
     const path = event.rawPath || event.requestContext.http.path;
 
@@ -99,11 +163,15 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
       if (method === "POST") { requirePerm(auth, "view:write"); return ViewsCreate.handle(event); }
       return methodNotAllowed();
     }
-    if (match(/^\/views\/([^/]+)$/i, path)) {
-      if (method === "GET")    { requirePerm(auth, "view:read");  return ViewsGet.handle(event); }
-      if (method === "PUT")    { requirePerm(auth, "view:write"); return ViewsUpdate.handle(event); }
-      if (method === "DELETE") { requirePerm(auth, "view:write"); return ViewsDelete.handle(event); }
-      return methodNotAllowed();
+    {
+      const m = match(/^\/views\/([^/]+)$/i, path);
+      if (m) {
+        const [id] = m;
+        if (method === "GET")    { requirePerm(auth, "view:read");  return ViewsGet.handle(withId(event, id)); }
+        if (method === "PUT")    { requirePerm(auth, "view:write"); return ViewsUpdate.handle(withId(event, id)); }
+        if (method === "DELETE") { requirePerm(auth, "view:write"); return ViewsDelete.handle(withId(event, id)); }
+        return methodNotAllowed();
+      }
     }
 
     // Workspaces
@@ -112,11 +180,120 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
       if (method === "POST") { requirePerm(auth, "workspace:write"); return WsCreate.handle(event); }
       return methodNotAllowed();
     }
-    if (match(/^\/workspaces\/([^/]+)$/i, path)) {
-      if (method === "GET")    { requirePerm(auth, "workspace:read");  return WsGet.handle(event); }
-      if (method === "PUT")    { requirePerm(auth, "workspace:write"); return WsUpdate.handle(event); }
-      if (method === "DELETE") { requirePerm(auth, "workspace:write"); return WsDelete.handle(event); }
-      return methodNotAllowed();
+    {
+      const m = match(/^\/workspaces\/([^/]+)$/i, path);
+      if (m) {
+        const [id] = m;
+        if (method === "GET")    { requirePerm(auth, "workspace:read");  return WsGet.handle(withId(event, id)); }
+        if (method === "PUT")    { requirePerm(auth, "workspace:write"); return WsUpdate.handle(withId(event, id)); }
+        if (method === "DELETE") { requirePerm(auth, "workspace:write"); return WsDelete.handle(withId(event, id)); }
+        return methodNotAllowed();
+      }
+    }
+
+    /* ========= Actions ========= */
+    // Purchasing PO actions
+    {
+      const m = match(/^\/purchasing\/po\/([^/]+):(submit|approve|receive|cancel|close)$/i, path);
+      if (m) {
+        const [id, action] = m;
+        switch (action) {
+          case "submit":  requirePerm(auth, "purchase:write");   return PoSubmit.handle(withId(event, id));
+          case "approve": requirePerm(auth, "purchase:approve"); return PoApprove.handle(withId(event, id));
+          case "receive": requirePerm(auth, "purchase:receive"); return PoReceive.handle(withId(event, id));
+          case "cancel":  requirePerm(auth, "purchase:cancel");  return PoCancel.handle(withId(event, id));
+          case "close":   requirePerm(auth, "purchase:close");   return PoClose.handle(withId(event, id));
+        }
+        return methodNotAllowed();
+      }
+    }
+
+    // Sales SO actions
+    {
+      const m = match(/^\/sales\/so\/([^/]+):(submit|commit|fulfill|cancel|close)$/i, path);
+      if (m) {
+        const [id, action] = m;
+        switch (action) {
+          case "submit":  requirePerm(auth, "sales:write");    return SoSubmit.handle(withId(event, id));
+          case "commit":  requirePerm(auth, "sales:commit");   return SoCommit.handle(withId(event, id));
+          case "fulfill": requirePerm(auth, "sales:fulfill");  return SoFulfill.handle(withId(event, id));
+          case "cancel":  requirePerm(auth, "sales:cancel");   return SoCancel.handle(withId(event, id));
+          case "close":   requirePerm(auth, "sales:close");    return SoClose.handle(withId(event, id));
+        }
+        return methodNotAllowed();
+      }
+    }
+
+    // Inventory on-hand (computed)
+    {
+      const m = match(/^\/inventory\/([^/]+)\/onhand$/i, path);
+      if (m) {
+        const [itemId] = m;
+        requirePerm(auth, "inventory:read");
+        return InvOnHandGet.handle(withId(event, itemId));
+      }
+    }
+
+    // Inventory onhand-batch
+    if (method === "POST" && path === "/inventory/onhand:batch") {
+      requirePerm(auth, "inventory:read");
+      return InvOnHandBatch.handle(event);
+    }
+
+    // Inventory movements (computed)
+    {
+      const m = match(/^\/inventory\/([^/]+)\/movements$/i, path);
+      if (m) {
+        const [itemId] = m;
+        requirePerm(auth, "inventory:read");
+        return InvMovements.handle(withId(event, itemId));
+      }
+    }
+
+    // Rich inventory search (label + uom + counters)
+    if (path === "/inventory/search" && method === "POST") {
+      requirePerm(auth, "inventory:read");
+      return InvSearch.handle(event);
+    }
+
+    // Event Registration actions
+    {
+      const m = match(/^\/events\/registration\/([^/]+):(cancel|checkin|checkout)$/i, path);
+      if (m) {
+        const [id, action] = m;
+        requirePerm(auth, "registration:write");
+        if (action === "cancel")   return RegCancel.handle(withId(event, id));
+        if (action === "checkin")  return RegCheckin.handle(withId(event, id));
+        if (action === "checkout") return RegCheckout.handle(withId(event, id));
+        return methodNotAllowed();
+      }
+    }
+
+    // Resource Reservation actions
+    {
+      const m = match(/^\/resources\/reservation\/([^/]+):(cancel|start|end)$/i, path);
+      if (m) {
+        const [id, action] = m;
+        requirePerm(auth, "reservation:write");
+        if (action === "cancel") return ResCancel.handle(withId(event, id));
+        if (action === "start")  return ResStart.handle(withId(event, id));
+        if (action === "end")    return ResEnd.handle(withId(event, id));
+        return methodNotAllowed();
+      }
+    }
+
+    // Tools: GC
+    const gcList = match(/^\/tools\/gc\/([^/]+)$/i, path);
+    if (gcList && method === "GET")    { requirePerm(auth, "admin:reset"); return GcList.handle(withTypeId(event, { type: gcList[0] })); }
+    if (gcList && method === "DELETE") { requirePerm(auth, "admin:reset"); return GcDelete.handle(withTypeId(event, { type: gcList[0] })); }
+    // Admin GC helpers
+    if (path === "/tools/gc/list-all" && method === "GET") {
+      requirePerm(auth, "admin:reset");
+      return GcListAll.handle(event);
+    }
+    if (path === "/tools/gc/delete-keys" && method === "POST") {
+      requirePerm(auth, "admin:reset");
+      return GcDeleteKeys.handle(event);
     }
 
     /* ========= Objects ========= */
@@ -138,7 +315,7 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
       return methodNotAllowed();
     }
 
-    // /objects/:type/:id (get/update/delete)
+    // /objects/:type/:id (update|get|delete)
     const itemParts = match(/^\/objects\/([^/]+)\/([^/]+)$/i, path);
     if (itemParts) {
       const [type, id] = itemParts;
@@ -147,6 +324,8 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
       if (method === "DELETE") { requirePerm(auth, permForObject("DELETE", type)); return ObjDelete.handle(withTypeId(event, { type, id })); }
       return methodNotAllowed();
     }
+
+
 
     return notFound();
   } catch (e: any) {

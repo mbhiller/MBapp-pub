@@ -7,7 +7,7 @@ const TYPE = "event";
 function toClientOpts(opts?: { limit?: number; next?: string | null; q?: string }) {
   const out: { limit?: number; next?: string; sort?: "asc" | "desc"; by?: string; q?: string } = {};
   if (opts?.limit != null) out.limit = opts.limit;
-  if (opts?.next) out.next = opts.next;
+  if (opts?.next) out.next = opts.next;            // keep as string; client will pass through
   if (opts?.q) out.q = opts.q;
   out.by = "updatedAt";
   out.sort = "desc";
@@ -23,7 +23,8 @@ export function getEvent(id: string): Promise<Event> {
 }
 
 export function createEvent(body: Partial<Event>): Promise<Event> {
-  return createObject<Event>(TYPE, body);
+  // ✅ ensure type is present for the generic /objects router
+  return createObject<Event>(TYPE, { ...body, type: TYPE } as Partial<Event>);
 }
 
 export function updateEvent(id: string, patch: Partial<Event>): Promise<Event> {

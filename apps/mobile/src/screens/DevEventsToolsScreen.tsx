@@ -1,434 +1,655 @@
-// apps/mobile/src/screens/DevEventsToolsScreen.tsx
 import React from "react";
-import { ScrollView, View, Text, Pressable, Alert, TextInput, Platform } from "react-native";
-import { listObjects, apiClient, type ListPage } from "../api/client"; // adjust import if your path differs
+import { ScrollView, View, Text, Pressable, TextInput, Platform } from "react-native";
+import type { components } from "../api/generated-types";
+type Schemas = components["schemas"];
+import {
+  apiClient,
+  listObjects,
+  createObject,
+  updateObject,
+  getObject,
+  deleteObject as delObject,
+  setBearerToken,
+} from "../api/client";
 
-async function deleteObject(type: string, id: string) {
-  await apiClient.del(`/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}`);
-}
+/* ---------- UI bits ---------- */
+type BtnProps = { label: string; onPress?: () => any | Promise<any> };
+const Btn = ({ label, onPress }: BtnProps) => {
+  const handlePress = React.useCallback(() => {
+    try {
+      const p = onPress?.();
+      if (p && typeof (p as Promise<any>).then === "function") void (p as Promise<any>).catch(() => {});
+    } catch {}
+  }, [onPress]);
 
-type Base = { id?: string; type: string; createdAt?: string; updatedAt?: string; externalId?: string };
+  return (
+    <Pressable
+      onPress={handlePress}
+      style={{ backgroundColor: "#2563eb", paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, marginRight: 8, marginTop: 8 }}
+    >
+      <Text style={{ color: "white", fontWeight: "700" }}>{label}</Text>
+    </Pressable>
+  );
+};
 
-type AccountRow   = Base & { type: "account";  name?: string; number?: string; accountType?: string; currency?: string; balance?: number; status?: "active" | "inactive" | "archived"; };
-type ClientRow    = Base & { type: "client";   name?: string; displayName?: string; firstName?: string; lastName?: string; email?: string; phone?: string; status?: "active" | "inactive" | "archived"; notes?: string; };
-type ProductRow   = Base & { type: "product";  name?: string; kind?: "good" | "service"; sku?: string; price?: number; taxCode?: string; status?: "active" | "inactive" | "archived"; notes?: string; };
-type InventoryRow = Base & { type: "inventory"; productId?: string; name?: string; sku?: string; quantity?: number; uom?: string; location?: string; minQty?: number; maxQty?: number; status?: "active" | "inactive" | "archived"; notes?: string; };
-type ResourceRow  = Base & { type: "resource"; name?: string; code?: string; url?: string; expiresAt?: string; };
-type EventRow     = Base & { type: "event";    name: string; description?: string; location?: string; startsAt: string; endsAt?: string; status?: "available" | "unavailable" | "maintenance"; capacity?: number; };
-type RegistrationRow = Base & { type: "registration"; eventId: string; clientId?: string; startsAt?: string; endsAt?: string; status?: "pending"|"confirmed"|"cancelled"|"checked_in"|"completed"; registeredAt?: string; notes?: string; };
-type ReservationRow  = Base & { type: "reservation"; resourceId: string; start?: string; end?: string; startsAt?: string; endsAt?: string; clientId?: string; status?: "pending"|"confirmed"|"cancelled"|"checked_in"|"completed"; notes?: string; };
-type VendorRow    = Base & { type: "vendor";   name: string; displayName?: string; email?: string; phone?: string; notes?: string; status?: "active" | "inactive" | "archived"; };
-type EmployeeRow  = Base & { type: "employee"; displayName: string; email?: string; phone?: string; role?: string; status?: "active" | "inactive" | "terminated"; hiredAt?: string; startDate?: string; terminatedAt?: string; notes?: string; };
-
-const now = Date.now();
-const iso = (t: number) => new Date(t).toISOString();
-const pick = <T,>(arr: T[], i: number) => arr[i % arr.length];
-const Mono = ({ children }: { children: React.ReactNode }) => (
-  <Text style={{ color: "#d1d5db", fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", fontSize: 12, lineHeight: 16 }}>{children as any}</Text>
+const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
+  <View style={{ marginTop: 16, padding: 12, borderWidth: 1, borderColor: "#374151", borderRadius: 10, backgroundColor: "#0b1220" }}>
+    <Text style={{ color: "#e5e7eb", fontWeight: "700", marginBottom: 8 }}>{title}</Text>
+    {children}
+  </View>
 );
-const j = (x: any) => { try { return JSON.stringify(x, null, 2); } catch { return String(x); } };
-const Label = ({ children }: { children: React.ReactNode }) => <Text style={{ color: "#9ca3af", marginBottom: 4 }}>{children as any}</Text>;
 const Box = (props: any) => (
   <TextInput
     {...props}
-    style={[{
-      borderWidth: 1, borderColor: "#374151", borderRadius: 8,
-      paddingHorizontal: 10, paddingVertical: 8, color: "#e5e7eb",
-      backgroundColor: "#111827", marginBottom: 8,
-    }, props.style]}
+    style={[
+      { borderWidth: 1, borderColor: "#374151", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, color: "#e5e7eb", backgroundColor: "#111827", marginBottom: 8 },
+      props.style,
+    ]}
     placeholderTextColor="#6b7280"
   />
 );
 
-// wipe (paged)
-async function wipeType(type: string) {
-  let next: string | undefined = undefined;
+/* ---------- helpers ---------- */
+function nowTag(prefix: string) {
+  const d = new Date();
+  return `${prefix}-${d.toISOString().replace(/[-:TZ.]/g, "").slice(4, 12)}`;
+}
+async function wipeType(type: string, log: (s: string) => void) {
+  let next: string | undefined;
+  let total = 0;
   for (let i = 0; i < 200; i++) {
-    const page: ListPage<Base> = await listObjects<Base>(type, { limit: 200, next, by: "updatedAt", sort: "desc" });
-    const items: Base[] = Array.isArray(page?.items) ? page.items : [];
-    for (const it of items) if (it.id) await deleteObject(type, it.id);
-    next = (page as any)?.next ?? undefined;
+    const page = await listObjects<any>(type, { limit: 100, next });
+    const items = page.items || [];
+    if (!items.length) break;
+    for (const it of items) {
+      try { await delObject(type, String(it.id)); total++; }
+      catch (e: any) { log(`DELETE ${type}/${it.id} failed: ${e?.message || e}`); }
+    }
+    next = page.next;
     if (!next) break;
   }
+  return total;
+}
+function pretty(obj: any) { try { return JSON.stringify(obj, null, 2); } catch { return String(obj); } }
+function normalizeError(e: any) {
+  const status = e?.status || e?.statusCode || e?.response?.status;
+  const body = e?.body || e?.response?.data || e?.data;
+  const message = e?.message ?? "Error";
+  return { message, status, body };
 }
 
-// bulk POST
-async function postAll<T extends Base>(type: string, rows: Omit<T, "id">[]): Promise<T[]> {
-  const out: T[] = [];
-  for (const row of rows) out.push(await apiClient.post<T>(`/objects/${encodeURIComponent(type)}`, row));
-  return out;
-}
-
-// generators
-function genAccounts(): Omit<AccountRow, "id">[] {
-  const currencies = ["USD","EUR","GBP","JPY","CAD"], types = ["asset","liability","revenue","expense","equity"];
-  return Array.from({ length: 5 }, (_, i) => ({ type:"account", name:`Account ${i+1}`, number:`ACCT-${1000+i}`, accountType:pick(types,i), currency:pick(currencies,i), balance:(i+1)*1000, status:i%4===3?"archived":"active" }));
-}
-function genClients(): Omit<ClientRow, "id">[] {
-  return Array.from({ length: 5 }, (_, i) => ({ type:"client", name:`Client ${i+1}`, displayName:`C${i+1}`, firstName:`First${i+1}`, lastName:`Last${i+1}`, email:`client${i+1}@example.test`, phone:`+1-555-01${(10+i).toString().padStart(2,"0")}`, status:i%4===3?"archived":"active", notes:i%2?"Preferred":"—" }));
-}
-function genProducts(): Omit<ProductRow, "id">[] {
-  return Array.from({ length: 5 }, (_, i) => ({ type:"product", name:i%2?`Service Tier ${i+1}`:`Widget ${i+1}`, kind:i%2?"service":"good", sku:`SKU-${(i+1).toString().padStart(3,"0")}`, price:(i+1)*25, taxCode:i%2?"SRV":"GDS", status:i%4===3?"inactive":"active", notes:i%2?"Billed monthly":"Ships in 2 days" }));
-}
-function genResources(): Omit<ResourceRow, "id">[] {
-  return Array.from({ length: 5 }, (_, i) => ({ type:"resource", name:`Resource ${i+1}`, code:`RES-${200+i}`, url:`https://example.test/res/${200+i}`, expiresAt:iso(now+(i+1)*7*24*3600_000) }));
-}
-function genEvents(): Omit<EventRow, "id">[] {
-  return Array.from({ length: 5 }, (_, i) => ({ type:"event", name:`Event ${i+1}`, description:`Description for event ${i+1}`, location:i%2?"Main Hall":"Expo Center", startsAt:iso(now+(i+1)*2*3600_000), endsAt:iso(now+(i+1)*4*3600_000), status:i%3===0?"available":i%3===1?"unavailable":"maintenance", capacity:100+i*50 }));
-}
-function genVendors(): Omit<VendorRow, "id">[] {
-  const statuses: VendorRow["status"][] = ["active","inactive","archived"];
-  return Array.from({ length: 5 }, (_, i) => ({ type:"vendor", name:`Vendor ${i+1}`, displayName:`V${i+1}`, email:`vendor${i+1}@example.test`, phone:`+1-555-02${(10+i).toString().padStart(2,"0")}`, notes:i%2?"Priority partner":"—", status: statuses[i % statuses.length] }));
-}
-function genEmployees(): Omit<EmployeeRow, "id">[] {
-  return Array.from({ length: 5 }, (_, i) => ({ type:"employee", displayName:`Employee ${i+1}`, email:`employee${i+1}@example.test`, phone:`+1-555-03${(10+i).toString().padStart(2,"0")}`, role:i%2?"Coordinator":"Technician", status:i%3===2?"inactive":"active", hiredAt:iso(now-(i+10)*24*3600_000), startDate:iso(now-(i+10)*24*3600_000), notes:i%2?"Part-time":"—" }));
-}
-function genInventory(products: ProductRow[]): Omit<InventoryRow, "id">[] {
-  // 5 rows: some linked to products, some standalone (no productId)
-  return Array.from({ length: 5 }, (_, i) => {
-    const maybeProduct = i % 2 === 0 ? products[i % products.length] : undefined;
-    return {
-      type:"inventory",
-      productId: maybeProduct?.id,  // undefined for standalone
-      name: maybeProduct?.name ?? (i % 2 ? `Cleaner ${i+1}` : `Supply ${i+1}`),
-      sku: maybeProduct?.sku ?? `INV-${300+i}`,
-      quantity: 10 + i * 5,
-      uom: "ea",
-      location: i%2 ? "Supply Closet" : "Warehouse A",
-      minQty: 5, maxQty: 100,
-      status: i%4===3 ? "inactive" : "active",
-      notes: i%2 ? "internal use" : "cycle count",
-    };
-  });
-}
-function genRegistrations(events: EventRow[], clients: ClientRow[]): Omit<RegistrationRow, "id">[] {
-  const statuses: RegistrationRow["status"][] = ["pending","confirmed","cancelled","checked_in","completed"];
-  return Array.from({ length: 5 }, (_, i) => {
-    const e = events[i % events.length], c = clients[i % clients.length];
-    return { type:"registration", eventId:e.id!, clientId:c.id, startsAt:iso(now+i*3600_000), endsAt:iso(now+(i+2)*3600_000), status: statuses[i % statuses.length], registeredAt:iso(now-i*3600_000), notes:i%2?"Walk-in":"Pre-registered" };
-  });
-}
-function genReservations(resources: ResourceRow[], clients: ClientRow[]): Omit<ReservationRow, "id">[] {
-  const statuses: ReservationRow["status"][] = ["pending","confirmed","cancelled","checked_in","completed"];
-  return Array.from({ length: 5 }, (_, i) => {
-    const r = resources[i % resources.length], c = clients[i % clients.length];
-    const s = now + (i+1)*3600_000, e = s + 2*3600_000;
-    return { type:"reservation", resourceId:r.id!, start:iso(s), end:iso(e), startsAt:iso(s), endsAt:iso(e), clientId:c.id, status: statuses[i % statuses.length], notes:i%2?"Hold":"Firm" };
-  });
-}
-
-function getEventId(reg: any): string | undefined {
-  if (typeof reg?.eventId === "string") return reg.eventId;
-  if (typeof reg?.event_id === "string") return reg.event_id;
-  if (typeof reg?.event === "string") return reg.event;
-  if (reg?.event?.id) return String(reg.event.id);
-  if (reg?.meta?.eventId) return String(reg.meta.eventId);
-  if (Array.isArray(reg?.refs)) {
-    const r = reg.refs.find((r: any) => r?.type === "event" && (r?.id || r?.refId));
-    if (r) return String(r.id ?? r.refId);
-  }
-}
-
+/* ---------- screen ---------- */
 export default function DevEventsToolsScreen() {
-  const [busy, setBusy] = React.useState(false);
-  const [log, setLog] = React.useState<string>("");
+  const [log, setLog] = React.useState("");
+  const append = (s: string) => setLog((p) => (p ? p + "\n" : "") + s);
 
-  const [iType, setIType]   = React.useState<string>("event");
-  const [iId, setIId]       = React.useState<string>("");
-  const [iLimit, setILimit] = React.useState<string>("10");
-  const [iNext, setINext]   = React.useState<string>("");
-  const [iQ, setIQ]         = React.useState<string>("");
+  const [resp, setResp] = React.useState<string>("—");
+  const show = (x: any) => setResp(pretty(x));
 
-  const [rawMethod, setRawMethod] = React.useState<"GET"|"POST"|"PUT"|"DELETE">("GET");
-  const [rawPath, setRawPath]     = React.useState<string>("/objects/event");
-  const [rawBody, setRawBody]     = React.useState<string>("");
+  // dev login
+  const [devUser, setDevUser] = React.useState("dev@example.com");
+  const [devTenant, setDevTenant] = React.useState("DemoTenant");
 
-  const [summary, setSummary] = React.useState<string>("");
-  const [out, setOut] = React.useState<any>(null);
+  // objects quick actions
+  const [rawType, setRawType] = React.useState("purchaseOrder");
+  const [rawId, setRawId] = React.useState("");
 
-  const append = (s: string) => setLog((p) => `${p}${p ? "\n" : ""}${s}`);
+  // search
+  const [searchType, setSearchType] = React.useState("purchaseOrder");
+  const [searchField, setSearchField] = React.useState("status");
+  const [searchValue, setSearchValue] = React.useState("draft");
 
-  const wipeAll = React.useCallback(async () => {
-    if (busy) return;
-    setBusy(true); setLog("");
+  /* ----- server/auth ----- */
+  const doHealth = async () => {
     try {
-      append("Wiping registrations…"); await wipeType("registration");
-      append("Wiping reservations…");  await wipeType("reservation");
-      append("Wiping inventory…");     await wipeType("inventory");
-
-      append("Wiping events…");        await wipeType("event");
-      append("Wiping resources…");     await wipeType("resource");
-      append("Wiping products…");      await wipeType("product");
-      append("Wiping clients…");       await wipeType("client");
-      append("Wiping vendors…");       await wipeType("vendor");
-      append("Wiping employees…");     await wipeType("employee");
-      append("Wiping accounts…");      await wipeType("account");
-
-      append("Done ✅");
-      Alert.alert("Wipe complete", "All modules wiped.");
-    } catch (e: any) {
-      append(`Error: ${e?.message ?? String(e)}`);
-      Alert.alert("Error", e?.message ?? String(e));
-    } finally {
-      setBusy(false);
-    }
-  }, [busy]);
-
-  const seedAll = React.useCallback(async () => {
-    if (busy) return;
-    setBusy(true); setLog("");
+      const res = await apiClient.get<{ ok: boolean; now: string; service: string }>("/health");
+      append(`HEALTH ok=${res.ok} now=${res.now}`);
+      show(res);
+    } catch (e: any) { const n = normalizeError(e); append(`HEALTH error: ${n.message}`); show(n); }
+  };
+  const doDevLogin = async () => {
     try {
-      append("Seeding accounts…");      await postAll<AccountRow>("account", genAccounts());
-      append("Seeding clients…"); const clients = await postAll<ClientRow>("client", genClients());
-      append("Seeding products…"); const products = await postAll<ProductRow>("product", genProducts());
-      append("Seeding resources…"); const resources = await postAll<ResourceRow>("resource", genResources());
-      append("Seeding events…");   const events    = await postAll<EventRow>("event", genEvents());
-      append("Seeding vendors…");        await postAll<VendorRow>("vendor", genVendors());
-      append("Seeding employees…");      await postAll<EmployeeRow>("employee", genEmployees());
-      append("Seeding inventory…");      await postAll<InventoryRow>("inventory", genInventory(products));
-      append("Seeding registrations…");  await postAll<RegistrationRow>("registration", genRegistrations(events, clients));
-      append("Seeding reservations…");   await postAll<ReservationRow>("reservation", genReservations(resources, clients));
+      const data = await apiClient.post<{ token: string }>("/auth/dev-login", { email: devUser, tenantId: devTenant });
+      setBearerToken(data.token);
+      append("DEV LOGIN ok — bearer set");
+      show(data);
+    } catch (e: any) { const n = normalizeError(e); append(`DEV LOGIN failed: ${n.message}`); show(n); }
+  };
+  const doPolicy = async () => {
+    try { const p = await apiClient.get<any>("/auth/policy"); append("POLICY loaded"); show(p); }
+    catch (e: any) { const n = normalizeError(e); append(`POLICY failed: ${n.message}`); show(n); }
+  };
 
-      append("Done ✅");
-      Alert.alert("Seed complete", "5 records added for every module.");
-    } catch (e: any) {
-      append(`Error: ${e?.message ?? String(e)}`);
-      Alert.alert("Error", e?.message ?? String(e));
-    } finally {
-      setBusy(false);
-    }
-  }, [busy]);
-
-  const wipeThenSeed = React.useCallback(async () => {
-    await wipeAll();
-    setTimeout(() => { seedAll(); }, 300);
-  }, [wipeAll, seedAll]);
-
-  const runGet = React.useCallback(async () => {
+  /* ----- generic objects quick actions ----- */
+  const doGet = async () => {
+    try { const r = await getObject<any>(rawType.trim(), rawId.trim()); append(`${rawType}/${rawId}: ok`); show(r); }
+    catch (e: any) { const n = normalizeError(e); append(`GET ${rawType}/${rawId} failed: ${n.message}`); show(n); }
+  };
+  const doDelete = async () => {
+    try { await delObject(rawType.trim(), rawId.trim()); append(`DELETE ${rawType}/${rawId}: ok`); show({ ok: true }); }
+    catch (e: any) { const n = normalizeError(e); append(`DELETE ${rawType}/${rawId} failed: ${n.message}`); show(n); }
+  };
+  const doWipe = async () => {
+    try { const n = await wipeType(rawType.trim(), append); const r = { type: rawType, deleted: n }; append(`WIPE ${rawType}: deleted ${n} item(s).`); show(r); }
+    catch (e: any) { const n = normalizeError(e); append(`WIPE ${rawType} failed: ${n.message}`); show(n); }
+  };
+  const doSearch = async () => {
     try {
-      setSummary(`GET /objects/${iType}/${iId}`);
-      const res = await apiClient.get(`/objects/${encodeURIComponent(iType)}/${encodeURIComponent(iId)}`);
-      setOut(res);
-    } catch (e: any) {
-      setOut({ error: e?.message ?? String(e) });
-    }
-  }, [iType, iId]);
+      const res = await apiClient.post<{ items: any[]; next?: string }>(`/objects/${encodeURIComponent(searchType)}/search`, {
+        [searchField]: searchValue, limit: 50,
+      });
+      append(`SEARCH ${searchType} ${searchField}=${searchValue}: ok`);
+      show(res);
+    } catch (e: any) { const n = normalizeError(e); append(`SEARCH failed: ${n.message}`); show(n); }
+  };
 
-  const runList = React.useCallback(async () => {
+  /* ----- seed helpers ----- */
+  const seedVendor = async () => {
+    const vendor = await createObject<any>("vendor", { type: "vendor", name: nowTag("Vendor"), status: "active" });
+    append(`CREATED vendor: ${vendor.id}`); show(vendor);
+    return vendor;
+  };
+  const seedCustomer = async () => {
+    const cust = await createObject<any>("customer", { type: "customer", name: nowTag("Customer"), status: "active" });
+    append(`CREATED customer: ${cust.id}`); show(cust);
+    return cust;
+  };
+  const seedClient = async () => {
+    const client = await createObject<any>("client", { type: "client", name: nowTag("Client"), status: "active" });
+    append(`CREATED client: ${client.id}`); show(client);
+    return client;
+  };
+  const seedAccount = async () => {
+    const acc = await createObject<any>("account", { type: "account", name: nowTag("Account"), status: "active" });
+    append(`CREATED account: ${acc.id}`); show(acc);
+    return acc;
+  };
+  const seedProduct = async () => {
+    const product = await createObject<any>("product", {
+      type: "product",
+      name: nowTag("Product"),
+      sku: `SKU-${Math.random().toString(36).slice(2, 8).toUpperCase()}`,
+      kind: "good",
+      status: "active",
+    });
+    append(`CREATED product: ${product.id}`); show(product);
+    return product;
+  };
+  const seedInventory = async (productId?: string) => {
+    const inv = await createObject<any>("inventory", { type: "inventory", productId, uom: "each", status: "active" });
+    append(`CREATED inventory: ${inv.id}`); show(inv);
+    return inv;
+  };
+
+  // ---------- PO helpers ----------
+  const seedPOHeader = async (vendor?: any) => {
+    const po = await createObject<any>("purchaseOrder", {
+      type: "purchaseOrder",
+      status: "draft",
+      vendorId: vendor?.id,
+      vendorName: vendor?.name ?? "Sample Vendor",
+      orderNumber: nowTag("PO"),
+      notes: "Seeded from mobile Dev Tools",
+    });
+    append(`CREATED purchaseOrder: ${po.id}`); show(po);
+    return po;
+  };
+  const seedPOLine = async (poId: string, itemId: string) => {
+    const updated = await updateObject<any>("purchaseOrder", poId, {
+      lines: [{ itemId, qty: 5, uom: "each", qtyReceived: 0 }],
+    });
+    append(`UPDATED purchaseOrder (add line): ${updated.id}`); show(updated);
+    return updated;
+  };
+  const poSubmit = async (id: string) => apiClient.post(`/purchasing/po/${encodeURIComponent(id)}:submit`, {});
+  const poApprove = async (id: string) => apiClient.post(`/purchasing/po/${encodeURIComponent(id)}:approve`, {});
+  const poReceiveAll = async (id: string) => {
+    const po = await getObject<any>("purchaseOrder", id);
+    const lines = (po.lines || []).map((l: any) => {
+      const rem = Math.max(0, Number(l.qty ?? 0) - Number(l.qtyReceived ?? 0));
+      return rem > 0 ? { lineId: String(l.id), deltaQty: rem } : null;
+    }).filter(Boolean) as any[];
+    if (!lines.length) return { ok: true, note: "Nothing to receive" };
+    return apiClient.post(`/purchasing/po/${encodeURIComponent(id)}:receive`, { lines });
+  };
+
+  // ---------- SO helpers ----------
+  const seedSOHeader = async (customer?: any) => {
+    const so = await createObject<any>("salesOrder", {
+      type: "salesOrder",
+      status: "draft",
+      customerId: customer?.id,
+      customerName: customer?.name ?? "Sample Customer",
+      orderNumber: nowTag("SO"),
+      notes: "Seeded from mobile Dev Tools",
+    });
+    append(`CREATED salesOrder: ${so.id}`); show(so);
+    return so;
+  };
+  const seedSOLine = async (soId: string, itemId: string) => {
+    const updated = await updateObject<any>("salesOrder", soId, {
+      lines: [{ itemId, qty: 2, uom: "each", qtyFulfilled: 0 }],
+    });
+    append(`UPDATED salesOrder (add line): ${updated.id}`); show(updated);
+    return updated;
+  };
+  const soSubmit = async (id: string) => apiClient.post(`/sales/so/${encodeURIComponent(id)}:submit`, {});
+  const soCommit = async (id: string) => apiClient.post(`/sales/so/${encodeURIComponent(id)}:commit`, {});
+  const soFulfillAll = async (id: string) => {
+    const so = await getObject<any>("salesOrder", id);
+    const lines = (so.lines || []).map((l: any) => {
+      const rem = Math.max(0, Number(l.qty ?? 0) - Number(l.qtyFulfilled ?? 0));
+      return rem > 0 ? { lineId: String(l.id), deltaQty: rem } : null;
+    }).filter(Boolean) as any[];
+    if (!lines.length) return { ok: true, note: "Nothing to fulfill" };
+    return apiClient.post(`/sales/so/${encodeURIComponent(id)}:fulfill`, { lines });
+  };
+
+  // ---------- Events/Resources ----------
+  const seedEvent = async () => {
+    const now = new Date();
+    const startsAt = new Date(now.getTime() + 60 * 60 * 1000).toISOString();
+    const endsAt   = new Date(now.getTime() + 3 * 60 * 60 * 1000).toISOString();
+    const e = await apiClient.post<Schemas["Event"]>("/objects/event", {
+      type: "event",
+      name: "Demo Event",
+      startsAt,
+      endsAt,
+      status: "available",
+      capacity: 100,
+      location: "Main Arena",
+    });
+    append(`CREATED event: ${e.id}`); show(e);
+    return e;
+  };
+  const seedResource = async () => {
+    const r = await apiClient.post<Schemas["Resource"]>("/objects/resource", {
+      type: "resource",
+      name: "Stall A-01",
+      kind: "stall",
+      status: "active",
+    });
+    append(`CREATED resource: ${r.id}`); show(r);
+    return r;
+  };
+  const seedRegistration = async (eventId: string) => {
+    const reg = await apiClient.post<Schemas["Registration"]>("/objects/registration", {
+      type: "registration",
+      eventId,
+      clientName: "Demo Rider",
+      qty: 1,
+      status: "confirmed",
+    });
+    append(`CREATED registration: ${reg.id}`); show(reg);
+    return reg;
+  };
+  const seedReservation = async (resourceId: string) => {
+    const now = new Date();
+    const startsAt = new Date(now.getTime() + 30 * 60 * 1000).toISOString();
+    const endsAt   = new Date(now.getTime() + 2 * 60 * 1000 * 60).toISOString();
+    const resv = await apiClient.post<Schemas["Reservation"]>("/objects/reservation", {
+      type: "reservation",
+      resourceId,
+      startsAt,
+      endsAt,
+      status: "confirmed",
+      clientName: "Demo Client",
+    });
+    append(`CREATED reservation: ${resv.id}`); show(resv);
+    return resv;
+  };
+
+  // ---------- composed flows ----------
+  const seedPurchaseFlow = async () => {
+    const vendor = await seedVendor();
+    const product = await seedProduct();
+    const inv = await seedInventory(product?.id);
+    const po = await seedPOHeader(vendor);
+    await seedPOLine(String(po.id), String(inv.id));
+    append("SEED purchase flow: vendor+product+inventory+PO line — ok");
+    return { vendor, product, inv, poId: po.id };
+  };
+  const seedSalesFlow = async () => {
+    const customer = await seedCustomer();
+    const product = await seedProduct();
+    const inv = await seedInventory(product?.id);
+    const so = await seedSOHeader(customer);
+    await seedSOLine(String(so.id), String(inv.id));
+    append("SEED sales flow: customer+product+inventory+SO line — ok");
+    return { customer, product, inv, soId: so.id };
+  };
+  const seedAllCore = async () => {
+    const vendor = await seedVendor();
+    const customer = await seedCustomer();
+    const client = await seedClient();
+    const account = await seedAccount();
+    const product = await seedProduct();
+    const inv = await seedInventory(product?.id);
+    const po = await seedPOHeader(vendor);
+    await seedPOLine(String(po.id), String(inv.id));
+    const so = await seedSOHeader(customer);
+    await seedSOLine(String(so.id), String(inv.id));
+    append("SEED ALL (core): vendor + customer + client + account + product + inventory + PO(line) + SO(line) — ok");
+    return { vendor, customer, client, account, product, inv, poId: po.id, soId: so.id };
+  };
+  const seedEverything = async () => {
+    const core = await seedAllCore();
+    const event = await seedEvent();
+    const resource = await seedResource();
+    const reg = await seedRegistration(String(event.id));
+    const resv = await seedReservation(String(resource.id));
+    const result = { ...core, eventId: event.id, resourceId: resource.id, registrationId: reg.id, reservationId: resv.id };
+    append("SEED EVERYTHING — done");
+    show(result);
+    return result;
+  };
+
+  // ---------- Inventory checks ----------
+  const checkLastInventory = async () => {
+    const page = await listObjects<any>("inventory", { limit: 1, sort: "desc" as any });
+    const it = page.items?.[0];
+    if (!it) { append("No inventory item found"); show({ error: "No inventory item found" }); return; }
+    const onhand = await apiClient.get(`/inventory/${encodeURIComponent(String(it.id))}/onhand`);
+    const moves  = await apiClient.get(`/inventory/${encodeURIComponent(String(it.id))}/movements`);
+    append(`INVENTORY ${it.id} onhand + movements`); show({ onhand, movements: moves });
+  };
+
+  // ---------- 409 smokes ----------
+  const doCapacity409 = async () => {
     try {
-      const limitNum = Math.max(1, Math.min(200, Number(iLimit || "10")));
-      setSummary(`LIST /objects/${iType}?limit=${limitNum}${iNext ? `&next=${iNext}` : ""}${iQ ? `&q=${iQ}` : ""}`);
-      const res: ListPage<any> = await listObjects<any>(iType, { limit: limitNum, next: iNext || undefined, q: iQ || undefined, by: "updatedAt", sort: "desc" });
-      setOut(res);
-    } catch (e: any) {
-      setOut({ error: e?.message ?? String(e) });
-    }
-  }, [iType, iLimit, iNext, iQ]);
-
-  const runRegCount = React.useCallback(async () => {
-    try {
-      const eventId = iId.trim();
-      if (!eventId) { setOut({ error: "Enter event id in the ID box above." }); return; }
-      setSummary(`COUNT registrations for eventId=${eventId}`);
-      let total = 0, scanned = 0, next: string | undefined = undefined;
-      for (let i = 0; i < 50; i++) {
-        const page: ListPage<any> = await listObjects<any>("registration", { limit: 200, next, by: "updatedAt", sort: "desc" });
-        const items: any[] = Array.isArray(page?.items) ? page.items : [];
-        for (const r of items) total += getEventId(r) === eventId ? 1 : 0;
-        scanned += items.length;
-        next = (page as any)?.next ?? undefined;
-        if (!next) break;
-      }
-      setOut({ eventId, total, scanned });
-    } catch (e: any) {
-      setOut({ error: e?.message ?? String(e) });
-    }
-  }, [iId]);
-
-  const runRaw = React.useCallback(async () => {
-    try {
-      const path = rawPath.trim() || "/";
-      setSummary(`${rawMethod} ${path}`);
-
-      let body: any = undefined;
-      if (rawMethod === "POST" || rawMethod === "PUT") {
-        if (rawBody.trim().length) {
-          body = JSON.parse(rawBody);
-        } else body = {};
-      }
-
-      let res: any;
-      if (rawMethod === "GET")    res = await apiClient.get(path);
-      if (rawMethod === "DELETE") res = await apiClient.del(path);
-      if (rawMethod === "POST")   res = await apiClient.post(path, body);
-      if (rawMethod === "PUT")    res = await apiClient.put(path, body);
-
-      setOut(res ?? { ok: true, empty: true });
-    } catch (e: any) {
-      setOut({ error: e?.message ?? String(e) });
-    }
-  }, [rawMethod, rawPath, rawBody]);
-
-  const copyOut = React.useCallback(async () => {
-    try {
-      const text = j(out ?? {});
-      let copied = false;
+      const now = new Date();
+      const startsAt = new Date(now.getTime() + 60 * 60 * 1000).toISOString();
+      const endsAt   = new Date(now.getTime() + 3 * 60 * 60 * 1000).toISOString();
+      const e = await apiClient.post<Schemas["Event"]>("/objects/event", {
+        type: "event", name: nowTag("CapEvent"), startsAt, endsAt, status: "available", capacity: 1,
+      });
+      const r1 = await apiClient.post<Schemas["Registration"]>("/objects/registration", {
+        type: "registration", eventId: String(e.id), clientName: "Rider One", qty: 1, status: "confirmed",
+      });
+      const r2 = await apiClient.post<Schemas["Registration"]>("/objects/registration", {
+        type: "registration", eventId: String(e.id), clientName: "Rider Two", qty: 1, status: "confirmed",
+      });
+      await apiClient.post(`/events/registration/${encodeURIComponent(String(r1.id))}:checkin`, {});
       try {
-        const Clipboard = require("expo-clipboard");
-        if (Clipboard?.setStringAsync) { await Clipboard.setStringAsync(text); copied = true; }
-      } catch {}
-      if (!copied) {
-        try {
-          const RN: any = require("react-native");
-          if (RN?.Clipboard?.setString) { RN.Clipboard.setString(text); copied = true; }
-          else if (RN?.Clipboard?.setStringAsync) { await RN.Clipboard.setStringAsync(text); copied = true; }
-        } catch {}
+        const bad = await apiClient.post(`/events/registration/${encodeURIComponent(String(r2.id))}:checkin`, {});
+        append("Expected 409 but received 200"); show(bad);
+      } catch (e: any) {
+        const n = normalizeError(e);
+        append(`CAPACITY 409: ${n.status ?? "error"} — ${n.message}`); show(n);
       }
-      Alert.alert("Copied", copied ? "JSON copied to clipboard." : "Rendered JSON ready—long-press to select/copy.");
-    } catch {
-      Alert.alert("Copy failed", "Could not copy JSON.");
+    } catch (e: any) {
+      const n = normalizeError(e); append(`Capacity test failed: ${n.message}`); show(n);
     }
-  }, [out]);
+  };
 
-  const MethodButton = ({ m }: { m: "GET"|"POST"|"PUT"|"DELETE" }) => (
-    <Pressable onPress={() => setRawMethod(m)}
-      style={{ backgroundColor: rawMethod === m ? "#16a34a" : "#4b5563", paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, marginRight: 8, marginBottom: 8 }}>
-      <Text style={{ color: "white", fontWeight: "700" }}>{m}</Text>
-    </Pressable>
-  );
+  const doOverlap409 = async () => {
+    try {
+      const r = await seedResource();
+      const now = new Date();
+      const s1 = new Date(now.getTime() + 15 * 60 * 1000).toISOString();
+      const e1 = new Date(now.getTime() + 90 * 60 * 1000).toISOString();
+      const s2 = new Date(now.getTime() + 30 * 60 * 1000).toISOString();
+      const e2 = new Date(now.getTime() + 120 * 60 * 1000).toISOString();
+      const a = await apiClient.post<Schemas["Reservation"]>("/objects/reservation", {
+        type: "reservation", resourceId: String(r.id), startsAt: s1, endsAt: e1, status: "confirmed", clientName: "Overlap A",
+      });
+      const b = await apiClient.post<Schemas["Reservation"]>("/objects/reservation", {
+        type: "reservation", resourceId: String(r.id), startsAt: s2, endsAt: e2, status: "confirmed", clientName: "Overlap B",
+      });
+      await apiClient.post(`/resources/reservation/${encodeURIComponent(String(a.id))}:start`, {});
+      try {
+        const bad = await apiClient.post(`/resources/reservation/${encodeURIComponent(String(b.id))}:start`, {});
+        append("Expected 409 but received 200"); show(bad);
+      } catch (e: any) {
+        const n = normalizeError(e);
+        append(`OVERLAP 409: ${n.status ?? "error"} — ${n.message}`); show(n);
+      }
+    } catch (e: any) {
+      const n = normalizeError(e); append(`Overlap test failed: ${n.message}`); show(n);
+    }
+  };
 
-  const presets = [
-    {
-      label: "List Events (limit 10)",
-      run: async () => {
-        setIType("event"); setILimit("10"); setINext(""); setIQ("");
-        setSummary(`LIST /objects/event?limit=10`);
-        const res: ListPage<EventRow> = await listObjects<EventRow>("event", { limit: 10, by: "updatedAt", sort: "desc" });
-        setOut(res);
-      },
-    },
-    {
-      label: "Get Event by ID",
-      run: async () => {
-        setIType("event");
-        setSummary(`GET /objects/event/${iId}`);
-        const res = await apiClient.get(`/objects/event/${encodeURIComponent(iId.trim())}`);
-        setOut(res);
-      },
-    },
-    {
-      label: "Registrations: COUNT by Event",
-      run: async () => { await runRegCount(); },
-    },
-    {
-      label: "List Vendors (limit 10)",
-      run: async () => {
-        setIType("vendor"); setILimit("10"); setINext(""); setIQ("");
-        setSummary(`LIST /objects/vendor?limit=10`);
-        const res: ListPage<VendorRow> = await listObjects<VendorRow>("vendor", { limit: 10, by: "updatedAt", sort: "desc" });
-        setOut(res);
-      },
-    },
-    {
-      label: "List Clients (limit 10)",
-      run: async () => {
-        setIType("client"); setILimit("10"); setINext(""); setIQ("");
-        setSummary(`LIST /objects/client?limit=10`);
-        const res: ListPage<ClientRow> = await listObjects<ClientRow>("client", { limit: 10, by: "updatedAt", sort: "desc" });
-        setOut(res);
-      },
-    },
-    {
-      label: "List Products (limit 10)",
-      run: async () => {
-        setIType("product"); setILimit("10"); setINext(""); setIQ("");
-        setSummary(`LIST /objects/product?limit=10`);
-        const res: ListPage<ProductRow> = await listObjects<ProductRow>("product", { limit: 10, by: "updatedAt", sort: "desc" });
-        setOut(res);
-      },
-    },
-    {
-      label: "List Inventory (limit 10)",
-      run: async () => {
-        setIType("inventory"); setILimit("10"); setINext(""); setIQ("");
-        setSummary(`LIST /objects/inventory?limit=10`);
-        const res: ListPage<InventoryRow> = await listObjects<InventoryRow>("inventory", { limit: 10, by: "updatedAt", sort: "desc" });
-        setOut(res);
-      },
-    },
-  ];
+  // ---------- Admin GC ----------
+ // Replace your current gcList/gcDelete with these:
 
+// ---------- Admin GC ----------
+// ---------- Admin GC ----------
+const gcList = async (type: string) => {
+  try {
+    const res = await apiClient.get<{ type?: string; count?: number; items?: any[] }>(`/tools/gc/${encodeURIComponent(type)}`);
+    const count = (res as any)?.count ?? (res as any)?.Count ?? ((res as any)?.items?.length ?? 0);
+    append(`GC LIST ${type}: ${count}`);
+    show(res);
+  } catch (e: any) {
+    const n = normalizeError(e);
+    append(`GC LIST ${type} failed: ${n.message}`);
+    show(n);
+  }
+};
+
+const gcDelete = async (type: string) => {
+  try {
+    const res = await apiClient.del<{ type?: string; deleted?: number; matched?: number; scanned?: number }>(`/tools/gc/${encodeURIComponent(type)}`);
+    const deleted = (res as any)?.deleted ?? 0;
+    append(`GC DELETE ${type}: deleted=${deleted}`);
+    show(res);
+  } catch (e: any) {
+    const n = normalizeError(e);
+    append(`GC DELETE ${type} failed: ${n.message}`);
+    show(n);
+  }
+};
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: "#0b1220", padding: 16 }}>
-      <Text style={{ color: "#fff", fontSize: 18, fontWeight: "700", marginBottom: 8 }}>
-        Dev Tools — Delete & Populate + API Inspector + Raw HTTP
+    <ScrollView style={{ flex: 1, backgroundColor: "#0b1220", padding: 12 }}>
+      <Text style={{ color: "#9ca3af", marginBottom: 8 }}>
+        Dev Tools — seed & smokes across modules + admin GC.
       </Text>
 
-      <Pressable disabled={busy} onPress={wipeAll}
-        style={{ backgroundColor: "#ef4444", opacity: busy ? 0.6 : 1, padding: 14, borderRadius: 10, marginBottom: 10 }}>
-        <Text style={{ color: "white", fontWeight: "700", textAlign: "center" }}>Delete ALL Records</Text>
-      </Pressable>
-
-      <Pressable disabled={busy} onPress={seedAll}
-        style={{ backgroundColor: "#10b981", opacity: busy ? 0.6 : 1, padding: 14, borderRadius: 10, marginBottom: 10 }}>
-        <Text style={{ color: "white", fontWeight: "700", textAlign: "center" }}>Populate (5 per module)</Text>
-      </Pressable>
-
-      <Pressable disabled={busy} onPress={wipeThenSeed}
-        style={{ backgroundColor: "#2563eb", opacity: busy ? 0.6 : 1, padding: 14, borderRadius: 10, marginBottom: 16 }}>
-        <Text style={{ color: "white", fontWeight: "700", textAlign: "center" }}>Delete & Populate</Text>
-      </Pressable>
-
-      <View style={{ backgroundColor: "#0f172a", borderRadius: 12, borderWidth: 1, borderColor: "#1f2937", padding: 12, marginBottom: 16 }}>
-        <Text style={{ color: "#fff", fontWeight: "700", marginBottom: 8 }}>Presets</Text>
+      {/* Server & Auth */}
+      <Section title="Server & Auth">
         <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
-          {presets.map((p, idx) => (
-            <Pressable key={idx} onPress={p.run}
-              style={{ backgroundColor: "#4b5563", paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, marginRight: 8, marginBottom: 8 }}>
-              <Text style={{ color: "white", fontWeight: "700" }}>{p.label}</Text>
-            </Pressable>
-          ))}
+          <Btn label="Health" onPress={doHealth} />
+          <Btn label="Dev Login" onPress={doDevLogin} />
+          <Btn label="Auth Policy" onPress={doPolicy} />
         </View>
-      </View>
+        <Text style={{ color: "#9ca3af", marginTop: 8 }}>Dev login payload</Text>
+        <Box value={devUser} onChangeText={setDevUser} placeholder="email" autoCapitalize="none" />
+        <Box value={devTenant} onChangeText={setDevTenant} placeholder="tenantId" autoCapitalize="none" />
+      </Section>
 
-      <View style={{ backgroundColor: "#0f172a", borderRadius: 12, borderWidth: 1, borderColor: "#1f2937", padding: 12, marginBottom: 16 }}>
-        <Text style={{ color: "#fff", fontWeight: "700", marginBottom: 8 }}>API Inspector</Text>
-
-        <Label>Type (e.g., event, registration, client, product, inventory…)</Label>
-        <Box value={iType} onChangeText={setIType} autoCapitalize="none" autoCorrect={false} placeholder="event" />
-
-        <Label>ID (for GET, or as eventId for Reg Count)</Label>
-        <Box value={iId} onChangeText={setIId} autoCapitalize="none" autoCorrect={false} placeholder="paste an id…" />
-
-        <Label>List options</Label>
-        <View style={{ flexDirection: "row", gap: 8 }}>
-          <Box value={iLimit} onChangeText={setILimit} keyboardType="number-pad" placeholder="limit" style={{ flex: 1 }} />
-          <Box value={iNext} onChangeText={setINext} autoCapitalize="none" autoCorrect={false} placeholder="next token" style={{ flex: 1 }} />
+      {/* One-click seed / delete */}
+      <Section title="One-click — Seed / Delete">
+        <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+          <Btn label="Seed EVERYTHING" onPress={seedEverything} />
+          <Btn label="DELETE EVERYTHING" onPress={async () => {
+            const types = [
+              "salesOrder", "purchaseOrder",
+              "registration", "reservation",
+              "resource", "event",
+              "inventory", "product",
+              "vendor", "customer", "client", "account",
+              "employee",
+            ];
+            let total = 0;
+            for (const t of types) total += await wipeType(t, append);
+            append(`WIPE EVERYTHING: deleted total ${total} item(s).`);
+            show({ ok: true, deleted: total });
+          }} />
         </View>
-        <Box value={iQ} onChangeText={setIQ} autoCapitalize="none" autoCorrect={false} placeholder='q (e.g., "name:Event")' />
+        <Text style={{ color: "#f59e0b", marginTop: 6, fontSize: 12 }}>
+          Tip: run “Dev Login” first for wildcard perms.
+        </Text>
+      </Section>
 
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
-          <Pressable onPress={runGet}  style={{ backgroundColor: "#4b5563", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}>
-            <Text style={{ color: "white", fontWeight: "700" }}>GET by ID</Text>
-          </Pressable>
-          <Pressable onPress={runList} style={{ backgroundColor: "#4b5563", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}>
-            <Text style={{ color: "white", fontWeight: "700" }}>LIST</Text>
-          </Pressable>
-          {iType.trim().toLowerCase() !== "registration" && (
-            <Pressable onPress={runRegCount} style={{ backgroundColor: "#4b5563", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}>
-              <Text style={{ color: "white", fontWeight: "700" }}>REG Count (uses ID as eventId)</Text>
-            </Pressable>
-          )}
+      {/* Core seeds */}
+      <Section title="Seeds — core records">
+        <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+          <Btn label="Vendor" onPress={seedVendor} />
+          <Btn label="Customer" onPress={seedCustomer} />
+          <Btn label="Client" onPress={seedClient} />
+          <Btn label="Account" onPress={seedAccount} />
+          <Btn label="Product" onPress={seedProduct} />
+          <Btn label="Inventory" onPress={() => seedInventory(undefined)} />
         </View>
-      </View>
+      </Section>
 
-      {!!summary && <Text style={{ color: "#9ca3af", marginBottom: 6 }}>{summary}</Text>}
-      <View style={{ borderWidth: 1, borderColor: "#1f2937", backgroundColor: "#0b1220", borderRadius: 8, padding: 8, minHeight: 140 }}>
-        <Mono>{j(out ?? {})}</Mono>
-      </View>
+      {/* Purchasing */}
+      <Section title="Purchasing — seed & actions">
+        <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+          <Btn label="Seed Purchase Flow" onPress={seedPurchaseFlow} />
+          <Btn label="PO Submit last" onPress={async () => {
+            const page = await listObjects<any>("purchaseOrder", { limit: 1, sort: "desc" as any });
+            const po = page.items?.[0]; if (!po) return append("No PO found");
+            const res = await poSubmit(String(po.id)); append(`PO submit: ${po.id}`); show(res);
+          }} />
+          <Btn label="PO Approve last" onPress={async () => {
+            const page = await listObjects<any>("purchaseOrder", { limit: 1, sort: "desc" as any });
+            const po = page.items?.[0]; if (!po) return append("No PO found");
+            const res = await poApprove(String(po.id)); append(`PO approve: ${po.id}`); show(res);
+          }} />
+          <Btn label="PO Receive all (last)" onPress={async () => {
+            const page = await listObjects<any>("purchaseOrder", { limit: 1, sort: "desc" as any });
+            const po = page.items?.[0]; if (!po) { append("No PO to receive."); show({ error: "No PO to receive" }); return; }
+            const res = await poReceiveAll(String(po.id)); append(`PO receive all: ${po.id}`); show(res);
+          }} />
+        </View>
+      </Section>
+
+      {/* Sales */}
+      <Section title="Sales — seed & actions">
+        <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+          <Btn label="Seed Sales Flow" onPress={seedSalesFlow} />
+          <Btn label="SO Submit last" onPress={async () => {
+            const page = await listObjects<any>("salesOrder", { limit: 1, sort: "desc" as any });
+            const so = page.items?.[0]; if (!so) return append("No SO found");
+            const res = await soSubmit(String(so.id)); append(`SO submit: ${so.id}`); show(res);
+          }} />
+          <Btn label="SO Commit last" onPress={async () => {
+            const page = await listObjects<any>("salesOrder", { limit: 1, sort: "desc" as any });
+            const so = page.items?.[0]; if (!so) return append("No SO found");
+            const res = await soCommit(String(so.id)); append(`SO commit: ${so.id}`); show(res);
+          }} />
+          <Btn label="SO Fulfill all (last)" onPress={async () => {
+            const page = await listObjects<any>("salesOrder", { limit: 1, sort: "desc" as any });
+            const so = page.items?.[0]; if (!so) { append("No SO to fulfill."); show({ error: "No SO to fulfill" }); return; }
+            const res = await soFulfillAll(String(so.id)); append(`SO fulfill all: ${so.id}`); show(res);
+          }} />
+        </View>
+      </Section>
+
+      {/* Inventory checks */}
+      <Section title="Inventory — quick checks">
+        <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+          <Btn label="Check last item (onhand+moves)" onPress={checkLastInventory} />
+        </View>
+      </Section>
+
+      {/* Events & reservations */}
+      <Section title="Events & Reservations — seeds">
+        <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+          <Btn label="Seed Event" onPress={seedEvent} />
+          <Btn label="Seed Resource" onPress={seedResource} />
+          <Btn label="Seed Registration" onPress={async () => {
+            const evs = await listObjects<Schemas["Event"]>("event", { limit: 1, sort: "desc" as any });
+            const e = evs.items?.[0]; if (!e) { append("No event found"); show({ error: "No event found" }); return; }
+            const reg = await seedRegistration(String(e.id)); show(reg);
+          }} />
+          <Btn label="Seed Reservation" onPress={async () => {
+            const rs = await listObjects<Schemas["Resource"]>("resource", { limit: 1, sort: "desc" as any });
+            const r = rs.items?.[0]; if (!r) { append("No resource found"); show({ error: "No resource found" }); return; }
+            const resv = await seedReservation(String(r.id)); show(resv);
+          }} />
+        </View>
+      </Section>
+
+      {/* 409 smokes */}
+      <Section title="Smokes — 409 validations">
+        <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+          <Btn label="Capacity 409 (Registration)" onPress={doCapacity409} />
+          <Btn label="Overlap 409 (Reservation)" onPress={doOverlap409} />
+        </View>
+      </Section>
+
+      {/* Admin GC */}
+      <Section title="Admin — GC (by type)">
+        <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+          <Btn label="GC List products" onPress={() => gcList("product")} />
+          <Btn label="GC Delete products" onPress={() => gcDelete("product")} />
+          <Btn label="GC List inventory" onPress={() => gcList("inventory")} />
+          <Btn label="GC Delete inventory" onPress={() => gcDelete("inventory")} />
+        </View>
+        <Text style={{ color: "#6b7280", marginTop: 6, fontSize: 12 }}>
+          Requires server route /tools/gc/:type with admin:reset perm.
+        </Text>
+      </Section>
+
+      {/* Admin — GC by exact keys */}
+<Section title="Admin — GC (delete by exact keys)">
+  <Text style={{ color: "#9ca3af", marginBottom: 6, fontSize: 12 }}>
+    Paste one pk|sk per line (e.g.|product|abc | abc). Use “List ALL (raw)” to discover keys.
+  </Text>
+  <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+    <Btn label="List ALL (raw)" onPress={async () => {
+      try {
+        const res = await apiClient.get<{ scanned: number; count: number; items: any[] }>(
+          `/tools/gc/list-all?limit=2000`
+        );
+        append(`GC LIST ALL: scanned=${res.scanned}, count=${res.count}`);
+        show(res);
+      } catch (e: any) { const n = normalizeError(e); append(`GC LIST ALL failed: ${n.message}`); show(n); }
+    }} />
+    <Btn label="List ALL containing 'product'" onPress={async () => {
+      try {
+        const res = await apiClient.get<{ scanned: number; count: number; items: any[] }>(
+          `/tools/gc/list-all?limit=2000&contains=product`
+        );
+        append(`GC LIST ALL (contains=product): scanned=${res.scanned}, count=${res.count}`);
+        show(res);
+      } catch (e: any) { const n = normalizeError(e); append(`GC LIST ALL (product) failed: ${n.message}`); show(n); }
+    }} />
+  </View>
+
+  {/* paste pk|sk lines here */}
+  <Box
+    value={resp} // reuse the response box temporarily to paste keys if you want; or add a new state if you prefer
+    onChangeText={setResp}
+    multiline
+    style={{ minHeight: 120, fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace" }}
+    placeholder="pk|sk\npk|sk"
+  />
+  <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+    <Btn label="Delete pasted keys" onPress={async () => {
+      try {
+        const lines = (resp || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+        const keys = lines.map((ln) => {
+          const [pk, sk] = ln.split("|").map((s) => s.trim());
+          return { pk, sk };
+        }).filter(k => k.pk && k.sk);
+        const res = await apiClient.post<{ requested: number; deleted: number; errors: any[] }>(
+          "/tools/gc/delete-keys",
+          { keys }
+        );
+        append(`GC DELETE-KEYS: requested=${res.requested}, deleted=${res.deleted}, errors=${res.errors?.length || 0}`);
+        show(res);
+      } catch (e: any) { const n = normalizeError(e); append(`GC DELETE-KEYS failed: ${n.message}`); show(n); }
+    }} />
+  </View>
+</Section>
+
+
+      {/* Response & Log */}
+      <Section title="Response (latest)">
+        <Box value={resp} onChangeText={() => {}} editable={false} multiline style={{ minHeight: 160, fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace" }} />
+        <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+          <Btn label="Clear Response" onPress={() => setResp("—")} />
+          <Btn label="Clear Log" onPress={() => setLog("")} />
+        </View>
+      </Section>
 
       <View style={{ marginTop: 12 }}>
-        <Text style={{ color: "#9ca3af", fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace" }}>{log || "—"}</Text>
+        <Text style={{ color: "#9ca3af", fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", fontSize: 12 }}>
+          {log || "—"}
+        </Text>
       </View>
     </ScrollView>
   );

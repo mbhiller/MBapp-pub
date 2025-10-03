@@ -1,0 +1,73 @@
+# 0) Login + policy
+node ops/smoke.mjs login --email dev@example.com --tenant DemoTenant --policy full
+
+# 1) Seed
+node ops/smoke.mjs smoke:event:create --each 3
+
+# 2) Lists
+node ops/smoke.mjs smoke:all:list
+node ops/smoke.mjs smoke:events:list
+
+# 3) Updates
+node ops/smoke.mjs smoke:all:update
+node ops/smoke.mjs smoke:inventory:update
+
+# 4) Flows
+node ops/smoke.mjs flow:purchase --lines 3 --qty 2
+node ops/smoke.mjs flow:sales    --lines 3 --qty 1
+
+# 5) Delete
+node ops/smoke.mjs smoke:all:delete --all
+node ops/smoke.mjs smoke:product:delete --all
+
+
+
+gc tools
+List keys for one type
+node ops/tools/gc/gc.mjs list:type product
+
+Delete everything of a type (tenant-scoped)
+node ops/tools/gc/gc.mjs delete:type purchaseorder
+
+List all keys for the tenant
+node ops/tools/gc/gc.mjs list:all
+
+Delete arbitrary keys from a file
+# save an array like: [{ "pk": "DemoTenant", "sk": "product#abc" }, ...]
+node ops/tools/gc/gc.mjs delete:keys .\ops\tools\gc\keys.json
+
+
+
+.\ops\Set-MBend.ps1
+
+node ops/smoke.mjs login --email dev@example.com --tenant DemoTenant --policy full
+# => stores $env:MBAPP_BEARER internally for this session (and prints a short summary)
+
+node ops/smoke.mjs seed:all --count 3
+
+node ops/smoke.mjs smoke:all:list
+
+node ops/smoke.mjs smoke:all:update
+
+node ops/smoke.mjs flow:purchase --lines 3 --qty 2
+
+node ops/smoke.mjs flow:sales --lines 3 --qty 1
+
+node ops/smoke.mjs smoke:all:delete --all
+
+
+
+########### EXAMPLE ###############
+# Create 3 events
+node ops/smoke.mjs smoke:event:create --each 3
+
+# List purchase orders
+node ops/smoke.mjs smoke:purchaseOrder:list
+
+# Update inventory
+node ops/smoke.mjs smoke:inventory:update
+
+# Delete ONLY sales orders made by smoke
+node ops/smoke.mjs smoke:salesOrder:delete
+
+
