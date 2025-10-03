@@ -1,0 +1,248 @@
+// apps/mobile/src/screens/DevEventsToolsScreen.tsx
+import React from "react";
+import { ScrollView, View, Text, Pressable, TextInput, Alert, Platform } from "react-native";
+import {
+  apiClient,
+  listObjects,
+  createObject,
+  updateObject,
+  getObject,
+  deleteObject as delObject,
+  setBearerToken,
+} from "../api/client";
+
+/* ---------- UI bits ---------- */
+const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
+  <View style={{ marginTop: 16, padding: 12, borderWidth: 1, borderColor: "#374151", borderRadius: 10, backgroundColor: "#0b1220" }}>
+    <Text style={{ color: "#e5e7eb", fontWeight: "700", marginBottom: 8 }}>{title}</Text>
+    {children}
+  </View>
+);
+const Btn = ({ label, onPress }: { label: string; onPress: () => void | Promise<void> }) => (
+  <Pressable onPress={onPress} style={{ backgroundColor: "#2563eb", paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, marginRight: 8, marginTop: 8 }}>
+    <Text style={{ color: "white", fontWeight: "700" }}>{label}</Text>
+  </Pressable>
+);
+const Box = (props: any) => (
+  <TextInput
+    {...props}
+    style={[
+      { borderWidth: 1, borderColor: "#374151", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, color: "#e5e7eb", backgroundColor: "#111827", marginBottom: 8 },
+      props.style,
+    ]}
+    placeholderTextColor="#6b7280"
+  />
+);
+
+/* ---------- helpers ---------- */
+function nowTag(prefix: string) {
+  const d = new Date();
+  return `${prefix}-${d.toISOString().replace(/[-:TZ.]/g, "").slice(4, 12)}`;
+}
+async function wipeType(type: string, log: (s: string) => void) {
+  let next: string | undefined;
+  let total = 0;
+  for (let i = 0; i < 200; i++) {
+    const page = await listObjects<any>(type, { limit: 100, next });
+    const items = page.items || [];
+    if (!items.length) break;
+    for (const it of items) {
+      try { await delObject(type, String(it.id)); total++; }
+      catch (e: any) { log(`DELETE ${type}/${it.id} failed: ${e?.message || e}`); }
+    }
+    next = page.next;
+    if (!next) break;
+  }
+  return total;
+}
+
+/* ---------- screen ---------- */
+export default function DevEventsToolsScreen() {
+  const [log, setLog] = React.useState("");
+  const append = (s: string) => setLog((p) => (p ? p + "\n" : "") + s);
+
+  // auth inputs
+  const [devUser, setDevUser] = React.useState("dev@example.com");
+  const [devTenant, setDevTenant] = React.useState("DemoTenant");
+
+  // objects quick actions
+  const [rawType, setRawType] = React.useState("purchaseOrder");
+  const [rawId, setRawId] = React.useState("");
+
+  // search
+  const [searchType, setSearchType] = React.useState("purchaseOrder");
+  const [searchField, setSearchField] = React.useState("status");
+  const [searchValue, setSearchValue] = React.useState("draft");
+
+  /* ----- server/auth ----- */
+  const doHealth = async () => {
+    try {
+      const res = await apiClient.get<{ ok: boolean; now: string; service: string }>("/health");
+      append(`HEALTH ok=${res.ok} now=${res.now}`);
+    } catch (e: any) { append(`HEALTH error: ${e?.message || e}`); }
+  };
+  const doDevLogin = async () => {
+    try {
+      const data = await apiClient.post<{ token: string }>("/auth/dev-login", { email: devUser, tenantId: devTenant });
+      setBearerToken(data.token);
+      append("DEV LOGIN ok — bearer set");
+    } catch (e: any) { append(`DEV LOGIN failed: ${e?.message || e}`); }
+  };
+  const doPolicy = async () => {
+    try { append(`POLICY: ${JSON.stringify(await apiClient.get<any>("/auth/policy"), null, 2)}`); }
+    catch (e: any) { append(`POLICY failed: ${e?.message || e}`); }
+  };
+
+  /* ----- generic objects ----- */
+  const doGet = async () => {
+    try { append(`${rawType}/${rawId}: ${JSON.stringify(await getObject<any>(rawType.trim(), rawId.trim()), null, 2)}`); }
+    catch (e: any) { append(`GET ${rawType}/${rawId} failed: ${e?.message || e}`); }
+  };
+  const doDelete = async () => {
+    try { await delObject(rawType.trim(), rawId.trim()); append(`DELETE ${rawType}/${rawId}: ok`); }
+    catch (e: any) { append(`DELETE ${rawType}/${rawId} failed: ${e?.message || e}`); }
+  };
+  const doWipe = async () => {
+    try { append(`WIPE ${rawType}: deleted ${await wipeType(rawType.trim(), append)} item(s).`); }
+    catch (e: any) { append(`WIPE ${rawType} failed: ${e?.message || e}`); }
+  };
+  const doSearch = async () => {
+    try {
+      const res = await apiClient.post<{ items: any[]; next?: string }>(`/objects/${encodeURIComponent(searchType)}/search`, {
+        [searchField]: searchValue, limit: 50,
+      });
+      append(`SEARCH ${searchType} ${searchField}=${searchValue}: ${JSON.stringify(res, null, 2)}`);
+    } catch (e: any) { append(`SEARCH failed: ${e?.message || e}`); }
+  };
+
+  /* ----- seeds: minimal fields so they work broadly ----- */
+  const seedVendor = async () => {
+    const vendor = await createObject<any>("vendor", { type: "vendor", name: nowTag("Vendor"), status: "active" });
+    append(`CREATED vendor: ${JSON.stringify(vendor, null, 2)}`);
+    return vendor;
+  };
+  const seedCustomer = async () => {
+    const cust = await createObject<any>("customer", { type: "customer", name: nowTag("Customer"), status: "active" });
+    append(`CREATED customer: ${JSON.stringify(cust, null, 2)}`);
+    return cust;
+  };
+  const seedProduct = async () => {
+    const product = await createObject<any>("product", {
+      type: "product", name: nowTag("Product"), sku: `SKU-${Math.random().toString(36).slice(2,8).toUpperCase()}`, kind: "good", status: "active",
+    });
+    append(`CREATED product: ${JSON.stringify(product, null, 2)}`);
+    return product;
+  };
+  const seedInventory = async (productId?: string) => {
+    const inv = await createObject<any>("inventory", { type: "inventory", productId, uom: "each", status: "active" });
+    append(`CREATED inventory: ${JSON.stringify(inv, null, 2)}`);
+    return inv;
+  };
+  const seedPOHeader = async (vendor?: any) => {
+    const po = await createObject<any>("purchaseOrder", {
+      type: "purchaseOrder",
+      status: "draft",
+      vendorId: vendor?.id,
+      vendorName: vendor?.name ?? "Sample Vendor",
+      orderNumber: nowTag("PO"),
+      notes: "Seeded from mobile Dev Tools",
+    });
+    append(`CREATED purchaseOrder: ${JSON.stringify(po, null, 2)}`);
+    return po;
+  };
+  const seedPOLine = async (poId: string, itemId: string) => {
+    const updated = await updateObject<any>("purchaseOrder", poId, {
+      lines: [{ itemId, qty: 5, uom: "each" }],
+    });
+    append(`UPDATED purchaseOrder (add line): ${JSON.stringify(updated, null, 2)}`);
+    return updated;
+  };
+
+  // one-tap composed flows
+  const seedPOWithVendor = async () => {
+    try {
+      const vendor = await seedVendor();
+      await seedPOHeader(vendor);
+      append("SEED PO (header w/ vendor): ok");
+    } catch (e: any) { /* already logged */ }
+  };
+  const seedPurchaseFlow = async () => {
+    try {
+      const vendor = await seedVendor();
+      const product = await seedProduct();
+      const inv = await seedInventory(product?.id);
+      const po = await seedPOHeader(vendor);
+      await seedPOLine(String(po.id), String(inv.id));
+      append("SEED purchase flow: vendor+product+inventory+PO line — ok");
+    } catch (e: any) { /* already logged */ }
+  };
+
+  return (
+    <ScrollView style={{ flex: 1, backgroundColor: "#0b1220", padding: 12 }}>
+      <Text style={{ color: "#9ca3af", marginBottom: 8 }}>
+        Dev Tools — health, auth, search, wipe, and seed flows for products/inventory/vendors/customers/purchase orders.
+      </Text>
+
+      <Section title="Server & Auth">
+        <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+          <Btn label="Health" onPress={doHealth} />
+          <Btn label="Dev Login" onPress={doDevLogin} />
+          <Btn label="Auth Policy" onPress={doPolicy} />
+        </View>
+        <Text style={{ color: "#9ca3af", marginTop: 8 }}>Dev login payload</Text>
+        <Box value={devUser} onChangeText={setDevUser} placeholder="email" autoCapitalize="none" />
+        <Box value={devTenant} onChangeText={setDevTenant} placeholder="tenantId" autoCapitalize="none" />
+      </Section>
+
+      <Section title="Objects — quick actions">
+        <Text style={{ color: "#9ca3af" }}>Type</Text>
+        <Box value={rawType} onChangeText={setRawType} placeholder="e.g., product | inventory | purchaseOrder | vendor" autoCapitalize="none" />
+        <Text style={{ color: "#9ca3af" }}>ID</Text>
+        <Box value={rawId} onChangeText={setRawId} placeholder="id to get/delete" autoCapitalize="none" />
+        <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+          <Btn label="Get" onPress={doGet} />
+          <Btn label="Delete" onPress={doDelete} />
+          <Btn label="Wipe Type" onPress={doWipe} />
+        </View>
+      </Section>
+
+      <Section title="Search (POST /objects/:type/search)">
+        <Text style={{ color: "#9ca3af" }}>Type</Text>
+        <Box value={searchType} onChangeText={setSearchType} placeholder="purchaseOrder" autoCapitalize="none" />
+        <Text style={{ color: "#9ca3af" }}>Field</Text>
+        <Box value={searchField} onChangeText={setSearchField} placeholder="status" autoCapitalize="none" />
+        <Text style={{ color: "#9ca3af" }}>Value</Text>
+        <Box value={searchValue} onChangeText={setSearchValue} placeholder="draft" autoCapitalize="none" />
+        <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+          <Btn label="Run Search" onPress={doSearch} />
+        </View>
+      </Section>
+
+      <Section title="Seeds — core records">
+        <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+          <Btn label="Seed Vendor" onPress={seedVendor} />
+          <Btn label="Seed Customer" onPress={seedCustomer} />
+          <Btn label="Seed Product" onPress={seedProduct} />
+          <Btn label="Seed Inventory" onPress={() => seedInventory(undefined)} />
+        </View>
+      </Section>
+
+      <Section title="Seeds — purchase orders">
+        <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+          <Btn label="Seed PO (header)" onPress={() => seedPOHeader(undefined)} />
+          <Btn label="Seed PO (header w/ vendor)" onPress={seedPOWithVendor} />
+          <Btn label="Seed Purchase Flow" onPress={seedPurchaseFlow} />
+        </View>
+        <Text style={{ color: "#6b7280", marginTop: 6, fontSize: 12 }}>
+          Purchase Flow: creates vendor → product → inventory → PO header → adds one line (qty 5, uom each).
+        </Text>
+      </Section>
+
+      <View style={{ marginTop: 12 }}>
+        <Text style={{ color: "#9ca3af", fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", fontSize: 12 }}>
+          {log || "—"}
+        </Text>
+      </View>
+    </ScrollView>
+  );
+}

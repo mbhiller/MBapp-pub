@@ -1,167 +1,335 @@
-// apps/api/src/index.ts
-import type { APIGatewayProxyResult, Context } from "aws-lambda";
-import { preflight, notimpl, ok, error } from "./common/responses";
+// apps/src/api/index.ts
+import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
+import { getAuth, requirePerm, policyFromAuth } from "../../api/src/auth/middleware";
+
+/* Routes */
+// Views
+import * as ViewsList   from "./views/list";
+import * as ViewsGet    from "./views/get";
+import * as ViewsCreate from "./views/create";
+import * as ViewsUpdate from "./views/update";
+import * as ViewsDelete from "./views/delete";
+// Workspaces
+import * as WsList   from "./workspaces/list";
+import * as WsGet    from "./workspaces/get";
+import * as WsCreate from "./workspaces/create";
+import * as WsUpdate from "./workspaces/update";
+import * as WsDelete from "./workspaces/delete";
+// Objects
+import * as ObjList   from "./objects/list";
+import * as ObjGet    from "./objects/get";
 import * as ObjCreate from "./objects/create";
 import * as ObjUpdate from "./objects/update";
-import * as ObjGet from "./objects/get";
-import * as ObjList from "./objects/list";
-import * as ObjSearch from "./objects/search";
 import * as ObjDelete from "./objects/delete";
-import { withCors } from "./cors";
+import * as ObjSearch from "./objects/search";
+// Dev auth
+import * as DevLogin from "./auth/dev-login";
+// Actions (stubs you’ll add)
+import * as PoSubmit   from "./purchasing/po-submit";
+import * as PoApprove  from "./purchasing/po-approve";
+import * as PoReceive  from "./purchasing/po-receive";
+import * as PoCancel   from "./purchasing/po-cancel";
+import * as PoClose    from "./purchasing/po-close";
+import * as SoSubmit   from "./sales/so-submit";
+import * as SoCommit   from "./sales/so-commit";
+import * as SoFulfill  from "./sales/so-fulfill";
+import * as SoCancel   from "./sales/so-cancel";
+import * as SoClose    from "./sales/so-close";
 
-// NEW: auth endpoints
-import { getPolicy } from "./auth/policy";
-import { devLogin } from "./auth/login";
+// Inventory on-hand (computed from movements)
+import * as InvOnHandGet from "./inventory/onhand-get";
+import * as InvOnHandBatch from "./inventory/onhand-batch";
 
-// Accept both HTTP API v2 and REST v1 shapes (keep types loose to avoid build issues)
-type ApiEvt = {
-  rawPath?: string;
-  path?: string;
-  requestContext?: { http?: { method?: string; path?: string } };
-  httpMethod?: string;
-  queryStringParameters?: Record<string, string | undefined>;
-  pathParameters?: Record<string, string | undefined>;
-  headers?: Record<string, string | undefined>;
-};
+// Inventory search (rich)
+import * as InvSearch from "./inventory/search";
 
-function methodOf(evt: ApiEvt): string {
-  return (evt.requestContext?.http?.method || evt.httpMethod || "GET").toUpperCase();
-}
-function pathOf(evt: ApiEvt): string {
-  const p = evt.requestContext?.http?.path || evt.rawPath || evt.path || "/";
-  return p.startsWith("/") ? p : `/${p}`;
-}
-function withParams<T extends ApiEvt>(evt: T, params: Record<string, string | undefined>): T {
-  return { ...evt, pathParameters: { ...(evt.pathParameters ?? {}), ...params } };
-}
+// Inventory computed endpoints
+import * as InvMovements from "./inventory/movements";
 
-// ----- Alias → canonical (/objects/:type)
-const aliasToType: Record<string, string> = {
-  "/clients": "client",
-  "/resources": "resource",
-  "/employees": "employee",
-  "/vendors": "vendor",
-  "/reservations": "reservation",
-  "/events": "event",
-  "/products": "product",
-  "/registrations": "registration",
-  "/accounts": "account",
-  // "/tenants": "tenant", // optional: only if you persist tenants in /objects/tenant
-};
 
-function rewriteAlias(path: string): string {
-  for (const alias of Object.keys(aliasToType)) {
-    if (path === alias || path.startsWith(alias + "/")) {
-      const suffix = path.slice(alias.length); // "" or "/{id}" or "/list"
-      return `/objects/${aliasToType[alias]}${suffix}`;
-    }
-  }
-  // REMOVED: legacy inventory→products alias
-  // /events/:id/registrations -> /objects/registration?eventId=:id
-  if (/^\/events\/[^/]+\/registrations$/.test(path)) {
-    const id = path.split("/")[2];
-    return `/objects/registration?eventId=${encodeURIComponent(id)}`;
-    // NOTE: handler below will treat this as /objects/registration list with eventId in query
-  }
-  return path;
-}
+// Registrations & Reservations actions
+import * as RegCancel  from "./events/registration-cancel";
+import * as RegCheckin from "./events/registration-checkin";
+import * as RegCheckout from "./events/registration-checkout";
+import * as ResCancel  from "./resources/reservation-cancel";
+import * as ResStart   from "./resources/reservation-start";
+import * as ResEnd     from "./resources/reservation-end";
 
-function splitObjectsPath(path: string): { type?: string; tail: string[] } {
-  const parts = path.split("/").filter(Boolean);
-  if (parts[0] !== "objects") return { tail: parts.slice() };
-  const type = parts[1];
-  const tail = parts.slice(2); // [], ["list"], [":id"], ["search"]
-  return { type, tail };
+import * as GcList   from "./tools/gc-list-type";
+import * as GcDelete from "./tools/gc-delete-type";
+import * as GcListAll   from "./tools/gc-list-all";
+import * as GcDeleteKeys from "./tools/gc-delete-keys";
+
+
+/* Helpers */
+const json = (statusCode: number, body: unknown): APIGatewayProxyResultV2 => ({
+  statusCode,
+  headers: {
+    "content-type": "application/json",
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "OPTIONS,GET,POST,PUT,DELETE",
+    "access-control-allow-headers": "Authorization,Content-Type,Idempotency-Key,X-Tenant-Id",
+  },
+  body: JSON.stringify(body),
+});
+const notFound = () => json(404, { message: "Not Found" });
+const methodNotAllowed = () => json(405, { message: "Method Not Allowed" });
+const match = (re: RegExp, s: string) => s.match(re)?.slice(1) ?? null;
+ 
+/** Ensure action handlers see { pathParameters: { id } } */
+function withId(event: APIGatewayProxyEventV2, id: string): APIGatewayProxyEventV2 {
+    const e: any = { ...event };
+    e.pathParameters = { ...(event.pathParameters || {}), id };
+    return e;
 }
 
+/** Preflight CORS */
+function isPreflight(e: APIGatewayProxyEventV2) {
+  return e.requestContext.http.method === "OPTIONS";
+}
+const corsOk = (): APIGatewayProxyResultV2 => ({
+  statusCode: 204,
+  headers: {
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "OPTIONS,GET,POST,PUT,DELETE",
+    "access-control-allow-headers": "Authorization,Content-Type,Idempotency-Key,X-Tenant-Id",
+  },
+});
 
-export const baseHandler = async (evt: ApiEvt, _ctx?: Context): Promise<APIGatewayProxyResult> => {
-  
-  const method = methodOf(evt);
-  
+/** Inject pre-auth */
+function injectPreAuth(
+  event: APIGatewayProxyEventV2,
+  auth: { userId: string; tenantId: string; roles: string[]; policy: any }
+) {
+  const anyEvt = event as any;
+  anyEvt.requestContext = anyEvt.requestContext || {};
+  anyEvt.requestContext.authorizer = anyEvt.requestContext.authorizer || {};
+  anyEvt.requestContext.authorizer.mbapp = {
+    userId: auth.userId,
+    tenantId: auth.tenantId,
+    roles: auth.roles,
+    policy: auth.policy,
+  };
+}
+
+/** Back-compat adapter: ensure handlers see type/id in query/path params */
+function withTypeId(
+  event: APIGatewayProxyEventV2,
+  opts: { type?: string; id?: string }
+): APIGatewayProxyEventV2 {
+  const e: any = { ...event };
+  e.queryStringParameters = { ...(event.queryStringParameters || {}) };
+  e.pathParameters = { ...(event.pathParameters || {}) };
+  if (opts.type && !e.queryStringParameters.type) e.queryStringParameters.type = opts.type;
+  if (opts.type && !e.pathParameters.type) e.pathParameters.type = opts.type;
+  if (opts.id && !e.pathParameters.id) e.pathParameters.id = opts.id;
+  return e;
+}
+
+/** Map object method→permission (e.g., product:read / product:write) */
+function permForObject(method: string, typeRaw: string) {
+  const type = (typeRaw || "").toLowerCase();
+  if (method === "GET") return `${type}:read`;
+  if (method === "POST" || method === "PUT" || method === "DELETE") return `${type}:write`;
+  return "";
+}
+
+export async function handler(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   try {
-    // Health first, always succeeds (useful for smoke tests)
-    const rawPath = pathOf(evt);
-    if (method === "GET" && rawPath === "/health") return ok({ ok: true });
+    if (isPreflight(event)) return corsOk();
 
-    // Short-circuit OPTIONS; withCors will also add headers on responses
-    if (method === "OPTIONS") return preflight();
+    const method = event.requestContext.http.method;
+    const path = event.rawPath || event.requestContext.http.path;
 
-    // --- Auth endpoints (mounted before any rewrites)
-    if (method === "GET" && rawPath === "/auth/policy") {
-      // cast to any to satisfy APIGateway V1/V2 unions
-      return await (getPolicy as any)(evt);
+    // Public
+    if (method === "GET" && (path === "/health" || path === "/")) {
+      return json(200, { ok: true, service: "mbapp-api", now: new Date().toISOString() });
     }
-    if (method === "POST" && rawPath === "/auth/login") {
-      return await (devLogin as any)(evt);
+    if (method === "POST" && path === "/auth/dev-login") {
+      return DevLogin.handle(event); // gated by DEV_LOGIN_ENABLED
     }
 
-    const path = rewriteAlias(rawPath);
+    // Authenticated
+    const auth = await getAuth(event);
+    injectPreAuth(event, auth);
 
-    // /objects/search (and allow ?type=&id= to fall through to GET by id)
-    if (path === "/objects/search" && method === "GET") {
-      const qs = evt.queryStringParameters ?? {};
-      if (qs?.id && qs?.type) {
-        return ObjGet.handler(withParams(evt, { type: String(qs.type), id: String(qs.id) }) as any);
-      }
-      return ObjSearch.handler(evt as any);
+    if (method === "GET" && path === "/auth/policy") {
+      return json(200, policyFromAuth(auth));
     }
 
-    // Canonical /objects/:type router
-    if (path.startsWith("/objects/")) {
-      const { type, tail } = splitObjectsPath(path);
-      if (!type) return notimpl(`${method} ${path} (missing type)`);
-
-      // GET /objects/:type/search
-      if (method === "GET" && tail.length === 1 && tail[0] === "search") {
-        return ObjSearch.handler(withParams(evt, { type }) as any);
+    // Views
+    if (path === "/views") {
+      if (method === "GET")  { requirePerm(auth, "view:read");  return ViewsList.handle(event); }
+      if (method === "POST") { requirePerm(auth, "view:write"); return ViewsCreate.handle(event); }
+      return methodNotAllowed();
+    }
+    {
+      const m = match(/^\/views\/([^/]+)$/i, path);
+      if (m) {
+        const [id] = m;
+        if (method === "GET")    { requirePerm(auth, "view:read");  return ViewsGet.handle(withId(event, id)); }
+        if (method === "PUT")    { requirePerm(auth, "view:write"); return ViewsUpdate.handle(withId(event, id)); }
+        if (method === "DELETE") { requirePerm(auth, "view:write"); return ViewsDelete.handle(withId(event, id)); }
+        return methodNotAllowed();
       }
-
-      // POST /objects/:type
-      if (method === "POST" && tail.length === 0) {
-        return ObjCreate.handler(withParams(evt, { type }) as any);
-      }
-
-      // PUT /objects/:type/:id
-      if (method === "PUT" && tail.length === 1) {
-        return ObjUpdate.handler(withParams(evt, { type, id: tail[0] }) as any);
-      }
-
-      // GET /objects/:type/:id
-      if (method === "GET" && tail.length === 1 && tail[0] !== "list" && tail[0] !== "search") {
-        return ObjGet.handler(withParams(evt, { type, id: tail[0] }) as any);
-      }
-
-      // GET /objects/:type/list
-      if (method === "GET" && tail.length === 1 && tail[0] === "list") {
-        return ObjList.handler(withParams(evt, { type }) as any);
-      }
-
-      // GET /objects/:type  (treat as list)
-      if (method === "GET" && tail.length === 0) {
-        return ObjList.handler(withParams(evt, { type }) as any);
-      }
-
-      // DELETE /objects/:type/:id
-      if (method === "DELETE" && tail.length === 1) {
-        return ObjDelete.handler(withParams(evt, { type, id: tail[0] }) as any);
-      }
-
-      return notimpl(`${method} ${path}`);
     }
 
-    // Fallback (legacy explicit routes can be handled elsewhere)
-    return notimpl(`${method} ${path}`);
+    // Workspaces
+    if (path === "/workspaces") {
+      if (method === "GET")  { requirePerm(auth, "workspace:read");  return WsList.handle(event); }
+      if (method === "POST") { requirePerm(auth, "workspace:write"); return WsCreate.handle(event); }
+      return methodNotAllowed();
+    }
+    {
+      const m = match(/^\/workspaces\/([^/]+)$/i, path);
+      if (m) {
+        const [id] = m;
+        if (method === "GET")    { requirePerm(auth, "workspace:read");  return WsGet.handle(withId(event, id)); }
+        if (method === "PUT")    { requirePerm(auth, "workspace:write"); return WsUpdate.handle(withId(event, id)); }
+        if (method === "DELETE") { requirePerm(auth, "workspace:write"); return WsDelete.handle(withId(event, id)); }
+        return methodNotAllowed();
+      }
+    }
+
+    /* ========= Actions ========= */
+    // Purchasing PO actions
+    {
+      const m = match(/^\/purchasing\/po\/([^/]+):(submit|approve|receive|cancel|close)$/i, path);
+      if (m) {
+        const [id, action] = m;
+        switch (action) {
+          case "submit":  requirePerm(auth, "purchase:write");   return PoSubmit.handle(withId(event, id));
+          case "approve": requirePerm(auth, "purchase:approve"); return PoApprove.handle(withId(event, id));
+          case "receive": requirePerm(auth, "purchase:receive"); return PoReceive.handle(withId(event, id));
+          case "cancel":  requirePerm(auth, "purchase:cancel");  return PoCancel.handle(withId(event, id));
+          case "close":   requirePerm(auth, "purchase:close");   return PoClose.handle(withId(event, id));
+        }
+        return methodNotAllowed();
+      }
+    }
+
+    // Sales SO actions
+    {
+      const m = match(/^\/sales\/so\/([^/]+):(submit|commit|fulfill|cancel|close)$/i, path);
+      if (m) {
+        const [id, action] = m;
+        switch (action) {
+          case "submit":  requirePerm(auth, "sales:write");    return SoSubmit.handle(withId(event, id));
+          case "commit":  requirePerm(auth, "sales:commit");   return SoCommit.handle(withId(event, id));
+          case "fulfill": requirePerm(auth, "sales:fulfill");  return SoFulfill.handle(withId(event, id));
+          case "cancel":  requirePerm(auth, "sales:cancel");   return SoCancel.handle(withId(event, id));
+          case "close":   requirePerm(auth, "sales:close");    return SoClose.handle(withId(event, id));
+        }
+        return methodNotAllowed();
+      }
+    }
+
+    // Inventory on-hand (computed)
+    {
+      const m = match(/^\/inventory\/([^/]+)\/onhand$/i, path);
+      if (m) {
+        const [itemId] = m;
+        requirePerm(auth, "inventory:read");
+        return InvOnHandGet.handle(withId(event, itemId));
+      }
+    }
+
+    // Inventory onhand-batch
+    if (method === "POST" && path === "/inventory/onhand:batch") {
+      requirePerm(auth, "inventory:read");
+      return InvOnHandBatch.handle(event);
+    }
+
+    // Inventory movements (computed)
+    {
+      const m = match(/^\/inventory\/([^/]+)\/movements$/i, path);
+      if (m) {
+        const [itemId] = m;
+        requirePerm(auth, "inventory:read");
+        return InvMovements.handle(withId(event, itemId));
+      }
+    }
+
+    // Rich inventory search (label + uom + counters)
+    if (path === "/inventory/search" && method === "POST") {
+      requirePerm(auth, "inventory:read");
+      return InvSearch.handle(event);
+    }
+
+    // Event Registration actions
+    {
+      const m = match(/^\/events\/registration\/([^/]+):(cancel|checkin|checkout)$/i, path);
+      if (m) {
+        const [id, action] = m;
+        requirePerm(auth, "registration:write");
+        if (action === "cancel")   return RegCancel.handle(withId(event, id));
+        if (action === "checkin")  return RegCheckin.handle(withId(event, id));
+        if (action === "checkout") return RegCheckout.handle(withId(event, id));
+        return methodNotAllowed();
+      }
+    }
+
+    // Resource Reservation actions
+    {
+      const m = match(/^\/resources\/reservation\/([^/]+):(cancel|start|end)$/i, path);
+      if (m) {
+        const [id, action] = m;
+        requirePerm(auth, "reservation:write");
+        if (action === "cancel") return ResCancel.handle(withId(event, id));
+        if (action === "start")  return ResStart.handle(withId(event, id));
+        if (action === "end")    return ResEnd.handle(withId(event, id));
+        return methodNotAllowed();
+      }
+    }
+
+    // Tools: GC
+    const gcList = match(/^\/tools\/gc\/([^/]+)$/i, path);
+    if (gcList && method === "GET")    { requirePerm(auth, "admin:reset"); return GcList.handle(withTypeId(event, { type: gcList[0] })); }
+    if (gcList && method === "DELETE") { requirePerm(auth, "admin:reset"); return GcDelete.handle(withTypeId(event, { type: gcList[0] })); }
+    // Admin GC helpers
+    if (path === "/tools/gc/list-all" && method === "GET") {
+      requirePerm(auth, "admin:reset");
+      return GcListAll.handle(event);
+    }
+    if (path === "/tools/gc/delete-keys" && method === "POST") {
+      requirePerm(auth, "admin:reset");
+      return GcDeleteKeys.handle(event);
+    }
+
+    /* ========= Objects ========= */
+
+    // /objects/:type/search
+    const searchParts = match(/^\/objects\/([^/]+)\/search$/i, path);
+    if (searchParts) {
+      const [type] = searchParts;
+      requirePerm(auth, permForObject("GET", type));
+      return ObjSearch.handle(withTypeId(event, { type }));
+    }
+
+    // /objects/:type (list or create)
+    const collParts = match(/^\/objects\/([^/]+)$/i, path);
+    if (collParts) {
+      const [type] = collParts;
+      if (method === "GET")  { requirePerm(auth, permForObject("GET", type));  return ObjList.handle(withTypeId(event, { type })); }
+      if (method === "POST") { requirePerm(auth, permForObject("POST", type)); return ObjCreate.handle(withTypeId(event, { type })); }
+      return methodNotAllowed();
+    }
+
+    // /objects/:type/:id (update|get|delete)
+    const itemParts = match(/^\/objects\/([^/]+)\/([^/]+)$/i, path);
+    if (itemParts) {
+      const [type, id] = itemParts;
+      if (method === "GET")    { requirePerm(auth, permForObject("GET", type));    return ObjGet.handle(withTypeId(event, { type, id })); }
+      if (method === "PUT")    { requirePerm(auth, permForObject("PUT", type));    return ObjUpdate.handle(withTypeId(event, { type, id })); }
+      if (method === "DELETE") { requirePerm(auth, permForObject("DELETE", type)); return ObjDelete.handle(withTypeId(event, { type, id })); }
+      return methodNotAllowed();
+    }
+
+
+
+    return notFound();
   } catch (e: any) {
-    console.error("router error", {
-      err: e?.message,
-      stack: e?.stack,
-      method,
-      rawPath: pathOf(evt),
-    });
-    return error(e?.message || "router");
+    const status = e?.statusCode ?? 500;
+    return json(status, { message: e?.message ?? "Internal Server Error" });
   }
-};
-
-// Cast to satisfy a looser event type expected by withCors (prevents TS mismatch)
-export const handler = withCors(baseHandler as any);
+}

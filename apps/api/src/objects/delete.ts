@@ -1,39 +1,48 @@
-// apps/api/src/objects/delete.ts
-import { DeleteCommand } from "@aws-sdk/lib-dynamodb";
-import { ddb, tableObjects } from "../common/ddb";
-import { ok, bad, notfound, error as errResp } from "../common/responses";
-import { getTenantId } from "../common/env";
+import type { APIGatewayProxyEventV2 } from "aws-lambda";
+import {
+  DynamoDBDocumentClient,
+  DeleteCommand,
+} from "@aws-sdk/lib-dynamodb";
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 
-export const handler = async (evt: any) => {
+import { ok, bad, notfound, error } from "../common/responses";
+import { getObjectById, deleteObject } from "./repo";
+import { getAuth, requirePerm } from "../auth/middleware";
+
+// Match repo.ts envs
+const TABLE = process.env.MBAPP_OBJECTS_TABLE || process.env.MBAPP_TABLE || "mbapp_objects";
+const PK    = process.env.MBAPP_TABLE_PK || "pk";
+const SK    = process.env.MBAPP_TABLE_SK || "sk";
+
+const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+
+export async function handle(event: APIGatewayProxyEventV2) {
   try {
-    const tenantId = getTenantId(evt);
-    if (!tenantId) return bad("x-tenant-id header required");
+    const auth = await getAuth(event);
+    const type = event.pathParameters?.type;
+    const id   = event.pathParameters?.id;
+    if (!type || !id) return bad("Missing type or id");
 
-    const id = (evt?.pathParameters?.id as string | undefined)?.trim();
-    const typeParam = (evt?.pathParameters?.type as string | undefined)?.trim();
-    if (!id) return bad("id is required");
-    if (!typeParam) return bad("type is required");
+    requirePerm(auth, `${type}:write`);
 
-    // Key format mirrors your GET code: pk=id, sk=tenant|type
-    const Key = { pk: id, sk: `${tenantId}|${typeParam}` };
+    const existing = await getObjectById({ tenantId: auth.tenantId, type, id });
+    if (!existing) return notfound("Not Found");
 
-    // ReturnValues=ALL_OLD lets us tell if it existed
-    const res = await ddb.send(
-      new DeleteCommand({
-        TableName: tableObjects,
-        Key,
-        ReturnValues: "ALL_OLD",
-      })
-    );
-
-    if (!res.Attributes) {
-      // nothing was deleted
-      return notfound("object not found");
+    // If product has a SKU, release its uniqueness lock
+    if (type === "product" && (existing as any)?.sku) {
+      const sku = String((existing as any).sku);
+      await ddb.send(new DeleteCommand({
+        TableName: TABLE,
+        Key: {
+          [PK]: `UNIQ#${auth.tenantId}#product#SKU#${sku}`,
+          [SK]: `${auth.tenantId}|product|${id}`,
+        },
+      })).catch(() => {});
     }
 
-    // keep DELETE responses consistent with other endpoints
-    return ok({ id, type: typeParam, deleted: true });
-  } catch (e) {
-    return errResp(e);
+    await deleteObject({ tenantId: auth.tenantId, type, id });
+    return ok({ ok: true, id, type, deleted: true });
+  } catch (e: any) {
+    return error(e);
   }
-};
+}

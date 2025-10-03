@@ -1,0 +1,16 @@
+apis:
+  mbapp:
+    root: spec/MBapp-Modules.yaml
+
+lint:
+  extends:
+    - recommended
+  rules:
+    no-unused-components: error
+    operation-operationId-unique: error
+    path-excludes:
+      severity: off
+
+theme:
+  openapi:
+    htmlTemplate: false

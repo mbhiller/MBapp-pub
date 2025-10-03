@@ -11,7 +11,9 @@ param(
   [string]$ApiId    = "ki8kgivz1f",
   [string]$Lambda   = "mbapp-nonprod-objects",
   [string]$IntegrationId = "tdnoorp",
-  [string]$AwsProfile = "mbapp-nonprod-admin"
+  [string]$AwsProfile = "mbapp-nonprod-admin",
+  [string]$Table_PK = "pk",
+  [string]$Table_SK = "sk"
 )
 
 if (Test-Path $RepoRoot) { Set-Location $RepoRoot }
@@ -28,6 +30,8 @@ $env:MBAPP_TENANT_ID = $TenantId
 $env:MBAPP_API_ID = $ApiId
 $env:MBAPP_LAMBDA = $Lambda
 $env:MBAPP_INTEGRATION_ID = $IntegrationId
+$env:MBAPP_TABLE_PK = $Table_PK
+$env:MBAPP_TABLE_SK = $Table_SK
 
 $env:EXPO_PUBLIC_ENV = $Env
 $env:EXPO_PUBLIC_API_BASE = $ApiBase
@@ -45,6 +49,8 @@ Write-Host "Environment set:" -ForegroundColor Cyan
   Lambda     = $Lambda
   IntegrationId = $IntegrationId
   AwsProfile = $AwsProfile
+  Table_SK = $Table_SK
+  Table_PK = $Table_PK
 } | Format-List | Out-String | Write-Host
 
 Write-Host "Tip: dot-source to persist: . `"$($MyInvocation.MyCommand.Path)`"" -ForegroundColor DarkGray
