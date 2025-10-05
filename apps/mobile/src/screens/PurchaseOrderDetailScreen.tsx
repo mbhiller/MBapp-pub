@@ -1,131 +1,157 @@
 import React from "react";
-import { ScrollView, View, Text, Pressable, RefreshControl, ActivityIndicator, Alert } from "react-native";
+import { View, Text, TextInput, Pressable, Alert } from "react-native";
 import { useRoute, RouteProp } from "@react-navigation/native";
-import type { RootStackParamList } from "../navigation/types";
 import { useColors } from "../features/_shared/useColors";
-import { apiClient, getObject } from "../api/client";
-import { useRefetchOnFocus } from "../features/_shared/useRefetchOnFocus";
+import FormScreen from "../features/_shared/FormScreen";
+import type { components } from "../api/generated-types";
+import type { RootStackParamList } from "../navigation/types";
+import { createObject, getObject, updateObject } from "../api/client";
 
-type Route = RouteProp<RootStackParamList, "PurchaseOrderDetail">;
+type SalesOrder = components["schemas"]["SalesOrder"];
+type Route = RouteProp<RootStackParamList, "SalesOrderDetail">;
 
-export default function PurchaseOrderDetailScreen() {
-  const route = useRoute<Route>();
-  const { id } = route.params ?? {};
+const STATUS_VALUES = ["draft","submitted","committed","partiallyFulfilled","fulfilled","cancelled","closed"] as const;
+
+export default function SalesOrderDetailScreen({ navigation }: any) {
+  const { params } = useRoute<Route>();
+  const id   = params?.id;
+  const mode = params?.mode as "new" | "edit" | undefined;
+  const isNew = mode === "new" || !id;
+  const initial = (params?.initial ?? {}) as Partial<SalesOrder>;
   const t = useColors();
 
-  const [po, setPo] = React.useState<any>(null);
+  const [saving, setSaving] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
-  const [refreshing, setRefreshing] = React.useState(false);
-  const [busy, setBusy] = React.useState(false);
 
+  // form state
+  const [customerName, setCustomerName] = React.useState(String((initial as any)?.customerName ?? ""));
+  const [status, setStatus] = React.useState<string>(String((initial as any)?.status ?? "draft"));
+  const [notes, setNotes]   = React.useState(String((initial as any)?.notes ?? ""));
+
+  // Load existing only (never load when new)
   const load = React.useCallback(async () => {
-    if (!id) return;
+    if (isNew || !id) return;
     setLoading(true);
     try {
-      const obj = await getObject<any>("purchaseOrder", String(id));
-      setPo(obj);
-    } finally { setLoading(false); }
-  }, [id]);
-
-  // 🔧 Fix: no deps array — the hook signature is (fn, opts?)
-  useRefetchOnFocus(load);
+      const so = await getObject<SalesOrder>("salesOrder", String(id));
+      setCustomerName((v) => v || String((so as any)?.customerName ?? ""));
+      setStatus((v) => v || String((so as any)?.status ?? "draft"));
+      setNotes((v) => v || String((so as any)?.notes ?? ""));
+    } catch (e: any) {
+      Alert.alert("Error", e?.message ?? "Failed to load sales order");
+    } finally {
+      setLoading(false);
+    }
+  }, [isNew, id]);
 
   React.useEffect(() => { load(); }, [load]);
 
-  const onRefresh = React.useCallback(async () => {
-    setRefreshing(true);
-    try { await load(); } finally { setRefreshing(false); }
-  }, [load]);
-
-  const canSubmit  = po?.status === "draft";
-  const canApprove = po?.status === "submitted";
-  const canReceive = ["approved", "partially_received"].includes(po?.status);
-
-  const Btn = ({ label, onPress, disabled }: { label: string; onPress: () => void | Promise<void>; disabled?: boolean }) => (
-    <Pressable
-      onPress={() => { const p = onPress(); if (p && (p as any).then) (p as Promise<any>).catch(()=>{}); }}
-      disabled={!!disabled || busy}
-      style={{
-        backgroundColor: disabled || busy ? t.colors.disabled : t.colors.primary,
-        paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, marginRight: 8, marginTop: 8
-      }}>
-      <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>{label}</Text>
-    </Pressable>
-  );
-
-  async function submit() {
-    setBusy(true);
+  async function onCreateDraft() {
+    if (!customerName.trim()) { Alert.alert("Customer name is required"); return; }
+    setSaving(true);
     try {
-      await apiClient.post(`/purchasing/po/${encodeURIComponent(String(id))}:submit`, {});
-      await load();
-    } catch (e: any) { Alert.alert("Submit failed", e?.message ?? "Error"); }
-    finally { setBusy(false); }
+      await createObject<SalesOrder>("salesOrder", {
+        type: "salesOrder",
+        customerName: customerName.trim(),
+        status: "draft",
+        ...(notes.trim() ? { notes: notes.trim() } : {}),
+        // lines can be added later from a lines UI if/when you add it
+      } as any);
+      navigation.goBack();
+    } catch (e: any) {
+      Alert.alert("Error", e?.message ?? "Failed to create draft");
+    } finally {
+      setSaving(false);
+    }
   }
-  async function approve() {
-    setBusy(true);
+
+  async function onSaveEdits() {
+    if (!id) return;
+    if (!customerName.trim()) { Alert.alert("Customer name is required"); return; }
+    setSaving(true);
     try {
-      await apiClient.post(`/purchasing/po/${encodeURIComponent(String(id))}:approve`, {});
-      await load();
-    } catch (e: any) { Alert.alert("Approve failed", e?.message ?? "Error"); }
-    finally { setBusy(false); }
-  }
-  async function receiveAll() {
-    const lines = (po?.lines || []).map((l: any) => {
-      const remaining = Math.max(0, Number(l.qty ?? 0) - Number(l.qtyReceived ?? 0));
-      return remaining > 0 ? { lineId: String(l.id ?? l.lineId), deltaQty: remaining } : null;
-    }).filter(Boolean) as any[];
-    if (lines.length === 0) { Alert.alert("Nothing to receive"); return; }
-    setBusy(true);
-    try {
-      await apiClient.post(`/purchasing/po/${encodeURIComponent(String(id))}:receive`, { lines });
-      await load();
-    } catch (e: any) { Alert.alert("Receive failed", e?.message ?? "Error"); }
-    finally { setBusy(false); }
+      await updateObject<SalesOrder>("salesOrder", String(id), {
+        customerName: customerName.trim(),
+        status,
+        ...(notes.trim() ? { notes: notes.trim() } : { notes: undefined }),
+      } as any);
+      navigation.goBack();
+    } catch (e: any) {
+      Alert.alert("Error", e?.message ?? "Failed to save");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: t.colors.background }}
-      contentContainerStyle={{ padding: 16 }}
-      refreshControl={<RefreshControl tintColor={t.colors.text} refreshing={refreshing} onRefresh={onRefresh} />}
-    >
-      <Text style={{ color: t.colors.text, fontSize: 18, fontWeight: "700", marginBottom: 8 }}>Purchase Order</Text>
-      {loading ? <ActivityIndicator /> : (
-        <View style={{ backgroundColor: t.colors.card, borderColor: t.colors.border, borderWidth: 1, borderRadius: 12, padding: 12 }}>
-          <Row label="ID" value={String(po?.id ?? "—")} />
-          <Row label="Order #" value={String(po?.orderNumber ?? "—")} />
-          <Row label="Vendor" value={String(po?.vendorName ?? po?.vendorId ?? "—")} />
-          <Row label="Status" value={String(po?.status ?? "—")} />
-          {!!po?.notes && <Row label="Notes" value={String(po.notes)} />}
+    <FormScreen>
+      <View style={{ backgroundColor: t.colors.card, borderRadius: 12, borderWidth: 1, borderColor: t.colors.border, padding: 16 }}>
+        <Field label="Customer *" value={customerName} onChangeText={setCustomerName} />
+        {!isNew && (
+          <>
+            <Label text="Status" />
+            <PillGroup options={STATUS_VALUES as unknown as string[]} value={status} onChange={setStatus} />
+          </>
+        )}
+        <Field label="Notes" value={notes} onChangeText={setNotes} multiline />
 
-          <Text style={{ color: t.colors.text, fontWeight: "700", marginTop: 12, marginBottom: 6 }}>Lines</Text>
-          {(po?.lines ?? []).map((l: any, i: number) => (
-            <View key={i} style={{ padding: 8, borderWidth: 1, borderColor: t.colors.border, borderRadius: 8, marginBottom: 6 }}>
-              <Text style={{ color: t.colors.text, fontWeight: "600" }}>
-                {l.qty} {l.uom} (recv {l.qtyReceived ?? 0})
-              </Text>
-              <Text style={{ color: t.colors.muted, fontSize: 12 }}>itemId: {l.itemId}</Text>
-            </View>
-          ))}
-
-          <View style={{ flexDirection: "row", flexWrap: "wrap", marginTop: 12 }}>
-            <Btn label="Submit" onPress={submit} disabled={!canSubmit} />
-            <Btn label="Approve" onPress={approve} disabled={!canApprove} />
-            <Btn label="Receive All" onPress={receiveAll} disabled={!canReceive} />
-          </View>
-        </View>
-      )}
-      <View style={{ height: 24 }} />
-    </ScrollView>
+        <Pressable
+          onPress={isNew ? onCreateDraft : onSaveEdits}
+          style={{ marginTop: 12, backgroundColor: t.colors.primary, padding: 14, borderRadius: 10, alignItems: "center" }}
+        >
+          <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>
+            {saving ? (isNew ? "Creating…" : "Saving…") : (isNew ? "Create Draft" : "Save")}
+          </Text>
+        </Pressable>
+      </View>
+    </FormScreen>
   );
 }
 
-function Row({ label, value }: { label: string; value?: string }) {
+function Label({ text }: { text: string }) {
+  const t = useColors();
+  return <Text style={{ marginBottom: 6, color: t.colors.muted }}>{text}</Text>;
+}
+function Field({ label, value, onChangeText, multiline, keyboardType }:{
+  label: string; value?: any; onChangeText: (v: any) => void; multiline?: boolean; keyboardType?: any;
+}) {
   const t = useColors();
   return (
-    <View style={{ flexDirection: "row", marginBottom: 6 }}>
-      <Text style={{ color: t.colors.muted, width: 110 }}>{label}</Text>
-      <Text style={{ color: t.colors.text, flex: 1 }}>{value || "—"}</Text>
+    <View style={{ marginBottom: 10 }}>
+      <Text style={{ marginBottom: 6, color: t.colors.muted }}>{label}</Text>
+      <TextInput
+        value={String(value ?? "")}
+        onChangeText={onChangeText}
+        multiline={multiline}
+        keyboardType={keyboardType}
+        autoCapitalize="none"
+        autoCorrect={false}
+        style={{
+          backgroundColor: t.colors.bg, color: t.colors.text,
+          borderColor: t.colors.border, borderWidth: 1, borderRadius: 8, padding: 12,
+          minHeight: multiline ? 80 : undefined,
+        }}
+        placeholderTextColor={t.colors.muted}
+      />
+    </View>
+  );
+}
+function PillGroup({ options, value, onChange }:{ options: string[]; value?: string; onChange: (v: string) => void; }) {
+  const t = useColors();
+  return (
+    <View style={{ flexDirection: "row", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+      {options.map((opt) => {
+        const selected = String(value ?? "") === opt;
+        return (
+          <Pressable key={opt} onPress={() => onChange(opt)} style={{
+            paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1,
+            borderColor: selected ? t.colors.primary : t.colors.border,
+            backgroundColor: selected ? t.colors.primary : t.colors.card, marginRight: 8, marginBottom: 8,
+          }}>
+            <Text style={{ color: selected ? t.colors.buttonText : t.colors.text, fontWeight: "600" }}>{opt}</Text>
+          </Pressable>
+        );
+      })}
     </View>
   );
 }

@@ -14,13 +14,16 @@ type Kind = typeof KIND_VALUES[number];
 export default function ProductDetailScreen({ route, navigation }: any) {
   const t = useColors();
   const id: string | undefined = route?.params?.id;
+  const mode: "new" | "edit" | undefined = route?.params?.mode;
+  const isNew = mode === "new" || !id;
+
   const initial = (route?.params?.initial ?? {}) as Partial<Product> & { notes?: string; taxCode?: string };
 
-  const { data, refetch, isFetching } = Products.useGet(id);
+  const detail = Products.useGet(isNew ? undefined : id);
   const create = Products.useCreate();
   const update = Products.useUpdate(id ?? "");
+  const [saving, setSaving] = React.useState(false);
 
-  // Controlled local state (string-coerced)
   const [name, setName] = React.useState(String(initial?.name ?? ""));
   const [sku, setSku] = React.useState(String((initial as any)?.sku ?? ""));
   const [price, setPrice] = React.useState(String((initial as any)?.price ?? ""));
@@ -29,42 +32,39 @@ export default function ProductDetailScreen({ route, navigation }: any) {
   const [status, setStatus] = React.useState<string>(String((initial as any)?.status ?? "active"));
   const [kind, setKind] = React.useState<string>(String((initial as any)?.kind ?? "good"));
 
-  // Track if the user has tapped pills this session
   const statusTouched = React.useRef(false);
   const kindTouched = React.useRef(false);
 
-  // Refetch on focus, but do NOT clear local state (prevents hydration flicker)
   useFocusEffect(
     React.useCallback(() => {
       statusTouched.current = false;
       kindTouched.current = false;
-      if (id) refetch();
-    }, [id, refetch])
+      if (!isNew && id) detail.refetch();
+    }, [isNew, id, detail.refetch])
   );
 
-  // Merge fresh server data into any still-empty fields; status/kind hydrate unless touched
   React.useEffect(() => {
+    const data = detail.data;
     if (!data) return;
-    const d = data as Product & { notes?: string; taxCode?: string };
 
-    if (name === "") setName(String(d?.name ?? ""));
-    if (sku === "") setSku(String((d as any)?.sku ?? ""));
-    if (price === "") setPrice(d?.price != null ? String(d.price) : "");
-    if (taxCode === "") setTaxCode(String((d as any)?.taxCode ?? ""));
-    if (notes === "") setNotes(String((d as any)?.notes ?? ""));
+    if (name === "") setName(String(data?.name ?? ""));
+    if (sku === "") setSku(String((data as any)?.sku ?? ""));
+    if (price === "") setPrice((data as any)?.price != null ? String((data as any).price) : "");
+    if (taxCode === "") setTaxCode(String((data as any)?.taxCode ?? ""));
+    if (notes === "") setNotes(String((data as any)?.notes ?? ""));
 
-    const serverStatus = String((d as any)?.status ?? "active");
+    const serverStatus = String((data as any)?.status ?? "active");
     if (!statusTouched.current) setStatus(serverStatus);
 
-    const serverKind = String((d as any)?.kind ?? "good");
+    const serverKind = String((data as any)?.kind ?? "good");
     if (!kindTouched.current) setKind(serverKind);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data]);
+  }, [detail.data]);
 
   const onSave = async () => {
     if (!name.trim()) { Alert.alert("Name is required"); return; }
+    setSaving(true);
 
-    // Coerce enums + numbers
     const normalizedStatus = (status ?? "").trim().toLowerCase();
     const statusEnum: Status = (STATUS_VALUES as readonly string[]).includes(normalizedStatus as Status)
       ? (normalizedStatus as Status) : "active";
@@ -75,7 +75,7 @@ export default function ProductDetailScreen({ route, navigation }: any) {
 
     const priceNum = price.trim() === "" ? undefined : Number(price);
     const payload: Partial<Product> & { notes?: string; taxCode?: string } = {
-      id,
+      ...(isNew ? {} : { id }),
       type: "product",
       name: name.trim(),
       sku: sku.trim() || undefined,
@@ -87,26 +87,22 @@ export default function ProductDetailScreen({ route, navigation }: any) {
     };
 
     try {
-      if (id) await update.mutateAsync(payload as any);
-      else     await create.mutateAsync(payload as any);
+      if (isNew) await create.mutateAsync(payload as any);
+      else       await update.mutateAsync(payload as any);
       navigation.goBack();
     } catch (e: any) {
       Alert.alert("Error", e?.message ?? "Failed to save");
+    } finally {
+      setSaving(false);
     }
   };
 
   return (
     <FormScreen>
-      <View
-        style={{
-          backgroundColor: t.colors.card,
-          borderRadius: 12,
-          borderWidth: 1,
-          borderColor: t.colors.border,
-          padding: 16,
-          marginBottom: 12,
-        }}
-      >
+      <View style={{
+        backgroundColor: t.colors.card, borderRadius: 12, borderWidth: 1, borderColor: t.colors.border,
+        padding: 16, marginBottom: 12,
+      }}>
         <Field label="Name *" value={name} onChangeText={setName} />
         <Field label="SKU" value={sku} onChangeText={setSku} />
         <Field label="Price" value={price} onChangeText={setPrice} keyboardType="numeric" />
@@ -134,7 +130,7 @@ export default function ProductDetailScreen({ route, navigation }: any) {
           style={{ marginTop: 12, backgroundColor: t.colors.primary, padding: 14, borderRadius: 10, alignItems: "center" }}
         >
           <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>
-            {id ? (isFetching ? "Saving…" : "Save") : "Create"}
+            {saving ? "Saving…" : isNew ? "Create" : "Save"}
           </Text>
         </Pressable>
       </View>
@@ -166,13 +162,8 @@ function Field({
         blurOnSubmit={false}
         returnKeyType="done"
         style={{
-          backgroundColor: t.colors.bg,
-          color: t.colors.text,
-          borderColor: t.colors.border,
-          borderWidth: 1,
-          borderRadius: 8,
-          padding: 12,
-          minHeight: multiline ? 80 : undefined,
+          backgroundColor: t.colors.bg, color: t.colors.text, borderColor: t.colors.border,
+          borderWidth: 1, borderRadius: 8, padding: 12, minHeight: multiline ? 80 : undefined,
         }}
         placeholderTextColor={t.colors.muted}
       />
@@ -181,14 +172,8 @@ function Field({
 }
 
 function PillGroup({
-  options,
-  value,
-  onChange,
-}: {
-  options: string[];
-  value?: string;
-  onChange: (v: string) => void;
-}) {
+  options, value, onChange,
+}: { options: string[]; value?: string; onChange: (v: string) => void; }) {
   const t = useColors();
   return (
     <View style={{ flexDirection: "row", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
@@ -199,14 +184,10 @@ function PillGroup({
             key={opt}
             onPress={() => onChange(opt)}
             style={{
-              paddingHorizontal: 12,
-              paddingVertical: 8,
-              borderRadius: 999,
-              borderWidth: 1,
+              paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1,
               borderColor: selected ? t.colors.primary : t.colors.border,
               backgroundColor: selected ? t.colors.primary : t.colors.card,
-              marginRight: 8,
-              marginBottom: 8,
+              marginRight: 8, marginBottom: 8,
             }}
           >
             <Text style={{ color: selected ? t.colors.buttonText : t.colors.text, fontWeight: "600" }}>

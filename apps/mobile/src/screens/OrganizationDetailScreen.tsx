@@ -1,4 +1,3 @@
-// apps/mobile/src/screens/RegistrationDetailScreen.tsx
 import React from "react";
 import { View, Text, TextInput, Pressable, Alert } from "react-native";
 import { useRoute, RouteProp } from "@react-navigation/native";
@@ -8,34 +7,30 @@ import type { components } from "../api/generated-types";
 import type { RootStackParamList } from "../navigation/types";
 import FormScreen from "../features/_shared/FormScreen";
 
-type Registration = components["schemas"]["Registration"];
-type Route = RouteProp<RootStackParamList, "RegistrationDetail">;
+type Organization = components["schemas"]["Organization"];
+type Route = RouteProp<RootStackParamList, "OrganizationDetail">;
 
-const STATUS_VALUES = ["new","confirmed","cancelled"] as const;
-type RStatus = typeof STATUS_VALUES[number];
+const STATUS_VALUES = ["active", "inactive", "archived"] as const;
+const KIND_VALUES   = ["club", "federation", "venueOp", "sponsor"] as const;
 
-export default function RegistrationDetailScreen({ navigation }: any) {
+export default function OrganizationDetailScreen({ navigation }: any) {
   const { params } = useRoute<Route>();
-  const id   = params?.id;
-  const mode: "new" | "edit" | undefined = (params as any)?.mode;
-  const isNew = mode === "new" || !id;
-  const initial = (params?.initial ?? {}) as Partial<Registration>;
+  const id = params?.id;
+  const isNew = params?.mode === "new" || !id;
+  const initial = (params?.initial ?? {}) as Partial<Organization>;
   const t = useColors();
 
-  const [item, setItem] = React.useState<Registration | null>(null);
+  const [item, setItem] = React.useState<Organization | null>(null);
   const [saving, setSaving] = React.useState(false);
 
-  const [attendeeName, setAttendeeName] = React.useState(String((initial as any)?.attendeeName ?? (initial as any)?.name ?? ""));
-  const [eventId, setEventId]           = React.useState(String((initial as any)?.eventId ?? ""));
-  const [clientId, setClientId]         = React.useState(String((initial as any)?.clientId ?? ""));
-  const [status, setStatus]             = React.useState<string>(String((initial as any)?.status ?? "new"));
-  const [notes, setNotes]               = React.useState(String((initial as any)?.notes ?? ""));
-
-  const statusTouched = React.useRef(false);
+  const [name, setName] = React.useState(String(initial?.name ?? ""));
+  const [kind, setKind] = React.useState<string>(String((initial as any)?.kind ?? "club"));
+  const [status, setStatus] = React.useState<string>(String((initial as any)?.status ?? "active"));
+  const [notes, setNotes] = React.useState(String((initial as any)?.notes ?? ""));
 
   const load = React.useCallback(async () => {
     if (!id || isNew) return;
-    const obj = await getObject<Registration>("registration", String(id));
+    const obj = await getObject<Organization>("organization", String(id));
     setItem(obj);
   }, [id, isNew]);
 
@@ -43,23 +38,21 @@ export default function RegistrationDetailScreen({ navigation }: any) {
 
   React.useEffect(() => {
     if (!item) return;
-    setAttendeeName((v) => v || String((item as any)?.attendeeName ?? (item as any)?.name ?? ""));
-    setEventId((v)     => v || String((item as any)?.eventId ?? ""));
-    setClientId((v)    => v || String((item as any)?.clientId ?? ""));
-    if (!statusTouched.current) setStatus(String((item as any)?.status ?? "new"));
-    setNotes((v)       => v || String((item as any)?.notes ?? ""));
+    setName((v) => v || String((item as any)?.name ?? ""));
+    setKind((v) => v || String((item as any)?.kind ?? "club"));
+    setStatus((v) => v || String((item as any)?.status ?? "active"));
+    setNotes((v) => v || String((item as any)?.notes ?? ""));
   }, [item]);
 
   async function onCreate() {
-    if (!eventId.trim()) { Alert.alert("Event ID is required"); return; }
+    if (!name.trim()) { Alert.alert("Name is required"); return; }
     setSaving(true);
     try {
-      await createObject<Registration>("registration", {
-        type: "registration",
-        attendeeName: attendeeName.trim() || undefined,
-        eventId: eventId.trim(),
-        clientId: clientId.trim() || undefined,
-        status: (STATUS_VALUES as unknown as string[]).includes(status) ? status as RStatus : "new",
+      await createObject<Organization>("organization", {
+        type: "organization",
+        name: name.trim(),
+        kind: (KIND_VALUES as unknown as string[]).includes(kind) ? kind : "club",
+        status: (STATUS_VALUES as unknown as string[]).includes(status) ? status : "active",
         notes: notes.trim() || undefined,
       } as any);
       navigation.goBack();
@@ -71,10 +64,9 @@ export default function RegistrationDetailScreen({ navigation }: any) {
     if (!id) return;
     setSaving(true);
     try {
-      await updateObject<Registration>("registration", String(id), {
-        ...(attendeeName.trim() ? { attendeeName: attendeeName.trim() } : {}),
-        ...(eventId.trim() ? { eventId: eventId.trim() } : {}),
-        ...(clientId.trim() ? { clientId: clientId.trim() } : {}),
+      await updateObject<Organization>("organization", String(id), {
+        ...(name.trim() ? { name: name.trim() } : {}),
+        ...(kind ? { kind } : {}),
         ...(status ? { status } : {}),
         ...(notes.trim() ? { notes: notes.trim() } : {}),
       } as any);
@@ -86,38 +78,13 @@ export default function RegistrationDetailScreen({ navigation }: any) {
   return (
     <FormScreen>
       <View style={{ backgroundColor: t.colors.card, borderRadius: 12, borderWidth: 1, borderColor: t.colors.border, padding: 16 }}>
-        {/* Quick links when editing */}
-        {!isNew && id ? (
-          <View style={{ marginBottom: 12 }}>
-            {!!eventId && (
-              <Pressable
-                onPress={() => navigation.navigate("EventDetail", { id: eventId, mode: "edit" })}
-                style={{ backgroundColor: t.colors.card, borderColor: t.colors.border, borderWidth: 1, borderRadius: 10, padding: 12, marginBottom: 8 }}
-              >
-                <Text style={{ color: t.colors.text, fontWeight: "700" }}>Open event</Text>
-              </Pressable>
-            )}
-            {!!clientId && (
-              <Pressable
-                onPress={() => navigation.navigate("ClientDetail", { id: clientId, mode: "edit" })}
-                style={{ backgroundColor: t.colors.card, borderColor: t.colors.border, borderWidth: 1, borderRadius: 10, padding: 12 }}
-              >
-                <Text style={{ color: t.colors.text, fontWeight: "700" }}>Open client</Text>
-              </Pressable>
-            )}
-          </View>
-        ) : null}
+        <Field label="Name *" value={name} onChangeText={setName} />
 
-        <Field label="Attendee name" value={attendeeName} onChangeText={setAttendeeName} />
-        <Field label="Event ID *"    value={eventId}      onChangeText={setEventId} />
-        <Field label="Client ID"     value={clientId}     onChangeText={setClientId} />
+        <Label text="Kind" />
+        <PillGroup options={KIND_VALUES as unknown as string[]} value={kind} onChange={setKind} />
 
         <Label text="Status" />
-        <PillGroup
-          options={STATUS_VALUES as unknown as string[]}
-          value={status}
-          onChange={(v) => { statusTouched.current = true; setStatus(v); }}
-        />
+        <PillGroup options={STATUS_VALUES as unknown as string[]} value={status} onChange={setStatus} />
 
         <Field label="Notes" value={notes} onChangeText={setNotes} multiline />
 
@@ -152,6 +119,7 @@ function Field({ label, value, onChangeText, multiline, keyboardType }:{
         keyboardType={keyboardType}
         autoCapitalize="none"
         autoCorrect={false}
+        blurOnSubmit={false}
         returnKeyType="done"
         style={{ backgroundColor: t.colors.bg, color: t.colors.text, borderColor: t.colors.border, borderWidth: 1, borderRadius: 8, padding: 12, minHeight: multiline ? 80 : undefined }}
         placeholderTextColor={t.colors.muted}

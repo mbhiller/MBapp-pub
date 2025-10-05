@@ -1,161 +1,175 @@
+// apps/mobile/src/screens/InventoryDetailScreen.tsx
 import React from "react";
-import { ScrollView, View, Text, Pressable, RefreshControl, ActivityIndicator } from "react-native";
-import { useRoute, RouteProp } from "@react-navigation/native";
-import type { RootStackParamList } from "../navigation/types";
+import { View, Text, TextInput, Pressable, Alert } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 import { useColors } from "../features/_shared/useColors";
-import { apiClient, getObject } from "../api/client";
-import { useRefetchOnFocus } from "../features/_shared/useRefetchOnFocus";
+import FormScreen from "../features/_shared/FormScreen";
+import { createObject, updateObject, getObject } from "../api/client";
+import StockCard from "../features/inventory/StockCard";
+import type { components } from "../api/generated-types";
+type InventoryItem = components["schemas"]["InventoryItem"];
 
-type Route = RouteProp<RootStackParamList, "InventoryDetail">;
+const STATUS_VALUES = ["active", "inactive", "archived"] as const;
+type Status = typeof STATUS_VALUES[number];
 
-type Movement = {
-  id?: string;
-  ts?: string;            // ISO
-  qty?: number;
-  kind?: "in" | "out";
-  refType?: string;       // "purchaseOrder" | "salesOrder" | "adjustment"
-  refId?: string;
-  notes?: string;
-};
-
-export default function InventoryDetailScreen() {
-  const route = useRoute<Route>();
-  const { id } = route.params ?? {};
+export default function InventoryDetailScreen({ route, navigation }: any) {
   const t = useColors();
+  const id: string | undefined = route?.params?.id;
+  const mode: "new" | "edit" | undefined = route?.params?.mode;
+  const isNew = mode === "new" || !id;
 
-  const [item, setItem] = React.useState<any>(null);
-  const [loading, setLoading] = React.useState(false);
-  const [refreshing, setRefreshing] = React.useState(false);
+  // local fields (string-coerced)
+  const [name, setName]         = React.useState("");
+  const [productId, setProductId]= React.useState("");
+  const [sku, setSku]           = React.useState("");
+  const [uom, setUom]           = React.useState("");
+  const [location, setLocation] = React.useState("");
+  const [minQty, setMinQty]     = React.useState("");
+  const [maxQty, setMaxQty]     = React.useState("");
+  const [status, setStatus]     = React.useState<string>("active");
+  const [notes, setNotes]       = React.useState("");
 
-  // stock card state
-  const [onhand, setOnhand] = React.useState<number | null>(null);
-  const [movements, setMovements] = React.useState<Movement[]>([]);
-  const [stockBusy, setStockBusy] = React.useState(false);
-
-  const loadStock = React.useCallback(async () => {
-    if (!id) return;
-    setStockBusy(true);
-    try {
-      const oh = await apiClient.get<{ onhand: number }>(`/inventory/${encodeURIComponent(String(id))}/onhand`);
-      const mv = await apiClient.get<{ items?: Movement[] }>(`/inventory/${encodeURIComponent(String(id))}/movements`);
-      setOnhand((oh as any)?.onhand ?? (oh as any));
-      const list: Movement[] = Array.isArray((mv as any)?.items) ? (mv as any).items : (Array.isArray(mv) ? (mv as any) : []);
-      setMovements(list.sort((a, b) => String(b.ts).localeCompare(String(a.ts))).slice(0, 10));
-    } catch { /* noop */ } finally { setStockBusy(false); }
-  }, [id]);
+  const [saving, setSaving]     = React.useState(false);
+  const [item, setItem]         = React.useState<InventoryItem | null>(null);
+  const statusTouched = React.useRef(false);
 
   const load = React.useCallback(async () => {
-    if (!id) return;
-    setLoading(true);
+    if (isNew || !id) return;
+    const obj = await getObject<InventoryItem>("inventory", String(id));
+    setItem(obj);
+  }, [isNew, id]);
+
+  useFocusEffect(React.useCallback(() => {
+    statusTouched.current = false;
+    load().catch(()=>{});
+  }, [load]));
+
+  // hydrate-from-server into empty fields only
+  React.useEffect(() => {
+    if (!item) return;
+    setName((v) => v || String((item as any)?.name ?? ""));
+    setProductId((v) => v || String((item as any)?.productId ?? ""));
+    setSku((v) => v || String((item as any)?.sku ?? ""));
+    setUom((v) => v || String((item as any)?.uom ?? ""));
+    setLocation((v) => v || String((item as any)?.location ?? ""));
+    setMinQty((v) => v || ((item as any)?.minQty != null ? String((item as any).minQty) : ""));
+    setMaxQty((v) => v || ((item as any)?.maxQty != null ? String((item as any).maxQty) : ""));
+    if (!statusTouched.current) setStatus(String((item as any)?.status ?? "active"));
+    setNotes((v) => v || String((item as any)?.notes ?? ""));
+  }, [item]);
+
+  async function onSave() {
+    if (!name.trim()) { Alert.alert("Name is required"); return; }
+    setSaving(true);
     try {
-      const obj = await getObject<any>("inventory", String(id));
-      setItem(obj);
-      await loadStock();
-    } finally { setLoading(false); }
-  }, [id, loadStock]);
+      const normalized = (status ?? "").trim().toLowerCase();
+      const statusEnum: Status = (STATUS_VALUES as readonly string[]).includes(normalized as Status)
+        ? (normalized as Status) : "active";
 
-  // 🔧 Fix: no deps array — the hook signature is (fn, opts?)
-  useRefetchOnFocus(load);
+      const payload: Partial<InventoryItem> = {
+        ...(isNew ? {} : { id }),
+        type: "inventory",
+        name: name.trim(),
+        productId: productId.trim() || undefined,
+        sku: sku.trim() || undefined,
+        uom: uom.trim() || undefined,
+        location: location.trim() || undefined,
+        minQty: minQty.trim() === "" ? undefined : Number(minQty),
+        maxQty: maxQty.trim() === "" ? undefined : Number(maxQty),
+        status: statusEnum as any,
+        notes: notes.trim() || undefined,
+      };
 
-  React.useEffect(() => { load(); }, [load]);
+      if (isNew) await createObject<InventoryItem>("inventory", payload as any);
+      else       await updateObject<InventoryItem>("inventory", String(id), payload as any);
 
-  const onRefresh = React.useCallback(async () => {
-    setRefreshing(true);
-    try { await load(); } finally { setRefreshing(false); }
-  }, [load]);
-
-  const Card = ({ children }: { children: React.ReactNode }) => (
-    <View style={{
-      backgroundColor: t.colors.card,
-      borderColor: t.colors.border,
-      borderWidth: 1,
-      borderRadius: 12,
-      padding: 12,
-      marginBottom: 12
-    }}>
-      {children}
-    </View>
-  );
-
-  if (!id) {
-    return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: t.colors.background }}>
-        <Text style={{ color: t.colors.text }}>No item id</Text>
-      </View>
-    );
+      navigation.goBack();
+    } catch (e: any) {
+      Alert.alert("Error", e?.message ?? "Failed to save");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: t.colors.background }}
-      contentContainerStyle={{ padding: 16 }}
-      refreshControl={<RefreshControl tintColor={t.colors.text} refreshing={refreshing} onRefresh={onRefresh} />}
-      keyboardShouldPersistTaps="handled"
-    >
-      <Text style={{ color: t.colors.text, fontSize: 18, fontWeight: "700", marginBottom: 8 }}>
-        Inventory Item
-      </Text>
-      {loading && <View style={{ paddingVertical: 16 }}><ActivityIndicator /></View>}
-
-      <Card>
-        <Text style={{ color: t.colors.text, fontWeight: "700", marginBottom: 8 }}>{item?.name || item?.label || item?.id}</Text>
-        <Row label="ID" value={String(item?.id ?? "")} />
-        <Row label="Product" value={String(item?.productId ?? "—")} />
-        <Row label="UOM" value={String(item?.uom ?? "—")} />
-        <Row label="Status" value={String(item?.status ?? "—")} />
-        {item?.notes ? <Row label="Notes" value={String(item.notes)} /> : null}
-      </Card>
-
-      <Card>
-        <Text style={{ color: t.colors.text, fontWeight: "700", marginBottom: 8 }}>Stock</Text>
-        <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
-          <Text style={{ color: t.colors.muted, marginRight: 8 }}>On hand:</Text>
-          {stockBusy ? <ActivityIndicator /> : (
-            <Text style={{ color: t.colors.text, fontWeight: "700", fontSize: 16 }}>
-              {onhand ?? "—"}
-            </Text>
-          )}
-          <Pressable onPress={loadStock} style={{ marginLeft: "auto", backgroundColor: t.colors.primary, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8 }}>
-            <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>Refresh</Text>
-          </Pressable>
+    <FormScreen>
+      <View style={{ backgroundColor: t.colors.card, borderRadius: 12, borderWidth: 1, borderColor: t.colors.border, padding: 16, marginBottom: 12 }}>
+        <Field label="Name *" value={name} onChangeText={setName} />
+        <Field label="Product ID" value={productId} onChangeText={setProductId} />
+        <Field label="SKU" value={sku} onChangeText={setSku} />
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <View style={{ flex: 1 }}><Field label="UOM" value={uom} onChangeText={setUom} /></View>
+          <View style={{ flex: 1 }}><Field label="Location" value={location} onChangeText={setLocation} /></View>
+        </View>
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <View style={{ flex: 1 }}><Field label="Min Qty" value={minQty} onChangeText={setMinQty} keyboardType="numeric" /></View>
+          <View style={{ flex: 1 }}><Field label="Max Qty" value={maxQty} onChangeText={setMaxQty} keyboardType="numeric" /></View>
         </View>
 
-        <Text style={{ color: t.colors.muted, marginBottom: 6 }}>Recent movements</Text>
-        <View style={{ gap: 6 }}>
-          {movements.length === 0 ? (
-            <Text style={{ color: t.colors.muted }}>No movements</Text>
-          ) : movements.map((m, idx) => (
-            <View key={idx} style={{
-              padding: 8,
-              borderWidth: 1,
-              borderColor: t.colors.border,
-              borderRadius: 8,
-              backgroundColor: t.colors.bg
-            }}>
-              <Text style={{ color: t.colors.text, fontWeight: "600" }}>
-                {m.kind === "in" ? "↑ In" : m.kind === "out" ? "↓ Out" : "•"} {m.qty ?? 0} {item?.uom ?? ""}
-              </Text>
-              <Text style={{ color: t.colors.muted, fontSize: 12 }}>
-                {m.ts ? new Date(m.ts).toLocaleString() : "—"}
-                {m.refType ? `  •  ${m.refType}${m.refId ? ` #${m.refId}` : ""}` : ""}
-              </Text>
-              {!!m.notes && <Text style={{ color: t.colors.muted, fontSize: 12 }}>{m.notes}</Text>}
-            </View>
-          ))}
-        </View>
-      </Card>
+        <Label text="Status" />
+        <PillGroup
+          options={STATUS_VALUES as unknown as string[]}
+          value={status}
+          onChange={(v) => { statusTouched.current = true; setStatus(v); }}
+        />
 
-      <View style={{ height: 24 }} />
-    </ScrollView>
+        <Field label="Notes" value={notes} onChangeText={setNotes} multiline />
+
+        <Pressable onPress={onSave} style={{ marginTop: 12, backgroundColor: t.colors.primary, padding: 14, borderRadius: 10, alignItems: "center" }}>
+          <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>
+            {saving ? "Saving…" : isNew ? "Create" : "Save"}
+          </Text>
+        </Pressable>
+      </View>
+
+      {/* Only show stock info for existing items */}
+      {!isNew && id ? <StockCard itemId={id} /> : null}
+    </FormScreen>
   );
 }
 
-function Row({ label, value }: { label: string; value?: string }) {
+function Label({ text }: { text: string }) {
+  const t = useColors();
+  return <Text style={{ marginBottom: 6, color: t.colors.muted }}>{text}</Text>;
+}
+function Field({ label, value, onChangeText, multiline, keyboardType }:{
+  label: string; value?: any; onChangeText: (v: any) => void; multiline?: boolean; keyboardType?: any;
+}) {
   const t = useColors();
   return (
-    <View style={{ flexDirection: "row", marginBottom: 6 }}>
-      <Text style={{ color: t.colors.muted, width: 110 }}>{label}</Text>
-      <Text style={{ color: t.colors.text, flex: 1 }}>{value || "—"}</Text>
+    <View style={{ marginBottom: 10 }}>
+      <Text style={{ marginBottom: 6, color: t.colors.muted }}>{label}</Text>
+      <TextInput
+        value={String(value ?? "")}
+        onChangeText={onChangeText}
+        multiline={multiline}
+        keyboardType={keyboardType}
+        autoCapitalize="none"
+        autoCorrect={false}
+        blurOnSubmit={false}
+        returnKeyType="done"
+        style={{ backgroundColor: t.colors.bg, color: t.colors.text, borderColor: t.colors.border, borderWidth: 1, borderRadius: 8, padding: 12, minHeight: multiline ? 80 : undefined }}
+        placeholderTextColor={t.colors.muted}
+      />
+    </View>
+  );
+}
+function PillGroup({ options, value, onChange }:{ options: string[]; value?: string; onChange: (v: string) => void; }) {
+  const t = useColors();
+  return (
+    <View style={{ flexDirection: "row", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+      {options.map((opt) => {
+        const selected = String(value ?? "") === opt;
+        return (
+          <Pressable key={opt} onPress={() => onChange(opt)} style={{
+            paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1,
+            borderColor: selected ? t.colors.primary : t.colors.border,
+            backgroundColor: selected ? t.colors.primary : t.colors.card, marginRight: 8, marginBottom: 8,
+          }}>
+            <Text style={{ color: selected ? t.colors.buttonText : t.colors.text, fontWeight: "600" }}>{opt}</Text>
+          </Pressable>
+        );
+      })}
     </View>
   );
 }

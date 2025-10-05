@@ -1,5 +1,6 @@
+// apps/mobile/src/features/inventory/StockCard.tsx
 import React from "react";
-import { View, Text, ActivityIndicator, FlatList } from "react-native";
+import { View, Text, ActivityIndicator } from "react-native";
 import { useColors } from "../_shared/useColors";
 import { useStock } from "./useStock";
 
@@ -7,15 +8,19 @@ export default function StockCard({ itemId }: { itemId?: string }) {
   const t = useColors();
   const { onhand, movements } = useStock(itemId);
 
+  const recent = (movements.data ?? []).slice(0, 5);
+
   return (
-    <View style={{
-      backgroundColor: t.colors.card,
-      borderColor: t.colors.border,
-      borderWidth: 1,
-      borderRadius: 12,
-      padding: 12,
-      marginTop: 12,
-    }}>
+    <View
+      style={{
+        backgroundColor: t.colors.card,
+        borderColor: t.colors.border,
+        borderWidth: 1,
+        borderRadius: 12,
+        padding: 12,
+        marginTop: 12,
+      }}
+    >
       <Text style={{ color: t.colors.text, fontWeight: "700", marginBottom: 8 }}>Stock</Text>
 
       {onhand.isLoading ? (
@@ -38,16 +43,18 @@ export default function StockCard({ itemId }: { itemId?: string }) {
         />
       )}
 
-      {/* Movements (optional) */}
-      {movements.isLoading ? null : (movements.data?.length ?? 0) > 0 ? (
+      {/* Recent movements (rendered non-virtualized to avoid nested VirtualizedList warning) */}
+      {movements.isLoading ? null : recent.length > 0 ? (
         <View style={{ marginTop: 10 }}>
           <Text style={{ color: t.colors.muted, marginBottom: 6 }}>Recent movements</Text>
-          <FlatList
-            data={movements.data!.slice(0, 5)}
-            keyExtractor={(it, i) => String(it.id || i)}
-            ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: t.colors.border }} />}
-            renderItem={({ item }) => <MovementRow item={item} />}
-          />
+          <View>
+            {recent.map((item, i) => (
+              <View key={String(item.id ?? i)} style={{ paddingVertical: 8 }}>
+                {i > 0 ? <View style={{ height: 1, backgroundColor: t.colors.border, marginBottom: 8 }} /> : null}
+                <MovementRow item={item} />
+              </View>
+            ))}
+          </View>
         </View>
       ) : null}
     </View>
@@ -75,18 +82,25 @@ function RowNumbers(props: {
   );
 }
 
-function MovementRow({ item }: { item: { ts?: string; kind?: string; delta?: number; refType?: string; refId?: string; note?: string } }) {
+function MovementRow({
+  item,
+}: {
+  item: { ts?: string; kind?: string; delta?: number; refType?: string; refId?: string; note?: string };
+}) {
   const t = useColors();
   const when = item.ts ? new Date(item.ts).toLocaleString() : "";
   const meta = [item.refType, item.refId].filter(Boolean).join("/");
   const sign = item.delta != null && item.delta >= 0 ? "+" : "";
   return (
-    <View style={{ paddingVertical: 8 }}>
+    <View>
       <Text style={{ color: t.colors.text, fontWeight: "600" }}>
-        {item.kind || "movement"} {sign}{item.delta ?? 0}
+        {item.kind || "movement"} {sign}
+        {item.delta ?? 0}
       </Text>
       <Text style={{ color: t.colors.muted, fontSize: 12 }}>
-        {when}{meta ? ` • ${meta}` : ""}{item.note ? ` • ${item.note}` : ""}
+        {when}
+        {meta ? ` • ${meta}` : ""}
+        {item.note ? ` • ${item.note}` : ""}
       </Text>
     </View>
   );

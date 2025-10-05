@@ -1,3 +1,4 @@
+// apps/mobile/src/screens/VendorDetailScreen.tsx
 import React from "react";
 import { View, Text, TextInput, Pressable, Alert } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
@@ -12,51 +13,58 @@ type VStatus = typeof STATUS_VALUES[number];
 export default function VendorDetailScreen({ route, navigation }: any) {
   const t = useColors();
   const id: string | undefined = route?.params?.id;
+  const mode: "new" | "edit" | undefined = route?.params?.mode;
+  const isNew = mode === "new" || !id;
+
   const initial = (route?.params?.initial ?? {}) as Partial<Vendor>;
 
-  const q = Vendors.useGet(id);
-  const save = Vendors.useSave();
+  // If your hooks lib has useCreate/useUpdate, you can swap them in like Products.
+  const detail = Vendors.useGet(isNew ? undefined : id);
+  const save   = Vendors.useSave();
+  const [saving, setSaving] = React.useState(false);
 
-  const [name, setName] = React.useState(String((initial as any)?.name ?? ""));
+  const [name, setName]           = React.useState(String((initial as any)?.name ?? ""));
   const [displayName, setDisplayName] = React.useState(String((initial as any)?.displayName ?? ""));
-  const [email, setEmail] = React.useState(String((initial as any)?.email ?? ""));
-  const [phone, setPhone] = React.useState(String((initial as any)?.phone ?? ""));
-  const [status, setStatus] = React.useState<string>(String((initial as any)?.status ?? "active"));
-  const [notes, setNotes] = React.useState(String((initial as any)?.notes ?? ""));
+  const [email, setEmail]         = React.useState(String((initial as any)?.email ?? ""));
+  const [phone, setPhone]         = React.useState(String((initial as any)?.phone ?? ""));
+  const [status, setStatus]       = React.useState<string>(String((initial as any)?.status ?? "active"));
+  const [notes, setNotes]         = React.useState(String((initial as any)?.notes ?? ""));
 
   const statusTouched = React.useRef(false);
 
-  useFocusEffect(React.useCallback(() => {
-    statusTouched.current = false;
-    if (id) q.refetch();
-  }, [id, q.refetch]));
+  useFocusEffect(
+    React.useCallback(() => {
+      statusTouched.current = false;
+      if (!isNew && id) detail.refetch();
+    }, [isNew, id, detail.refetch])
+  );
 
   React.useEffect(() => {
-    const data = q.data as Vendor | undefined;
+    const data = detail.data as Vendor | undefined;
     if (!data) return;
 
-    if (name === "") setName(String((data as any)?.name ?? ""));
+    if (name === "")        setName(String((data as any)?.name ?? ""));
     if (displayName === "") setDisplayName(String((data as any)?.displayName ?? ""));
-    if (email === "") setEmail(String((data as any)?.email ?? ""));
-    if (phone === "") setPhone(String((data as any)?.phone ?? ""));
+    if (email === "")       setEmail(String((data as any)?.email ?? ""));
+    if (phone === "")       setPhone(String((data as any)?.phone ?? ""));
+    if (notes === "")       setNotes(String((data as any)?.notes ?? ""));
 
     const serverStatus = String((data as any)?.status ?? "active");
     if (!statusTouched.current) setStatus(serverStatus);
-
-    if (notes === "") setNotes(String((data as any)?.notes ?? ""));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q.data]);
+  }, [detail.data]);
 
   const onSave = async () => {
     if (!name.trim()) { Alert.alert("Name is required"); return; }
+    setSaving(true);
 
     const normalized = (status ?? "").trim();
     const statusEnum: VStatus = (STATUS_VALUES as readonly string[]).includes(normalized as VStatus)
-      ? (normalized as VStatus)
-      : "active";
+      ? (normalized as VStatus) : "active";
 
     const payload: Partial<Vendor> = {
-      id, type: "vendor",
+      ...(isNew ? {} : { id }),
+      type: "vendor",
       name: name.trim(),
       displayName: displayName.trim() || undefined,
       email: email.trim() || undefined,
@@ -70,6 +78,8 @@ export default function VendorDetailScreen({ route, navigation }: any) {
       navigation.goBack();
     } catch (e: any) {
       Alert.alert("Error", e?.message ?? "Failed to save");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -92,7 +102,9 @@ export default function VendorDetailScreen({ route, navigation }: any) {
 
         <Pressable onPress={onSave}
           style={{ marginTop: 12, backgroundColor: t.colors.primary, padding: 14, borderRadius: 10, alignItems: "center" }}>
-          <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>{id ? "Save" : "Create"}</Text>
+          <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>
+            {saving ? "Saving…" : isNew ? "Create" : "Save"}
+          </Text>
         </Pressable>
       </View>
     </FormScreen>
@@ -129,7 +141,7 @@ function Field({ label, value, onChangeText, multiline, keyboardType }:{
     </View>
   );
 }
-function PillGroup({ options, value, onChange }: { options: string[]; value?: string; onChange: (v: string) => void; }) {
+function PillGroup({ options, value, onChange }:{ options: string[]; value?: string; onChange: (v: string) => void; }) {
   const t = useColors();
   return (
     <View style={{ flexDirection: "row", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
@@ -139,7 +151,8 @@ function PillGroup({ options, value, onChange }: { options: string[]; value?: st
           <Pressable key={opt} onPress={() => onChange(opt)} style={{
             paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1,
             borderColor: selected ? t.colors.primary : t.colors.border,
-            backgroundColor: selected ? t.colors.primary : t.colors.card, marginRight: 8, marginBottom: 8,
+            backgroundColor: selected ? t.colors.primary : t.colors.card,
+            marginRight: 8, marginBottom: 8,
           }}>
             <Text style={{ color: selected ? t.colors.buttonText : t.colors.text, fontWeight: "600" }}>{opt}</Text>
           </Pressable>

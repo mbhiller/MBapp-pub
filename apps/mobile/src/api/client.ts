@@ -1,8 +1,7 @@
 // apps/mobile/src/api/client.ts
 // Canonical objects client used by all features.
-// Reads MBAPP_* envs first (your PowerShell script sets these), then Expo envs.
-// Adds optional Authorization bearer token support (via setBearerToken) and Idempotency-Key.
-import AsyncStorage from "@react-native-async-storage/async-storage";
+// Adds: auto refresh on 401 in dev, dual header casings, Accept header.
+
 let API_BASE = (
   process.env.MBAPP_API_BASE ??
   process.env.EXPO_PUBLIC_API_BASE ??
@@ -28,7 +27,9 @@ export function _debugConfig() {
 }
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
-type RequestOpts = { idempotencyKey?: string; headers?: Record<string, string>; };
+type RequestOpts = { idempotencyKey?: string; headers?: Record<string, string> };
+
+export type ListPage<T> = { items: T[]; next?: string };
 
 function normalizePage<T>(res: any): { items: T[]; next?: string } {
   if (Array.isArray(res)) return { items: res };
@@ -46,18 +47,51 @@ function normalizePage<T>(res: any): { items: T[]; next?: string } {
   return { items: [] };
 }
 
-async function request<T>(path: string, method: HttpMethod = "GET", body?: any, opts: RequestOpts = {}): Promise<T> {
+function qs(params?: Record<string, any>) {
+  const s = new URLSearchParams();
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      if (v === undefined || v === null) continue;
+      if (Array.isArray(v)) v.forEach((vv) => s.append(k, String(vv)));
+      else if (typeof v === "boolean") s.set(k, v ? "true" : "false");
+      else s.set(k, String(v));
+    }
+  }
+  const q = s.toString();
+  return q ? `?${q}` : "";
+}
+
+/** Dev-only: silently re-login and set bearer, then return true if refreshed */
+async function tryDevRelogin(): Promise<boolean> {
+  // Only in dev-like environments where we have Expo envs
+  const email   = process.env.EXPO_PUBLIC_DEV_EMAIL  || "dev@example.com";
+  const tenant  = TENANT || process.env.EXPO_PUBLIC_TENANT_ID || "DemoTenant";
+  try {
+    const res = await apiClient.post<{ token: string }>("/auth/dev-login", { email, tenantId: tenant });
+    if (res?.token) {
+      setBearerToken(res.token);
+      return true;
+    }
+  } catch {
+    // ignore
+  }
+  return false;
+}
+
+async function request<T>(path: string, method: HttpMethod = "GET", body?: any, opts: RequestOpts = {}, _retried = false): Promise<T> {
   const headers: Record<string, string> = {
+    "accept": "application/json",
     "content-type": "application/json",
+    // send both casings for tenant & auth (some middlewares normalize differently)
+    "X-Tenant-Id": TENANT,
     "x-tenant-id": TENANT,
     ...opts.headers,
   };
-  // ⚙️ Send both casings — whichever your middleware inspects will be present
   if (_bearerToken) {
     headers["Authorization"] = `Bearer ${_bearerToken}`;
     headers["authorization"] = `Bearer ${_bearerToken}`;
   }
-  if (opts.idempotencyKey) headers["idempotency-key"] = opts.idempotencyKey;
+  if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
 
   const url = `${API_BASE}${path}`;
   const res = await fetch(url, {
@@ -67,6 +101,14 @@ async function request<T>(path: string, method: HttpMethod = "GET", body?: any, 
   });
 
   if (!res.ok) {
+    // If unauthorized once, try a dev re-login and retry exactly once
+    if (res.status === 401 && !_retried && !path.startsWith("/auth/dev-login")) {
+      const refreshed = await tryDevRelogin();
+      if (refreshed) {
+        return request<T>(path, method, body, opts, true);
+      }
+    }
+
     let detail = "";
     try {
       const data = await res.json();
@@ -82,22 +124,6 @@ async function request<T>(path: string, method: HttpMethod = "GET", body?: any, 
 
   if (res.status === 204) return undefined as unknown as T;
   return (await res.json()) as T;
-}
-
-export type ListPage<T> = { items: T[]; next?: string };
-
-function qs(params?: Record<string, any>) {
-  const s = new URLSearchParams();
-  if (params) {
-    for (const [k, v] of Object.entries(params)) {
-      if (v === undefined || v === null) continue;
-      if (Array.isArray(v)) v.forEach((vv) => s.append(k, String(vv)));
-      else if (typeof v === "boolean") s.set(k, v ? "true" : "false");
-      else s.set(k, String(v));
-    }
-  }
-  const q = s.toString();
-  return q ? `?${q}` : "";
 }
 
 // ===== Generic Objects helpers =====

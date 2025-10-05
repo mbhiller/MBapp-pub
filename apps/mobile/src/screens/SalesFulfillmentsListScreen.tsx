@@ -4,11 +4,11 @@ import { useColors } from "../features/_shared/useColors";
 import { useRefetchOnFocus } from "../features/_shared/useRefetchOnFocus";
 import { useObjectsList } from "../features/_shared/useObjectsList";
 import type { components } from "../api/generated-types";
-type PurchaseOrder = components["schemas"]["PurchaseOrder"];
+type SalesFulfillment = components["schemas"]["SalesFulfillment"];
 
-export default function PurchaseOrdersListScreen({ navigation }: any) {
+export default function SalesFulfillmentsListScreen({ navigation }: any) {
   const t = useColors();
-  const q = useObjectsList<PurchaseOrder>({ type: "purchaseOrder", limit: 20, by: "updatedAt", sort: "desc" });
+  const q = useObjectsList<SalesFulfillment>({ type: "salesFulfillment", limit: 20, by: "updatedAt", sort: "desc" });
 
   const [pulling, setPulling] = React.useState(false);
   const onPull = React.useCallback(async () => {
@@ -17,25 +17,25 @@ export default function PurchaseOrdersListScreen({ navigation }: any) {
   }, [q]);
   useRefetchOnFocus(q.refetchStable, { debounceMs: 150 });
 
-  const renderItem = ({ item }: { item: PurchaseOrder }) => {
+  const renderItem = ({ item }: { item: SalesFulfillment }) => {
     const id = String(item.id ?? "");
     const title =
       (item as any).name ??
       (item as any).number ??
-      (item as any).vendorName ??
-      `Purchase Order ${id.slice(0, 8)}`;
+      `Fulfillment ${id.slice(0, 8)}`;
 
-    const lineCount = Array.isArray((item as any).lines) ? (item as any).lines.length : 0;
+    const soId = (item as any)?.salesOrderId;
+    const lineCount = Array.isArray((item as any)?.lines) ? (item as any).lines.length : 0;
     const parts: string[] = [];
-    if ((item as any).vendorName) parts.push(String((item as any).vendorName));
+    if (soId) parts.push(`SO: ${soId}`);
     if (lineCount) parts.push(`${lineCount} line${lineCount === 1 ? "" : "s"}`);
     const subtitle = parts.join(" • ") || "—";
 
-    const status = String((item as any).status ?? "draft");
+    const status = String((item as any)?.status ?? "pending");
 
     return (
       <Pressable
-        onPress={() => navigation.navigate("PurchaseOrderDetail", { id, mode: "edit" })}
+        onPress={() => navigation.navigate("SalesFulfillmentDetail", { id, mode: "edit" })}
         style={{
           backgroundColor: t.colors.card,
           borderColor: t.colors.border,
@@ -72,38 +72,23 @@ export default function PurchaseOrdersListScreen({ navigation }: any) {
                 Error: {String(q.error?.message ?? "unknown")}
               </Text>
             ) : (
-              <Text style={{ color: t.colors.muted }}>No purchase orders.</Text>
+              <Text style={{ color: t.colors.muted }}>
+                No fulfillments yet. Fulfill a Sales Order to generate one.
+              </Text>
             )}
           </View>
         }
         contentContainerStyle={{ paddingBottom: 96 }}
       />
-
-      {/* + New */}
-      <Pressable
-        onPress={() => navigation.navigate("PurchaseOrdersList" /* or detail new? */, { mode: "new" })}
-        // If you want to go straight to detail like other modules:
-        // onPress={() => navigation.navigate("PurchaseOrderDetail", { mode: "new" })}
-        style={{
-          position: "absolute",
-          right: 16,
-          bottom: 16,
-          backgroundColor: t.colors.primary,
-          paddingHorizontal: 16,
-          paddingVertical: 12,
-          borderRadius: 999,
-        }}
-      >
-        <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>+ New</Text>
-      </Pressable>
+      {/* Intentionally no “+ New” — fulfillments are produced by fulfilling an SO */}
     </View>
   );
 }
 
 function StatusPill({ value }: { value: string }) {
   const t = useColors();
-  const v = value?.toLowerCase?.() ?? "draft";
-  const { bg, fg, br } = getPOStatusStyle(t, v);
+  const v = value?.toLowerCase?.() ?? "pending";
+  const { bg, fg, br } = getStatusStyle(t, v);
   return (
     <View
       style={{
@@ -121,17 +106,14 @@ function StatusPill({ value }: { value: string }) {
   );
 }
 
-function getPOStatusStyle(t: ReturnType<typeof useColors>, v?: string) {
-  const s = String(v || "").toLowerCase();
-  // happy/positive
-  if (["approved", "receiving", "received", "closed"].includes(s)) {
+function getStatusStyle(t: ReturnType<typeof useColors>, v: string) {
+  // pending → fulfilled → closed → canceled
+  if (v === "fulfilled" || v === "closed") {
     return { bg: t.colors.card, fg: t.colors.primary, br: t.colors.primary };
   }
-  // negative
-  if (s === "canceled" || s === "cancelled" || s === "rejected") {
+  if (v === "canceled") {
     return { bg: t.colors.card, fg: t.colors.danger,  br: t.colors.danger  };
   }
-  // neutral (draft/submitted/unknown)
+  // default: pending/unknown
   return { bg: t.colors.card, fg: t.colors.text,    br: t.colors.border  };
 }
-

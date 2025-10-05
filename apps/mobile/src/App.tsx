@@ -6,6 +6,7 @@ import RootStack from "./navigation/RootStack"
 import { ThemeProvider } from "./providers/ThemeProvider";
 import { RolesProvider } from "./providers/RolesProvider";
 import { QueryClientProvider } from "@tanstack/react-query";
+import { DevAuthBootstrap } from "./providers/DevAuthBootstrap";
 
 
 // ✅ use the shared client
@@ -25,9 +26,11 @@ export default function App() {
     <ThemeProvider>
       <RolesProvider initialRoles={initialRoles}>
         <QueryClientProvider client={queryClient}>
-          <NavigationContainer>
-            <RootStack />
-          </NavigationContainer>
+          <DevAuthBootstrap>
+            <NavigationContainer>
+              <RootStack />
+            </NavigationContainer>
+          </DevAuthBootstrap>
         </QueryClientProvider>
       </RolesProvider>
     </ThemeProvider>

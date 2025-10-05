@@ -13,15 +13,22 @@ import path from "node:path";
 const API_BASE = (process.env.MBAPP_API_BASE || "").replace(/\/+$/, "");
 let   BEARER   = process.env.MBAPP_BEARER || ""; // updated by `login`
 
-// Supported module keys (exact CLI names in your banner)
+// Supported module keys (exact CLI names in your banner) — ordered for linked seeding
 const MODULES = [
-  "client", "account", "employee", "vendor", "product", "inventory",
-  "event", "registration", "resource", "reservation",
+  "organization",
+  "client", "vendor", "employee", "account",
+  "product", "inventory",
+  "resource",
+  "venueArea", "stall",
+  "classDef", "scorecardTemplate",
+  "event",
+  "reservation", "registration",
   "purchaseOrder", "salesOrder",
 ];
 
 // Map CLI type → objects route type (DB item.type)
 const TYPE_MAP = {
+  organization: "organization",
   client: "client",
   account: "account",
   employee: "employee",
@@ -34,6 +41,10 @@ const TYPE_MAP = {
   reservation: "reservation",
   purchaseOrder: "purchaseOrder",
   salesOrder: "salesOrder",
+  classDef: "classDef",
+  scorecardTemplate: "scorecardTemplate",
+  venueArea: "venueArea",
+  stall: "stall",
 };
 
 function usage() {
@@ -76,7 +87,9 @@ function randId() {
   return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
 }
 function nowIso() { return new Date().toISOString(); }
+function addMinutes(date, mins) { return new Date(date.getTime() + mins * 60000); }
 function pick(n, arr) { const out=[]; for(let i=0;i<n;i++) out.push(arr[i % arr.length]); return out; }
+function sample(arr) { return arr.length ? arr[Math.floor(Math.random()*arr.length)] : undefined; }
 
 function normalizePage(res) {
   if (Array.isArray(res)) return { items: res };
@@ -117,8 +130,6 @@ async function api(path, { method = "GET", body, headers } = {}) {
     const rid = res.headers.get("x-amzn-RequestId") || res.headers.get("x-request-id") || "";
     const hdr = Object.fromEntries([...res.headers.entries()]);
     throw new Error(`HTTP ${res.status} ${res.statusText} ${path} — ${msg}\nheaders=${JSON.stringify(hdr)}\nbody=${text}\nrequestId=${rid}`);
-
-    //throw new Error(`HTTP ${res.status} ${res.statusText} ${path} — ${msg}`);
   }
   return json;
 }
@@ -129,7 +140,7 @@ function policyPreset(kind) {
   const FULL = {
     "*:read": true,
     "product:read": true, "inventory:read": true, "purchase:read": true, "sales:read": true,
-    "event:read": true, "registration:read": true, "resource:read": true, "reservation:read": true,
+    "event:read": true, "registration:read": true, "resource:read": true, "reservation:read": true,"organization:read": true,
 
     "purchase:write": true, "purchase:approve": true, "purchase:receive": true, "purchase:cancel": true, "purchase:close": true,
     "sales:write": true, "sales:commit": true, "sales:fulfill": true, "sales:cancel": true, "sales:close": true,
@@ -139,10 +150,7 @@ function policyPreset(kind) {
     "*:write": true, "*:*": true, "*": true,
   };
   const READ = { "*:read": true };
-  const MIN  = {
-    "*:read": true,
-    "purchase:write": true, "sales:write": true,
-  };
+  const MIN  = { "*:read": true, "purchase:write": true, "sales:write": true };
   switch ((kind || "full").toLowerCase()) {
     case "read": return READ;
     case "min":  return MIN;
@@ -165,13 +173,8 @@ async function writeTokenFiles(token) {
   try { await fs.mkdir(outDir, { recursive: true }); } catch {}
   const tokenPath = path.join(outDir, ".mb_bearer");
   const envPath   = path.join(outDir, ".env.local");
-  try {
-    await fs.writeFile(tokenPath, token, "utf8");
-  } catch {}
-  try {
-    const line = `MBAPP_BEARER="${token}"\n`;
-    await fs.writeFile(envPath, line, "utf8");
-  } catch {}
+  try { await fs.writeFile(tokenPath, token, "utf8"); } catch {}
+  try { await fs.writeFile(envPath, `MBAPP_BEARER="${token}"\n`, "utf8"); } catch {}
   return { tokenPath, envPath };
 }
 
@@ -181,7 +184,6 @@ async function cmdLogin(args) {
   const policy  = policyPreset(args.policy || "full");
   const exportOnly = Boolean(args.export);
 
-  // request token
   const res  = await fetch(`${API_BASE}/auth/dev-login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -190,39 +192,22 @@ async function cmdLogin(args) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(`dev-login failed — ${res.status} ${res.statusText}: ${JSON.stringify(data)}`);
 
-  // set for this Node process
   BEARER = data.token;
   process.env.MBAPP_BEARER = BEARER;
 
-  if (exportOnly) {
-    // print only the token so caller can capture: $env:MBAPP_BEARER = $(node ops/smoke.mjs login --export)
-    console.log(BEARER);
-    return;
-  }
+  if (exportOnly) { console.log(BEARER); return; }
 
-  // write helper files for reuse
   const paths = await writeTokenFiles(BEARER);
 
-  // fetch and print policy (verifies header works)
   let policyGet = {};
-  try {
-    policyGet = await api(`/auth/policy`, { method: "GET" });
-  } catch (e) {
-    policyGet = { error: "policy_fetch_failed", message: e?.message || String(e) };
-  }
+  try { policyGet = await api(`/auth/policy`, { method: "GET" }); }
+  catch (e) { policyGet = { error: "policy_fetch_failed", message: e?.message || String(e) }; }
 
-  // final summary
   console.log(JSON.stringify({
-    ok: true,
-    email,
-    tenant,
+    ok: true, email, tenant,
     policyRulesPosted: Object.keys(policy).length,
     tokenPreview: BEARER?.slice(0, 20) + "...",
-    stored: {
-      processEnv: true,
-      tokenFile: paths.tokenPath,
-      envFile: paths.envPath,
-    },
+    stored: { processEnv: true, tokenFile: paths.tokenPath, envFile: paths.envPath },
     howToSetInCurrentShell: "PowerShell: $env:MBAPP_BEARER = (Get-Content ops/.mb_bearer)",
     policy: policyGet,
   }, null, 2));
@@ -256,36 +241,40 @@ function seedBody(cliType) {
   const t = TYPE_MAP[cliType];
   const n = Date.now();
   switch (cliType) {
-    case "client":        return { type: t, name: `Client ${n}`,  status: "active" };
-    case "account":       return { type: t, name: `Account ${n}` };
-    case "employee":      return { type: t, name: `Employee ${n}` };
-    case "vendor":        return { type: t, name: `Vendor ${n}` };
-    case "product":       return { type: t, name: `Product ${n}`, sku: `SKU-${n}`, uom: "each", status: "active" };
-    case "inventory":     return { type: t, name: `INV ${n}`, sku: `INV-${n}`, uom: "each", status: "active", quantity: 0 };
-    case "event":         return { type: t, name: `Event ${n}`, startsAt: new Date().toISOString(), capacity: 100, status: "available" };
-    case "registration":  return { type: t, eventId: `evt-${randId()}`, clientId: `cli-${randId()}`, qty: 1, status: "pending" };
-    case "resource":      return { type: t, name: `Resource ${n}`, status: "available" };
-    case "reservation":   return {
-      type: t, resourceId: `res-${randId()}`, clientId: `cli-${randId()}`,
-      startsAt: new Date(Date.now()+5*60*1000).toISOString(),
-      endsAt:   new Date(Date.now()+65*60*1000).toISOString(),
+    case "organization":   return { type: t, name: `Org ${n}`, kind: "club", status: "active" };
+    case "client":         return { type: t, name: `Client ${n}`,  status: "active" };
+    case "account":        return { type: t, name: `Account ${n}`, currency: "USD", accountType: "asset" };
+    case "employee":       return { type: t, name: `Employee ${n}`, status: "active" };
+    case "vendor":         return { type: t, name: `Vendor ${n}`,   status: "active" };
+    case "product":        return { type: t, name: `Product ${n}`, sku: `SKU-${n}`, uom: "each", status: "active" };
+    case "inventory":      return { type: t, name: `INV ${n}`, sku: `INV-${n}`, uom: "each", status: "active", quantity: 0 };
+    case "resource":       return { type: t, name: `Resource ${n}`, status: "available" };
+    case "venueArea":      return { type: t, name: `Ring ${n}`, kind: "ring", capacity: 8, status: "open" };
+    case "stall":          return { type: t, number: `S-${n}`, status: "available" };
+    case "classDef":       return { type: t, code: `CL-${n}`, name: `Class ${n}`, discipline: "dressage", fee: 35 };
+    case "scorecardTemplate":
+      return {
+        type: t,
+        name: `Dressage Basic ${n}`,
+        fields: [
+          { key: "gaits",    label: "Gaits",    type: "number", weight: 1 },
+          { key: "impulse",  label: "Impulse",  type: "number", weight: 1 },
+          { key: "submission", label: "Submission", type: "number", weight: 1 },
+          { key: "notes",    label: "Notes",    type: "note" },
+        ],
+        calc: { formula: "total = (gaits||0) + (impulse||0) + (submission||0)" },
+      };
+    case "event":          return { type: t, name: `Event ${n}`, startsAt: new Date().toISOString(), capacity: 100, status: "scheduled" };
+    case "reservation":    return {
+      type: t,
+      startsAt: addMinutes(new Date(), 30).toISOString(),
+      endsAt:   addMinutes(new Date(), 90).toISOString(),
       status: "pending",
     };
-    case "purchaseOrder": return {
-      type: t, vendorId: `ven-${randId()}`, vendorName: "Demo Vendor", status: "draft",
-      lines: [
-        { id: "L1", itemId: `inv-${randId()}`, uom: "each", qty: 2, qtyReceived: 0 },
-        { id: "L2", itemId: `inv-${randId()}`, uom: "each", qty: 1, qtyReceived: 0 },
-      ],
-    };
-    case "salesOrder":    return {
-      type: t, customerName: "Demo Customer", status: "draft",
-      lines: [
-        { id: "L1", itemId: `inv-${randId()}`, uom: "each", qty: 1, qtyFulfilled: 0 },
-        { id: "L2", itemId: `inv-${randId()}`, uom: "each", qty: 2, qtyFulfilled: 0 },
-      ],
-    };
-    default:              return { type: t, name: `Unknown ${n}` };
+    case "registration":   return { type: t, qty: 1, status: "pending" };
+    case "purchaseOrder":  return { type: t, vendorName: "Demo Vendor", status: "draft", lines: [] };
+    case "salesOrder":     return { type: t, customerName: "Demo Customer", status: "draft", lines: [] };
+    default:               return { type: t, name: `Unknown ${n}` };
   }
 }
 
@@ -295,11 +284,32 @@ async function cmdCreate(cliType, each = 1) {
   const type = TYPE_MAP[cliType];
   if (!type) throw new Error(`Unknown type: ${cliType}`);
   const ids = [];
+
+  // Special handling for POs/SOs so lines reference real inventory items
+  if (cliType === "purchaseOrder" || cliType === "salesOrder") {
+    const inv = await ensureInventoryItems(3);
+    for (let i = 0; i < Number(each); i++) {
+      const body = seedBody(cliType);
+      const chosen = pick(2, inv);
+      const lines = chosen.map((c, idx) =>
+        cliType === "purchaseOrder"
+          ? { id: `L${idx+1}`, itemId: c.id, uom: c.uom, qty: 2, qtyReceived: 0 }
+          : { id: `L${idx+1}`, itemId: c.id, uom: c.uom, qty: 1, qtyFulfilled: 0 }
+      );
+      body.lines = lines;
+      const created = await createType(type, body);
+      ids.push(created.id);
+      await wait(15);
+    }
+    console.log(JSON.stringify({ type: cliType, created: ids }, null, 2));
+    return;
+  }
+
+  // Default simple create
   for (let i = 0; i < Number(each); i++) {
-    const body = seedBody(cliType);
-    const created = await createType(type, body);
+    const created = await createType(type, seedBody(cliType));
     ids.push(created.id);
-    await wait(20);
+    await wait(10);
   }
   console.log(JSON.stringify({ type: cliType, created: ids }, null, 2));
 }
@@ -442,10 +452,81 @@ async function flowSalesOrder(args) {
 
 /* ------------------------- Orchestrations --------------------------- */
 
-async function allCreate(each = 1) {
-  for (const m of MODULES) await cmdCreate(m, each);
-  console.log("✅ smoke:all:create done");
+async function createN(type, count, factory) {
+  const ids = [];
+  for (let i = 0; i < count; i++) {
+    const body = await factory(i);
+    const created = await createType(type, body);
+    ids.push(created.id);
+    await wait(8);
+  }
+  return ids;
 }
+
+async function allCreate(each = 1) {
+  // pools used for linking
+  const orgIds   = await createN("organization", each, () => seedBody("organization"));
+  const clientIds= await createN("client",       each, () => seedBody("client"));
+  const vendorIds= await createN("vendor",       each, () => seedBody("vendor"));
+  await createN("employee",     each, () => seedBody("employee"));
+  await createN("account",      each, () => seedBody("account"));
+
+  const invIds   = await createN("inventory",    each * 3, () => seedBody("inventory"));
+  await createN("product",      each, () => seedBody("product"));
+
+  const resIds   = await createN("resource",     each, () => seedBody("resource"));
+  const areaIds  = await createN("venueArea",    each, () => seedBody("venueArea"));
+  await createN("stall",        each * 2, (i) => ({ ...seedBody("stall"), barnId: sample(areaIds) }));
+
+  const classDefIds = await createN("classDef",          each, () => seedBody("classDef"));
+  const sctIds      = await createN("scorecardTemplate", each, () => seedBody("scorecardTemplate"));
+
+  // Events linked to organizations
+  const eventIds = [];
+  for (let i = 0; i < each; i++) {
+    const base = seedBody("event");
+    base.orgId = sample(orgIds);
+    base.venueAreaId = sample(areaIds);
+    const created = await createType("event", base);
+    eventIds.push(created.id);
+    await wait(8);
+  }
+
+  // Reservations (resource + client)
+  for (let i = 0; i < each; i++) {
+    const base = seedBody("reservation");
+    base.resourceId = sample(resIds);
+    base.clientId   = sample(clientIds);
+    await createType("reservation", base);
+    await wait(6);
+  }
+
+  // Registrations (event + client)
+  for (let i = 0; i < each; i++) {
+    const base = seedBody("registration");
+    base.eventId  = sample(eventIds);
+    base.clientId = sample(clientIds);
+    await createType("registration", base);
+    await wait(6);
+  }
+
+  // POs and SOs with real inventory lines
+  const invObjs = await Promise.all(invIds.map(async (id) => getById("inventory", id).catch(()=>null)));
+  const invPool = invObjs.filter(Boolean).map(it => ({ id: it.id, uom: it.uom || "each" }));
+  const pickLines = (k, qtyField) => pick(k, invPool).map((c, i) => ({ id: `L${i+1}`, itemId: c.id, uom: c.uom, qty: 1, [qtyField]: 0 }));
+
+  for (let i = 0; i < each; i++) {
+    await createType("purchaseOrder", { ...seedBody("purchaseOrder"), vendorId: sample(vendorIds), lines: pickLines(2, "qtyReceived") });
+    await wait(6);
+  }
+  for (let i = 0; i < each; i++) {
+    await createType("salesOrder", { ...seedBody("salesOrder"), lines: pickLines(2, "qtyFulfilled") });
+    await wait(6);
+  }
+
+  console.log("✅ smoke:all:create done (linked)");
+}
+
 async function allList() {
   for (const m of MODULES) await cmdList(m);
   console.log("✅ smoke:all:list done");
@@ -477,7 +558,6 @@ const args = parseArgs(rest);
 
       // Per-module CRUD and flows
       default: {
-        // Formats: smoke:<type>:create|list|update|delete|flow
         const m = cmd && cmd.match(/^smoke:([^:]+):(create|list|update|delete|flow)$/i);
         if (m) {
           const cliType = m[1];
@@ -496,7 +576,6 @@ const args = parseArgs(rest);
             throw new Error(`'flow' not supported for type '${cliType}'.`);
           }
         }
-
         usage();
       }
     }

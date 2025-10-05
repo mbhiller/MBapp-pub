@@ -23,14 +23,7 @@
     "spec:docs": "redocly build-docs spec/openapi.yaml -o docs/api",
     "api:build": "esbuild apps/api/src/index.ts --bundle --platform=node --target=node20 --outfile=apps/api/dist/bootstrap.js",
     "api:smoke": "node apps/api/scripts/smoke.mjs",
-    "api:deploy": "powershell -ExecutionPolicy Bypass -File ops/Publish-ObjectsLambda-Daily.ps1",
-    "smoke": "tsx ops/smoke.ts",
-    "smoke:all:list": "tsx ops/smoke.ts all list",
-    "smoke:all:create": "tsx ops/smoke.ts all create 3",
-    "smoke:all:test": "tsx ops/smoke.ts all test",
-    "smoke:all:delete": "tsx ops/smoke.ts all delete",
-    "smoke:vendors:list": "tsx ops/smoke.ts vendors list",
-    "smoke:purchaseOrders:flow": "tsx ops/smoke.ts purchaseOrders flow"
+    "api:deploy": "powershell -ExecutionPolicy Bypass -File ops/Publish-ObjectsLambda-Daily.ps1"
   },
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "^3.882.0",

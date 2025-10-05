@@ -13,15 +13,15 @@ export type ScanParams = {
   intent?: "navigate" | "attach_epc" | string;
 };
 
+// export type ListFilterParams = Record<string, any>;
 export type RootStackParamList = {
-  // Hub / Global
+  // Hub / global
   Hub: undefined;
-  Scan: ScanParams | undefined;          // <-- allow params (fixes route.params?.intent)
-  DevDiagnostics: undefined;
-  // Tenants
+  Scan: undefined;
   Tenants: undefined;
+  DevDiagnostics: undefined;
 
-  // Objects (generic manager)
+  // Objects (generic)
   ObjectsList: undefined;
   ObjectDetail: DetailParams;
 
@@ -44,22 +44,28 @@ export type RootStackParamList = {
   // Events & Registrations
   EventsList: undefined;
   EventDetail: DetailParams;
+
+  // Registrations list can be filtered by a specific event
   RegistrationsList: { eventId?: string } | undefined;
   RegistrationDetail: DetailParams;
 
-  // Reservations
-  ReservationsList: undefined;
+  // Reservations (optionally filtered by resource)
+  ReservationsList: { resourceId?: string } | undefined;
   ReservationDetail: DetailParams;
 
+  // Vendors
+  VendorsList: undefined;
+  VendorDetail: DetailParams;
+
+  // Employees
+  EmployeesList: undefined;
+  EmployeeDetail: DetailParams;
+  //
+  OrganizationsList: undefined;
+  OrganizationDetail: DetailParams;
   // Resources
   ResourcesList: undefined;
   ResourceDetail: DetailParams;
-
-  // Vendors / Employees
-  VendorsList: undefined;
-  VendorDetail: DetailParams;
-  EmployeesList: undefined;
-  EmployeeDetail: DetailParams;
 
   // Purchasing
   PurchaseOrdersList: undefined;
@@ -72,4 +78,14 @@ export type RootStackParamList = {
   // Integrations
   IntegrationsList: undefined;
   IntegrationDetail: DetailParams;
+  // IntegrationRunsList?: undefined; // if/when you enable it
+
+  // ✅ Goods Receipts (added)
+  GoodsReceiptsList: undefined;
+  GoodsReceiptDetail: DetailParams;
+
+  // ✅ Sales Fulfillments (added)
+  SalesFulfillmentsList: undefined;
+  SalesFulfillmentDetail: DetailParams;
+  
 };

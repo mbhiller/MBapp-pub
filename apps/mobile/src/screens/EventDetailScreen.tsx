@@ -1,4 +1,3 @@
-// apps/mobile/src/screens/EventDetailScreen.tsx
 import React from "react";
 import { View, Text, TextInput, Pressable, Alert } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
@@ -9,15 +8,18 @@ import DateTimeField from "../features/_shared/DateTimeField";
 import { useRegistrationsCount } from "../features/registrations/useRegistrationsCount";
 import type { Event } from "../features/events/types";
 
-const STATUS_VALUES = ["available", "unavailable", "maintenance"] as const;
+const STATUS_VALUES = ["draft","scheduled","open","closed","completed","cancelled","archived"] as const;
 type Status = typeof STATUS_VALUES[number];
 
 export default function EventDetailScreen({ route, navigation }: any) {
   const t = useColors();
   const id: string | undefined = route?.params?.id;
+  const mode: "new" | "edit" | undefined = route?.params?.mode;
+  const isNew = mode === "new" || !id; // ← authoritative new-mode check
+
   const initial = (route?.params?.initial ?? {}) as Partial<Event> & { notes?: string };
 
-  const { data, refetch, isFetching } = Events.useGet(id);
+  const { data, refetch } = Events.useGet(isNew ? undefined : id); // don't fetch when new
   const create = Events.useCreate();
   const update = Events.useUpdate(id ?? "");
 
@@ -27,23 +29,24 @@ export default function EventDetailScreen({ route, navigation }: any) {
   const [location, setLocation] = React.useState(String((initial as any)?.location ?? ""));
   const [startsAt, setStartsAt] = React.useState<string | undefined>((initial as any)?.startsAt ?? undefined);
   const [endsAt, setEndsAt] = React.useState<string | undefined>((initial as any)?.endsAt ?? undefined);
-  const [status, setStatus] = React.useState<string>(String((initial as any)?.status ?? "available"));
+  const [status, setStatus] = React.useState<string>(String((initial as any)?.status ?? "scheduled"));
   const [capacity, setCapacity] = React.useState(String((initial as any)?.capacity ?? ""));
   const [notes, setNotes] = React.useState(String((initial as any)?.notes ?? ""));
+  const [saving, setSaving] = React.useState(false);
 
-  // Registrations count
-  const countsQ = useRegistrationsCount(id ? [id] : [], { enabled: Boolean(id) });
-  const regCount = id ? (countsQ.data?.[id] ?? 0) : 0;
+  // Registrations count (disabled in new mode)
+  const countsQ = useRegistrationsCount(!isNew && id ? [id] : [], { enabled: !isNew && Boolean(id) });
+  const regCount = !isNew && id ? (countsQ.data?.[id] ?? 0) : 0;
 
   // Track if the user has edited status this session
   const statusTouched = React.useRef(false);
 
-  // ✨ On focus: just refetch; DON'T clear fields (prevents losing hydration when returning)
+  // On focus: just refetch for existing ids
   useFocusEffect(
     React.useCallback(() => {
       statusTouched.current = false;
-      if (id) refetch();
-    }, [id, refetch])
+      if (!isNew && id) refetch();
+    }, [isNew, id, refetch])
   );
 
   // Merge fresh server data into any still-empty fields; status hydrates unless user typed
@@ -56,7 +59,7 @@ export default function EventDetailScreen({ route, navigation }: any) {
     if (!startsAt && (data as any)?.startsAt) setStartsAt((data as any).startsAt);
     if (!endsAt && (data as any)?.endsAt) setEndsAt((data as any).endsAt);
 
-    const serverStatus = String((data as any)?.status ?? "available");
+    const serverStatus = String((data as any)?.status ?? "scheduled");
     if (!statusTouched.current) setStatus(serverStatus);
 
     if (capacity === "") {
@@ -69,18 +72,19 @@ export default function EventDetailScreen({ route, navigation }: any) {
 
   const onSave = async () => {
     if (!name.trim()) { Alert.alert("Name is required"); return; }
+    setSaving(true);
 
     // Coerce status to enum on save
     const normalized = (status ?? "").trim().toLowerCase();
     const statusEnum: Status = (STATUS_VALUES as readonly string[]).includes(normalized as Status)
       ? (normalized as Status)
-      : "available";
+      : "scheduled";
 
     const capNum = capacity.trim() === "" ? undefined : Number.parseInt(capacity, 10);
     const capacityClean = Number.isFinite(capNum as number) ? (capNum as number) : undefined;
 
     const payload: Partial<Event> & { notes?: string } = {
-      id,
+      ...(isNew ? {} : { id }),
       type: "event",
       name: name.trim(),
       description: description.trim() || undefined,
@@ -92,11 +96,19 @@ export default function EventDetailScreen({ route, navigation }: any) {
     };
 
     try {
-      if (id) await update.mutateAsync(payload as any);
-      else     await create.mutateAsync(payload as any);
-      navigation.goBack();
+      if (isNew) {
+        const saved = await create.mutateAsync(payload as any);
+        const newId = (saved as any)?.id;
+        // After create, you can go back or replace into the new id. Keeping your prior flow:
+        navigation.goBack();
+      } else {
+        await update.mutateAsync(payload as any);
+        navigation.goBack();
+      }
     } catch (e: any) {
       Alert.alert("Error", e?.message ?? "Failed to save");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -112,8 +124,8 @@ export default function EventDetailScreen({ route, navigation }: any) {
           marginBottom: 12,
         }}
       >
-        {/* 🔝 View registrations at top */}
-        {id && (
+        {/* 🔝 View registrations (hidden in new mode) */}
+        {!isNew && id && (
           <Pressable
             onPress={() => navigation.navigate("RegistrationsList", { eventId: id })}
             style={{
@@ -154,7 +166,7 @@ export default function EventDetailScreen({ route, navigation }: any) {
         <DateTimeField label="Ends at" value={endsAt} onChange={setEndsAt} mode="datetime" />
 
         {/* Status as selectable pill buttons */}
-        <Label text='Status'/>
+        <Label text="Status" />
         <PillGroup
           options={STATUS_VALUES as unknown as string[]}
           value={status}
@@ -169,7 +181,7 @@ export default function EventDetailScreen({ route, navigation }: any) {
           style={{ marginTop: 12, backgroundColor: t.colors.primary, padding: 14, borderRadius: 10, alignItems: "center" }}
         >
           <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>
-            {id ? (isFetching ? "Saving…" : "Save") : "Create"}
+            {saving ? "Saving…" : isNew ? "Create" : "Save"}
           </Text>
         </Pressable>
       </View>

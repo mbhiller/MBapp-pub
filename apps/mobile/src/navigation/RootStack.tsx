@@ -1,5 +1,6 @@
 // apps/mobile/src/navigation/RootStack.tsx
 import React from "react";
+import SignOutButton from "../features/dev/SignOutButton";
 import { Text, Pressable } from "react-native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "./types";
@@ -65,6 +66,16 @@ import SalesOrderDetailScreen from  "../screens/SalesOrderDetailScreen";
 // Integrations
 import IntegrationsListScreen from  "../screens/IntegrationsListScreen";
 import IntegrationDetailScreen from "../screens/IntegrationDetailScreen";
+
+import OrganizationsListScreen from "../screens/OrganizationsListScreen";
+import OrganizationDetailScreen from "../screens/OrganizationDetailScreen";
+
+import GoodsReceiptsListScreen from "../screens/GoodsReceiptsListScreen";
+import GoodsReceiptDetailScreen from "../screens/GoodsReceiptDetailScreen";
+
+import SalesFulfillmentsListScreen from "../screens/SalesFulfillmentsListScreen";
+import SalesFulfillmentDetailScreen from "../screens/SalesFulfillmentDetailScreen";
+
 import DevDiagnosticsScreen from "../features/dev/DevDiagnosticsScreen";
 // optional runs
 // import IntegrationRunsListScreen from "../screens/IntegrationRunsListScreen";
@@ -85,10 +96,14 @@ export default function RootStack() {
   return (
     <Stack.Navigator
       screenOptions={({ navigation }) => ({
-        headerStyle: { backgroundColor: t.colors.headerBg },
-        headerTitleStyle: { color: t.colors.headerText, fontWeight: "700" },
-        headerRight: () => <HeaderButton title="Scan" onPress={() => navigation.navigate("Scan")} />,
-      })}
+    headerRight: () => (
+      <>
+        <HeaderButton title="Scan" onPress={() => navigation.navigate("Scan")} />
+        <SignOutButton />
+      </>
+    ),
+  })}
+      
     >
     
       
@@ -148,8 +163,18 @@ export default function RootStack() {
       <Stack.Screen name="SalesOrdersList" component={SalesOrdersListScreen} options={{ title: "Sales" }} />
       <Stack.Screen name="SalesOrderDetail" component={SalesOrderDetailScreen} options={{ title: "Sales Order" }} />
 
+      <Stack.Screen name="GoodsReceiptsList" component={GoodsReceiptsListScreen} options={{ title: "Goods Receipts" }} />
+      <Stack.Screen name="GoodsReceiptDetail" component={GoodsReceiptDetailScreen} options={{ title: "Goods Receipt" }} />
+      
+      <Stack.Screen name="SalesFulfillmentsList" component={SalesFulfillmentsListScreen} options={{ title: "Sales Fulfillments" }} />
+      <Stack.Screen name="SalesFulfillmentDetail" component={SalesFulfillmentDetailScreen} options={{ title: "Sales Fulfillment" }} />
+
       <Stack.Screen name="IntegrationsList" component={IntegrationsListScreen} options={{ title: "Integrations" }} />
       <Stack.Screen name="IntegrationDetail" component={IntegrationDetailScreen} options={{ title: "Integration" }} />
+      
+      <Stack.Screen name="OrganizationsList" component={OrganizationsListScreen} options={{ title: "Organizations" }}/>
+      <Stack.Screen name="OrganizationDetail" component={OrganizationDetailScreen} options={{ title: "Organization" }}
+/>
     {/* <Stack.Screen name="IntegrationRunsList" component={IntegrationRunsListScreen} options={{ title: "Runs" }} /> */}
     </Stack.Navigator>
   );

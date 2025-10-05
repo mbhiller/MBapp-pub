@@ -1235,11 +1235,15 @@ export interface components {
             type: "account";
             name: string;
             number?: string;
-            currency?: string;
-            /** @description e.g., asset, liability, revenue */
-            accountType?: string;
+            /** @default USD */
+            currency: string;
+            /**
+             * @description e.g., asset, liability, revenue, expense, equity
+             * @enum {string}
+             */
+            accountType?: "asset" | "liability" | "revenue" | "expense" | "equity";
             /** @description Current balance (display only) */
-            balance?: number;
+            readonly balance?: number;
             /**
              * @default active
              * @enum {string}
@@ -1250,8 +1254,11 @@ export interface components {
             /** @enum {string} */
             type: "product";
             name: string;
-            /** @enum {string} */
-            kind?: "good" | "service";
+            /**
+             * @default good
+             * @enum {string}
+             */
+            kind: "good" | "service";
             sku?: string;
             price?: number;
             taxCode?: string;
@@ -1299,7 +1306,7 @@ export interface components {
              * Format: date-time
              * @description Mirror of ts for UI lists
              */
-            createdAt?: string;
+            readonly createdAt?: string;
             /** @description Inventory item id */
             itemId: string;
             /** @description Mirror of itemId for client convenience */
@@ -1373,7 +1380,7 @@ export interface components {
              * @default available
              * @enum {string}
              */
-            status: "available" | "unavailable" | "maintenance";
+            status: "draft" | "scheduled" | "open" | "closed" | "completed" | "cancelled" | "archived";
             capacity?: number;
             notes?: string;
         };
@@ -1439,7 +1446,7 @@ export interface components {
         };
         Vendor: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
-            type?: "vendor";
+            type: "vendor";
             name: string;
             displayName?: string;
             /** Format: email */
@@ -1455,7 +1462,8 @@ export interface components {
         Employee: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
             type: "employee";
-            displayName: string;
+            name: string;
+            displayName?: string;
             /** Format: email */
             email?: string;
             phone?: string;
@@ -1475,6 +1483,29 @@ export interface components {
             /** Format: date-time */
             terminatedAt?: string;
             notes?: string;
+        };
+        Organization: components["schemas"]["ObjectBase"] & {
+            /**
+             * @example organization
+             * @enum {string}
+             */
+            type: "organization";
+            /** @example National Dressage Foundation */
+            name: string;
+            /**
+             * @example federation
+             * @enum {string}
+             */
+            kind?: "club" | "federation" | "venueOp" | "sponsor";
+            /**
+             * @default active
+             * @enum {string}
+             */
+            status: "active" | "inactive" | "archived";
+            notes?: string | null;
+            metadata?: {
+                [key: string]: unknown;
+            } | null;
         };
         MoneyTotals: {
             subtotal?: number;
@@ -1644,29 +1675,6 @@ export interface components {
             tracking?: string | null;
             notes?: string | null;
             attachments?: string[];
-        };
-        Receipt: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "receipt";
-            purchaseOrderId: string;
-            lines: {
-                productId?: string;
-                qty?: number;
-                locationId?: string;
-            }[];
-            note?: string;
-        };
-        Fulfillment: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "fulfillment";
-            salesOrderId: string;
-            lines: {
-                productId?: string;
-                qty?: number;
-                fromLocationId?: string;
-            }[];
-            carrier?: string;
-            tracking?: string;
         };
         Integration: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */

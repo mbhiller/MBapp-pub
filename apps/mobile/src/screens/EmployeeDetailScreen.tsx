@@ -1,3 +1,4 @@
+// apps/mobile/src/screens/EmployeeDetailScreen.tsx
 import React from "react";
 import { View, Text, TextInput, Pressable, Alert } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
@@ -13,55 +14,60 @@ type Status = typeof STATUS_VALUES[number];
 export default function EmployeeDetailScreen({ route, navigation }: any) {
   const t = useColors();
   const id: string | undefined = route?.params?.id;
+  const mode: "new" | "edit" | undefined = route?.params?.mode;
+  const isNew = mode === "new" || !id;
+
   const initial = (route?.params?.initial ?? {}) as Partial<Employee>;
 
-  const { data, refetch, isFetching } = Employees.useGet(id);
-  const save = Employees.useSave();
+  const detail = Employees.useGet(isNew ? undefined : id);
+  const save   = Employees.useSave();
+  const [saving, setSaving] = React.useState(false);
 
-  // String-controlled local state
+  // local state
   const [displayName, setDisplayName] = React.useState(String((initial as any)?.displayName ?? String((initial as any)?.name ?? "")));
-  const [email, setEmail] = React.useState(String((initial as any)?.email ?? ""));
-  const [phone, setPhone] = React.useState(String((initial as any)?.phone ?? ""));
-  const [role, setRole] = React.useState(String((initial as any)?.role ?? ""));
-  const [status, setStatus] = React.useState<string>(String((initial as any)?.status ?? "active"));
-  const [hiredAt, setHiredAt] = React.useState<string | undefined>((initial as any)?.hiredAt ?? (initial as any)?.startDate ?? undefined);
+  const [email, setEmail]             = React.useState(String((initial as any)?.email ?? ""));
+  const [phone, setPhone]             = React.useState(String((initial as any)?.phone ?? ""));
+  const [role, setRole]               = React.useState(String((initial as any)?.role ?? ""));
+  const [status, setStatus]           = React.useState<string>(String((initial as any)?.status ?? "active"));
+  const [hiredAt, setHiredAt]         = React.useState<string | undefined>((initial as any)?.hiredAt ?? (initial as any)?.startDate ?? undefined);
   const [terminatedAt, setTerminatedAt] = React.useState<string | undefined>((initial as any)?.terminatedAt ?? undefined);
-  const [notes, setNotes] = React.useState(String((initial as any)?.notes ?? ""));
+  const [notes, setNotes]             = React.useState(String((initial as any)?.notes ?? ""));
 
   const statusTouched = React.useRef(false);
 
   useFocusEffect(
     React.useCallback(() => {
       statusTouched.current = false;
-      if (id) refetch();
-    }, [id, refetch])
+      if (!isNew && id) detail.refetch();
+    }, [isNew, id, detail.refetch])
   );
 
   React.useEffect(() => {
-    if (!data) return;
-    const d = data as Employee;
+    const d = detail.data as Employee | undefined;
+    if (!d) return;
 
     if (displayName === "") setDisplayName(String((d as any)?.displayName ?? (d as any)?.name ?? ""));
-    if (email === "") setEmail(String((d as any)?.email ?? ""));
-    if (phone === "") setPhone(String((d as any)?.phone ?? ""));
-    if (role === "") setRole(String((d as any)?.role ?? ""));
+    if (email === "")       setEmail(String((d as any)?.email ?? ""));
+    if (phone === "")       setPhone(String((d as any)?.phone ?? ""));
+    if (role === "")        setRole(String((d as any)?.role ?? ""));
     if (!hiredAt && ((d as any)?.hiredAt || (d as any)?.startDate)) setHiredAt((d as any)?.hiredAt ?? (d as any)?.startDate);
     if (!terminatedAt && (d as any)?.terminatedAt) setTerminatedAt((d as any).terminatedAt);
-    if (notes === "") setNotes(String((d as any)?.notes ?? ""));
+    if (notes === "")       setNotes(String((d as any)?.notes ?? ""));
 
     const serverStatus = String((d as any)?.status ?? "active");
     if (!statusTouched.current) setStatus(serverStatus);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data]);
+  }, [detail.data]);
 
   const onSave = async () => {
     if (!displayName.trim()) { Alert.alert("Display name is required"); return; }
+    setSaving(true);
 
     const normalized = (status ?? "").trim().toLowerCase();
     const statusEnum: Status = (STATUS_VALUES as readonly string[]).includes(normalized as Status) ? (normalized as Status) : "active";
 
     const payload: Partial<Employee> = {
-      id,
+      ...(isNew ? {} : { id }),
       type: "employee",
       displayName: displayName.trim(),
       email: email.trim() || undefined,
@@ -69,7 +75,7 @@ export default function EmployeeDetailScreen({ route, navigation }: any) {
       role: role.trim() || undefined,
       status: statusEnum,
       hiredAt,
-      startDate: hiredAt, // keep alias in payload for server normalization
+      startDate: hiredAt,  // alias for server normalization
       terminatedAt,
       notes: notes.trim() || undefined,
     };
@@ -79,6 +85,8 @@ export default function EmployeeDetailScreen({ route, navigation }: any) {
       navigation.goBack();
     } catch (e: any) {
       Alert.alert("Error", e?.message ?? "Failed to save");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -99,7 +107,9 @@ export default function EmployeeDetailScreen({ route, navigation }: any) {
         <Field label="Notes" value={notes} onChangeText={setNotes} multiline />
 
         <Pressable onPress={onSave} style={{ marginTop: 12, backgroundColor: t.colors.primary, padding: 14, borderRadius: 10, alignItems: "center" }}>
-          <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>{id ? (isFetching ? "Saving…" : "Save") : "Create"}</Text>
+          <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>
+            {saving ? "Saving…" : isNew ? "Create" : "Save"}
+          </Text>
         </Pressable>
       </View>
     </FormScreen>
