@@ -17,7 +17,7 @@ node ops/smoke.mjs smoke:all:update
 node ops/smoke.mjs smoke:all:delete
 
 # Per module
-node ops/smoke.mjs smoke:event:create --each 3
+node ops/smoke.mjs smoke:event:create --eacporth 3
 node ops/smoke.mjs smoke:purchaseOrder:list
 
 # Flows
@@ -41,6 +41,7 @@ node ops/smoke.mjs smoke:guardrails:po-idempotency --lines 2 --qty 2 --idem test
 # 4) Reserved release on cancel
 node ops/smoke.mjs smoke:guardrails:cancel-release
 
+node ops/smoke.mjs smoke:scanner:simulate
 
 # Show env
 node ops/smoke.mjs env

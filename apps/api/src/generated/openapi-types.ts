@@ -1702,6 +1702,60 @@ export interface components {
             };
             error?: string | null;
         };
+        EPCMap: {
+            /** @description UUID */
+            id: string;
+            /**
+             * @default epcMap
+             * @enum {string}
+             */
+            type: "epcMap";
+            epc: string;
+            itemId: string;
+            lotId?: string | null;
+            locationId?: string | null;
+            /**
+             * @default active
+             * @enum {string}
+             */
+            status: "active" | "retired";
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            updatedAt?: string;
+        };
+        ScannerSession: {
+            id: string;
+            /**
+             * @default scannerSession
+             * @enum {string}
+             */
+            type: "scannerSession";
+            userId: string;
+            workspaceId?: string | null;
+            /** Format: date-time */
+            startedAt: string;
+            /** Format: date-time */
+            endedAt?: string | null;
+        };
+        ScannerAction: {
+            id: string;
+            /**
+             * @default scannerAction
+             * @enum {string}
+             */
+            type: "scannerAction";
+            sessionId: string;
+            /** Format: date-time */
+            ts: string;
+            epc: string;
+            /** @description Resolved on server */
+            itemId?: string | null;
+            /** @enum {string} */
+            action: "receive" | "move" | "pick" | "count";
+            fromLocationId?: string | null;
+            toLocationId?: string | null;
+        };
     };
     responses: {
         /** @description Error response */
