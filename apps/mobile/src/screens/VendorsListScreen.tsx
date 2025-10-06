@@ -44,7 +44,7 @@ export default function VendorsListScreen({ navigation }: any) {
         keyExtractor={(i, idx) => String((i as any).id ?? idx)}
         refreshControl={<RefreshControl refreshing={pulling} onRefresh={onPull} />}
         renderItem={renderItem}
-        ListEmptyComponent={<View style={{ padding: 24 }}>{q.isLoading ? <ActivityIndicator/> : q.isError ? <Text style={{ color: t.colors.danger }}>Error: {String(q.error?.message ?? "unknown")}</Text> : <Text style={{ color: t.colors.muted }}>No employees.</Text>}</View>}
+        ListEmptyComponent={<View style={{ padding: 24 }}>{q.isLoading ? <ActivityIndicator/> : q.isError ? <Text style={{ color: t.colors.danger }}>Error: {String(q.error?.message ?? "unknown")}</Text> : <Text style={{ color: t.colors.muted }}>No Vendors.</Text>}</View>}
         contentContainerStyle={{ paddingBottom: 96 }}
       />
 

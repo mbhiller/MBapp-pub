@@ -7,38 +7,44 @@ import type { components } from "../api/generated-types";
 import type { RootStackParamList } from "../navigation/types";
 import { createObject, getObject, updateObject } from "../api/client";
 
-type SalesOrder = components["schemas"]["SalesOrder"];
-type Route = RouteProp<RootStackParamList, "SalesOrderDetail">;
+type PurchaseOrder = components["schemas"]["PurchaseOrder"];
+type Route = RouteProp<RootStackParamList, "PurchaseOrderDetail">;
 
-const STATUS_VALUES = ["draft","submitted","committed","partiallyFulfilled","fulfilled","cancelled","closed"] as const;
+const STATUS_VALUES = ["draft","submitted","approved","partiallyReceived","received","cancelled","closed"] as const;
 
-export default function SalesOrderDetailScreen({ navigation }: any) {
+export default function PurchaseOrderDetailScreen({ navigation }: any) {
   const { params } = useRoute<Route>();
   const id   = params?.id;
   const mode = params?.mode as "new" | "edit" | undefined;
   const isNew = mode === "new" || !id;
-  const initial = (params?.initial ?? {}) as Partial<SalesOrder>;
+  const initial = (params?.initial ?? {}) as Partial<PurchaseOrder>;
   const t = useColors();
 
   const [saving, setSaving] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
 
   // form state
-  const [customerName, setCustomerName] = React.useState(String((initial as any)?.customerName ?? ""));
-  const [status, setStatus] = React.useState<string>(String((initial as any)?.status ?? "draft"));
-  const [notes, setNotes]   = React.useState(String((initial as any)?.notes ?? ""));
+  const [vendorName, setVendorName] = React.useState(String((initial as any)?.vendorName ?? ""));
+  const [status, setStatus]         = React.useState<string>(String((initial as any)?.status ?? "draft"));
+  const [notes, setNotes]           = React.useState(String((initial as any)?.notes ?? ""));
 
-  // Load existing only (never load when new)
+  // track if user changed status this session
+  const statusTouched = React.useRef(false);
+
+  // Load existing only
   const load = React.useCallback(async () => {
     if (isNew || !id) return;
     setLoading(true);
     try {
-      const so = await getObject<SalesOrder>("salesOrder", String(id));
-      setCustomerName((v) => v || String((so as any)?.customerName ?? ""));
-      setStatus((v) => v || String((so as any)?.status ?? "draft"));
-      setNotes((v) => v || String((so as any)?.notes ?? ""));
+      const po = await getObject<PurchaseOrder>("purchaseOrder", String(id));
+      setVendorName((v) => v || String((po as any)?.vendorName ?? ""));
+      setNotes((v) => v || String((po as any)?.notes ?? ""));
+
+      // hydrate status from server unless user touched locally this session
+      const serverStatus = String((po as any)?.status ?? "draft");
+      if (!statusTouched.current) setStatus(serverStatus);
     } catch (e: any) {
-      Alert.alert("Error", e?.message ?? "Failed to load sales order");
+      Alert.alert("Error", e?.message ?? "Failed to load purchase order");
     } finally {
       setLoading(false);
     }
@@ -47,15 +53,14 @@ export default function SalesOrderDetailScreen({ navigation }: any) {
   React.useEffect(() => { load(); }, [load]);
 
   async function onCreateDraft() {
-    if (!customerName.trim()) { Alert.alert("Customer name is required"); return; }
+    if (!vendorName.trim()) { Alert.alert("Vendor name is required"); return; }
     setSaving(true);
     try {
-      await createObject<SalesOrder>("salesOrder", {
-        type: "salesOrder",
-        customerName: customerName.trim(),
+      await createObject<PurchaseOrder>("purchaseOrder", {
+        type: "purchaseOrder",
+        vendorName: vendorName.trim(),
         status: "draft",
         ...(notes.trim() ? { notes: notes.trim() } : {}),
-        // lines can be added later from a lines UI if/when you add it
       } as any);
       navigation.goBack();
     } catch (e: any) {
@@ -67,11 +72,11 @@ export default function SalesOrderDetailScreen({ navigation }: any) {
 
   async function onSaveEdits() {
     if (!id) return;
-    if (!customerName.trim()) { Alert.alert("Customer name is required"); return; }
+    if (!vendorName.trim()) { Alert.alert("Vendor name is required"); return; }
     setSaving(true);
     try {
-      await updateObject<SalesOrder>("salesOrder", String(id), {
-        customerName: customerName.trim(),
+      await updateObject<PurchaseOrder>("purchaseOrder", String(id), {
+        vendorName: vendorName.trim(),
         status,
         ...(notes.trim() ? { notes: notes.trim() } : { notes: undefined }),
       } as any);
@@ -86,11 +91,15 @@ export default function SalesOrderDetailScreen({ navigation }: any) {
   return (
     <FormScreen>
       <View style={{ backgroundColor: t.colors.card, borderRadius: 12, borderWidth: 1, borderColor: t.colors.border, padding: 16 }}>
-        <Field label="Customer *" value={customerName} onChangeText={setCustomerName} />
+        <Field label="Vendor *" value={vendorName} onChangeText={setVendorName} />
         {!isNew && (
           <>
             <Label text="Status" />
-            <PillGroup options={STATUS_VALUES as unknown as string[]} value={status} onChange={setStatus} />
+            <PillGroup
+              options={STATUS_VALUES as unknown as string[]}
+              value={status}
+              onChange={(v) => { statusTouched.current = true; setStatus(v); }}
+            />
           </>
         )}
         <Field label="Notes" value={notes} onChangeText={setNotes} multiline />

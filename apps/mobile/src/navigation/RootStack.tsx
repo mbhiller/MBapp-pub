@@ -98,7 +98,7 @@ export default function RootStack() {
       screenOptions={({ navigation }) => ({
     headerRight: () => (
       <>
-        <HeaderButton title="Scan" onPress={() => navigation.navigate("Scan")} />
+        {/*<HeaderButton title="Scan" onPress={() => navigation.navigate("Scan")} />*/}
         <SignOutButton />
       </>
     ),
@@ -110,7 +110,7 @@ export default function RootStack() {
 
       <Stack.Screen name="Hub" component={ModuleHubScreen} options={{ title: "Hub" }} />
       <Stack.Screen name="DevDiagnostics" component={DevDiagnosticsScreen} options={{ title: "Dev Diagnostics" }} />
-   
+      <Stack.Screen name="Scan" component={ScanScreen} options={{ title: "Scan" }} />
       {/* Products */}
       <Stack.Screen name="ProductsList" component={ProductsListScreen} options={{ title: "Products" }} />
       <Stack.Screen name="ProductDetail" component={ProductDetailScreen} options={{ title: "Product" }} />
