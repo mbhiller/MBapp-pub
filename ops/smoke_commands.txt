@@ -1,25 +1,65 @@
-# 0) Login + policy
-node ops/smoke.mjs login --email dev@example.com --tenant DemoTenant --policy full
 
-# 1) Seed
-node ops/smoke.mjs smoke:event:create --each 3
 
-# 2) Lists
+
+########### EXAMPLE ###############
+# Show env
+node ops/smoke.mjs env
+
+# Login (sets MBAPP_BEARER for this process)
+node ops/smoke.mjs login --tenant DemoTenant --email dev@example.com --policy full
+
+# Create 3 per module
+node ops/smoke.mjs smoke:all:create --each 3
+
+# List / Update / Delete
 node ops/smoke.mjs smoke:all:list
-node ops/smoke.mjs smoke:events:list
-
-# 3) Updates
 node ops/smoke.mjs smoke:all:update
-node ops/smoke.mjs smoke:inventory:update
+node ops/smoke.mjs smoke:all:delete
 
-# 4) Flows
-node ops/smoke.mjs flow:purchase --lines 3 --qty 2
-node ops/smoke.mjs flow:sales    --lines 3 --qty 1
+# Per module
+node ops/smoke.mjs smoke:event:create --each 3
+node ops/smoke.mjs smoke:purchaseOrder:list
 
-# 5) Delete
-node ops/smoke.mjs smoke:all:delete --all
-node ops/smoke.mjs smoke:product:delete --all
+# Flows
+node ops/smoke.mjs smoke:purchaseOrder:flow --lines 3 --qty 2
+node ops/smoke.mjs smoke:salesOrder:flow    --lines 3 --qty 1
 
+# 0) Login
+node ops/smoke.mjs login --tenant DemoTenant --email dev@example.com
+
+# 1) Normal flows (should PASS without negatives)
+node ops/smoke.mjs smoke:purchaseOrder:flow --lines 2 --qty 2
+node ops/smoke.mjs smoke:salesOrder:flow    --lines 2 --qty 1
+
+# 2) Guardrails (these EXPECT 409 and then PASS the test)
+node ops/smoke.mjs smoke:guardrails:so-overcommit --qty 2
+node ops/smoke.mjs smoke:guardrails:so-overfulfill --qty 2
+
+# 3) PO idempotency (no double increment when same Idempotency-Key)
+node ops/smoke.mjs smoke:guardrails:po-idempotency --lines 2 --qty 2 --idem test-key-123
+
+# 4) Reserved release on cancel
+node ops/smoke.mjs smoke:guardrails:cancel-release
+
+
+# Show env
+node ops/smoke.mjs env
+
+# Login with full lowercase policy, print policy, and write token files
+node ops/smoke.mjs login --tenant DemoTenant --email dev@example.com --policy full
+
+# (optional) set token in current shell using the file we wrote
+$env:MBAPP_BEARER = (Get-Content ops/.mb_bearer)
+
+# Or capture directly:
+$env:MBAPP_BEARER = $(node ops/smoke.mjs login --tenant DemoTenant --email dev@example.com --policy full --export)
+
+# Create 3 per module
+node ops/smoke.mjs smoke:all:create --each 3
+
+# Flows
+node ops/smoke.mjs smoke:purchaseOrder:flow --lines 3 --qty 2
+node ops/smoke.mjs smoke:salesOrder:flow    --lines 3 --qty 1
 
 
 gc tools
@@ -36,38 +76,8 @@ Delete arbitrary keys from a file
 # save an array like: [{ "pk": "DemoTenant", "sk": "product#abc" }, ...]
 node ops/tools/gc/gc.mjs delete:keys .\ops\tools\gc\keys.json
 
+054799133473
 
-
-.\ops\Set-MBend.ps1
-
-node ops/smoke.mjs login --email dev@example.com --tenant DemoTenant --policy full
-# => stores $env:MBAPP_BEARER internally for this session (and prints a short summary)
-
-node ops/smoke.mjs seed:all --count 3
-
-node ops/smoke.mjs smoke:all:list
-
-node ops/smoke.mjs smoke:all:update
-
-node ops/smoke.mjs flow:purchase --lines 3 --qty 2
-
-node ops/smoke.mjs flow:sales --lines 3 --qty 1
-
-node ops/smoke.mjs smoke:all:delete --all
-
-
-
-########### EXAMPLE ###############
-# Create 3 events
-node ops/smoke.mjs smoke:event:create --each 3
-
-# List purchase orders
-node ops/smoke.mjs smoke:purchaseOrder:list
-
-# Update inventory
-node ops/smoke.mjs smoke:inventory:update
-
-# Delete ONLY sales orders made by smoke
-node ops/smoke.mjs smoke:salesOrder:delete
-
-
+npm run api:deploy   -FunctionName "mbapp-nonprod-objects" `
+>>   -Region "us-east-1" `
+>>   -ApiBase "$Env:MBAPP_API_BASE"
