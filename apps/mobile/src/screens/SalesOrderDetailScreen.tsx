@@ -25,8 +25,11 @@ export default function SalesOrderDetailScreen({ navigation }: any) {
 
   // form state
   const [customerName, setCustomerName] = React.useState(String((initial as any)?.customerName ?? ""));
-  const [status, setStatus] = React.useState<string>(String((initial as any)?.status ?? "draft"));
-  const [notes, setNotes]   = React.useState(String((initial as any)?.notes ?? ""));
+  const [status, setStatus]             = React.useState<string>(String((initial as any)?.status ?? "draft"));
+  const [notes, setNotes]               = React.useState(String((initial as any)?.notes ?? ""));
+
+  // track if user changed status this session
+  const statusTouched = React.useRef(false);
 
   // Load existing only (never load when new)
   const load = React.useCallback(async () => {
@@ -35,8 +38,10 @@ export default function SalesOrderDetailScreen({ navigation }: any) {
     try {
       const so = await getObject<SalesOrder>("salesOrder", String(id));
       setCustomerName((v) => v || String((so as any)?.customerName ?? ""));
-      setStatus((v) => v || String((so as any)?.status ?? "draft"));
       setNotes((v) => v || String((so as any)?.notes ?? ""));
+
+      const serverStatus = String((so as any)?.status ?? "draft");
+      if (!statusTouched.current) setStatus(serverStatus);
     } catch (e: any) {
       Alert.alert("Error", e?.message ?? "Failed to load sales order");
     } finally {
@@ -55,7 +60,6 @@ export default function SalesOrderDetailScreen({ navigation }: any) {
         customerName: customerName.trim(),
         status: "draft",
         ...(notes.trim() ? { notes: notes.trim() } : {}),
-        // lines can be added later from a lines UI if/when you add it
       } as any);
       navigation.goBack();
     } catch (e: any) {
@@ -90,7 +94,11 @@ export default function SalesOrderDetailScreen({ navigation }: any) {
         {!isNew && (
           <>
             <Label text="Status" />
-            <PillGroup options={STATUS_VALUES as unknown as string[]} value={status} onChange={setStatus} />
+            <PillGroup
+              options={STATUS_VALUES as unknown as string[]}
+              value={status}
+              onChange={(v) => { statusTouched.current = true; setStatus(v); }}
+            />
           </>
         )}
         <Field label="Notes" value={notes} onChangeText={setNotes} multiline />

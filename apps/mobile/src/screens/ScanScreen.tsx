@@ -1,142 +1,294 @@
-import React, { useCallback, useEffect, useState } from "react";
-import { View, Text, Alert, ActivityIndicator } from "react-native";
+// apps/mobile/src/screens/ScanScreen.tsx
+import React from "react";
+import { View, Text, TextInput, Pressable, Alert, SectionList, ListRenderItemInfo, Vibration, Switch } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import type { RootStackParamList } from "../navigation/types";
-import { getObject } from "../api/client";
 import { useColors } from "../features/_shared/useColors";
+import { apiClient } from "../api/client";
+import { Feather } from "@expo/vector-icons";
 
-type Props = NativeStackScreenProps<RootStackParamList, "Scan">;
 
-type QrParsed = {
-  t?: "mbapp/object-v1";
-  id?: string;
-  type?: "product" | "inventory" | "event" | "registration" | "client" | "resource";
-  intent?: "navigate" | "attach-epc";
-  attachTo?: { type: string; id: string };
-};
+type ActionKind = "receive" | "pick" | "count";
+type HistoryRow = { id: string; ts: string; epc: string; action: ActionKind; itemId?: string; status?: number; err?: string };
 
-function tryParse(text: string): QrParsed | null {
-  try {
-    const j = JSON.parse(text);
-    return j && typeof j === "object" ? (j as QrParsed) : null;
-  } catch {
-    return null;
-  }
-}
-
-export default function ScanScreen({ navigation, route }: Props) {
+export default function ScanScreen() {
   const t = useColors();
+  const [sessionId, setSessionId] = React.useState<string | null>(null);
+  const [epc, setEpc] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [resolved, setResolved] = React.useState<{ itemId?: string; status?: string } | null>(null);
+  const [history, setHistory] = React.useState<HistoryRow[]>([]);
+
+  // Camera (expo-camera)
+  const [showCamera, setShowCamera] = React.useState(true);
   const [permission, requestPermission] = useCameraPermissions();
-  const [scanning, setScanning] = useState(true);
-  const [busy, setBusy] = useState(false);
+  const [autoReceive, setAutoReceive] = React.useState(true);
+  const lastScanRef = React.useRef<{ code?: string; at?: number }>({});
 
-  useEffect(() => {
-    if (!permission?.granted) requestPermission();
-  }, [permission, requestPermission]);
-
-  const routeTo = useCallback(
-    (type: string, id: string) => {
-      switch (type) {
-        case "product":       navigation.navigate("ProductDetail", { id, mode: "edit" }); return;
-        case "inventory":     navigation.navigate("InventoryDetail", { id, mode: "edit" }); return;
-        case "event":         navigation.navigate("EventDetail", { id, mode: "edit" }); return;
-        case "registration":  navigation.navigate("RegistrationDetail", { id }); return;
-        case "client":        navigation.navigate("ClientDetail", { id, mode: "edit" }); return;
-        case "resource":      navigation.navigate("ResourceDetail", { id, mode: "edit" }); return;
-        default:
-          Alert.alert("Unsupported type", `Type "${type}" is not routed yet.`);
-      }
-    },
-    [navigation]
+  // Start/stop scanner session
+  useFocusEffect(
+    React.useCallback(() => {
+      let cancelled = false;
+      (async () => {
+        try {
+          const res = await apiClient.post<{ id: string }>("/scanner/sessions", { op: "start" });
+          if (!cancelled) setSessionId(res.id);
+        } catch (e: any) {
+          if (!cancelled) Alert.alert("Scanner", e?.message ?? "Failed to start session");
+        }
+      })();
+      return () => {
+        cancelled = true;
+        if (sessionId) apiClient.post("/scanner/sessions", { op: "stop", sessionId }).catch(() => {});
+      };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
   );
 
-  const handleAttachEpc = useCallback((payload: QrParsed) => {
-    Alert.alert("Attach EPC (coming soon)", `AttachTo: ${JSON.stringify(payload.attachTo)}`);
-  }, []);
+  React.useEffect(() => {
+    if (showCamera && !permission?.granted) requestPermission().catch(() => {});
+  }, [showCamera, permission?.granted, requestPermission]);
 
-  const onBarcodeScanned = useCallback(
-    async (scan: { data: string }) => {
-      if (!scanning || busy) return;
-      setScanning(false);
-      setBusy(true);
-      try {
-        const text = scan.data?.trim();
-        const parsed = tryParse(text) ?? ({ id: text } as QrParsed);
-        const intent = parsed.intent ?? route.params?.intent ?? "navigate";
+  async function resolveEpc(code?: string) {
+    const tag = (code ?? epc).trim();
+    if (!tag) return;
+    try {
+      const res = await apiClient.get<{ itemId: string; status?: string }>(`/epc/resolve?epc=${encodeURIComponent(tag)}`);
+      setResolved(res);
+      return res;
+    } catch (e: any) {
+      setResolved(null);
+      throw e;
+    }
+  }
 
-        if (intent === "attach-epc") {
-          handleAttachEpc(parsed);
-          return;
-        }
+  async function doAction(kind: ActionKind, tagOverride?: string) {
+    const tag = (tagOverride ?? epc).trim();
+    if (!tag) return Alert.alert("Scanner", "Enter or scan an EPC first.");
+    if (!sessionId) return Alert.alert("Scanner", "Session not ready yet. Try again in a moment.");
 
-        // Preferred exact payload
-        if (parsed.t === "mbapp/object-v1" && parsed.type && parsed.id) {
-          routeTo(parsed.type, parsed.id);
-          return;
-        }
+    setBusy(true);
+    const ts = new Date().toISOString();
+    const idempotencyKey = kind === "receive" ? `scan-${tag}` : undefined;
 
-        // Fallback heuristics: try common types by id
-        if (parsed.id) {
-          const candidates = ["product", "event", "client", "resource"] as const;
-          for (const ty of candidates) {
-            try {
-              await getObject(ty, parsed.id);
-              routeTo(ty, parsed.id);
-              return;
-            } catch {
-              // keep trying
-            }
-          }
-        }
+    try {
+      try { await resolveEpc(tag); } catch { throw new Error(`EPC not found (${tag})`); }
+      await apiClient.post(
+        "/scanner/actions",
+        { sessionId, epc: tag, action: kind },
+        idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined
+      );
 
-        Alert.alert("Not recognized", "Couldn’t resolve a known object from the scan.");
-      } finally {
-        setBusy(false);
-        setTimeout(() => setScanning(true), 600);
-      }
+      setHistory((h) => [
+        { id: `${ts}-${Math.random()}`, ts, epc: tag, action: kind, itemId: resolved?.itemId, status: 200 },
+        ...h.slice(0, 49),
+      ]);
+      if (kind === "receive") setEpc("");
+    } catch (e: any) {
+      const msg = e?.message || "Failed";
+      setHistory((h) => [
+        { id: `${ts}-${Math.random()}`, ts, epc: tag, action: kind, itemId: resolved?.itemId, err: msg, status: 0 },
+        ...h.slice(0, 49),
+      ]);
+      Alert.alert("Scanner", msg);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Camera barcode handler (debounced)
+  const onBarcodeScanned = React.useCallback(
+    async ({ data }: { data: string }) => {
+      const code = String(data || "").trim();
+      if (!code) return;
+      const now = Date.now();
+      const last = lastScanRef.current;
+      if (last.code === code && last.at && now - last.at < 1500) return; // debounce same code < 1.5s
+      lastScanRef.current = { code, at: now };
+      Vibration.vibrate(10);
+      setEpc(code);
+      if (autoReceive && !busy) await doAction("receive", code);
     },
-    [scanning, busy, route.params?.intent, routeTo, handleAttachEpc]
+    [autoReceive, busy] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
-  if (!permission) {
-    return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-        <ActivityIndicator />
+  const Header = (
+    <View style={{ padding: 16 }}>
+      <View
+        style={{
+          backgroundColor: t.colors.card,
+          borderRadius: 12,
+          borderWidth: 1,
+          borderColor: t.colors.border,
+          padding: 16,
+          marginBottom: 12,
+        }}
+      >
+        <View style={{ marginBottom: 10, flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+          <Text style={{ color: t.colors.muted }}>
+            {sessionId ? `Session: ${sessionId.slice(0, 8)}…` : "Starting session…"}
+          </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <Text style={{ color: t.colors.muted }}>Auto-Receive</Text>
+              <Switch value={autoReceive} onValueChange={setAutoReceive} />
+            </View>
+            <Pressable
+              onPress={() => setShowCamera((v) => !v)}
+              accessibilityLabel={showCamera ? "Hide camera" : "Show camera"}
+              hitSlop={10}
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 20,
+                alignItems: "center",
+                justifyContent: "center",
+                borderWidth: 1,
+                borderColor: t.colors.border,
+                backgroundColor: t.colors.card,
+              }}
+            >
+              <Feather
+                name={showCamera ? "camera-off" : "camera"}
+                size={20}
+                color={t.colors.text}
+              />
+            </Pressable>
+
+          </View>
+        </View>
+
+        {showCamera ? (
+          permission?.granted ? (
+            <View
+              style={{
+                overflow: "hidden",
+                borderRadius: 12,
+                borderWidth: 1,
+                borderColor: t.colors.border,
+                marginBottom: 12,
+              }}
+            >
+              <CameraView
+                style={{ width: "100%", height: 260 }}
+                facing="back"
+                // Accept most codes (omit barcodeScannerSettings to allow all)
+                onBarcodeScanned={(e) => {
+                  // e has { data, type, cornerPoints } on SDK 50+
+                  onBarcodeScanned({ data: e.data });
+                }}
+              />
+            </View>
+          ) : permission?.granted === false ? (
+            <Text style={{ color: t.colors.danger, marginBottom: 10 }}>Camera permission denied</Text>
+          ) : (
+            <Text style={{ color: t.colors.muted, marginBottom: 10 }}>Requesting camera permission…</Text>
+          )
+        ) : null}
+
+        <Text style={{ marginBottom: 6, color: t.colors.muted }}>EPC</Text>
+        <TextInput
+          value={epc}
+          onChangeText={setEpc}
+          autoCapitalize="characters"
+          autoCorrect={false}
+          placeholder="Scan or type EPC"
+          placeholderTextColor={t.colors.muted}
+          style={{
+            backgroundColor: t.colors.bg,
+            color: t.colors.text,
+            borderColor: t.colors.border,
+            borderWidth: 1,
+            borderRadius: 8,
+            padding: 12,
+            marginBottom: 10,
+          }}
+        />
+
+        {resolved?.itemId ? (
+          <View style={{ marginBottom: 10 }}>
+            <Text style={{ color: t.colors.muted }}>
+              Resolved ➜ itemId: <Text style={{ color: t.colors.text }}>{resolved.itemId}</Text>{" "}
+              {resolved.status ? `(status: ${resolved.status})` : ""}
+            </Text>
+          </View>
+        ) : null}
+
+        <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
+          <Button title="Receive" onPress={() => doAction("receive")} disabled={busy} theme={t} />
+          <Button title="Pick" onPress={() => doAction("pick")} disabled={busy} theme={t} />
+          <Button title="Count" onPress={() => doAction("count")} disabled={busy} theme={t} />
+        </View>
       </View>
-    );
-  }
-  if (!permission.granted) {
-    return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}>
-        <Text style={{ color: t.colors.text, textAlign: "center" }}>
-          Camera access is required to scan codes.
-        </Text>
-      </View>
-    );
-  }
+
+      <Text style={{ color: t.colors.muted, marginBottom: 8, marginLeft: 4 }}>Recent</Text>
+    </View>
+  );
 
   return (
-    <View style={{ flex: 1, backgroundColor: t.colors.bg }}>
-      {!scanning && (
+    <SectionList
+      sections={[{ title: "Recent", data: history }]}
+      keyExtractor={(item) => item.id}
+      renderSectionHeader={() => null}
+      renderItem={({ item }: ListRenderItemInfo<HistoryRow>) => (
         <View
           style={{
-            position: "absolute",
-            top: 12,
-            left: 12,
-            right: 12,
-            zIndex: 10,
-            alignItems: "center",
+            paddingHorizontal: 16,
+            paddingVertical: 8,
+            borderBottomWidth: 1,
+            borderBottomColor: t.colors.border,
+            backgroundColor: t.colors.card,
           }}
         >
-          {busy ? <ActivityIndicator /> : <Text style={{ color: t.colors.muted }}>Re-arming…</Text>}
+          <Text style={{ color: t.colors.text, fontWeight: "600" }}>
+            {item.action.toUpperCase()} • {item.epc}
+          </Text>
+          <Text style={{ color: t.colors.muted }}>
+            {new Date(item.ts).toLocaleTimeString()} {item.itemId ? `• ${item.itemId}` : ""}
+          </Text>
+          {item.err ? <Text style={{ color: t.colors.danger }}>{item.err}</Text> : null}
         </View>
       )}
-      <CameraView
-        style={{ flex: 1 }}
-        onBarcodeScanned={scanning ? onBarcodeScanned : undefined}
-        barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-      />
-    </View>
+      ListHeaderComponent={Header}
+      ListEmptyComponent={
+        <Text style={{ color: t.colors.muted, paddingHorizontal: 16, paddingBottom: 20 }}>
+          No scans yet. Try Receive to test idempotency.
+        </Text>
+      }
+      stickySectionHeadersEnabled={false}
+      style={{ backgroundColor: t.colors.bg }}
+      contentContainerStyle={{ paddingBottom: 40 }}
+    />
+  );
+}
+
+function Button({
+  title,
+  onPress,
+  disabled,
+  theme,
+}: {
+  title: string;
+  onPress: () => void;
+  disabled?: boolean;
+  theme: ReturnType<typeof useColors>;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      style={{
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        backgroundColor: theme.colors.card,
+        opacity: disabled ? 0.6 : 1,
+        marginRight: 8,
+      }}
+    >
+      <Text style={{ color: theme.colors.text, fontWeight: "700" }}>{title}</Text>
+    </Pressable>
   );
 }
