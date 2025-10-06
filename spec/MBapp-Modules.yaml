@@ -852,7 +852,7 @@ components:
       type: object
       required: [id, type, epc, itemId]
       properties:
-        id: { type: string, description: "UUID" }
+        id: { type: string, description: "Use EPC string as id" }
         type: { type: string, enum: ["epcMap"], default: "epcMap" }
         epc: { type: string }
         itemId: { type: string }
@@ -861,7 +861,6 @@ components:
         status: { type: string, enum: ["active", "retired"], default: "active" }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
-
     ScannerSession:
       type: object
       required: [id, type, userId, startedAt]
@@ -872,7 +871,8 @@ components:
         workspaceId: { type: string, nullable: true }
         startedAt: { type: string, format: date-time }
         endedAt: { type: string, format: date-time, nullable: true }
-
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     ScannerAction:
       type: object
       required: [id, type, sessionId, ts, epc, action]
@@ -882,12 +882,15 @@ components:
         sessionId: { type: string }
         ts: { type: string, format: date-time }
         epc: { type: string }
-        itemId: { type: string, nullable: true, description: "Resolved on server" }
+        itemId: { type: string, nullable: true }
         action:
           type: string
           enum: [receive, move, pick, count]
         fromLocationId: { type: string, nullable: true }
         toLocationId: { type: string, nullable: true }
+        userId: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
 security:
 - bearerAuth: []
 paths:
@@ -1815,6 +1818,80 @@ paths:
         "200":
           description: Updated reservation
           content: { application/json: { schema: { $ref: "#/components/schemas/Reservation" } } }
+  /epc/resolve:
+    get:
+      summary: Resolve EPC to item
+      parameters:
+        - in: query
+          name: epc
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  itemId: { type: string }
+                  status: { type: string }
+        "404": { description: Not found }
+  /scanner/sessions:
+    post:
+      summary: Start/stop a scanner session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                op: { type: string, enum: [start, stop] }
+                sessionId: { type: string, description: "Required for stop" }
+                workspaceId: { type: string, nullable: true }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScannerSession" }
+  /scanner/actions:
+    post:
+      summary: Record a scanner action and update counters
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ScannerAction" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScannerAction" }
+        "409": { description: Guardrail violation (e.g. pick without reservation) }
+  /scanner/simulate:
+    post:
+      summary: Dev only - generate EPCs bound to itemIds
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                count: { type: integer, default: 10, minimum: 1, maximum: 1000 }
+                itemId: { type: string, nullable: true }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  created: { type: integer }
   /admin/audit:
     get:
       tags:
