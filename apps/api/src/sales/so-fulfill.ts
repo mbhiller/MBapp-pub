@@ -2,7 +2,7 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
 import * as ObjGet from "../objects/get";
 import * as ObjUpdate from "../objects/update";
-import { upsertDelta } from "../inventory/counters";
+import { upsertDelta, getOnHand } from "../inventory/counters";
 import { getAuth, requirePerm } from "../auth/middleware";
 
 const json = (c: number, b: unknown): APIGatewayProxyResultV2 => ({
@@ -32,7 +32,6 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
   if (!id) return json(400, { message: "Missing id" });
 
   try {
-    // 🔒 Auth & perms (match your other endpoints)
     const auth = await getAuth(event);
     requirePerm(auth, "sales:fulfill");
     const tenantId = String(auth?.tenantId || "").trim();
@@ -53,9 +52,6 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
       return json(409, { message: `Cannot fulfill unless committed (status=${so.status})` });
     }
 
-    // Idempotency (optional): if you've stored keys on fulfill, check here similarly to PO
-    // Skipping storage for brevity; add if you want parity with PO receive.
-
     // Parse request
     const req = bodyOf<FulfillReq>(event);
     const reqLines = Array.isArray(req.lines) ? req.lines : [];
@@ -75,19 +71,37 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
       if (idx === -1) continue;
 
       const line = next.lines[idx];
+      const itemId = String(line.itemId);
       const ordered   = Number(line.qty ?? 0);
       const fulfilled = Number(line.qtyFulfilled ?? 0);
       const reserved  = Math.max(0, Number(reservedMap[String(line.id)] ?? 0));
 
-      // Constrain delta to what's still fulfillable and what’s reserved
-      const remainingOrder   = Math.max(0, ordered - fulfilled);
-      const remainingToShip  = Math.min(remainingOrder, reserved);
-      const delta = Math.max(0, Math.min(Number(r.deltaQty ?? 0), remainingToShip));
-      if (delta <= 0) continue;
+      // 👇 The key change:
+      // 1) Take the user's requested qty as-is (non-negative).
+      const requested = Math.max(0, Number(r.deltaQty ?? 0));
+      if (requested <= 0) continue;
 
-      // Inventory counters: ship delta → onHand -= delta, reserved -= delta
+      // 2) Preflight against *physical on-hand* with the *requested* qty.
+      const counters = await getOnHand(tenantId, itemId);
+      if (counters.onHand < requested) {
+        return json(409, {
+          message: "insufficient_onhand_to_fulfill",
+          itemId,
+          need: requested,
+          onHand: counters.onHand,
+        });
+      }
+
+      // 3) Only after passing on-hand guard, clamp to remaining order qty to ship.
+      const remainingOrder = Math.max(0, ordered - fulfilled);
+      const deltaToShip = Math.min(requested, remainingOrder);
+      if (deltaToShip <= 0) continue;
+
+      // Consume reserved up to the shipped amount
+      const reservedToConsume = Math.min(deltaToShip, reserved);
+
       try {
-        await upsertDelta(tenantId, String(line.itemId), -delta, -delta);
+        await upsertDelta(tenantId, itemId, -deltaToShip, -reservedToConsume);
       } catch (e: any) {
         const code = (e?.code || "").toString();
         const name = (e?.name || "").toString();
@@ -96,17 +110,17 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
         if (STRICT_COUNTERS) {
           return json(isQty ? 409 : 500, {
             message: msg,
-            itemId: String(line.itemId),
-            deltas: { dOnHand: -delta, dReserved: -delta },
+            itemId,
+            deltas: { dOnHand: -deltaToShip, dReserved: -reservedToConsume },
             err: String(e?.message || e),
           });
         }
-        console.error("upsertDelta(fulfill) failed", { itemId: String(line.itemId), err: e });
+        console.error("upsertDelta(fulfill) failed", { itemId, err: e });
       }
 
       // Update SO state
-      line.qtyFulfilled = fulfilled + delta;
-      reservedMap[String(line.id)] = Math.max(0, reserved - delta);
+      line.qtyFulfilled = fulfilled + deltaToShip;
+      reservedMap[String(line.id)] = Math.max(0, reserved - reservedToConsume);
     }
 
     // Status transitions
