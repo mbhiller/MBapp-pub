@@ -60,6 +60,11 @@ import * as GcDelete from "./tools/gc-delete-type";
 import * as GcListAll   from "./tools/gc-list-all";
 import * as GcDeleteKeys from "./tools/gc-delete-keys";
 
+//EPC & SCANNERS
+import * as EpcResolve from "./epc/resolve";
+import * as ScannerSessions from "./scanner/sessions";
+import * as ScannerActions from "./scanner/actions";
+import * as ScannerSim from "./scanner/simulate";
 
 /* Helpers */
 const json = (statusCode: number, body: unknown): APIGatewayProxyResultV2 => ({
@@ -281,6 +286,34 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
         return methodNotAllowed();
       }
     }
+
+
+    // --- EPC: resolve a tag to an item ---
+    if (method === "GET" && path === "/epc/resolve") {
+      requirePerm(auth, "inventory:read");
+      // Handler reads ?epc=... itself from event.queryStringParameters
+      return EpcResolve.handle(event);
+    }
+
+    // --- Scanner sessions: start/stop ---
+    if (method === "POST" && path === "/scanner/sessions") {
+      requirePerm(auth, "scanner:use");
+      return ScannerSessions.handle(event);
+    }
+
+    // --- Scanner actions: receive | pick | count | move ---
+    if (method === "POST" && path === "/scanner/actions") {
+      requirePerm(auth, "scanner:use");
+      // If you pass idempotency in headers today, the handler will consume it.
+      return ScannerActions.handle(event);
+    }
+
+    // --- Dev-only: simulate EPCs for testing ---
+    if (method === "POST" && path === "/scanner/simulate") {
+      requirePerm(auth, "admin:seed");
+      return ScannerSim.handle(event);
+    }
+
 
     // Tools: GC
     const gcList = match(/^\/tools\/gc\/([^/]+)$/i, path);

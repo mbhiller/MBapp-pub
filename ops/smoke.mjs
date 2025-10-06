@@ -68,6 +68,10 @@ function usage() {
   node ops/smoke.mjs smoke:guardrails:so-overfulfill  [--qty 2]
   node ops/smoke.mjs smoke:guardrails:po-idempotency  [--lines 2] [--qty 2] [--idem abc]
   node ops/smoke.mjs smoke:guardrails:cancel-release
+
+  // Scanning
+  node ops/smoke.mjs smoke:scanner:simulate [--idem test-key-123]
+  node ops/smoke.mjs smoke:scanner:receive-pick [--idem test-key-123]
 `);
 }
 
@@ -254,6 +258,54 @@ async function getOnhand(itemId) {
     return { id: itemId, qtyOnHand: Number(inv?.qtyOnHand ?? 0), qtyReserved: Number(inv?.qtyReserved ?? 0), qtyAvailable: Math.max(0, Number(inv?.qtyOnHand ?? 0) - Number(inv?.qtyReserved ?? 0)) };
   }
 }
+
+// Create a sales order directly via generic "objects" API
+async function createCommittedSalesOrder({ itemId, qty = 1 }) {
+  const so = await createType("salesOrder", {
+    type: "salesOrder",
+    status: "committed",          // so-fulfill requires committed
+    customerId: "cust-dev",
+    lines: [
+      {
+        id: "line-" + Math.random().toString(36).slice(2, 8),
+        itemId,
+        qty,
+        qtyFulfilled: 0,
+        price: 0,
+      },
+    ],
+    metadata: {},                 // reservedMap optional; fulfill consumes reserved if present
+  });
+  return so;
+}
+
+// Hit SO fulfill: POST /sales/so/{id}:fulfill
+async function soFulfill(soId, lines, opts = {}) {
+  const headers = { ...(opts.headers || {}) };
+  if (opts.idem) headers["Idempotency-Key"] = String(opts.idem);
+
+  // This endpoint returns 200 with no body; the api() helper should tolerate empty JSON.
+  // If your api() expects JSON, it should still be fine because many endpoints already respond 200 {}.
+  return api(`/sales/so/${encodeURIComponent(soId)}:fulfill`, {
+    method: "POST",
+    headers,
+    body: { lines },
+  });
+}
+
+// Normalize counters from various shapes to a single number
+async function readOnHandQty(itemId) {
+  try {
+    const c = await getOnhand(itemId); // whatever your helper returns
+    const val = Number(
+      (c && (c.qtyOnHand ?? c.onHand ?? c.qty ?? c.value ?? c.count)) ?? 0
+    );
+    return Number.isFinite(val) ? val : 0;
+  } catch {
+    return 0; // if the row doesn't exist yet, treat as 0 for smoke
+  }
+}
+
 
 /* ------------------------------ Seeding ----------------------------- */
 
@@ -508,6 +560,209 @@ async function flowSalesOrder(args) {
   const final = await getById("salesOrder", soId);
   console.log(JSON.stringify({ flow: "salesOrder", id: soId, status: final.status }, null, 2));
 }
+
+/* ------------------------------ Scanner ------------------------------ */
+
+// Create a deterministic EPC binding for test: make an inventory item, then an epcMap
+async function createEpcBinding() {
+  // 1) Create an inventory item we can safely increment
+  const inv = await createType("inventory", {
+    type: "inventory",
+    name: `INV ${Date.now()}`,
+    sku: `INV-${Date.now()}`,
+    uom: "each",
+    status: "active",
+    quantity: 0,
+  });
+
+  // 2) Choose a deterministic-but-unique EPC so we can resolve it later
+  const epc = ("SCAN" + Date.now().toString(16) + Math.random().toString(16).slice(2, 6)).toUpperCase();
+
+  // 3) Bind EPC → item via generic objects API (type: epcMap, id === epc)
+  await createType("epcMap", {
+    id: epc,
+    type: "epcMap",
+    epc,
+    itemId: inv.id,
+    status: "active",
+  });
+
+  return { epc, itemId: inv.id };
+}
+
+/**
+ * smoke:scanner:simulate
+ * - Seeds an EPC→item binding
+ * - Starts a scanner session
+ * - GET /epc/resolve to verify binding
+ * - POST /scanner/actions receive twice with SAME Idempotency-Key (should not double count)
+ * - Stops session
+ * - Asserts onHand increased exactly by 1
+ */
+async function smokeScannerSimulate(args) {
+  // Seed EPC map
+  const { epc, itemId } = await createEpcBinding();
+
+  // Start session
+  const sess = await api(`/scanner/sessions`, { method: "POST", body: { op: "start" } });
+
+  // Resolve EPC
+  const resolved = await api(`/epc/resolve?epc=${encodeURIComponent(epc)}`, { method: "GET" });
+  if (!resolved?.itemId || resolved.itemId !== itemId) {
+    throw new Error(`resolve mismatch: expected itemId=${itemId} got ${JSON.stringify(resolved)}`);
+  }
+
+  // Baseline counters
+  const beforeQty = await readOnHandQty(itemId);
+  const idem = String(args.idem || `scan-idem-${Math.random().toString(36).slice(2)}`);
+
+  // Receive (idempotent)
+  await api(`/scanner/actions`, {
+    method: "POST",
+    headers: { "Idempotency-Key": idem },
+    body: { sessionId: sess.id, epc, action: "receive" },
+  });
+  // Repeat with same Idempotency-Key
+  await api(`/scanner/actions`, {
+    method: "POST",
+    headers: { "Idempotency-Key": idem },
+    body: { sessionId: sess.id, epc, action: "receive" },
+  });
+
+  // Stop session (idempotent if called again)
+  await api(`/scanner/sessions`, { method: "POST", body: { op: "stop", sessionId: sess.id } });
+
+  // Verify: onHand +1 (and not +2)
+  const afterQty = await readOnHandQty(itemId);
+  const delta = afterQty - beforeQty;
+  if (delta < 1) throw new Error(`Scanner receive failed to increment onHand: before=${beforeQty} after=${afterQty}`);
+  if (delta > 1) throw new Error(`Idempotency failed (double counted): before=${beforeQty} after=${afterQty}`);
+
+  console.log(JSON.stringify({ test: "scanner-simulate", result: "PASS", itemId, epc, onHandBefore: beforeQty, onHandAfter: afterQty }, null, 2));
+}
+
+// SCAN RECEIVE ➜ PICK (guard-aware)
+async function smokeScannerReceivePick(args) {
+  const { epc, itemId } = await createEpcBinding();
+  const sess = await api(`/scanner/sessions`, { method: "POST", body: { op: "start" } });
+
+  const resolved = await api(`/epc/resolve?epc=${encodeURIComponent(epc)}`, { method: "GET" });
+  if (resolved?.itemId !== itemId) throw new Error(`resolve mismatch for ${epc}`);
+
+  const beforeQty = await readOnHandQty(itemId);
+
+  // Receive once (idempotent)
+  const idem = String(args.idem || `scan-idem-${Math.random().toString(36).slice(2)}`);
+  await api(`/scanner/actions`, {
+    method: "POST",
+    headers: { "Idempotency-Key": idem },
+    body: { sessionId: sess.id, epc, action: "receive" },
+  });
+
+  // Try pick once — allow guardrail 409
+  let pickApplied = false;
+  try {
+    await api(`/scanner/actions`, {
+      method: "POST",
+      body: { sessionId: sess.id, epc, action: "pick" },
+    });
+    pickApplied = true; // 200 OK
+  } catch (e) {
+    const status = e?.status ?? e?.response?.status ?? e?.response?.code;
+    const msg = (e?.response && (e.response.message || e.response.error)) || e?.message || "";
+    if (status !== 409) {
+      // Unexpected failure
+      throw new Error(`pick failed unexpectedly: status=${status} msg=${msg}`);
+    }
+    // 409 is expected when reservation guardrails are active
+  }
+
+  await api(`/scanner/sessions`, { method: "POST", body: { op: "stop", sessionId: sess.id } });
+
+  const afterQty = await readOnHandQty(itemId);
+  const delta = afterQty - beforeQty;
+  const expectedDelta = pickApplied ? 0 : 1;
+
+  if (delta !== expectedDelta) {
+    throw new Error(
+      `Unexpected onHand delta. pickApplied=${pickApplied} expected=${expectedDelta} actual=${delta} (before=${beforeQty}, after=${afterQty})`
+    );
+  }
+
+  console.log(JSON.stringify({ test: "scanner-receive-pick", result: "PASS", itemId, epc, pickApplied, onHandBefore: beforeQty, onHandAfter: afterQty }, null, 2));
+}
+
+// SCAN RECEIVE ➜ SO FULFILL (net zero)
+async function smokeScannerReceiveFulfill(args) {
+  const { epc, itemId } = await createEpcBinding();
+  const sess = await api(`/scanner/sessions`, { method: "POST", body: { op: "start" } });
+
+  // Resolve sanity check
+  const resolved = await api(`/epc/resolve?epc=${encodeURIComponent(epc)}`, { method: "GET" });
+  if (resolved?.itemId !== itemId) throw new Error(`resolve mismatch for ${epc}`);
+
+  const beforeQty = await readOnHandQty(itemId);
+
+  // 1) Receive once (idempotent)
+  const idemRecv = String(args.idem || `scan-idem-${Math.random().toString(36).slice(2)}`);
+  await api(`/scanner/actions`, {
+    method: "POST",
+    headers: { "Idempotency-Key": idemRecv },
+    body: { sessionId: sess.id, epc, action: "receive" },
+  });
+
+  // 2) Create a committed SO with one line for this item
+  const so = await createType("salesOrder", {
+    type: "salesOrder",
+    status: "committed",      // fulfill requires committed
+    customerId: "cust-dev",
+    lines: [
+      {
+        id: "line-" + Math.random().toString(36).slice(2, 8),
+        itemId,
+        qty: 1,
+        qtyFulfilled: 0,
+        price: 0,
+      },
+    ],
+    metadata: {},
+  });
+  const lineId = so.lines[0].id;
+
+  // 3) Fulfill that SO line by 1 (idempotent header optional)
+  const idemFulfill = `idem-fulfill-${Math.random().toString(36).slice(2)}`;
+  await soFulfill(so.id, [{ lineId, deltaQty: 1 }], { idem: idemFulfill });
+
+  // Stop session
+  await api(`/scanner/sessions`, { method: "POST", body: { op: "stop", sessionId: sess.id } });
+
+  // Expect net 0 (receive +1, fulfill -1)
+  const afterQty = await readOnHandQty(itemId);
+  const delta = afterQty - beforeQty;
+  if (delta !== 0) {
+    throw new Error(
+      `Expected net 0 after receive+fulfill; got ${delta} (before=${beforeQty}, after=${afterQty})`
+    );
+  }
+
+  console.log(
+    JSON.stringify(
+      {
+        test: "scanner-receive-fulfill",
+        result: "PASS",
+        itemId,
+        epc,
+        soId: so.id,
+        soLineId: lineId,
+        onHandBefore: beforeQty,
+        onHandAfter: afterQty,
+      },
+      null,
+      2
+    )
+  );
+}
+
 
 /* ---------------------- Guardrail test cases ------------------------ */
 
@@ -768,6 +1023,15 @@ const args = parseArgs(rest);
       case "smoke:guardrails:so-overfulfill": return guardrailSoOverfulfill(args);
       case "smoke:guardrails:po-idempotency": return guardrailPoIdempotency(args);
       case "smoke:guardrails:cancel-release": return guardrailCancelRelease(args);
+
+      // Scanner
+      case "smoke:scanner:simulate":        return smokeScannerSimulate(args);
+      case "smoke:scanner:simulate":        return smokeScannerSimulate(args);
+      case "smoke:scanner:receive-pick":    return smokeScannerReceivePick(args);
+      case "smoke:scanner:receive-fulfill": return smokeScannerReceiveFulfill(args);
+
+
+
 
       // Per-module CRUD and flows
       default: {

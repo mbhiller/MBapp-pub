@@ -848,6 +848,46 @@ components:
         - integrationId
         - startedAt
         - status
+    EPCMap:
+      type: object
+      required: [id, type, epc, itemId]
+      properties:
+        id: { type: string, description: "UUID" }
+        type: { type: string, enum: ["epcMap"], default: "epcMap" }
+        epc: { type: string }
+        itemId: { type: string }
+        lotId: { type: string, nullable: true }
+        locationId: { type: string, nullable: true }
+        status: { type: string, enum: ["active", "retired"], default: "active" }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    ScannerSession:
+      type: object
+      required: [id, type, userId, startedAt]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: ["scannerSession"], default: "scannerSession" }
+        userId: { type: string }
+        workspaceId: { type: string, nullable: true }
+        startedAt: { type: string, format: date-time }
+        endedAt: { type: string, format: date-time, nullable: true }
+
+    ScannerAction:
+      type: object
+      required: [id, type, sessionId, ts, epc, action]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: ["scannerAction"], default: "scannerAction" }
+        sessionId: { type: string }
+        ts: { type: string, format: date-time }
+        epc: { type: string }
+        itemId: { type: string, nullable: true, description: "Resolved on server" }
+        action:
+          type: string
+          enum: [receive, move, pick, count]
+        fromLocationId: { type: string, nullable: true }
+        toLocationId: { type: string, nullable: true }
 security:
 - bearerAuth: []
 paths:
