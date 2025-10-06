@@ -81,7 +81,7 @@ export default function PurchaseOrdersListScreen({ navigation }: any) {
 
       {/* + New */}
       <Pressable
-        onPress={() => navigation.navigate("PurchaseOrdersList" /* or detail new? */, { mode: "new" })}
+        onPress={() => navigation.navigate("PurchaseOrderDetail" /* or detail new? */, { mode: "new" })}
         // If you want to go straight to detail like other modules:
         // onPress={() => navigation.navigate("PurchaseOrderDetail", { mode: "new" })}
         style={{
