@@ -2,7 +2,8 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import * as ObjGet from "../objects/get";
 import * as ObjUpdate from "../objects/update";
-import { upsertDelta } from "../inventory/counters";
+import { upsertDelta, getOnHand } from "../inventory/counters";
+import { getAuth } from "../auth/middleware";
 
 const json = (c: number, b: unknown) => ({
   statusCode: c,
@@ -18,34 +19,53 @@ const withTypeId = (e: any, t: string, id: string, body?: any) => {
   return out;
 };
 
-const STRICT_COUNTERS = true; // set true to hard-fail if counters update fails
-
 export async function handle(event: APIGatewayProxyEventV2) {
   const id = event.pathParameters?.id || "";
   if (!id) return json(400, { message: "Missing id" });
 
   try {
-    // Load the SO
-    const get = await ObjGet.handle(withTypeId(event, "salesOrder", id));
-    if (get.statusCode !== 200 || !get.body) {
-      return json(get.statusCode || 500, { where: "getSO", body: get.body || null, message: "Get SO failed" });
-    }
-    const so = JSON.parse(get.body);
+    // ✅ Use same auth source as objects/update.ts
+    const auth = await getAuth(event);
+    const tenantId = String(auth?.tenantId || "");
+    if (!tenantId) return json(400, { message: "tenantId missing (auth)" });
 
-    // Guard invalid states
-    if (so.status === "cancelled" || so.status === "closed") {
+    // Load SO
+    const g = await ObjGet.handle(withTypeId(event, "salesOrder", id));
+    if (g.statusCode !== 200 || !g.body) return g;
+    const so = JSON.parse(g.body);
+
+    if (!["draft", "submitted"].includes(String(so.status))) {
       return json(409, { message: `Cannot commit when status is ${so.status}` });
     }
 
-    // Work on a copy
-    const next = {
-      ...so,
-      lines: Array.isArray(so.lines) ? so.lines.map((l: any) => ({ ...l })) : [],
-    };
+    const lines = Array.isArray(so.lines) ? so.lines : [];
     const reservedMap: Record<string, number> = { ...(so.metadata?.reservedMap || {}) };
 
-    // Reserve remaining quantities per line
-    for (const line of next.lines) {
+    // ---------- Preflight availability (return 409 w/ shortages) ----------
+    const needByItem: Record<string, number> = {};
+    for (const line of lines) {
+      const lineId = String(line.id);
+      const ordered = Number(line.qty ?? 0);
+      const fulfilled = Number(line.qtyFulfilled ?? 0);
+      const alreadyReserved = Math.max(0, Number(reservedMap[lineId] ?? 0));
+      const remaining = Math.max(0, ordered - fulfilled - alreadyReserved);
+      if (remaining > 0) {
+        const itemId = String(line.itemId);
+        needByItem[itemId] = (needByItem[itemId] || 0) + remaining;
+      }
+    }
+
+    const shortages: Array<{ itemId: string; need: number; available: number }> = [];
+    for (const [itemId, need] of Object.entries(needByItem)) {
+      const counters = await getOnHand(tenantId, itemId);
+      if (counters.available < need) shortages.push({ itemId, need, available: counters.available });
+    }
+    if (shortages.length) {
+      return json(409, { message: "insufficient_available_to_commit", shortages });
+    }
+
+    // ---------- Reserve per line under counters ----------
+    for (const line of lines) {
       const lineId = String(line.id);
       const ordered = Number(line.qty ?? 0);
       const fulfilled = Number(line.qtyFulfilled ?? 0);
@@ -53,33 +73,34 @@ export async function handle(event: APIGatewayProxyEventV2) {
       const remainingToReserve = Math.max(0, ordered - fulfilled - alreadyReserved);
       if (remainingToReserve <= 0) continue;
 
-      reservedMap[lineId] = alreadyReserved + remainingToReserve;
-
-      // counters: reserved += remainingToReserve
       try {
-        await upsertDelta(event, String(line.itemId), 0, remainingToReserve);
+        await upsertDelta(tenantId, String(line.itemId), 0, remainingToReserve);
       } catch (e: any) {
-        if (STRICT_COUNTERS) {
-          return json(500, {
-            where: "upsertDelta(commit)",
-            itemId: String(line.itemId),
-            err: String(e?.message || e),
-          });
-        }
-        console.error("upsertDelta(commit) failed", { itemId: String(line.itemId), err: e });
+        const code = (e?.code || "").toString();
+        const name = (e?.name || "").toString();
+        const isQty = code === "INSUFFICIENT_QTY" || name.includes("ConditionalCheckFailed");
+        return json(isQty ? 409 : 500, {
+          message: isQty ? "insufficient_available_to_commit" : "reserve_failed",
+          where: "upsertDelta(commit)",
+          itemId: String(line.itemId),
+          err: String(e?.message || e),
+        });
       }
+
+      reservedMap[lineId] = alreadyReserved + remainingToReserve;
     }
 
-    next.status = "committed";
-    next.metadata = { ...(next.metadata || {}), reservedMap };
-
-    // Persist
+    const next = { ...so, status: "committed", metadata: { ...(so.metadata || {}), reservedMap } };
     const put = await ObjUpdate.handle(withTypeId(event, "salesOrder", id, next));
-    if (put.statusCode !== 200) {
-      return json(put.statusCode || 500, { where: "updateSO", body: put.body || null });
-    }
+    if (put.statusCode !== 200) return put;
     return put;
   } catch (e: any) {
-    return json(500, { where: "so-commit:outer", err: String(e?.message || e) });
+    const code = (e?.code || "").toString();
+    const name = (e?.name || "").toString();
+    const isQty = code === "INSUFFICIENT_QTY" || name.includes("ConditionalCheckFailed");
+    return json(isQty ? 409 : 500, {
+      message: isQty ? "insufficient_available_to_commit" : "so-commit:outer",
+      err: String(e?.message || e),
+    });
   }
 }

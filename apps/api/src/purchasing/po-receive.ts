@@ -4,6 +4,7 @@ import * as ObjGet from "../objects/get";
 import * as ObjUpdate from "../objects/update";
 import * as ObjCreate from "../objects/create";
 import { upsertDelta } from "../inventory/counters";
+import { getAuth } from "../auth/middleware";
 
 const json = (c: number, b: unknown): APIGatewayProxyResultV2 => ({
   statusCode: c,
@@ -19,7 +20,7 @@ const withTypeId = (e: any, type: string, id?: string, body?: any) => {
   return out;
 };
 
-const bodyOf = <T = any>(e: APIGatewayProxyEventV2) => (e.body ? JSON.parse(e.body) as T : ({} as any));
+const bodyOf = <T = any>(e: APIGatewayProxyEventV2) => (e.body ? (JSON.parse(e.body) as T) : ({} as any));
 const header = (e: APIGatewayProxyEventV2, k: string) => e.headers?.[k] || e.headers?.[k.toLowerCase()];
 
 const STRICT_COUNTERS = true; // set true to hard-fail if counters update fails
@@ -29,6 +30,11 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
   if (!id) return json(400, { message: "Missing id" });
 
   try {
+    // 🔑 Get tenant the same way other endpoints do; avoid helpers/patches elsewhere
+    const auth = await getAuth(event);
+    const tenantId = String(auth?.tenantId || "").trim();
+    if (!tenantId) return json(400, { message: "tenantId missing (auth)" });
+
     const idemKey = header(event, "Idempotency-Key") || bodyOf(event).idempotencyKey;
 
     // Load PO
@@ -64,9 +70,9 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
       if (idx === -1) continue;
 
       const line = next.lines[idx];
-      const ordered  = Number(line.qty ?? 0);
+      const ordered = Number(line.qty ?? 0);
       const received = Number(line.qtyReceived ?? 0);
-      const delta    = Math.max(0, Math.min(Number(r.deltaQty ?? 0), Math.max(0, ordered - received)));
+      const delta = Math.max(0, Math.min(Number(r.deltaQty ?? 0), Math.max(0, ordered - received)));
       if (delta <= 0) continue;
 
       line.qtyReceived = received + delta;
@@ -98,7 +104,8 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
 
       // Update counters (onHand += delta)
       try {
-        await upsertDelta(event, String(line.itemId), delta, 0);
+        // ✅ Pass explicit tenantId to match your composite { pk, sk } counters schema
+        await upsertDelta(tenantId, String(line.itemId), delta, 0);
       } catch (e: any) {
         if (STRICT_COUNTERS) {
           return json(500, {
@@ -113,9 +120,8 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
 
     // Status transitions
     const anyReceived = next.lines.some((l: any) => Number(l.qtyReceived ?? 0) > 0);
-    const allReceived = next.lines.length > 0 && next.lines.every(
-      (l: any) => Number(l.qtyReceived ?? 0) >= Number(l.qty ?? 0)
-    );
+    const allReceived =
+      next.lines.length > 0 && next.lines.every((l: any) => Number(l.qtyReceived ?? 0) >= Number(l.qty ?? 0));
     if (allReceived) next.status = "received";
     else if (anyReceived) next.status = "partially_received";
 
