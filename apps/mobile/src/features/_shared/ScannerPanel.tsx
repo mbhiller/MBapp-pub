@@ -1,45 +1,43 @@
 import * as React from "react";
 import {
-  View, Text, Pressable, TextInput, Alert, Vibration, Switch, type TextStyle,
+  View, Text, Pressable, TextInput, Alert, Vibration, type TextStyle,
 } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { Feather } from "@expo/vector-icons";
+import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import { apiClient } from "../../api/client";
 import { useColors } from "./useColors";
 
 type BuiltInAction = "receive" | "pick" | "count";
 type BuiltInMode = "add" | BuiltInAction;
-
 type ExtraMode = { key: string; label: string; run: (epc: string) => Promise<void> };
 
 export function ScannerPanel({
   soId,
-  expanded = false,             // now: initial CAMERA state only
+  initialCollapsed = true,
   defaultMode = "add",
   extraModes = [],
   onLinesChanged,
 }: {
   soId?: string;
-  expanded?: boolean;
-  defaultMode?: BuiltInMode;     // "add" | "receive" | "pick" | "count"
+  initialCollapsed?: boolean;
+  defaultMode?: BuiltInMode;                 // "add" | "receive" | "pick" | "count"
   extraModes?: ExtraMode[];
-  onLinesChanged?: (nextLines: Array<{ id?: string; itemId: string; qty: number }>) => void;
+  onLinesChanged?: (next: Array<{ id?: string; itemId: string; qty: number }>) => void;
 }) {
   const t = useColors();
 
-  // Manual input is ALWAYS visible now
-  const [showCamera, setShowCamera] = React.useState<boolean>(Boolean(expanded));
-
+  const [collapsed, setCollapsed] = React.useState<boolean>(initialCollapsed);
+  const [showCamera, setShowCamera] = React.useState<boolean>(false);
   const [mode, setMode] = React.useState<BuiltInMode | { extraKey: string }>(defaultMode);
+
   const [permission, requestPermission] = useCameraPermissions();
 
-  // Start/stop session whenever we're in a built-in action mode
   const [sessionId, setSessionId] = React.useState<string | null>(null);
-  const isBuiltInAction = mode === "receive" || mode === "pick" || mode === "count";
+  const isAction = mode === "receive" || mode === "pick" || mode === "count";
 
   React.useEffect(() => {
     let cancelled = false;
-    if (!isBuiltInAction) return;
+    if (collapsed || !isAction) return;
     (async () => {
       try {
         const res = await apiClient.post<{ id: string }>("/scanner/sessions", { op: "start" });
@@ -53,7 +51,7 @@ export function ScannerPanel({
       if (sessionId) apiClient.post("/scanner/sessions", { op: "stop", sessionId }).catch(() => {});
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isBuiltInAction]);
+  }, [collapsed, isAction]);
 
   React.useEffect(() => {
     if (showCamera && !permission?.granted) requestPermission().catch(() => {});
@@ -63,7 +61,7 @@ export function ScannerPanel({
   const [busy, setBusy] = React.useState(false);
   const lastRef = React.useRef<{ data?: string; at?: number }>({});
 
-  async function resolveEpc(epc: string): Promise<{ itemId: string; status?: string }> {
+  async function resolveEpc(epc: string) {
     const res = await apiClient.get<{ itemId: string; status?: string }>(
       `/epc/resolve?epc=${encodeURIComponent(epc)}`
     );
@@ -136,130 +134,170 @@ export function ScannerPanel({
       ? "Receive"
       : mode === "pick"
       ? "Pick"
-      : mode === "count"
-      ? "Count"
-      : (extraModes.find(m => "extraKey" in mode && m.key === (mode as any).extraKey)?.label || "Run");
+      : "Count";
 
   const disabled =
     (mode === "add" && !soId) ||
     ((mode === "receive" || mode === "pick" || mode === "count") && !sessionId) ||
     busy;
 
+  // ---------- UI ----------
   return (
-    <View
-      style={{
-        backgroundColor: t.colors.card,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: t.colors.border,
-        overflow: "hidden",
-      }}
-    >
-      {/* Header: pills + session indicator (for built-in actions) + camera toggle */}
-      <View style={{ padding: 12, borderBottomWidth: 1, borderBottomColor: t.colors.border }}>
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-          <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap", alignItems: "center", flex: 1 }}>
-            <Pill label="Add Line" active={mode === "add"} onPress={() => setMode("add")} t={t} />
-            <Pill label="Receive" active={mode === "receive"} onPress={() => setMode("receive")} t={t} />
-            <Pill label="Pick" active={mode === "pick"} onPress={() => setMode("pick")} t={t} />
-            <Pill label="Count" active={mode === "count"} onPress={() => setMode("count")} t={t} />
-            {extraModes.map((em) => (
-              <Pill
-                key={em.key}
-                label={em.label}
-                active={typeof mode === "object" && "extraKey" in mode && mode.extraKey === em.key}
-                onPress={() => setMode({ extraKey: em.key })}
-                t={t}
-              />
-            ))}
-            {(mode === "receive" || mode === "pick" || mode === "count") && (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginLeft: 6 }}>
-                <Text style={{ color: t.colors.muted }}>Session</Text>
-                <Switch value={Boolean(sessionId)} disabled />
-              </View>
-            )}
-          </View>
-
+    <View style={{
+      backgroundColor: t.colors.card,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: t.colors.border,
+      overflow: "hidden",
+    }}>
+      {collapsed ? (
+        // COLLAPSED: left barcode icon, right chevron. Tap chevron to expand.
+        <View
+          style={{
+            height: 44,
+            paddingHorizontal: 12,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <MaterialCommunityIcons name="barcode-scan" size={22} color={t.colors.muted} />
           <Pressable
-            onPress={() => setShowCamera((v) => !v)}
+            onPress={() => { setCollapsed(false); setShowCamera(false); }}
             hitSlop={10}
-            style={{
-              width: 40, height: 40, borderRadius: 20,
-              alignItems: "center", justifyContent: "center",
-              borderWidth: 1, borderColor: t.colors.border, backgroundColor: t.colors.card, marginLeft: 8,
-            }}
+            style={{ padding: 6 }}
           >
-            <Feather name={showCamera ? "camera-off" : "camera"} size={20} color={t.colors.text} />
+            <Feather name="chevron-down" size={22} color={t.colors.text} />
           </Pressable>
         </View>
-      </View>
+      ) : (
+        <>
+          {/* Expanded header: pills + right-side chevron-up (collapse) */}
+          <View style={{ padding: 12, borderBottomWidth: 1, borderBottomColor: t.colors.border }}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap", alignItems: "center", flex: 1 }}>
+                <Pill label="Add Line" active={mode === "add"} onPress={() => setMode("add")} t={t} />
+                <Pill label="Receive" active={mode === "receive"} onPress={() => setMode("receive")} t={t} />
+                <Pill label="Pick"    active={mode === "pick"}    onPress={() => setMode("pick")}    t={t} />
+                <Pill label="Count"   active={mode === "count"}   onPress={() => setMode("count")}   t={t} />
+                {extraModes.map((em) => (
+                  <Pill
+                    key={em.key}
+                    label={em.label}
+                    active={typeof mode === "object" && "extraKey" in mode && mode.extraKey === em.key}
+                    onPress={() => setMode({ extraKey: em.key })}
+                    t={t}
+                  />
+                ))}
+              </View>
 
-      {/* Camera (optional) */}
-      {showCamera ? (
-        permission?.granted ? (
-          <View style={{ height: 240, borderBottomWidth: 1, borderBottomColor: t.colors.border }}>
-            <CameraView
-              style={{ flex: 1 }}
-              facing="back"
-              onBarcodeScanned={onBarcodeScanned}
-              barcodeScannerSettings={{
-                barcodeTypes: [
-                  "qr",
-                  "code128", "code39", "code93",
-                  "ean13", "ean8", "upc_a", "upc_e",
-                  "itf14", "pdf417", "datamatrix", "aztec",
-                ],
-              }}
+              {/* right-side chevron to collapse */}
+              <Pressable
+                onPress={() => setCollapsed(true)}
+                hitSlop={10}
+                style={{
+                  width: 40, height: 40, borderRadius: 20,
+                  alignItems: "center", justifyContent: "center",
+                  borderWidth: 1, borderColor: t.colors.border, backgroundColor: t.colors.card, marginLeft: 8,
+                }}
+              >
+                <Feather name="chevron-up" size={20} color={t.colors.text} />
+              </Pressable>
+            </View>
+          </View>
+
+          {/* Input row with camera toggle adornment */}
+          <View style={{ padding: 12, gap: 10 }}>
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              <TextInput
+                value={code}
+                onChangeText={setCode}
+                placeholder="Type or scan EPC / Code"
+                placeholderTextColor={t.colors.muted}
+                autoCapitalize="characters"
+                autoCorrect={false}
+                onSubmitEditing={() => handleSubmit()}
+                style={{
+                  flex: 1,
+                  backgroundColor: t.colors.bg,
+                  color: t.colors.text,
+                  borderColor: t.colors.border,
+                  borderWidth: 1,
+                  borderTopLeftRadius: 8,
+                  borderBottomLeftRadius: 8,
+                  paddingHorizontal: 12,
+                  paddingVertical: 12,
+                }}
+              />
+              <Pressable
+                onPress={() => setShowCamera(v => !v)}
+                hitSlop={10}
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderTopRightRadius: 8,
+                  borderBottomRightRadius: 8,
+                  borderWidth: 1,
+                  borderLeftWidth: 0,
+                  borderColor: t.colors.border,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: t.colors.card,
+                }}
+              >
+                <Feather name={showCamera ? "camera-off" : "camera"} size={18} color={t.colors.text} />
+              </Pressable>
+            </View>
+
+            <PrimaryButton
+              title={busy ? `${primaryLabel}…` : primaryLabel}
+              onPress={() => handleSubmit()}
+              disabled={disabled}
+              t={t}
             />
           </View>
-        ) : permission?.granted === false ? (
-          <View style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: t.colors.border }}>
-            <Text style={{ color: t.colors.danger, marginBottom: 8 }}>Camera permission is required.</Text>
-            <Pressable
-              onPress={() => requestPermission()}
-              style={{ paddingVertical: 10, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: t.colors.border }}
-            >
-              <Text style={{ color: t.colors.text }}>Grant Permission</Text>
-            </Pressable>
-          </View>
-        ) : (
-          <View style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: t.colors.border }}>
-            <Text style={{ color: t.colors.muted }}>Requesting camera permission…</Text>
-          </View>
-        )
-      ) : null}
 
-      {/* Manual input: ALWAYS visible */}
-      <View style={{ padding: 16, gap: 10 }}>
-        <Text style={{ color: t.colors.muted }}>Manual EPC / Code</Text>
-        <TextInput
-          value={code}
-          onChangeText={setCode}
-          placeholder="Type or paste code"
-          placeholderTextColor={t.colors.muted}
-          autoCapitalize="characters"
-          autoCorrect={false}
-          onSubmitEditing={() => handleSubmit()}
-          style={{
-            backgroundColor: t.colors.bg,
-            color: t.colors.text,
-            borderColor: t.colors.border,
-            borderWidth: 1,
-            borderRadius: 8,
-            padding: 12,
-          }}
-        />
-        <PrimaryButton
-          title={busy ? `${primaryLabel}…` : primaryLabel}
-          onPress={() => handleSubmit()}
-          disabled={disabled}
-          t={t}
-        />
-      </View>
+          {/* Camera view (toggles on demand; hidden by default) */}
+          {showCamera ? (
+            permission?.granted ? (
+              <View style={{ height: 240, borderTopWidth: 1, borderTopColor: t.colors.border }}>
+                <CameraView
+                  style={{ flex: 1 }}
+                  facing="back"
+                  onBarcodeScanned={onBarcodeScanned}
+                  barcodeScannerSettings={{
+                    barcodeTypes: [
+                      "qr",
+                      "code128", "code39", "code93",
+                      "ean13", "ean8", "upc_a", "upc_e",
+                      "itf14", "pdf417", "datamatrix", "aztec",
+                    ],
+                  }}
+                />
+              </View>
+            ) : permission?.granted === false ? (
+              <View style={{ padding: 16, borderTopWidth: 1, borderTopColor: t.colors.border }}>
+                <Text style={{ color: t.colors.muted }}>Camera permission required.</Text>
+                <Pressable
+                  onPress={() => requestPermission()}
+                  style={{ marginTop: 8, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: t.colors.border }}
+                >
+                  <Text style={{ color: t.colors.text }}>Grant Permission</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <View style={{ padding: 16, borderTopWidth: 1, borderTopColor: t.colors.border }}>
+                <Text style={{ color: t.colors.muted }}>Requesting camera permission…</Text>
+              </View>
+            )
+          ) : null}
+        </>
+      )}
     </View>
   );
 }
 
+/* --- small UI helpers --- */
 function Pill({ label, active, onPress, t }:{
   label: string; active: boolean; onPress: () => void; t: ReturnType<typeof useColors>;
 }) {

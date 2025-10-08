@@ -101,8 +101,9 @@ export default function SalesOrderDetailScreen() {
       {/* Scanner card AT TOP */}
       <ScannerPanel
         soId={id}
-        expanded={Boolean(params?.expandScanner)}
-        defaultMode={id ? "add" : "receive"}  // "add" | "receive" | "pick" | "count"
+        initialCollapsed={!Boolean(params?.expandScanner)}
+        defaultMode={id ? "add" : "receive"}
+        // extraModes={[ ...optional module-specific actions... ]}
         onLinesChanged={(next) => setLines(next)}
       />
       {/* Info Card */}
