@@ -41,7 +41,10 @@ node ops/smoke.mjs smoke:guardrails:po-idempotency --lines 2 --qty 2 --idem test
 # 4) Reserved release on cancel
 node ops/smoke.mjs smoke:guardrails:cancel-release
 
-node ops/smoke.mjs smoke:scanner:simulate
+node ops/smoke.mjs smoke:scanner:simulate  [--idem test-key-123]
+node ops/smoke.mjs smoke:scanner:receive-pick [--idem test-key-123]
+node ops/smoke.mjs smoke:scanner:receive-fulfill [--idem test-key-123]
+ 
 
 # Show env
 node ops/smoke.mjs env
@@ -79,6 +82,4 @@ node ops/tools/gc/gc.mjs delete:keys .\ops\tools\gc\keys.json
 
 054799133473
 
-npm run api:deploy   -FunctionName "mbapp-nonprod-objects" `
->>   -Region "us-east-1" `
->>   -ApiBase "$Env:MBAPP_API_BASE"
+npm run api:deploy -FunctionName "mbapp-nonprod-objects" -Region "us-east-1" -ApiBase "$Env:MBAPP_API_BASE"

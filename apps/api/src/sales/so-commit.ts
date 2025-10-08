@@ -34,7 +34,17 @@ export async function handle(event: APIGatewayProxyEventV2) {
     if (g.statusCode !== 200 || !g.body) return g;
     const so = JSON.parse(g.body);
 
-    if (!["draft", "submitted"].includes(String(so.status))) {
+    const st = String(so.status);
+    // Hard stops
+    if (st === "cancelled" || st === "closed") {
+      return json(409, { message: `Cannot commit when status is ${so.status}` });
+    }
+    // Idempotent no-op when fully done
+    if (st === "fulfilled") {
+      return json(200, { message: "already_fulfilled", id });
+    }
+   // Allow: draft, submitted, committed (idempotent), partially_fulfilled (top-up)
+    if (!["draft", "submitted", "committed", "partially_fulfilled"].includes(st)) {
       return json(409, { message: `Cannot commit when status is ${so.status}` });
     }
 
@@ -90,7 +100,11 @@ export async function handle(event: APIGatewayProxyEventV2) {
       reservedMap[lineId] = alreadyReserved + remainingToReserve;
     }
 
-    const next = { ...so, status: "committed", metadata: { ...(so.metadata || {}), reservedMap } };
+    let nextStatus = String(so.status);
+    if (nextStatus === "draft" || nextStatus === "submitted") nextStatus = "committed";
+    // stay partially_fulfilled if it already is
+    const next = { ...so, status: nextStatus, metadata: { ...(so.metadata || {}), reservedMap } };
+    
     const put = await ObjUpdate.handle(withTypeId(event, "salesOrder", id, next));
     if (put.statusCode !== 200) return put;
     return put;

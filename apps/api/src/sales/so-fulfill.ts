@@ -48,8 +48,15 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     if (String(so.status) === "cancelled" || String(so.status) === "closed") {
       return json(409, { message: `Cannot fulfill when status is ${so.status}` });
     }
-    if (String(so.status) !== "committed") {
-      return json(409, { message: `Cannot fulfill unless committed (status=${so.status})` });
+    const st = String(so.status);
+    if (st === "cancelled" || st === "closed") {
+      return json(409, { message: `Cannot fulfill when status is ${st}` });
+    }
+    if (st === "fulfilled") {
+      return json(200, { message: "already_fulfilled", id });
+    }
+    if (!["committed", "partially_fulfilled"].includes(st)) {
+      return json(409, { message: `Cannot fulfill unless committed or partially_fulfilled (status=${st})` });
     }
 
     // Parse request
@@ -67,6 +74,7 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
 
     // Apply each requested fulfillment
     for (const r of reqLines) {
+      
       const idx = next.lines.findIndex((l: any) => String(l.id) === String(r.lineId));
       if (idx === -1) continue;
 
