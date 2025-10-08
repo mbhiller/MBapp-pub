@@ -1,45 +1,57 @@
-import { listObjects, getObject, createObject, updateObject, deleteObject } from "../../api/client";
-import type { Page } from "./types";
-import type { components } from "../../api/generated-types";
-type SalesOrder = components["schemas"]["SalesOrder"];
+// src/features/salesOrders/api.ts
+import { apiClient } from "../../api/client";
 
-function toPage<T>(res: any, limit?: number): Page<T> {
-  if (Array.isArray(res)) return { items: res as T[], next: null, limit };
-  if (res?.items && Array.isArray(res.items)) return { items: res.items as T[], next: res.next ?? null, limit };
-  if (res?.data && Array.isArray(res.data)) return { items: res.data as T[], next: res.next ?? null, limit };
-  return { items: [], next: null, limit };
+export type CreateSalesOrderBody = {
+  customerName?: string;
+  status?: string;
+  notes?: string;
+  lines?: Array<{ itemId: string; qty: number }>;
+};
+
+export async function listSalesOrders(params?: { limit?: number; next?: string }) {
+  const qs = new URLSearchParams();
+  if (params?.limit) qs.set("limit", String(params.limit));
+  if (params?.next) qs.set("next", params.next);
+  const path = `/sales/so${qs.toString() ? `?${qs.toString()}` : ""}`;
+  return apiClient.get<any>(path);
 }
 
-/** List SOs */
-export async function listSalesOrders(opts: {
-  limit?: number;
-  next?: string;
-  sort?: "asc" | "desc";
-  q?: string;
-} = {}): Promise<Page<SalesOrder>> {
-  const res = await listObjects<SalesOrder>("salesOrder", {
-    by: "updatedAt",
-    sort: opts.sort ?? "desc",
-    limit: opts.limit ?? 20,
-    next: opts.next,
-    q: opts.q,
-  });
-  return toPage<SalesOrder>(res, opts.limit);
+export async function getSalesOrder(id: string) {
+  return apiClient.get<any>(`/sales/so/${encodeURIComponent(id)}`);
 }
 
-/** Get one SO */
-export const getSalesOrder = (id: string) => getObject<SalesOrder>("salesOrder", id);
-
-/** Create/Update SO */
-export async function saveSalesOrder(input: Partial<SalesOrder>) {
-  if (input.id) {
-    return updateObject<SalesOrder>("salesOrder", String(input.id), input);
-  }
-  return createObject<SalesOrder>("salesOrder", { ...input, type: "salesOrder" });
+export async function createSalesOrder(body: CreateSalesOrderBody) {
+  return apiClient.post<any>("/sales/so", body);
 }
 
-/** Optional delete */
-export async function deleteSalesOrder(id: string): Promise<{ ok: true }> {
-  await deleteObject("salesOrder", id);
-  return { ok: true };
+export async function updateSalesOrder(id: string, patch: Partial<CreateSalesOrderBody>) {
+  return apiClient.put<any>(`/sales/so/${encodeURIComponent(id)}`, patch);
+}
+
+export async function appendLines(id: string, lines: Array<{ itemId: string; qty: number }>) {
+  const so = await getSalesOrder(id);
+  const next = Array.isArray(so?.lines) ? [...so.lines, ...lines] : [...lines];
+  return updateSalesOrder(id, { lines: next });
+}
+
+// Scanner helpers
+export async function resolveEpc(epc: string): Promise<{ itemId: string; status?: string }> {
+  const res = await apiClient.get<{ itemId: string; status?: string }>(
+    `/epc/resolve?epc=${encodeURIComponent(epc)}`
+  );
+  if (!res?.itemId) throw new Error(`EPC not found (${epc})`);
+  return res;
+}
+
+export async function postScannerAction(payload: {
+  action: "receive" | "pick" | "count" | "move";
+  epc: string;
+  sessionId?: string;
+  // NOTE: backend does not accept soId/lineId today
+  fromLocationId?: string;
+  toLocationId?: string;
+}) {
+  const headers: Record<string, string> = {};
+  if (payload.action === "receive") headers["Idempotency-Key"] = `scan-${payload.epc}`;
+  return apiClient.post("/scanner/actions", payload, headers);
 }

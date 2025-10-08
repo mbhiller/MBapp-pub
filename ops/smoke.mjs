@@ -14,6 +14,8 @@ import * as ResvFlow from "./smoke/flows/reservation-flow.mjs";
 import * as ScannerFlow from "./smoke/flows/scanner-flow.mjs";
 import * as Guardrails from "./smoke/flows/guardrails.mjs";
 import * as LinksReport from "./smoke/reports/product-links.mjs";
+import * as ScannerPick from "./smoke/flows/scanner-pick.mjs";
+import * as ScannerGuards from "./smoke/flows/scanner-guardrails.mjs";
 
 
 function argsToObj(argv) {
@@ -196,6 +198,18 @@ if (cmd === "smoke:salesOrder:fulfill") {
   });
   console.log(JSON.stringify(out, null, 2));
   return;
+}
+
+// SCANNER SMOKES ####################################################################
+if (cmd === "smoke:scanner:pick") {
+  const out = await ScannerPick.run({ qty: Number(arg.qty || 1) });
+  console.log(JSON.stringify(out, null, 2));
+  process.exit(out.result === "PASS" ? 0 : 1);
+}
+if (cmd === "smoke:scanner:guardrails") {
+  const out = await ScannerGuards.run({ qty: Number(arg.qty || 1) });
+  console.log(JSON.stringify(out, null, 2));
+  process.exit(out.result === "EXPECTED_409" ? 0 : 1);
 }
 
 

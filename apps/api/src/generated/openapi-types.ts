@@ -825,6 +825,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/sales/so/{id}:release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Release previously reserved quantity */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        lineId: string;
+                        deltaQty: number;
+                        reason?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Guardrail violation */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/sales-orders/{id}/fulfill-line": {
         parameters: {
             query?: never;
@@ -1224,7 +1275,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Record a scanner action and update counters */
+        /** Record a scanner action (pick/receive/count/move) */
         post: {
             parameters: {
                 query?: never;
@@ -1234,11 +1285,21 @@ export interface paths {
             };
             requestBody: {
                 content: {
-                    "application/json": components["schemas"]["ScannerAction"];
+                    "application/json": {
+                        /** @enum {string} */
+                        action: "pick" | "receive" | "count" | "move";
+                        epc: string;
+                        /** @default 1 */
+                        qty?: number;
+                        soId?: string;
+                        lineId?: string;
+                        fromLocationId?: string;
+                        toLocationId?: string;
+                    };
                 };
             };
             responses: {
-                /** @description OK */
+                /** @description Recorded */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -1247,7 +1308,7 @@ export interface paths {
                         "application/json": components["schemas"]["ScannerAction"];
                     };
                 };
-                /** @description Guardrail violation (e.g. pick without reservation) */
+                /** @description Guardrail violation */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -1330,13 +1391,13 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         ObjectBase: {
-            id: string;
-            tenantId: string;
+            readonly id: string;
+            readonly tenantId: string;
             type?: string;
             /** Format: date-time */
-            createdAt: string;
+            readonly createdAt: string;
             /** Format: date-time */
-            updatedAt: string;
+            readonly updatedAt: string;
             metadata?: {
                 [key: string]: unknown;
             };
@@ -1911,45 +1972,49 @@ export interface components {
             /** Format: date-time */
             updatedAt?: string;
         };
-        ScannerSession: {
-            id: string;
+        EpcBinding: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "epcBinding";
+            epc: string;
+            itemId: string;
+            locationId?: string;
+            lot?: string | null;
             /**
-             * @default scannerSession
+             * @default active
              * @enum {string}
              */
+            state: "active" | "retired";
+        };
+        ScannerSession: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
             type: "scannerSession";
             userId: string;
-            workspaceId?: string | null;
+            workspaceId?: string;
+            /** @enum {string} */
+            status: "active" | "stopped";
             /** Format: date-time */
             startedAt: string;
             /** Format: date-time */
-            endedAt?: string | null;
-            /** Format: date-time */
-            createdAt?: string;
-            /** Format: date-time */
-            updatedAt?: string;
+            stoppedAt?: string | null;
         };
-        ScannerAction: {
-            id: string;
-            /**
-             * @default scannerAction
-             * @enum {string}
-             */
+        ScannerAction: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
             type: "scannerAction";
-            sessionId: string;
+            /** @enum {string} */
+            action: "pick" | "receive" | "count" | "move";
+            /** @description EPC as scanned */
+            epc: string;
+            itemId: string;
             /** Format: date-time */
             ts: string;
-            epc: string;
-            itemId?: string | null;
-            /** @enum {string} */
-            action: "receive" | "move" | "pick" | "count";
-            fromLocationId?: string | null;
-            toLocationId?: string | null;
-            userId?: string;
-            /** Format: date-time */
-            createdAt?: string;
-            /** Format: date-time */
-            updatedAt?: string;
+            sessionId?: string;
+            soId?: string;
+            lineId?: string;
+            fromLocationId?: string;
+            toLocationId?: string;
+            /** @default 1 */
+            qty: number;
+            notes?: string;
         };
     };
     responses: {

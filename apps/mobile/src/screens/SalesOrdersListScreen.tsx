@@ -1,9 +1,10 @@
 import * as React from "react";
-import { View, FlatList, Text, Pressable, RefreshControl, ActivityIndicator } from "react-native";
+import { View, FlatList, Text, Pressable, RefreshControl, ActivityIndicator, Alert } from "react-native";
 import { useColors } from "../features/_shared/useColors";
 import { useRefetchOnFocus } from "../features/_shared/useRefetchOnFocus";
 import { useObjectsList } from "../features/_shared/useObjectsList";
 import type { components } from "../api/generated-types";
+import { createObject } from "../api/client"; // ← added
 type SalesOrder = components["schemas"]["SalesOrder"];
 
 export default function SalesOrdersListScreen({ navigation }: any) {
@@ -56,6 +57,12 @@ export default function SalesOrdersListScreen({ navigation }: any) {
     );
   };
 
+  // NEW: create a draft and open detail with scanner expanded
+  const [creating, setCreating] = React.useState(false);
+  const onNew = React.useCallback(() => {
+  navigation.navigate("SalesOrderDetail", { mode: "new", expandScanner: true });
+}, [navigation]);
+
   return (
     <View style={{ flex: 1, backgroundColor: t.colors.background, padding: 12 }}>
       <FlatList
@@ -81,7 +88,7 @@ export default function SalesOrdersListScreen({ navigation }: any) {
 
       {/* + New */}
       <Pressable
-        onPress={() => navigation.navigate("SalesOrderDetail", { mode: "new" })}
+        onPress={onNew}
         style={{
           position: "absolute",
           right: 16,
@@ -90,6 +97,7 @@ export default function SalesOrdersListScreen({ navigation }: any) {
           paddingHorizontal: 16,
           paddingVertical: 12,
           borderRadius: 999,
+          opacity: creating ? 0.6 : 1,
         }}
       >
         <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>+ New</Text>
@@ -121,15 +129,11 @@ function StatusPill({ value }: { value: string }) {
 
 function getSOStatusStyle(t: ReturnType<typeof useColors>, v?: string) {
   const s = String(v || "").toLowerCase();
-  // happy/positive
   if (["committed", "fulfilling", "fulfilled", "closed"].includes(s)) {
     return { bg: t.colors.card, fg: t.colors.primary, br: t.colors.primary };
   }
-  // negative
   if (s === "canceled" || s === "cancelled") {
     return { bg: t.colors.card, fg: t.colors.danger,  br: t.colors.danger  };
   }
-  // neutral (draft/submitted/unknown)
   return { bg: t.colors.card, fg: t.colors.text,    br: t.colors.border  };
 }
-
