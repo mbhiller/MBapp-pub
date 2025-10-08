@@ -7,6 +7,9 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import { apiClient } from "../../api/client";
 import { useColors } from "./useColors";
+import { useToast } from "./Toast";
+import { resolveEpc } from "./epc";
+import { useScannerSession } from "./useScannerSession";
 
 type BuiltInAction = "receive" | "pick" | "count";
 type BuiltInMode = "add" | BuiltInAction;
@@ -26,6 +29,7 @@ export function ScannerPanel({
   onLinesChanged?: (next: Array<{ id?: string; itemId: string; qty: number }>) => void;
 }) {
   const t = useColors();
+  const toast = useToast();
 
   const [collapsed, setCollapsed] = React.useState<boolean>(initialCollapsed);
   const [showCamera, setShowCamera] = React.useState<boolean>(false);
@@ -33,36 +37,9 @@ export function ScannerPanel({
 
   const [permission, requestPermission] = useCameraPermissions();
 
-  const [sessionId, setSessionId] = React.useState<string | null>(null);
   const isAction = mode === "receive" || mode === "pick" || mode === "count";
-
-  // Inline toast state
-  const [toast, setToast] = React.useState<{ msg: string; kind: "success" | "error" } | null>(null);
-  const toastTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pushToast = React.useCallback((msg: string, kind: "success" | "error" = "success", dur = 1800) => {
-    if (toastTimer.current) { clearTimeout(toastTimer.current); toastTimer.current = null; }
-    setToast({ msg, kind });
-    toastTimer.current = setTimeout(() => { setToast(null); toastTimer.current = null; }, dur);
-  }, []);
-  React.useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    if (collapsed || !isAction) return;
-    (async () => {
-      try {
-        const res = await apiClient.post<{ id: string }>("/scanner/sessions", { op: "start" });
-        if (!cancelled) setSessionId(res.id);
-      } catch (e: any) {
-        if (!cancelled) pushToast(String(e?.message ?? "Failed to start session"), "error");
-      }
-    })();
-    return () => {
-      cancelled = true;
-      if (sessionId) apiClient.post("/scanner/sessions", { op: "stop", sessionId }).catch(() => {});
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [collapsed, isAction]);
+  // start/stop session only when expanded and in action mode
+  const sessionId = useScannerSession(!collapsed && isAction);
 
   React.useEffect(() => {
     if (showCamera && !permission?.granted) requestPermission().catch(() => {});
@@ -72,23 +49,15 @@ export function ScannerPanel({
   const [busy, setBusy] = React.useState(false);
   const lastRef = React.useRef<{ data?: string; at?: number }>({});
 
-  async function resolveEpc(epc: string) {
-    const res = await apiClient.get<{ itemId: string; status?: string }>(
-      `/epc/resolve?epc=${encodeURIComponent(epc)}`
-    );
-    if (!res?.itemId) throw new Error("EPC not found");
-    return res;
-  }
-
   async function addLineFromEpc(epc: string) {
-    if (!soId) { pushToast("Open or create an order first.", "error"); return; }
+    if (!soId) { toast("Open or create an order first.", "error"); return; }
     const { itemId } = await resolveEpc(epc);
     const so = await apiClient.get<any>(`/objects/salesOrder/${encodeURIComponent(soId)}`);
     const next = Array.isArray(so?.lines) ? [...so.lines, { itemId, qty: 1 }] : [{ itemId, qty: 1 }];
     const updated = await apiClient.put<any>(`/objects/salesOrder/${encodeURIComponent(soId)}`, { lines: next });
     onLinesChanged?.(Array.isArray(updated?.lines) ? updated.lines : next);
     Vibration.vibrate(10);
-    pushToast("Line added", "success");
+    toast("Line added", "success");
   }
 
   async function postAction(epc: string, kind: BuiltInAction) {
@@ -97,7 +66,7 @@ export function ScannerPanel({
     if (kind === "receive") headers["Idempotency-Key"] = `scan-${epc}`;
     await apiClient.post("/scanner/actions", { sessionId, epc, action: kind }, headers);
     Vibration.vibrate(10);
-    pushToast(kind === "receive" ? "Received" : kind === "pick" ? "Picked" : "Counted", "success");
+    toast(kind === "receive" ? "Received" : kind === "pick" ? "Picked" : "Counted", "success");
   }
 
   const handleSubmit = React.useCallback(
@@ -116,16 +85,16 @@ export function ScannerPanel({
           if (!extra) throw new Error("Unknown action");
           await extra.run(epc);
           Vibration.vibrate(10);
-          pushToast("Action completed", "success");
+          toast("Action completed", "success");
         }
         setCode("");
       } catch (e: any) {
-        pushToast(String(e?.message || "Operation failed"), "error");
+        toast(String(e?.message || "Operation failed"), "error");
       } finally {
         setBusy(false);
       }
     },
-    [mode, code, soId, sessionId, extraModes, pushToast]
+    [mode, code, soId, sessionId, extraModes, toast]
   );
 
   const onBarcodeScanned = React.useCallback(
@@ -155,7 +124,6 @@ export function ScannerPanel({
     ((mode === "receive" || mode === "pick" || mode === "count") && !sessionId) ||
     busy;
 
-  // ---------- UI ----------
   return (
     <View style={{
       backgroundColor: t.colors.card,
@@ -204,6 +172,7 @@ export function ScannerPanel({
                   />
                 ))}
               </View>
+
               <Pressable
                 onPress={() => setCollapsed(true)}
                 hitSlop={10}
@@ -305,14 +274,11 @@ export function ScannerPanel({
           ) : null}
         </>
       )}
-
-      {/* Inline toast renderer */}
-      {toast ? <InlineToast t={t} toast={toast} /> : null}
     </View>
   );
 }
 
-/* --- helpers --- */
+/* --- small UI helpers --- */
 function Pill({ label, active, onPress, t }:{
   label: string; active: boolean; onPress: () => void; t: ReturnType<typeof useColors>;
 }) {
@@ -350,28 +316,5 @@ function PrimaryButton({ title, onPress, disabled, t }:{
     >
       <Text style={style}>{title}</Text>
     </Pressable>
-  );
-}
-
-function InlineToast({ t, toast }:{ t: ReturnType<typeof useColors>, toast:{ msg:string; kind:"success"|"error" } }) {
-  const bg = toast.kind === "success" ? (t.colors.success ?? "#0a7") : (t.colors.danger ?? "#c33");
-  const fg = t.colors.buttonText || "#fff";
-  return (
-    <View style={{
-      position: "absolute",
-      bottom: 12,
-      left: 12,
-      right: 12,
-      borderRadius: 10,
-      paddingVertical: 10,
-      paddingHorizontal: 12,
-      backgroundColor: bg,
-      shadowColor: "#000",
-      shadowOpacity: 0.2,
-      shadowRadius: 6,
-      elevation: 5,
-    }}>
-      <Text style={{ color: fg, fontWeight: "700" }}>{toast.msg}</Text>
-    </View>
   );
 }
