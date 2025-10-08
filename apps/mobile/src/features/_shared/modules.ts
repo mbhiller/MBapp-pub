@@ -48,7 +48,6 @@ export function visibleModules(policy?: Record<string, boolean> | null): readonl
 export const MODULES: readonly ModuleEntry[] = [
   // Core / global (no perms required)
   { key: "tenants",       title: "Tenants",          screen: "Tenants",          icon: "building" },
-  { key: "scan",          title: "Scan",             screen: "Scan",             icon: "qrcode" },
   { key: "devdiagnostics",title: "Dev Dx",           screen: "DevDiagnostics",   icon: "wrench" },
 
   // Power tool (leave unguarded)

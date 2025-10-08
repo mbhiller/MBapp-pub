@@ -1,85 +1,90 @@
-import React from "react";
-import { View, Text, TextInput, Pressable, Alert } from "react-native";
+import * as React from "react";
+import {
+  View, Text, TextInput, Pressable, Alert, ActivityIndicator, ScrollView,
+} from "react-native";
 import { useRoute, RouteProp } from "@react-navigation/native";
 import { useColors } from "../features/_shared/useColors";
-import FormScreen from "../features/_shared/FormScreen";
-import type { components } from "../api/generated-types";
-import type { RootStackParamList } from "../navigation/types";
-import { createObject, getObject, updateObject } from "../api/client";
+import { getObject, updateObject, createObject } from "../api/client";
+import { ScannerPanel } from "../features/_shared/ScannerPanel";
 
-type SalesOrder = components["schemas"]["SalesOrder"];
+type RootStackParamList = {
+  SalesOrderDetail: { id?: string; mode?: "new" | "edit"; expandScanner?: boolean } | undefined;
+};
 type Route = RouteProp<RootStackParamList, "SalesOrderDetail">;
 
-const STATUS_VALUES = ["draft","submitted","committed","partiallyFulfilled","fulfilled","cancelled","closed"] as const;
+const STATUS_VALUES = [
+  "draft",
+  "submitted",
+  "committed",
+  "partially_fulfilled",
+  "fulfilled",
+  "cancelled",
+  "closed",
+] as const;
 
-export default function SalesOrderDetailScreen({ navigation }: any) {
+export default function SalesOrderDetailScreen() {
   const { params } = useRoute<Route>();
-  const id   = params?.id;
-  const mode = params?.mode as "new" | "edit" | undefined;
-  const isNew = mode === "new" || !id;
-  const initial = (params?.initial ?? {}) as Partial<SalesOrder>;
   const t = useColors();
 
+  const [id, setId] = React.useState<string | undefined>(params?.id);
+  const [customerName, setCustomerName] = React.useState("");
+  const [status, setStatus] = React.useState("draft");
+  const [notes, setNotes] = React.useState("");
+  const [lines, setLines] = React.useState<any[]>([]);
+  const [loading, setLoading] = React.useState(Boolean(id));
   const [saving, setSaving] = React.useState(false);
-  const [loading, setLoading] = React.useState(false);
 
-  // form state
-  const [customerName, setCustomerName] = React.useState(String((initial as any)?.customerName ?? ""));
-  const [status, setStatus]             = React.useState<string>(String((initial as any)?.status ?? "draft"));
-  const [notes, setNotes]               = React.useState(String((initial as any)?.notes ?? ""));
-
-  // track if user changed status this session
-  const statusTouched = React.useRef(false);
-
-  // Load existing only (never load when new)
-  const load = React.useCallback(async () => {
-    if (isNew || !id) return;
-    setLoading(true);
-    try {
-      const so = await getObject<SalesOrder>("salesOrder", String(id));
-      setCustomerName((v) => v || String((so as any)?.customerName ?? ""));
-      setNotes((v) => v || String((so as any)?.notes ?? ""));
-
-      const serverStatus = String((so as any)?.status ?? "draft");
-      if (!statusTouched.current) setStatus(serverStatus);
-    } catch (e: any) {
-      Alert.alert("Error", e?.message ?? "Failed to load sales order");
-    } finally {
-      setLoading(false);
-    }
-  }, [isNew, id]);
-
-  React.useEffect(() => { load(); }, [load]);
+  // Load SO when id exists
+  React.useEffect(() => {
+    if (!id) return;
+    (async () => {
+      try {
+        setLoading(true);
+        const so = await getObject<any>("salesOrder", id);
+        setCustomerName(String(so?.customerName ?? ""));
+        setStatus(String(so?.status ?? "draft"));
+        setNotes(String(so?.notes ?? ""));
+        setLines(Array.isArray(so?.lines) ? so.lines : []);
+      } catch (e: any) {
+        Alert.alert("Error", e?.message ?? "Failed to load sales order");
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [id]);
 
   async function onCreateDraft() {
-    if (!customerName.trim()) { Alert.alert("Customer name is required"); return; }
+    if (!customerName.trim()) return Alert.alert("Validation", "Customer name is required.");
     setSaving(true);
     try {
-      await createObject<SalesOrder>("salesOrder", {
+      const created = await createObject<any>("salesOrder", {
         type: "salesOrder",
         customerName: customerName.trim(),
         status: "draft",
         ...(notes.trim() ? { notes: notes.trim() } : {}),
-      } as any);
-      navigation.goBack();
+        lines: [],
+      });
+      setId(String(created?.id));
+      Alert.alert("Created", "Draft sales order created.");
     } catch (e: any) {
-      Alert.alert("Error", e?.message ?? "Failed to create draft");
+      Alert.alert("Error", e?.message ?? "Failed to create order");
     } finally {
       setSaving(false);
     }
   }
 
-  async function onSaveEdits() {
+  async function onSave() {
     if (!id) return;
-    if (!customerName.trim()) { Alert.alert("Customer name is required"); return; }
+    if (!customerName.trim()) return Alert.alert("Validation", "Customer name is required.");
     setSaving(true);
     try {
-      await updateObject<SalesOrder>("salesOrder", String(id), {
+      const updated = await updateObject<any>("salesOrder", id, {
         customerName: customerName.trim(),
         status,
         ...(notes.trim() ? { notes: notes.trim() } : { notes: undefined }),
-      } as any);
-      navigation.goBack();
+      });
+      setLines(Array.isArray(updated?.lines) ? updated.lines : lines);
+      Alert.alert("Saved", "Sales order updated.");
     } catch (e: any) {
       Alert.alert("Error", e?.message ?? "Failed to save");
     } finally {
@@ -88,31 +93,95 @@ export default function SalesOrderDetailScreen({ navigation }: any) {
   }
 
   return (
-    <FormScreen>
-      <View style={{ backgroundColor: t.colors.card, borderRadius: 12, borderWidth: 1, borderColor: t.colors.border, padding: 16 }}>
+    <ScrollView
+      style={{ flex: 1, backgroundColor: t.colors.bg }}
+      contentContainerStyle={{ padding: 16, paddingBottom: 40, gap: 12 }}
+      keyboardShouldPersistTaps="handled"
+    >
+      {/* Scanner card AT TOP */}
+      <ScannerPanel
+        soId={id}
+        initialCollapsed={!Boolean(params?.expandScanner)}
+        defaultMode={id ? "add" : "receive"}
+        // extraModes={[ ...optional module-specific actions... ]}
+        onLinesChanged={(next) => setLines(next)}
+      />
+      {/* Info Card */}
+      <View
+        style={{
+          backgroundColor: t.colors.card,
+          borderRadius: 12,
+          borderWidth: 1,
+          borderColor: t.colors.border,
+          padding: 16,
+        }}
+      >
         <Field label="Customer *" value={customerName} onChangeText={setCustomerName} />
-        {!isNew && (
+        {id ? (
           <>
             <Label text="Status" />
             <PillGroup
               options={STATUS_VALUES as unknown as string[]}
               value={status}
-              onChange={(v) => { statusTouched.current = true; setStatus(v); }}
+              onChange={setStatus}
             />
           </>
-        )}
+        ) : null}
         <Field label="Notes" value={notes} onChangeText={setNotes} multiline />
 
         <Pressable
-          onPress={isNew ? onCreateDraft : onSaveEdits}
-          style={{ marginTop: 12, backgroundColor: t.colors.primary, padding: 14, borderRadius: 10, alignItems: "center" }}
+          onPress={id ? onSave : onCreateDraft}
+          disabled={saving}
+          style={{
+            marginTop: 12,
+            backgroundColor: t.colors.primary,
+            padding: 14,
+            borderRadius: 10,
+            alignItems: "center",
+            opacity: saving ? 0.7 : 1,
+          }}
         >
-          <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>
-            {saving ? (isNew ? "Creating…" : "Saving…") : (isNew ? "Create Draft" : "Save")}
+          <Text style={{ color: t.colors.buttonText, fontWeight: "700" as const }}>
+            {id ? (saving ? "Saving…" : "Save") : (saving ? "Creating…" : "Create Draft")}
           </Text>
         </Pressable>
       </View>
-    </FormScreen>
+
+      {/* Lines */}
+      <View
+        style={{
+          backgroundColor: t.colors.card,
+          borderRadius: 12,
+          borderWidth: 1,
+          borderColor: t.colors.border,
+          padding: 16,
+          marginBottom: 4,
+        }}
+      >
+        <Label text="Lines" />
+        {loading ? (
+          <ActivityIndicator />
+        ) : lines.length ? (
+          lines.map((ln, idx) => (
+            <View
+              key={(ln as any).id ?? `${(ln as any).itemId}-${idx}`}
+              style={{
+                paddingVertical: 8,
+                borderBottomWidth: idx < lines.length - 1 ? 1 : 0,
+                borderBottomColor: t.colors.border,
+              }}
+            >
+              <Text style={{ color: t.colors.text, fontWeight: "600" as const }}>
+                {String((ln as any).itemId || "—")}
+              </Text>
+              <Text style={{ color: t.colors.muted }}>qty: {String((ln as any).qty ?? 1)}</Text>
+            </View>
+          ))
+        ) : (
+          <Text style={{ color: t.colors.muted }}>No lines yet.</Text>
+        )}
+      </View>
+    </ScrollView>
   );
 }
 
@@ -120,8 +189,19 @@ function Label({ text }: { text: string }) {
   const t = useColors();
   return <Text style={{ marginBottom: 6, color: t.colors.muted }}>{text}</Text>;
 }
-function Field({ label, value, onChangeText, multiline, keyboardType }:{
-  label: string; value?: any; onChangeText: (v: any) => void; multiline?: boolean; keyboardType?: any;
+
+function Field({
+  label,
+  value,
+  onChangeText,
+  multiline,
+  keyboardType,
+}: {
+  label: string;
+  value?: any;
+  onChangeText: (v: any) => void;
+  multiline?: boolean;
+  keyboardType?: any;
 }) {
   const t = useColors();
   return (
@@ -135,8 +215,12 @@ function Field({ label, value, onChangeText, multiline, keyboardType }:{
         autoCapitalize="none"
         autoCorrect={false}
         style={{
-          backgroundColor: t.colors.bg, color: t.colors.text,
-          borderColor: t.colors.border, borderWidth: 1, borderRadius: 8, padding: 12,
+          backgroundColor: t.colors.bg,
+          color: t.colors.text,
+          borderColor: t.colors.border,
+          borderWidth: 1,
+          borderRadius: 8,
+          padding: 12,
           minHeight: multiline ? 80 : undefined,
         }}
         placeholderTextColor={t.colors.muted}
@@ -144,19 +228,42 @@ function Field({ label, value, onChangeText, multiline, keyboardType }:{
     </View>
   );
 }
-function PillGroup({ options, value, onChange }:{ options: string[]; value?: string; onChange: (v: string) => void; }) {
+
+function PillGroup({
+  options,
+  value,
+  onChange,
+}: {
+  options: string[];
+  value?: string;
+  onChange: (v: string) => void;
+}) {
   const t = useColors();
   return (
-    <View style={{ flexDirection: "row", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
       {options.map((opt) => {
         const selected = String(value ?? "") === opt;
         return (
-          <Pressable key={opt} onPress={() => onChange(opt)} style={{
-            paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1,
-            borderColor: selected ? t.colors.primary : t.colors.border,
-            backgroundColor: selected ? t.colors.primary : t.colors.card, marginRight: 8, marginBottom: 8,
-          }}>
-            <Text style={{ color: selected ? t.colors.buttonText : t.colors.text, fontWeight: "600" }}>{opt}</Text>
+          <Pressable
+            key={opt}
+            onPress={() => onChange(opt)}
+            style={{
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              borderRadius: 999,
+              borderWidth: 1,
+              borderColor: selected ? t.colors.primary : t.colors.border,
+              backgroundColor: selected ? t.colors.primary : t.colors.card,
+            }}
+          >
+            <Text
+              style={{
+                color: selected ? t.colors.buttonText : t.colors.text,
+                fontWeight: "600" as const,
+              }}
+            >
+              {opt}
+            </Text>
           </Pressable>
         );
       })}

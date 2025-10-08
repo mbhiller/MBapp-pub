@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useMemo } from "react";
-import { defaultTheme, type Theme } from "../ui/theme";
+import { defaultTheme, type Theme } from "../features/_shared/ui/theme";
 
 const ThemeCtx = createContext<Theme>(defaultTheme);
 

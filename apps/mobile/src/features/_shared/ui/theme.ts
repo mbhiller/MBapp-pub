@@ -9,6 +9,7 @@ export type Theme = {
     textMuted: string;
     primary: string;
     danger: string;
+    success: string;
     headerBg: string;
     headerText: string;
   };
@@ -36,6 +37,7 @@ export const defaultTheme: Theme = {
     textMuted: "#666666",
     primary: "#007aff",
     danger: "crimson",
+    success: "#B6A268",
     headerBg: "#ffffff",
     headerText: "#111111",
   },

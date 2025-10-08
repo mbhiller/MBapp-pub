@@ -3,7 +3,7 @@ Param(
   [Parameter(Mandatory=$true)] [string]$Logo,
   [string]$Title = "MBapp Roadmap vNext — Equestrian Operations Platform",
   [string]$Subtitle = "Executive & Technical Master Plan",
-  [string]$OutPdf = "dist/MBapp-Roadmap-vNext.pdf",
+  [string]$OutPdf = "new_docs/MBapp-Roadmap-vNext.pdf",
   [ValidateSet("landscape","portrait")] [string]$Orientation = "landscape",
   [int]$WatermarkRotate = 30,
   [double]$WatermarkOpacity = 0.15
@@ -17,7 +17,7 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path | Split-Path -Parent
 $tools = Join-Path $root "tools/roadmap"
-$dist = Join-Path $root "dist"
+$dist = Join-Path $root "new_docs"
 New-Item -ItemType Directory -Force -Path $dist | Out-Null
 
 Push-Location $tools

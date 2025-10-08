@@ -1,4 +1,4 @@
-// GET /epc/resolve?epc=...
+// apps/api/src/epc/resolve.ts
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
 import { getObjectById } from "../objects/repo";
 

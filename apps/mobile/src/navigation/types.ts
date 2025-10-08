@@ -17,7 +17,6 @@ export type ScanParams = {
 export type RootStackParamList = {
   // Hub / global
   Hub: undefined;
-  Scan: undefined;
   Tenants: undefined;
   DevDiagnostics: undefined;
 

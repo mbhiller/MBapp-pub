@@ -9,8 +9,6 @@ import { useTheme } from "../providers/ThemeProvider";
 
 // Hub / global
 import ModuleHubScreen from "../screens/ModuleHubScreen";
-import ScanScreen from "../screens/ScanScreen";
-
 import TenantsScreen from "../screens/TenantsScreen";
 
 
@@ -110,7 +108,7 @@ export default function RootStack() {
 
       <Stack.Screen name="Hub" component={ModuleHubScreen} options={{ title: "Hub" }} />
       <Stack.Screen name="DevDiagnostics" component={DevDiagnosticsScreen} options={{ title: "Dev Diagnostics" }} />
-      <Stack.Screen name="Scan" component={ScanScreen} options={{ title: "Scan" }} />
+
       {/* Products */}
       <Stack.Screen name="ProductsList" component={ProductsListScreen} options={{ title: "Products" }} />
       <Stack.Screen name="ProductDetail" component={ProductDetailScreen} options={{ title: "Product" }} />
