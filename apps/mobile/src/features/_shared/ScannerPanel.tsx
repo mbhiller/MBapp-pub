@@ -1,3 +1,4 @@
+//apps/mobile/src/features/_shared/ScannerPanel.tsx
 import * as React from "react";
 import {
   View, Text, Pressable, TextInput, Vibration, type TextStyle,
