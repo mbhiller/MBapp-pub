@@ -1,0 +1,14 @@
+{
+  "name": "mbapp-roadmap-builder",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build-roadmap.js"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "markdown-it": "^14.1.0",
+    "puppeteer": "^22.10.0"
+  }
+}

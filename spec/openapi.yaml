@@ -1100,6 +1100,103 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Reservation'
+  /epc/resolve:
+    get:
+      summary: Resolve EPC to item
+      parameters:
+        - in: query
+          name: epc
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  itemId:
+                    type: string
+                  status:
+                    type: string
+        '404':
+          description: Not found
+  /scanner/sessions:
+    post:
+      summary: Start/stop a scanner session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                op:
+                  type: string
+                  enum:
+                    - start
+                    - stop
+                sessionId:
+                  type: string
+                  description: Required for stop
+                workspaceId:
+                  type: string
+                  nullable: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScannerSession'
+  /scanner/actions:
+    post:
+      summary: Record a scanner action and update counters
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScannerAction'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScannerAction'
+        '409':
+          description: Guardrail violation (e.g. pick without reservation)
+  /scanner/simulate:
+    post:
+      summary: Dev only - generate EPCs bound to itemIds
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                count:
+                  type: integer
+                  default: 10
+                  minimum: 1
+                  maximum: 1000
+                itemId:
+                  type: string
+                  nullable: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  created:
+                    type: integer
   /admin/audit:
     get:
       tags:
@@ -2420,7 +2517,7 @@ components:
       properties:
         id:
           type: string
-          description: UUID
+          description: Use EPC string as id
         type:
           type: string
           enum:
@@ -2475,6 +2572,12 @@ components:
           type: string
           format: date-time
           nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
     ScannerAction:
       type: object
       required:
@@ -2502,7 +2605,6 @@ components:
         itemId:
           type: string
           nullable: true
-          description: Resolved on server
         action:
           type: string
           enum:
@@ -2516,3 +2618,11 @@ components:
         toLocationId:
           type: string
           nullable: true
+        userId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time

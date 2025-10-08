@@ -25,16 +25,19 @@ import * as ObjSearch from "./objects/search";
 // Dev auth
 import * as DevLogin from "./auth/dev-login";
 // Actions (stubs you’ll add)
+//Purchase Orders
 import * as PoSubmit   from "./purchasing/po-submit";
 import * as PoApprove  from "./purchasing/po-approve";
 import * as PoReceive  from "./purchasing/po-receive";
 import * as PoCancel   from "./purchasing/po-cancel";
 import * as PoClose    from "./purchasing/po-close";
+//Sales Orders
 import * as SoSubmit   from "./sales/so-submit";
 import * as SoCommit   from "./sales/so-commit";
 import * as SoFulfill  from "./sales/so-fulfill";
 import * as SoCancel   from "./sales/so-cancel";
 import * as SoClose    from "./sales/so-close";
+import * as SoReserve  from "./sales/so-reserve";
 
 // Inventory on-hand (computed from movements)
 import * as InvOnHandGet from "./inventory/onhand-get";
@@ -215,12 +218,13 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
 
     // Sales SO actions
     {
-      const m = match(/^\/sales\/so\/([^/]+):(submit|commit|fulfill|cancel|close)$/i, path);
+      const m = match(/^\/sales\/so\/([^/]+):(submit|commit|reserve|fulfill|cancel|close)$/i, path);
       if (m) {
         const [id, action] = m;
         switch (action) {
           case "submit":  requirePerm(auth, "sales:write");    return SoSubmit.handle(withId(event, id));
           case "commit":  requirePerm(auth, "sales:commit");   return SoCommit.handle(withId(event, id));
+          case "reserve": requirePerm(auth, "sales:reserve");  return SoReserve.handle(withId(event, id));  
           case "fulfill": requirePerm(auth, "sales:fulfill");  return SoFulfill.handle(withId(event, id));
           case "cancel":  requirePerm(auth, "sales:cancel");   return SoCancel.handle(withId(event, id));
           case "close":   requirePerm(auth, "sales:close");    return SoClose.handle(withId(event, id));
@@ -228,6 +232,7 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
         return methodNotAllowed();
       }
     }
+
 
     // Inventory on-hand (computed)
     {

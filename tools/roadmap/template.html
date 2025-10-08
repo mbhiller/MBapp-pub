@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>{{TITLE}}</title>
+  <style>{{THEME_CSS}}</style>
+</head>
+<body data-orientation="{{ORIENTATION}}">
+  <!-- Conference deck watermark (diagonal) -->
+  <div class="watermark">
+    <img src="{{LOGO_DATAURL}}" alt="watermark" />
+  </div>
+
+  <!-- Title page -->
+  <section class="slide title-slide">
+    <div class="title-logo">
+      <img src="{{LOGO_DATAURL}}" alt="logo" />
+    </div>
+    <h1>{{TITLE}}</h1>
+    <h2>{{SUBTITLE}}</h2>
+  </section>
+
+  <!-- Content -->
+  <section class="slide content">
+    <article class="md">
+      {{BODY_HTML}}
+    </article>
+  </section>
+</body>
+</html>
