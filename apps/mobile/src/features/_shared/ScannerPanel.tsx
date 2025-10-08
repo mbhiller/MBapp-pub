@@ -1,4 +1,3 @@
-// apps/mobile/src/features/_shared/ScannerPanel.tsx
 import * as React from "react";
 import {
   View, Text, Pressable, TextInput, Vibration, type TextStyle,
@@ -12,7 +11,7 @@ import { resolveEpc } from "./epc";
 import { useScannerSession } from "./useScannerSession";
 
 type BuiltInAction = "receive" | "pick" | "count";
-type BuiltInMode = "add" | BuiltInAction;
+type BuiltInMode = "add" | BuiltInAction | "smartPick";
 type ExtraMode = { key: string; label: string; run: (epc: string) => Promise<void> };
 
 export function ScannerPanel({
@@ -24,7 +23,7 @@ export function ScannerPanel({
 }: {
   soId?: string;
   initialCollapsed?: boolean;
-  defaultMode?: BuiltInMode;                 // "add" | "receive" | "pick" | "count"
+  defaultMode?: BuiltInMode;                 // "add" | "receive" | "pick" | "count" | "smartPick"
   extraModes?: ExtraMode[];
   onLinesChanged?: (next: Array<{ id?: string; itemId: string; qty: number }>) => void;
 }) {
@@ -37,8 +36,8 @@ export function ScannerPanel({
 
   const [permission, requestPermission] = useCameraPermissions();
 
-  const isAction = mode === "receive" || mode === "pick" || mode === "count";
-  // start/stop session only when expanded and in action mode
+  const isAction =
+    mode === "receive" || mode === "pick" || mode === "count" || mode === "smartPick";
   const sessionId = useScannerSession(!collapsed && isAction);
 
   React.useEffect(() => {
@@ -49,6 +48,7 @@ export function ScannerPanel({
   const [busy, setBusy] = React.useState(false);
   const lastRef = React.useRef<{ data?: string; at?: number }>({});
 
+  // ---- helpers ----
   async function addLineFromEpc(epc: string) {
     if (!soId) { toast("Open or create an order first.", "error"); return; }
     const { itemId } = await resolveEpc(epc);
@@ -60,13 +60,55 @@ export function ScannerPanel({
     toast("Line added", "success");
   }
 
-  async function postAction(epc: string, kind: BuiltInAction) {
+  async function postAction(epc: string, kind: Exclude<BuiltInAction, never>) {
     if (!sessionId) throw new Error("Session not ready yet");
     const headers: Record<string, string> = {};
     if (kind === "receive") headers["Idempotency-Key"] = `scan-${epc}`;
     await apiClient.post("/scanner/actions", { sessionId, epc, action: kind }, headers);
     Vibration.vibrate(10);
     toast(kind === "receive" ? "Received" : kind === "pick" ? "Picked" : "Counted", "success");
+  }
+
+  async function smartPick(epc: string) {
+    if (!soId) throw new Error("No sales order context");
+    if (!sessionId) throw new Error("Session not ready yet");
+
+    // 1) resolve tag → itemId
+    const { itemId } = await resolveEpc(epc);
+
+    // 2) fetch SO + compute eligible line (remaining to ship/reserve)
+    const so = await apiClient.get<any>(`/objects/salesOrder/${encodeURIComponent(soId)}`);
+    const lines: any[] = Array.isArray(so?.lines) ? so.lines : [];
+    const reservedMap: Record<string, number> = { ...(so?.metadata?.reservedMap || {}) };
+
+    const findEligible = () => {
+      for (const l of lines) {
+        if (String(l.itemId) !== String(itemId)) continue;
+        const ordered = Number(l.qty ?? 0);
+        const fulfilled = Number(l.qtyFulfilled ?? 0);
+        const reserved = Math.max(0, Number(reservedMap[String(l.id)] ?? 0));
+        const remainingToShip = Math.max(0, ordered - fulfilled);
+        const remainingToReserve = Math.max(0, remainingToShip - reserved);
+        if (remainingToShip > 0 && remainingToReserve > 0) return l;
+      }
+      return null;
+    };
+
+    const target = findEligible();
+    if (!target) {
+      throw new Error("No matching line to reserve (already fulfilled or fully reserved).");
+    }
+
+    // 3) reserve exactly 1 on that line (idempotency scoped to so+line+epc)
+    const idem = `sprsv-${soId}-${target.id}-${epc}`;
+    await apiClient.post(
+      `/sales/so/${encodeURIComponent(soId)}:reserve`,
+      { lines: [{ lineId: target.id, deltaQty: 1 }] },
+      { "Idempotency-Key": idem }
+    );
+
+    // 4) post scanner pick (this will consume on-hand & reserved)
+    await postAction(epc, "pick");
   }
 
   const handleSubmit = React.useCallback(
@@ -80,6 +122,9 @@ export function ScannerPanel({
         } else if (mode === "receive" || mode === "pick" || mode === "count") {
           await resolveEpc(epc);
           await postAction(epc, mode);
+        } else if (mode === "smartPick") {
+          await smartPick(epc);
+          // success toast happens in postAction("pick")
         } else if (typeof mode === "object" && "extraKey" in mode) {
           const extra = extraModes.find(m => m.key === mode.extraKey);
           if (!extra) throw new Error("Unknown action");
@@ -89,7 +134,14 @@ export function ScannerPanel({
         }
         setCode("");
       } catch (e: any) {
-        toast(String(e?.message || "Operation failed"), "error");
+        // Normalize common guardrail messages a bit
+        const msg = String(e?.message || e);
+        toast(
+          /insufficient_onhand|INSUFFICIENT|reserve|fulfilled|reserved/i.test(msg)
+            ? msg
+            : "Operation failed",
+          "error"
+        );
       } finally {
         setBusy(false);
       }
@@ -117,13 +169,16 @@ export function ScannerPanel({
       ? "Receive"
       : mode === "pick"
       ? "Pick"
-      : "Count";
+      : mode === "count"
+      ? "Count"
+      : "Smart Pick";
 
   const disabled =
     (mode === "add" && !soId) ||
-    ((mode === "receive" || mode === "pick" || mode === "count") && !sessionId) ||
+    ((mode === "receive" || mode === "pick" || mode === "count" || mode === "smartPick") && !sessionId) ||
     busy;
 
+  // ---------- UI ----------
   return (
     <View style={{
       backgroundColor: t.colors.card,
@@ -154,14 +209,17 @@ export function ScannerPanel({
         </View>
       ) : (
         <>
-          {/* Expanded: action pills + right chevron to collapse */}
+          {/* Expanded: action pills (+ Smart Pick if soId present) + right chevron to collapse */}
           <View style={{ padding: 12, borderBottomWidth: 1, borderBottomColor: t.colors.border }}>
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
               <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap", alignItems: "center", flex: 1 }}>
-                <Pill label="Add Line" active={mode === "add"} onPress={() => setMode("add")} t={t} />
-                <Pill label="Receive" active={mode === "receive"} onPress={() => setMode("receive")} t={t} />
-                <Pill label="Pick"    active={mode === "pick"}    onPress={() => setMode("pick")}    t={t} />
-                <Pill label="Count"   active={mode === "count"}   onPress={() => setMode("count")}   t={t} />
+                <Pill label="Add Line"   active={mode === "add"}        onPress={() => setMode("add")}        t={t} />
+                <Pill label="Receive"    active={mode === "receive"}    onPress={() => setMode("receive")}    t={t} />
+                <Pill label="Pick"       active={mode === "pick"}       onPress={() => setMode("pick")}       t={t} />
+                <Pill label="Count"      active={mode === "count"}      onPress={() => setMode("count")}      t={t} />
+                {soId ? (
+                  <Pill label="Smart Pick" active={mode === "smartPick"} onPress={() => setMode("smartPick")} t={t} />
+                ) : null}
                 {extraModes.map((em) => (
                   <Pill
                     key={em.key}
