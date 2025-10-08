@@ -7,7 +7,7 @@ import { ThemeProvider } from "./providers/ThemeProvider";
 import { RolesProvider } from "./providers/RolesProvider";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { DevAuthBootstrap } from "./providers/DevAuthBootstrap";
-
+import { ToastProvider } from "./features/_shared/Toast";
 
 // ✅ use the shared client
 import { queryClient } from "./features/_shared/queryClient";
@@ -23,16 +23,18 @@ export default function App() {
   const initialRoles = React.useMemo(parseEnvRoles, []);
 
   return (
-    <ThemeProvider>
-      <RolesProvider initialRoles={initialRoles}>
-        <QueryClientProvider client={queryClient}>
-          <DevAuthBootstrap>
-            <NavigationContainer>
-              <RootStack />
-            </NavigationContainer>
-          </DevAuthBootstrap>
-        </QueryClientProvider>
-      </RolesProvider>
-    </ThemeProvider>
+    <ToastProvider>
+      <ThemeProvider>
+        <RolesProvider initialRoles={initialRoles}>
+          <QueryClientProvider client={queryClient}>
+            <DevAuthBootstrap>
+              <NavigationContainer>
+                <RootStack />
+              </NavigationContainer>
+            </DevAuthBootstrap>
+          </QueryClientProvider>
+        </RolesProvider>
+      </ThemeProvider>
+    </ToastProvider>
   );
 }

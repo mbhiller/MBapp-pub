@@ -1,6 +1,7 @@
+// apps/mobile/src/features/_shared/ScannerPanel.tsx
 import * as React from "react";
 import {
-  View, Text, Pressable, TextInput, Alert, Vibration, type TextStyle,
+  View, Text, Pressable, TextInput, Vibration, type TextStyle,
 } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -35,6 +36,16 @@ export function ScannerPanel({
   const [sessionId, setSessionId] = React.useState<string | null>(null);
   const isAction = mode === "receive" || mode === "pick" || mode === "count";
 
+  // Inline toast state
+  const [toast, setToast] = React.useState<{ msg: string; kind: "success" | "error" } | null>(null);
+  const toastTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pushToast = React.useCallback((msg: string, kind: "success" | "error" = "success", dur = 1800) => {
+    if (toastTimer.current) { clearTimeout(toastTimer.current); toastTimer.current = null; }
+    setToast({ msg, kind });
+    toastTimer.current = setTimeout(() => { setToast(null); toastTimer.current = null; }, dur);
+  }, []);
+  React.useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
+
   React.useEffect(() => {
     let cancelled = false;
     if (collapsed || !isAction) return;
@@ -43,7 +54,7 @@ export function ScannerPanel({
         const res = await apiClient.post<{ id: string }>("/scanner/sessions", { op: "start" });
         if (!cancelled) setSessionId(res.id);
       } catch (e: any) {
-        if (!cancelled) Alert.alert("Scanner", e?.message ?? "Failed to start session");
+        if (!cancelled) pushToast(String(e?.message ?? "Failed to start session"), "error");
       }
     })();
     return () => {
@@ -70,13 +81,14 @@ export function ScannerPanel({
   }
 
   async function addLineFromEpc(epc: string) {
-    if (!soId) return Alert.alert("Sales Order", "Create/Load the order first.");
+    if (!soId) { pushToast("Open or create an order first.", "error"); return; }
     const { itemId } = await resolveEpc(epc);
     const so = await apiClient.get<any>(`/objects/salesOrder/${encodeURIComponent(soId)}`);
     const next = Array.isArray(so?.lines) ? [...so.lines, { itemId, qty: 1 }] : [{ itemId, qty: 1 }];
     const updated = await apiClient.put<any>(`/objects/salesOrder/${encodeURIComponent(soId)}`, { lines: next });
     onLinesChanged?.(Array.isArray(updated?.lines) ? updated.lines : next);
     Vibration.vibrate(10);
+    pushToast("Line added", "success");
   }
 
   async function postAction(epc: string, kind: BuiltInAction) {
@@ -85,6 +97,7 @@ export function ScannerPanel({
     if (kind === "receive") headers["Idempotency-Key"] = `scan-${epc}`;
     await apiClient.post("/scanner/actions", { sessionId, epc, action: kind }, headers);
     Vibration.vibrate(10);
+    pushToast(kind === "receive" ? "Received" : kind === "pick" ? "Picked" : "Counted", "success");
   }
 
   const handleSubmit = React.useCallback(
@@ -103,15 +116,16 @@ export function ScannerPanel({
           if (!extra) throw new Error("Unknown action");
           await extra.run(epc);
           Vibration.vibrate(10);
+          pushToast("Action completed", "success");
         }
         setCode("");
       } catch (e: any) {
-        Alert.alert("Scan", e?.message ?? "Operation failed");
+        pushToast(String(e?.message || "Operation failed"), "error");
       } finally {
         setBusy(false);
       }
     },
-    [mode, code, soId, sessionId, extraModes]
+    [mode, code, soId, sessionId, extraModes, pushToast]
   );
 
   const onBarcodeScanned = React.useCallback(
@@ -151,7 +165,7 @@ export function ScannerPanel({
       overflow: "hidden",
     }}>
       {collapsed ? (
-        // COLLAPSED: left barcode icon, right chevron. Tap chevron to expand.
+        // COLLAPSED: barcode icon (left) + chevron (right)
         <View
           style={{
             height: 44,
@@ -172,7 +186,7 @@ export function ScannerPanel({
         </View>
       ) : (
         <>
-          {/* Expanded header: pills + right-side chevron-up (collapse) */}
+          {/* Expanded: action pills + right chevron to collapse */}
           <View style={{ padding: 12, borderBottomWidth: 1, borderBottomColor: t.colors.border }}>
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
               <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap", alignItems: "center", flex: 1 }}>
@@ -190,8 +204,6 @@ export function ScannerPanel({
                   />
                 ))}
               </View>
-
-              {/* right-side chevron to collapse */}
               <Pressable
                 onPress={() => setCollapsed(true)}
                 hitSlop={10}
@@ -257,7 +269,7 @@ export function ScannerPanel({
             />
           </View>
 
-          {/* Camera view (toggles on demand; hidden by default) */}
+          {/* Camera view (hidden by default; toggled by adornment) */}
           {showCamera ? (
             permission?.granted ? (
               <View style={{ height: 240, borderTopWidth: 1, borderTopColor: t.colors.border }}>
@@ -293,11 +305,14 @@ export function ScannerPanel({
           ) : null}
         </>
       )}
+
+      {/* Inline toast renderer */}
+      {toast ? <InlineToast t={t} toast={toast} /> : null}
     </View>
   );
 }
 
-/* --- small UI helpers --- */
+/* --- helpers --- */
 function Pill({ label, active, onPress, t }:{
   label: string; active: boolean; onPress: () => void; t: ReturnType<typeof useColors>;
 }) {
@@ -335,5 +350,28 @@ function PrimaryButton({ title, onPress, disabled, t }:{
     >
       <Text style={style}>{title}</Text>
     </Pressable>
+  );
+}
+
+function InlineToast({ t, toast }:{ t: ReturnType<typeof useColors>, toast:{ msg:string; kind:"success"|"error" } }) {
+  const bg = toast.kind === "success" ? (t.colors.success ?? "#0a7") : (t.colors.danger ?? "#c33");
+  const fg = t.colors.buttonText || "#fff";
+  return (
+    <View style={{
+      position: "absolute",
+      bottom: 12,
+      left: 12,
+      right: 12,
+      borderRadius: 10,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      backgroundColor: bg,
+      shadowColor: "#000",
+      shadowOpacity: 0.2,
+      shadowRadius: 6,
+      elevation: 5,
+    }}>
+      <Text style={{ color: fg, fontWeight: "700" }}>{toast.msg}</Text>
+    </View>
   );
 }
