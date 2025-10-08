@@ -211,7 +211,10 @@ if (cmd === "smoke:scanner:guardrails") {
   console.log(JSON.stringify(out, null, 2));
   process.exit(out.result === "EXPECTED_409" ? 0 : 1);
 }
-
+if (cmd === "smoke:scanner:smartpick") {
+  const mod = await import("./smoke/modules/scanner.smartpick.mjs");
+  await mod.run(process.argv.slice(3));
+}
 
   // Seed ALL
 if (cmd === "smoke:seed:all") {

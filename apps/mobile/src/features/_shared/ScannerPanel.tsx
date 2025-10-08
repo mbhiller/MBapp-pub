@@ -1,4 +1,4 @@
-// apps/mobile/src/features/_shared/ScannerPanel.tsx
+//apps/mobile/src/features/_shared/ScannerPanel.tsx
 import * as React from "react";
 import {
   View, Text, Pressable, TextInput, Vibration, type TextStyle,
@@ -7,9 +7,12 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import { apiClient } from "../../api/client";
 import { useColors } from "./useColors";
+import { useToast } from "./Toast";
+import { resolveEpc } from "./epc";
+import { useScannerSession } from "./useScannerSession";
 
 type BuiltInAction = "receive" | "pick" | "count";
-type BuiltInMode = "add" | BuiltInAction;
+type BuiltInMode = "add" | BuiltInAction | "smartPick";
 type ExtraMode = { key: string; label: string; run: (epc: string) => Promise<void> };
 
 export function ScannerPanel({
@@ -21,11 +24,12 @@ export function ScannerPanel({
 }: {
   soId?: string;
   initialCollapsed?: boolean;
-  defaultMode?: BuiltInMode;                 // "add" | "receive" | "pick" | "count"
+  defaultMode?: BuiltInMode;                 // "add" | "receive" | "pick" | "count" | "smartPick"
   extraModes?: ExtraMode[];
   onLinesChanged?: (next: Array<{ id?: string; itemId: string; qty: number }>) => void;
 }) {
   const t = useColors();
+  const toast = useToast();
 
   const [collapsed, setCollapsed] = React.useState<boolean>(initialCollapsed);
   const [showCamera, setShowCamera] = React.useState<boolean>(false);
@@ -33,36 +37,9 @@ export function ScannerPanel({
 
   const [permission, requestPermission] = useCameraPermissions();
 
-  const [sessionId, setSessionId] = React.useState<string | null>(null);
-  const isAction = mode === "receive" || mode === "pick" || mode === "count";
-
-  // Inline toast state
-  const [toast, setToast] = React.useState<{ msg: string; kind: "success" | "error" } | null>(null);
-  const toastTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pushToast = React.useCallback((msg: string, kind: "success" | "error" = "success", dur = 1800) => {
-    if (toastTimer.current) { clearTimeout(toastTimer.current); toastTimer.current = null; }
-    setToast({ msg, kind });
-    toastTimer.current = setTimeout(() => { setToast(null); toastTimer.current = null; }, dur);
-  }, []);
-  React.useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    if (collapsed || !isAction) return;
-    (async () => {
-      try {
-        const res = await apiClient.post<{ id: string }>("/scanner/sessions", { op: "start" });
-        if (!cancelled) setSessionId(res.id);
-      } catch (e: any) {
-        if (!cancelled) pushToast(String(e?.message ?? "Failed to start session"), "error");
-      }
-    })();
-    return () => {
-      cancelled = true;
-      if (sessionId) apiClient.post("/scanner/sessions", { op: "stop", sessionId }).catch(() => {});
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [collapsed, isAction]);
+  const isAction =
+    mode === "receive" || mode === "pick" || mode === "count" || mode === "smartPick";
+  const sessionId = useScannerSession(!collapsed && isAction);
 
   React.useEffect(() => {
     if (showCamera && !permission?.granted) requestPermission().catch(() => {});
@@ -72,32 +49,67 @@ export function ScannerPanel({
   const [busy, setBusy] = React.useState(false);
   const lastRef = React.useRef<{ data?: string; at?: number }>({});
 
-  async function resolveEpc(epc: string) {
-    const res = await apiClient.get<{ itemId: string; status?: string }>(
-      `/epc/resolve?epc=${encodeURIComponent(epc)}`
-    );
-    if (!res?.itemId) throw new Error("EPC not found");
-    return res;
-  }
-
+  // ---- helpers ----
   async function addLineFromEpc(epc: string) {
-    if (!soId) { pushToast("Open or create an order first.", "error"); return; }
+    if (!soId) { toast("Open or create an order first.", "error"); return; }
     const { itemId } = await resolveEpc(epc);
     const so = await apiClient.get<any>(`/objects/salesOrder/${encodeURIComponent(soId)}`);
     const next = Array.isArray(so?.lines) ? [...so.lines, { itemId, qty: 1 }] : [{ itemId, qty: 1 }];
     const updated = await apiClient.put<any>(`/objects/salesOrder/${encodeURIComponent(soId)}`, { lines: next });
     onLinesChanged?.(Array.isArray(updated?.lines) ? updated.lines : next);
     Vibration.vibrate(10);
-    pushToast("Line added", "success");
+    toast("Line added", "success");
   }
 
-  async function postAction(epc: string, kind: BuiltInAction) {
+  async function postAction(epc: string, kind: Exclude<BuiltInAction, never>) {
     if (!sessionId) throw new Error("Session not ready yet");
     const headers: Record<string, string> = {};
     if (kind === "receive") headers["Idempotency-Key"] = `scan-${epc}`;
     await apiClient.post("/scanner/actions", { sessionId, epc, action: kind }, headers);
     Vibration.vibrate(10);
-    pushToast(kind === "receive" ? "Received" : kind === "pick" ? "Picked" : "Counted", "success");
+    toast(kind === "receive" ? "Received" : kind === "pick" ? "Picked" : "Counted", "success");
+  }
+
+  async function smartPick(epc: string) {
+    if (!soId) throw new Error("No sales order context");
+    if (!sessionId) throw new Error("Session not ready yet");
+
+    // 1) resolve tag → itemId
+    const { itemId } = await resolveEpc(epc);
+
+    // 2) fetch SO + compute eligible line (remaining to ship/reserve)
+    const so = await apiClient.get<any>(`/objects/salesOrder/${encodeURIComponent(soId)}`);
+    const lines: any[] = Array.isArray(so?.lines) ? so.lines : [];
+    const reservedMap: Record<string, number> = { ...(so?.metadata?.reservedMap || {}) };
+
+    const findEligible = () => {
+      for (const l of lines) {
+        if (String(l.itemId) !== String(itemId)) continue;
+        const ordered = Number(l.qty ?? 0);
+        const fulfilled = Number(l.qtyFulfilled ?? 0);
+        const reserved = Math.max(0, Number(reservedMap[String(l.id)] ?? 0));
+        const remainingToShip = Math.max(0, ordered - fulfilled);
+        const remainingToReserve = Math.max(0, remainingToShip - reserved);
+        if (remainingToShip > 0 && remainingToReserve > 0) return l;
+      }
+      return null;
+    };
+
+    const target = findEligible();
+    if (!target) {
+      throw new Error("No matching line to reserve (already fulfilled or fully reserved).");
+    }
+
+    // 3) reserve exactly 1 on that line (idempotency scoped to so+line+epc)
+    const idem = `sprsv-${soId}-${target.id}-${epc}`;
+    await apiClient.post(
+      `/sales/so/${encodeURIComponent(soId)}:reserve`,
+      { lines: [{ lineId: target.id, deltaQty: 1 }] },
+      { "Idempotency-Key": idem }
+    );
+
+    // 4) post scanner pick (this will consume on-hand & reserved)
+    await postAction(epc, "pick");
   }
 
   const handleSubmit = React.useCallback(
@@ -111,21 +123,31 @@ export function ScannerPanel({
         } else if (mode === "receive" || mode === "pick" || mode === "count") {
           await resolveEpc(epc);
           await postAction(epc, mode);
+        } else if (mode === "smartPick") {
+          await smartPick(epc);
+          // success toast happens in postAction("pick")
         } else if (typeof mode === "object" && "extraKey" in mode) {
           const extra = extraModes.find(m => m.key === mode.extraKey);
           if (!extra) throw new Error("Unknown action");
           await extra.run(epc);
           Vibration.vibrate(10);
-          pushToast("Action completed", "success");
+          toast("Action completed", "success");
         }
         setCode("");
       } catch (e: any) {
-        pushToast(String(e?.message || "Operation failed"), "error");
+        // Normalize common guardrail messages a bit
+        const msg = String(e?.message || e);
+        toast(
+          /insufficient_onhand|INSUFFICIENT|reserve|fulfilled|reserved/i.test(msg)
+            ? msg
+            : "Operation failed",
+          "error"
+        );
       } finally {
         setBusy(false);
       }
     },
-    [mode, code, soId, sessionId, extraModes, pushToast]
+    [mode, code, soId, sessionId, extraModes, toast]
   );
 
   const onBarcodeScanned = React.useCallback(
@@ -148,11 +170,13 @@ export function ScannerPanel({
       ? "Receive"
       : mode === "pick"
       ? "Pick"
-      : "Count";
+      : mode === "count"
+      ? "Count"
+      : "Smart Pick";
 
   const disabled =
     (mode === "add" && !soId) ||
-    ((mode === "receive" || mode === "pick" || mode === "count") && !sessionId) ||
+    ((mode === "receive" || mode === "pick" || mode === "count" || mode === "smartPick") && !sessionId) ||
     busy;
 
   // ---------- UI ----------
@@ -186,14 +210,17 @@ export function ScannerPanel({
         </View>
       ) : (
         <>
-          {/* Expanded: action pills + right chevron to collapse */}
+          {/* Expanded: action pills (+ Smart Pick if soId present) + right chevron to collapse */}
           <View style={{ padding: 12, borderBottomWidth: 1, borderBottomColor: t.colors.border }}>
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
               <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap", alignItems: "center", flex: 1 }}>
-                <Pill label="Add Line" active={mode === "add"} onPress={() => setMode("add")} t={t} />
-                <Pill label="Receive" active={mode === "receive"} onPress={() => setMode("receive")} t={t} />
-                <Pill label="Pick"    active={mode === "pick"}    onPress={() => setMode("pick")}    t={t} />
-                <Pill label="Count"   active={mode === "count"}   onPress={() => setMode("count")}   t={t} />
+                <Pill label="Add Line"   active={mode === "add"}        onPress={() => setMode("add")}        t={t} />
+                <Pill label="Receive"    active={mode === "receive"}    onPress={() => setMode("receive")}    t={t} />
+                <Pill label="Pick"       active={mode === "pick"}       onPress={() => setMode("pick")}       t={t} />
+                <Pill label="Count"      active={mode === "count"}      onPress={() => setMode("count")}      t={t} />
+                {soId ? (
+                  <Pill label="Smart Pick" active={mode === "smartPick"} onPress={() => setMode("smartPick")} t={t} />
+                ) : null}
                 {extraModes.map((em) => (
                   <Pill
                     key={em.key}
@@ -204,6 +231,7 @@ export function ScannerPanel({
                   />
                 ))}
               </View>
+
               <Pressable
                 onPress={() => setCollapsed(true)}
                 hitSlop={10}
@@ -305,14 +333,11 @@ export function ScannerPanel({
           ) : null}
         </>
       )}
-
-      {/* Inline toast renderer */}
-      {toast ? <InlineToast t={t} toast={toast} /> : null}
     </View>
   );
 }
 
-/* --- helpers --- */
+/* --- small UI helpers --- */
 function Pill({ label, active, onPress, t }:{
   label: string; active: boolean; onPress: () => void; t: ReturnType<typeof useColors>;
 }) {
@@ -350,28 +375,5 @@ function PrimaryButton({ title, onPress, disabled, t }:{
     >
       <Text style={style}>{title}</Text>
     </Pressable>
-  );
-}
-
-function InlineToast({ t, toast }:{ t: ReturnType<typeof useColors>, toast:{ msg:string; kind:"success"|"error" } }) {
-  const bg = toast.kind === "success" ? (t.colors.success ?? "#0a7") : (t.colors.danger ?? "#c33");
-  const fg = t.colors.buttonText || "#fff";
-  return (
-    <View style={{
-      position: "absolute",
-      bottom: 12,
-      left: 12,
-      right: 12,
-      borderRadius: 10,
-      paddingVertical: 10,
-      paddingHorizontal: 12,
-      backgroundColor: bg,
-      shadowColor: "#000",
-      shadowOpacity: 0.2,
-      shadowRadius: 6,
-      elevation: 5,
-    }}>
-      <Text style={{ color: fg, fontWeight: "700" }}>{toast.msg}</Text>
-    </View>
   );
 }
