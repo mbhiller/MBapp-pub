@@ -110,7 +110,11 @@ export default function RootStack() {
 
       <Stack.Screen name="Hub" component={ModuleHubScreen} options={{ title: "Hub" }} />
       <Stack.Screen name="DevDiagnostics" component={DevDiagnosticsScreen} options={{ title: "Dev Diagnostics" }} />
-      <Stack.Screen name="Scan" component={ScanScreen} options={{ title: "Scan" }} />
+      <Stack.Screen
+        name="Scan"
+        component={ScanScreen}
+        options={{ title: "Scan", headerShown: true }}
+      />
       {/* Products */}
       <Stack.Screen name="ProductsList" component={ProductsListScreen} options={{ title: "Products" }} />
       <Stack.Screen name="ProductDetail" component={ProductDetailScreen} options={{ title: "Product" }} />

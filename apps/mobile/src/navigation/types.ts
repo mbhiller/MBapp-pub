@@ -17,7 +17,7 @@ export type ScanParams = {
 export type RootStackParamList = {
   // Hub / global
   Hub: undefined;
-  Scan: undefined;
+  Scan: { soId?: string; lineId?: string; action?: "pick" | "receive" | "count" | "move" } | undefined;
   Tenants: undefined;
   DevDiagnostics: undefined;
 

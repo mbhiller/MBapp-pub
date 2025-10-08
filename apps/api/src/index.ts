@@ -1,6 +1,6 @@
 // apps/src/api/index.ts
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
-import { getAuth, requirePerm, policyFromAuth } from "../../api/src/auth/middleware";
+import { getAuth, requirePerm, policyFromAuth } from "./auth/middleware";
 
 /* Routes */
 // Views

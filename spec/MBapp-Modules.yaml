@@ -124,24 +124,28 @@ components:
       properties:
         id:
           type: string
+          readOnly: true
         tenantId:
           type: string
+          readOnly: true
         type:
           type: string
         createdAt:
           type: string
           format: date-time
+          readOnly: true
         updatedAt:
           type: string
           format: date-time
+          readOnly: true
         metadata:
           type: object
           additionalProperties: true
       required:
-      - id
-      - tenantId
-      - createdAt
-      - updatedAt
+        - id
+        - tenantId
+        - createdAt
+        - updatedAt
     AnyObject:
       type: object
       additionalProperties: true
@@ -861,36 +865,98 @@ components:
         status: { type: string, enum: ["active", "retired"], default: "active" }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    EpcBinding:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          properties:
+            type:
+              type: string
+              enum: [ epcBinding ]
+            epc:
+              type: string
+            itemId:
+              type: string
+            locationId:
+              type: string
+            lot:
+              type: string
+              nullable: true
+            state:
+              type: string
+              enum: [ active, retired ]
+              default: active
+          required:
+            - type
+            - epc
+            - itemId
     ScannerSession:
-      type: object
-      required: [id, type, userId, startedAt]
-      properties:
-        id: { type: string }
-        type: { type: string, enum: ["scannerSession"], default: "scannerSession" }
-        userId: { type: string }
-        workspaceId: { type: string, nullable: true }
-        startedAt: { type: string, format: date-time }
-        endedAt: { type: string, format: date-time, nullable: true }
-        createdAt: { type: string, format: date-time }
-        updatedAt: { type: string, format: date-time }
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          properties:
+            type:
+              type: string
+              enum: [ scannerSession ]   # keeps your “type” consistent
+            userId:
+              type: string
+            workspaceId:
+              type: string
+            status:
+              type: string
+              enum: [ active, stopped ]
+            startedAt:
+              type: string
+              format: date-time
+            stoppedAt:
+              type: string
+              format: date-time
+              nullable: true
+          required:
+            - type
+            - userId
+            - status
+            - startedAt
     ScannerAction:
-      type: object
-      required: [id, type, sessionId, ts, epc, action]
-      properties:
-        id: { type: string }
-        type: { type: string, enum: ["scannerAction"], default: "scannerAction" }
-        sessionId: { type: string }
-        ts: { type: string, format: date-time }
-        epc: { type: string }
-        itemId: { type: string, nullable: true }
-        action:
-          type: string
-          enum: [receive, move, pick, count]
-        fromLocationId: { type: string, nullable: true }
-        toLocationId: { type: string, nullable: true }
-        userId: { type: string }
-        createdAt: { type: string, format: date-time }
-        updatedAt: { type: string, format: date-time }
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          properties:
+            type:
+              type: string
+              enum: [ scannerAction ]
+            action:
+              type: string
+              enum: [ pick, receive, count, move ]
+            epc:
+              type: string
+              description: EPC as scanned
+            itemId:
+              type: string
+            ts:
+              type: string
+              format: date-time
+            sessionId:
+              type: string
+            soId:
+              type: string
+            lineId:
+              type: string
+            fromLocationId:
+              type: string
+            toLocationId:
+              type: string
+            qty:
+              type: number
+              default: 1
+            notes:
+              type: string
+          required:
+            - type
+            - action
+            - epc
+            - itemId
+            - ts
 security:
 - bearerAuth: []
 paths:
@@ -1716,6 +1782,28 @@ paths:
           schema: { type: string }
         - $ref: '#/components/parameters/IdempotencyKey'
       responses: { "200": { description: "OK", content: { application/json: { schema: { $ref: "#/components/schemas/SalesOrder" } } } } }
+  /sales/so/{id}:release:
+    post:
+      summary: Release previously reserved quantity
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ lineId, deltaQty ]
+              properties:
+                lineId:   { type: string }
+                deltaQty: { type: number, minimum: 0 }
+                reason:   { type: string }
+      responses:
+        "200": { description: OK }
+        "409": { description: Guardrail violation }
   /sales-orders/{id}/fulfill-line:
     post:
       tags: [Sales]
@@ -1858,19 +1946,32 @@ paths:
               schema: { $ref: "#/components/schemas/ScannerSession" }
   /scanner/actions:
     post:
-      summary: Record a scanner action and update counters
+      summary: Record a scanner action (pick/receive/count/move)
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/ScannerAction" }
+            schema:
+              type: object
+              required: [ action, epc ]
+              properties:
+                action:
+                  type: string
+                  enum: [ pick, receive, count, move ]
+                epc: { type: string }
+                qty: { type: number, default: 1 }
+                soId: { type: string }
+                lineId: { type: string }
+                fromLocationId: { type: string }
+                toLocationId: { type: string }
       responses:
         "200":
-          description: OK
+          description: Recorded
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ScannerAction" }
-        "409": { description: Guardrail violation (e.g. pick without reservation) }
+              schema:
+                $ref: '#/components/schemas/ScannerAction'
+        "409": { description: Guardrail violation }
   /scanner/simulate:
     post:
       summary: Dev only - generate EPCs bound to itemIds
