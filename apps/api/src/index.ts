@@ -24,20 +24,21 @@ import * as ObjDelete from "./objects/delete";
 import * as ObjSearch from "./objects/search";
 // Dev auth
 import * as DevLogin from "./auth/dev-login";
-// Actions (stubs you’ll add)
-//Purchase Orders
+// Actions
+// Purchase Orders
 import * as PoSubmit   from "./purchasing/po-submit";
 import * as PoApprove  from "./purchasing/po-approve";
 import * as PoReceive  from "./purchasing/po-receive";
 import * as PoCancel   from "./purchasing/po-cancel";
 import * as PoClose    from "./purchasing/po-close";
-//Sales Orders
+// Sales Orders
 import * as SoSubmit   from "./sales/so-submit";
 import * as SoCommit   from "./sales/so-commit";
 import * as SoFulfill  from "./sales/so-fulfill";
 import * as SoCancel   from "./sales/so-cancel";
 import * as SoClose    from "./sales/so-close";
 import * as SoReserve  from "./sales/so-reserve";
+import * as SoRelease  from "./sales/so-release"; // <-- added
 
 // Inventory on-hand (computed from movements)
 import * as InvOnHandGet from "./inventory/onhand-get";
@@ -48,7 +49,6 @@ import * as InvSearch from "./inventory/search";
 
 // Inventory computed endpoints
 import * as InvMovements from "./inventory/movements";
-
 
 // Registrations & Reservations actions
 import * as RegCancel  from "./events/registration-cancel";
@@ -63,7 +63,7 @@ import * as GcDelete from "./tools/gc-delete-type";
 import * as GcListAll   from "./tools/gc-list-all";
 import * as GcDeleteKeys from "./tools/gc-delete-keys";
 
-//EPC & SCANNERS
+// EPC & SCANNERS
 import * as EpcResolve from "./epc/resolve";
 import * as ScannerSessions from "./scanner/sessions";
 import * as ScannerActions from "./scanner/actions";
@@ -83,12 +83,12 @@ const json = (statusCode: number, body: unknown): APIGatewayProxyResultV2 => ({
 const notFound = () => json(404, { message: "Not Found" });
 const methodNotAllowed = () => json(405, { message: "Method Not Allowed" });
 const match = (re: RegExp, s: string) => s.match(re)?.slice(1) ?? null;
- 
+
 /** Ensure action handlers see { pathParameters: { id } } */
 function withId(event: APIGatewayProxyEventV2, id: string): APIGatewayProxyEventV2 {
-    const e: any = { ...event };
-    e.pathParameters = { ...(event.pathParameters || {}), id };
-    return e;
+  const e: any = { ...event };
+  e.pathParameters = { ...(event.pathParameters || {}), id };
+  return e;
 }
 
 /** Preflight CORS */
@@ -218,13 +218,14 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
 
     // Sales SO actions
     {
-      const m = match(/^\/sales\/so\/([^/]+):(submit|commit|reserve|fulfill|cancel|close)$/i, path);
+      const m = match(/^\/sales\/so\/([^/]+):(submit|commit|reserve|release|fulfill|cancel|close)$/i, path);
       if (m) {
         const [id, action] = m;
         switch (action) {
           case "submit":  requirePerm(auth, "sales:write");    return SoSubmit.handle(withId(event, id));
           case "commit":  requirePerm(auth, "sales:commit");   return SoCommit.handle(withId(event, id));
-          case "reserve": requirePerm(auth, "sales:reserve");  return SoReserve.handle(withId(event, id));  
+          case "reserve": requirePerm(auth, "sales:reserve");  return SoReserve.handle(withId(event, id));
+          case "release": requirePerm(auth, "sales:reserve");  return SoRelease.handle(withId(event, id)); // same perm bucket as reserve
           case "fulfill": requirePerm(auth, "sales:fulfill");  return SoFulfill.handle(withId(event, id));
           case "cancel":  requirePerm(auth, "sales:cancel");   return SoCancel.handle(withId(event, id));
           case "close":   requirePerm(auth, "sales:close");    return SoClose.handle(withId(event, id));
@@ -232,7 +233,6 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
         return methodNotAllowed();
       }
     }
-
 
     // Inventory on-hand (computed)
     {
@@ -292,7 +292,6 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
       }
     }
 
-
     // --- EPC: resolve a tag to an item ---
     if (method === "GET" && path === "/epc/resolve") {
       requirePerm(auth, "inventory:read");
@@ -318,7 +317,6 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
       requirePerm(auth, "admin:seed");
       return ScannerSim.handle(event);
     }
-
 
     // Tools: GC
     const gcList = match(/^\/tools\/gc\/([^/]+)$/i, path);
@@ -362,8 +360,6 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
       if (method === "DELETE") { requirePerm(auth, permForObject("DELETE", type)); return ObjDelete.handle(withTypeId(event, { type, id })); }
       return methodNotAllowed();
     }
-
-
 
     return notFound();
   } catch (e: any) {

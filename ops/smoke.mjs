@@ -16,6 +16,9 @@ import * as Guardrails from "./smoke/flows/guardrails.mjs";
 import * as LinksReport from "./smoke/reports/product-links.mjs";
 import * as ScannerPick from "./smoke/flows/scanner-pick.mjs";
 import * as ScannerGuards from "./smoke/flows/scanner-guardrails.mjs";
+import * as SOBackorder from "./smoke/flows/salesOrder-backorder.mjs";
+import * as SORelease   from "./smoke/flows/salesOrder-release.mjs";
+
 
 
 function argsToObj(argv) {
@@ -184,7 +187,7 @@ if (cmd === "smoke:salesOrder:reserve") {
     strict: Boolean(Number(arg.strict || 0)),   // ← pass strict flag
   });
   console.log(JSON.stringify(out, null, 2));
-  return;
+  process.exit(out.result === "PASS" ? 0 : 1);
 }
 
 // SALES ORDER FULFILL ################################################################
@@ -197,7 +200,7 @@ if (cmd === "smoke:salesOrder:fulfill") {
     strict: Boolean(Number(arg.strict || 0)),
   });
   console.log(JSON.stringify(out, null, 2));
-  return;
+  process.exit(out.result === "PASS" ? 0 : 1);
 }
 
 // SCANNER SMOKES ####################################################################
@@ -215,7 +218,17 @@ if (cmd === "smoke:scanner:smartpick") {
   const mod = await import("./smoke/modules/scanner.smartpick.mjs");
   await mod.run(process.argv.slice(3));
 }
-
+// BACKORDER   ########################################################################
+if (cmd === "smoke:salesOrder:backorder") {
+  requireEnv(); const out = await SOBackorder.run(arg);
+  console.log(JSON.stringify(out, null, 2));
+  process.exit(out.result === "PASS" ? 0 : 1);
+}
+if (cmd === "smoke:salesOrder:release") {
+  requireEnv(); const out = await SORelease.run(arg);
+  console.log(JSON.stringify(out, null, 2));
+  process.exit(out.result === "PASS" ? 0 : 1);
+}
   // Seed ALL
 if (cmd === "smoke:seed:all") {
   requireEnv();
