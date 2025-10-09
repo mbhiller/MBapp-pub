@@ -146,6 +146,22 @@ components:
         - tenantId
         - createdAt
         - updatedAt
+    Error:
+      type: object
+      additionalProperties: false
+      properties:
+        message:
+          type: string
+          description: Human-readable summary
+        code:
+          type: string
+          description: Stable error code (e.g., insufficient_available_to_commit)
+        details:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+      required: [message]
     AnyObject:
       type: object
       additionalProperties: true
@@ -1727,13 +1743,62 @@ paths:
   /sales/so/{id}:commit:
     post:
       summary: Commit/allocate inventory for a sales order
+      description: |
+        Default is **non-strict** (will commit and return `200` even if short on stock; response may include `shortages[]`).
+        Pass `strict=1` (query) or `{ "strict": true }` (body) to require full availability (returns `409` with `shortages[]`).
       parameters:
         - in: path
           name: id
           required: true
           schema: { type: string }
+        - in: query
+          name: strict
+          required: false
+          schema: { type: integer, enum: [0,1] }
+          description: When 1, require full availability; otherwise partial commits are allowed.
         - $ref: '#/components/parameters/IdempotencyKey'
-      responses: { "200": { description: "OK", content: { application/json: { schema: { $ref: "#/components/schemas/SalesOrder" } } } } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                strict: { type: boolean, description: 'Same as ?strict=1' }
+      responses:
+        '200':
+          description: OK (may include `shortages[]` when non-strict)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SalesOrder'
+                  - type: object
+                    properties:
+                      shortages:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            lineId:     { type: string }
+                            itemId:     { type: string }
+                            backordered: { type: number }
+        '409':
+          description: Insufficient availability in strict mode
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:   { type: string }
+                  shortages:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        lineId:     { type: string }
+                        itemId:     { type: string }
+                        backordered: { type: number }
   /sales/so/{id}:fulfill:
     post:
       summary: Fulfill items on a sales order
@@ -1790,22 +1855,40 @@ paths:
           name: id
           required: true
           schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [ lineId, deltaQty ]
+              required: [lines]
               properties:
-                lineId:   { type: string }
-                deltaQty: { type: number, minimum: 0 }
-                reason:   { type: string }
+                lines:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [lineId, deltaQty]
+                    properties:
+                      lineId:   { type: string }
+                      deltaQty: { type: number, minimum: 0 }
+                      reason:   { type: string }
       responses:
-        "200": { description: OK }
-        "409": { description: Guardrail violation }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SalesOrder' }
+        '409':
+          description: Guardrail violation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
   /sales-orders/{id}/fulfill-line:
     post:
+      deprecated: true
+      description: Use `POST /sales/so/{id}:fulfill` instead.
       tags: [Sales]
       summary: Fulfill a specific SO line
       parameters:

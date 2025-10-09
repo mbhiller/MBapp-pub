@@ -658,10 +658,18 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Commit/allocate inventory for a sales order */
+        /**
+         * Commit/allocate inventory for a sales order
+         * @description Default is **non-strict** (will commit and return `200` even if short on stock; response may include `shortages[]`).
+         *     Pass `strict=1` (query) or `{ "strict": true }` (body) to require full availability (returns `409` with `shortages[]`).
+         *
+         */
         post: {
             parameters: {
-                query?: never;
+                query?: {
+                    /** @description When 1, require full availability; otherwise partial commits are allowed. */
+                    strict?: 0 | 1;
+                };
                 header?: {
                     /** @description Optional idempotency key for safe retries. */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -671,15 +679,44 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @description Same as ?strict=1 */
+                        strict?: boolean;
+                    };
+                };
+            };
             responses: {
-                /** @description OK */
+                /** @description OK (may include `shortages[]` when non-strict) */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["SalesOrder"];
+                        "application/json": components["schemas"]["SalesOrder"] & {
+                            shortages?: {
+                                lineId?: string;
+                                itemId?: string;
+                                backordered?: number;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Insufficient availability in strict mode */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            message?: string;
+                            shortages?: {
+                                lineId?: string;
+                                itemId?: string;
+                                backordered?: number;
+                            }[];
+                        };
                     };
                 };
             };
@@ -838,7 +875,10 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
                 path: {
                     id: string;
                 };
@@ -847,9 +887,11 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
-                        lineId: string;
-                        deltaQty: number;
-                        reason?: string;
+                        lines: {
+                            lineId: string;
+                            deltaQty: number;
+                            reason?: string;
+                        }[];
                     };
                 };
             };
@@ -859,14 +901,18 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["SalesOrder"];
+                    };
                 };
                 /** @description Guardrail violation */
                 409: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
                 };
             };
         };
@@ -885,7 +931,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Fulfill a specific SO line */
+        /**
+         * Fulfill a specific SO line
+         * @deprecated
+         * @description Use `POST /sales/so/{id}:fulfill` instead.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -1401,6 +1451,15 @@ export interface components {
             metadata?: {
                 [key: string]: unknown;
             };
+        };
+        Error: {
+            /** @description Human-readable summary */
+            message: string;
+            /** @description Stable error code (e.g., insufficient_available_to_commit) */
+            code?: string;
+            details?: {
+                [key: string]: unknown;
+            }[];
         };
         AnyObject: {
             [key: string]: unknown;
