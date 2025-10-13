@@ -72,7 +72,7 @@ export const MODULES: readonly ModuleEntry[] = [
 
   // Operational docs
   { key: "goodsReceipts",  title: "Goods Receipts",  screen: "GoodsReceiptsList",   icon: "inbox-arrow-down", required: ["goodsreceipt:read"] },
-  { key: "salesFulfillments", title: "Sales Fulfillments", screen: "SalesFulfillmentsList", icon: "truck", required: ["salesfulfillment:read"] },
+  { key: "SalesFulfillments", title: "Sales Fulfillments", screen: "SalesFulfillmentsList", icon: "truck", required: ["fulfillment:read"] },
 
   // Integrations
   { key: "integrations",   title: "Integrations",    screen: "IntegrationsList",   icon: "plug",           required: ["integration:read"] },

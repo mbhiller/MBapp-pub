@@ -11,7 +11,6 @@ import {
   Switch,
   KeyboardAvoidingView,
   Platform,
-  Keyboard,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { useRoute, RouteProp } from "@react-navigation/native";
@@ -44,11 +43,36 @@ function Pill({ label, bg, fg }: { label: string; bg: string; fg: string }) {
     </View>
   );
 }
+function s<T>(v: T | null | undefined): T | undefined { return v == null ? undefined : v; }
 function Chevron({ open }: { open: boolean }) { return <Text style={{ fontSize: 16 }}>{open ? "▾" : "▸"}</Text>; }
 function lineItemLabel(ln: Partial<SalesOrderLine>): string | undefined {
   return (ln as any).itemName ?? (ln as any).productName ?? (ln as any).name ?? (ln as any).sku ?? (ln as any).code ?? (ln as any).label ?? undefined;
 }
 function isTempId(id?: string | null) { return !!id && String(id).startsWith("TMP_"); }
+
+// ---- Stable key helpers ----
+type WithKey<T> = T & { _key: string };
+type WLine = WithKey<SalesOrderLine>;
+
+function makeKey(id?: string) {
+  return id && typeof id === "string" ? id : `CID_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+function normalizeLines<T extends { id?: string; itemId: string; qty?: number; note?: string }>(
+  lines: T[] | undefined | null
+): Array<WithKey<Required<T>>> {
+  const src = Array.isArray(lines) ? lines : [];
+  return src.map((ln) => {
+    const qty = typeof ln.qty === "number" && !Number.isNaN(ln.qty) ? ln.qty : 1;
+    const _key = makeKey(ln.id);
+    return { ...ln, qty, _key } as WithKey<Required<T>>;
+  });
+}
+function toPatchLines<T extends { id?: string; itemId: string; qty: number; note?: string }>(lines: Array<WithKey<T>>) {
+  return lines.map((l) => {
+    const id = typeof l.id === "string" && !/^TMP_|^CID_/.test(l.id) ? l.id : undefined;
+    return { id, itemId: l.itemId, qty: Number(l.qty) || 1, note: l.note };
+  });
+}
 
 export default function SalesOrderDetailScreen() {
   const route = useRoute<ScreenRoute>();
@@ -71,22 +95,24 @@ export default function SalesOrderDetailScreen() {
   const [editMode, setEditMode] = React.useState(false);
   const [actionMode, setActionMode] = React.useState(false);
 
-  // drafts (used when editMode is true)
-  const [draftLines, setDraftLines] = React.useState<SalesOrderLine[]>([]);
+  // drafts (edit mode)
+  const [draftLines, setDraftLines] = React.useState<WLine[]>([]);
   const [orderNotes, setOrderNotes] = React.useState<string>("");
 
   // Customer Modal
   const [customerModalOpen, setCustomerModalOpen] = React.useState<boolean>(Boolean(isNew));
+  const [customerInitial, setCustomerInitial] = React.useState<{ id: string; label?: string } | null>(null);
 
-  // Item selection modal (for adding or changing a line)
+  // Item modal
   const [itemModalOpen, setItemModalOpen] = React.useState(false);
   const addAfterLineIdRef = React.useRef<string | null>(null);
-  const changeLineIdRef = React.useRef<string | null>(null);
+  const changeLineKeyRef = React.useRef<string | null>(null);
+  const changeLineIndexRef = React.useRef<number | null>(null);
 
-  // ✅ NEW: when we create the order here, persist lines immediately even in edit mode
+  // inline persist after creating brand-new order here
   const inlinePersistRef = React.useRef<boolean>(false);
 
-  // For pre-seeding ItemSelector when editing a line
+  // pre-seed item modal
   const [modalInitialItem, setModalInitialItem] = React.useState<{ id: string; label?: string; type?: string } | null>(null);
   const [modalInitialQty, setModalInitialQty] = React.useState<number>(1);
 
@@ -96,7 +122,7 @@ export default function SalesOrderDetailScreen() {
     try {
       const soObj = await getSalesOrder(soId);
       setOrder(soObj);
-      setDraftLines(soObj?.lines ? JSON.parse(JSON.stringify(soObj.lines)) : []);
+      setDraftLines(normalizeLines(soObj?.lines));
       setOrderNotes(soObj?.notes || "");
     } catch (e: any) {
       Alert.alert("Error", e?.message ?? "Failed to load sales order");
@@ -111,7 +137,7 @@ export default function SalesOrderDetailScreen() {
   const backorderedFor = React.useCallback((line: SalesOrderLine) => Math.max(0, (line.qty ?? 0) - reservedFor(line.id) - fulfilledFor(line)), [reservedFor, fulfilledFor]);
 
   const totals = React.useMemo(() => {
-    const src = editMode ? draftLines : (order?.lines || []);
+    const src: SalesOrderLine[] = editMode ? draftLines : (order?.lines || []);
     let res = 0, ful = 0, back = 0;
     for (const ln of src) { res += reservedFor(ln.id); ful += fulfilledFor(ln); back += backorderedFor(ln); }
     return { reserved: res, fulfilled: ful, backordered: back, lines: src.length };
@@ -119,13 +145,12 @@ export default function SalesOrderDetailScreen() {
 
   // edit helpers
   function makeTmpId() { return `TMP_${Date.now()}_${Math.random().toString(36).slice(2)}`; }
-  function setLineQty(lineId: string, qty: number) {
-    setDraftLines((prev) => prev.map((l) => (l.id === lineId ? { ...l, qty: Math.max(0, Math.floor(qty)) } : l)));
+  function setLineQty(lineKey: string, qty: number) {
+    setDraftLines((prev) => prev.map((l) => ((l as any)._key === lineKey ? { ...l, qty: Math.max(0, Math.floor(qty)) } : l)));
   }
-  function removeLineLocal(lineId: string) { setDraftLines((prev) => prev.filter((l) => l.id !== lineId)); }
 
-  // 🔑 central apply: persist immediately if this order was created here in this session
-  async function applyLines(next: SalesOrderLine[]) {
+  // apply
+  async function applyLines(next: WLine[]) {
     if (!order) return;
     const shouldPersistNow = inlinePersistRef.current === true ? true : !editMode ? true : false;
 
@@ -134,14 +159,13 @@ export default function SalesOrderDetailScreen() {
       return;
     }
 
-    // Build patch; omit id for TMP_* so backend creates lines
-    const linesPatch = next.map(({ id, itemId, qty, note }) => (isTempId(id) ? { itemId, qty, note } : { id, itemId, qty, note }));
-
+    const linesPatch = toPatchLines(next);
     try {
       const updated = await updateSalesOrder(order.id, { lines: linesPatch });
+      const normalized = normalizeLines(updated?.lines);
       if (updated && updated.id) {
-        setOrder(updated);
-        setDraftLines(updated.lines ?? []);
+        setOrder(updated as any);
+        setDraftLines(normalized);
       } else {
         await hydrate();
       }
@@ -152,31 +176,49 @@ export default function SalesOrderDetailScreen() {
 
   async function addLineAfter(afterLineId: string | null, sel: ItemSelection) {
     if (!order) return;
-    const base = editMode ? [...draftLines] : [...(order.lines || [])];
+    const base = [...draftLines];
     const idx = afterLineId ? base.findIndex((l) => l.id === afterLineId) : base.length - 1;
     const insertIdx = idx >= 0 ? idx + 1 : base.length;
-    const newLine: SalesOrderLine = { id: makeTmpId(), itemId: sel.itemId, qty: sel.qty };
-    base.splice(insertIdx, 0, newLine);
-    await applyLines(base);
+    const newLine: WLine = { id: makeTmpId(), itemId: sel.itemId, qty: sel.qty, _key: makeKey(undefined) } as any;
+    const next = base.slice();
+    next.splice(insertIdx, 0, newLine);
+    await applyLines(next);
     setTimeout(() => scrollRef.current?.scrollToEnd?.({ animated: true }), 80);
   }
 
-  async function changeLineItem(lineId: string, sel: ItemSelection) {
+  async function changeLineItem(lineKey: string, sel: ItemSelection) {
     if (!order) return;
-    const base = editMode ? [...draftLines] : [...(order.lines || [])];
-    const next = base.map((l) => (l.id === lineId ? { ...l, itemId: sel.itemId, qty: sel.qty ?? l.qty } : l));
+    const base = [...draftLines];
+    const idxByKey = base.findIndex((l) => (l as any)._key === lineKey || l.id === lineKey);
+    let idx = idxByKey >= 0 ? idxByKey : (changeLineIndexRef.current ?? -1);
+    if (idx < 0 || idx >= base.length) return;
+
+    const curr = base[idx];
+    const next = base.slice();
+    next[idx] = {
+      ...(curr as any),
+      id: curr.id,
+      _key: (curr as any)._key,
+      itemId: sel.itemId,
+      qty: typeof sel.qty === "number" && sel.qty > 0 ? sel.qty : (curr.qty ?? 1),
+    } as any;
+
     await applyLines(next);
   }
 
-  async function removeLineWithConfirm(lineId: string) {
+  async function removeLineWithConfirm(lineKey: string) {
     Alert.alert("Remove line", "Are you sure you want to remove this line?", [
       { text: "Cancel", style: "cancel" },
-      { text: "Remove", style: "destructive", onPress: async () => {
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: async () => {
           if (!order) return;
-          const base = editMode ? [...draftLines] : [...(order.lines || [])];
-          const next = base.filter((l) => l.id !== lineId);
+          const base = [...draftLines];
+          const next = base.filter((l) => (l as any)._key !== lineKey);
           await applyLines(next);
-        } },
+        },
+      },
     ]);
   }
 
@@ -185,11 +227,11 @@ export default function SalesOrderDetailScreen() {
     if (!order) return;
     setSaving(true);
     try {
-      const linesPatch = draftLines.map(({ id, itemId, qty, note }) => (isTempId(id) ? { itemId, qty, note } : { id, itemId, qty, note }));
+      const linesPatch = toPatchLines(draftLines);
       const updated = await updateSalesOrder(order.id, { lines: linesPatch, notes: orderNotes });
       if (updated && updated.id) {
-        setOrder(updated);
-        setDraftLines(updated.lines ?? []);
+        setOrder(updated as any);
+        setDraftLines(normalizeLines(updated.lines));
         setOrderNotes(updated.notes ?? "");
       } else {
         await hydrate();
@@ -201,7 +243,7 @@ export default function SalesOrderDetailScreen() {
   }
   function onCancelEdits() {
     if (!order) return;
-    setDraftLines(order.lines || []);
+    setDraftLines(normalizeLines(order.lines));
     setOrderNotes(order.notes || "");
     setEditMode(false);
   }
@@ -210,8 +252,8 @@ export default function SalesOrderDetailScreen() {
   const isClosed = (s: string) => s === "canceled" || s === "closed" || s === "fulfilled";
 
   // order-level actions
-  async function actionSubmit() { if (!order || isClosed(order.status)) return; try { await submitSalesOrder(order.id); await hydrate(); } catch (e: any) { Alert.alert("Submit failed", e?.message ?? ""); } }
-  async function actionCommit(strict?: boolean) { if (!order || isClosed(order.status)) return; try { await commitSalesOrder(order.id, { strict: !!strict }); await hydrate(); } catch (e: any) { Alert.alert("Commit failed", e?.message ?? ""); } }
+  async function actionSubmit() { if (!order || isClosed(order.status)) return; try { await submitSalesOrder(order.id); await hydrate(); } catch {} }
+  async function actionCommit(strict?: boolean) { if (!order || isClosed(order.status)) return; try { await commitSalesOrder(order.id, { strict: !!strict }); await hydrate(); } catch {} }
   async function actionReserveAll() {
     if (!order || isClosed(order.status)) return;
     try {
@@ -222,7 +264,7 @@ export default function SalesOrderDetailScreen() {
         })
         .filter(Boolean) as LineDelta[];
       if (lines.length) { await reserveSalesOrder(order.id, lines); await hydrate(); }
-    } catch (e: any) { Alert.alert("Reserve failed", e?.message ?? ""); }
+    } catch {}
   }
   async function actionFulfillAll() {
     if (!order || isClosed(order.status)) return;
@@ -231,7 +273,7 @@ export default function SalesOrderDetailScreen() {
         .map((l) => { const r = reservedFor(l.id); return r > 0 ? { lineId: l.id, deltaQty: r } : null; })
         .filter(Boolean) as LineDelta[];
       if (lines.length) { await fulfillSalesOrder(order.id, lines); await hydrate(); }
-    } catch (e: any) { Alert.alert("Fulfill failed", e?.message ?? ""); }
+    } catch {}
   }
   async function actionReleaseAll() {
     if (!order || isClosed(order.status)) return;
@@ -245,48 +287,32 @@ export default function SalesOrderDetailScreen() {
         })
         .filter(Boolean) as LineDelta[];
       if (lines.length) { await releaseSalesOrder(order.id, lines); await hydrate(); }
-    } catch (e: any) { Alert.alert("Release failed", e?.message ?? ""); }
+    } catch {}
   }
-  
+
   // per-line actions (outside edit)
-async function reserveOne(line: SalesOrderLine) {
-  if (!order || isClosed(order.status)) return;
-  const need = Math.max(0, (line.qty ?? 0) - reservedFor(line.id) - fulfilledFor(line));
-  if (need <= 0) return;
-  try {
-    await reserveSalesOrder(order.id, [{ lineId: line.id, deltaQty: 1 }]);
-    await hydrate();
-  } catch (e: any) {
-    Alert.alert("Reserve failed", e?.message ?? "");
+  async function reserveOne(line: SalesOrderLine) {
+    if (!order || isClosed(order.status)) return;
+    const need = Math.max(0, (line.qty ?? 0) - reservedFor(line.id) - fulfilledFor(line));
+    if (need <= 0) return;
+    try { await reserveSalesOrder(order.id, [{ lineId: line.id, deltaQty: 1 }]); await hydrate(); } catch {}
   }
-}
+  async function fulfillOne(line: SalesOrderLine) {
+    if (!order || isClosed(order.status)) return;
+    const r = reservedFor(line.id);
+    if (r <= 0) return;
+    try { await fulfillSalesOrder(order.id, [{ lineId: line.id, deltaQty: 1 }]); await hydrate(); } catch {}
+  }
+  async function releaseOne(line: SalesOrderLine) {
+    if (!order || isClosed(order.status)) return;
+    const r = reservedFor(line.id);
+    const need = Math.max(0, (line.qty ?? 0) - fulfilledFor(line));
+    const extra = Math.max(0, r - need);
+    if (extra <= 0) return;
+    try { await releaseSalesOrder(order.id, [{ lineId: line.id, deltaQty: 1 }]); await hydrate(); } catch {}
+  }
 
-async function fulfillOne(line: SalesOrderLine) {
-  if (!order || isClosed(order.status)) return;
-  const r = reservedFor(line.id);
-  if (r <= 0) return;
-  try {
-    await fulfillSalesOrder(order.id, [{ lineId: line.id, deltaQty: 1 }]);
-    await hydrate();
-  } catch (e: any) {
-    Alert.alert("Fulfill failed", e?.message ?? "");
-  }
-}
-
-async function releaseOne(line: SalesOrderLine) {
-  if (!order || isClosed(order.status)) return;
-  const r = reservedFor(line.id);
-  const need = Math.max(0, (line.qty ?? 0) - fulfilledFor(line));
-  const extra = Math.max(0, r - need);
-  if (extra <= 0) return;
-  try {
-    await releaseSalesOrder(order.id, [{ lineId: line.id, deltaQty: 1 }]);
-    await hydrate();
-  } catch (e: any) {
-    Alert.alert("Release failed", e?.message ?? "");
-  }
-}
-  // badge colors (theme or fallbacks)
+  // badge colors
   const reservedBg = (t.colors as any).badgeReservedBg ?? "#EEF2FF";
   const reservedFg = (t.colors as any).badgeReservedFg ?? "#3730A3";
   const fulfilledBg = (t.colors as any).badgeFulfilledBg ?? "#ECFDF5";
@@ -294,45 +320,40 @@ async function releaseOne(line: SalesOrderLine) {
   const backBg = (t.colors as any).badgeBackorderedBg ?? "#FEF3C7";
   const backFg = (t.colors as any).badgeBackorderedFg ?? "#92400E";
 
-  // New-mode: prompt for customer on mount; do not create order until saved
+  // new-mode: prompt for customer; create order on save
   const handleCustomerSave = React.useCallback(
     async (snap: CustomerSnapshot) => {
       try {
         if (!order && isNew) {
-          // Create the order first
           const created = await createSalesOrder({
-            customerId: snap.customerId,
-            customerName: snap.customerName,
-            customerEmail: snap.customerEmail,
-            customerPhone: snap.customerPhone,
-            customerAltPhone: snap.customerAltPhone,
-            billingAddress: snap.billingAddress,
-            shippingAddress: snap.shippingAddress,
-            customerNotes: snap.customerNotes,
-            status: "draft",
-            lines: [],
+            customerId: snap.customerId!,
+            customerName: s(snap.customerName),
+            customerEmail: s(snap.customerEmail),
+            customerPhone: s(snap.customerPhone),
+            customerAltPhone: s(snap.customerAltPhone),
+            billingAddress: s(snap.billingAddress),
+            shippingAddress: s(snap.shippingAddress),
+            customerNotes: s(snap.customerNotes),
           });
-          // Mark that this order was created here → persist lines inline even in edit mode
           inlinePersistRef.current = true;
-
           setOrder(created);
-          setDraftLines(created.lines ?? []);
+          setDraftLines(normalizeLines(created.lines));
           setOrderNotes(created.notes ?? "");
           setCustomerOpen(true);
           setEditMode(true);
         } else if (order) {
           const patch = {
-            customerId: snap.customerId,
-            customerName: snap.customerName,
-            customerEmail: snap.customerEmail,
-            customerPhone: snap.customerPhone,
-            customerAltPhone: snap.customerAltPhone,
-            billingAddress: snap.billingAddress,
-            shippingAddress: snap.shippingAddress,
-            customerNotes: snap.customerNotes ?? order.customerNotes,
+            customerId: snap.customerId!,
+            customerName: s(snap.customerName),
+            customerEmail: s(snap.customerEmail),
+            customerPhone: s(snap.customerPhone),
+            customerAltPhone: s(snap.customerAltPhone),
+            billingAddress: s(snap.billingAddress),
+            shippingAddress: s(snap.shippingAddress),
+            customerNotes: s(snap.customerNotes ?? order.customerNotes),
           };
           const updated = await updateSalesOrder(order.id, patch);
-          if (updated && updated.id) { setOrder(updated); }
+          if (updated && updated.id) { setOrder(updated as any); }
           setCustomerOpen(true);
         }
       } catch (e: any) {
@@ -380,7 +401,13 @@ async function releaseOne(line: SalesOrderLine) {
               (order?.status ?? "draft") === "draft" ? (
                 <View style={{ marginRight: 25 }}>
                   <Pressable
-                    onPress={() => setCustomerModalOpen(true)}
+                    onPress={() => {
+                      setCustomerInitial({
+                        id: String(order?.customerId ?? ""),
+                        label: order?.customerName || undefined,
+                      });
+                      setCustomerModalOpen(true);
+                    }}
                     hitSlop={10}
                     style={{ padding: 6, borderRadius: 8, borderWidth: 1, borderColor: t.colors.border, backgroundColor: t.colors.card }}
                   >
@@ -420,7 +447,6 @@ async function releaseOne(line: SalesOrderLine) {
                   onValueChange={async (v) => {
                     if (!order) return;
                     if (v) { setEditMode(true); return; }
-                    // turning OFF → persist staged edits
                     await onSaveEdits();
                   }}
                 />
@@ -462,7 +488,7 @@ async function releaseOne(line: SalesOrderLine) {
                 <Pressable
                   onPress={() => {
                     addAfterLineIdRef.current = (draftLines[draftLines.length - 1]?.id ?? null);
-                    changeLineIdRef.current = null;
+                    changeLineKeyRef.current = null;
                     setModalInitialItem(null);
                     setModalInitialQty(1);
                     setItemModalOpen(true);
@@ -483,7 +509,7 @@ async function releaseOne(line: SalesOrderLine) {
 
             {/* lines */}
             <View>
-              {(editMode ? draftLines : order?.lines || []).map((ln, index) => {
+              {(editMode ? draftLines : (order?.lines || [])).map((ln: any, index: number) => {
                 const r = reservedFor(ln.id);
                 const f = fulfilledFor(ln);
                 const b = Math.max(0, (ln.qty ?? 0) - r - f);
@@ -492,7 +518,7 @@ async function releaseOne(line: SalesOrderLine) {
                 const need = Math.max(0, (ln.qty ?? 0) - f);
                 const extra = Math.max(0, r - need);
                 const canRelease1 = !editMode && order && !isClosed(order.status) && extra > 0;
-                const key = `${ln.id || ln.itemId || "idx"}:${index}`;
+                const key = editMode ? (ln._key ?? `${ln.id || ln.itemId || "idx"}:${index}`) : `${ln.id || ln.itemId || "idx"}:${index}`;
                 const label = lineItemLabel(ln) ?? ln.itemId ?? "(select item)";
 
                 return (
@@ -505,7 +531,7 @@ async function releaseOne(line: SalesOrderLine) {
                         editable={editMode}
                         keyboardType="number-pad"
                         value={String(ln.qty ?? 0)}
-                        onChangeText={(s) => setLineQty(ln.id, Number(s || 0))}
+                        onChangeText={(s) => setLineQty(editMode ? ln._key : ln.id, Number(s || 0))}
                         style={{
                           width: 64,
                           paddingHorizontal: 8,
@@ -522,10 +548,11 @@ async function releaseOne(line: SalesOrderLine) {
                         <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginLeft: 10 }}>
                           <Pressable
                             onPress={() => {
-                              changeLineIdRef.current = ln.id;
+                              changeLineKeyRef.current = ln._key ?? ln.id ?? null;
+                              changeLineIndexRef.current = index;
                               addAfterLineIdRef.current = null;
                               setModalInitialItem({ id: String(ln.itemId ?? ""), label });
-                              setModalInitialQty(Math.max(1, Math.floor(ln.qty ?? 1)));
+                              setModalInitialQty(Math.max(1, Math.floor(Number(ln.qty ?? 1))));
                               setItemModalOpen(true);
                             }}
                             hitSlop={10}
@@ -536,7 +563,7 @@ async function releaseOne(line: SalesOrderLine) {
                           </Pressable>
 
                           <Pressable
-                            onPress={() => removeLineWithConfirm(ln.id)}
+                            onPress={() => removeLineWithConfirm(ln._key ?? ln.id)}
                             hitSlop={10}
                             style={{ paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: t.colors.border, backgroundColor: t.colors.card }}
                             accessibilityLabel="Remove line"
@@ -580,7 +607,7 @@ async function releaseOne(line: SalesOrderLine) {
             ) : null}
           </Card>
 
-          {/* Actions card */}
+          {/* Actions */}
           {!editMode && order ? (
             <Card title="Actions" open={true} onToggle={() => {}}>
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
@@ -602,8 +629,10 @@ async function releaseOne(line: SalesOrderLine) {
         onClose={() => {
           if (isNew && !order) { navigation.goBack(); return; }
           setCustomerModalOpen(false);
+          setCustomerInitial(null);
         }}
         onSave={handleCustomerSave}
+        initialCustomer={customerInitial ?? undefined}
       />
 
       {/* Item Selector Modal */}
@@ -612,20 +641,22 @@ async function releaseOne(line: SalesOrderLine) {
         onClose={() => {
           setItemModalOpen(false);
           addAfterLineIdRef.current = null;
-          changeLineIdRef.current = null;
+          changeLineKeyRef.current = null;
+          changeLineIndexRef.current = null;
           setModalInitialItem(null);
         }}
         onSave={async (sel) => {
-          const toChange = changeLineIdRef.current;
+          const toChangeKey = changeLineKeyRef.current;
           const toAddAfter = addAfterLineIdRef.current;
-          if (toChange) { await changeLineItem(toChange, sel); }
+          if (toChangeKey) { await changeLineItem(toChangeKey, sel); }
           else { await addLineAfter(toAddAfter, sel); }
           setItemModalOpen(false);
           addAfterLineIdRef.current = null;
-          changeLineIdRef.current = null;
+          changeLineKeyRef.current = null;
+          changeLineIndexRef.current = null;
           setModalInitialItem(null);
         }}
-        title={changeLineIdRef.current ? "Change Item" : "Select Item"}
+        title={changeLineKeyRef.current ? "Change Item" : "Select Item"}
         initialItem={modalInitialItem ?? undefined}
         initialQty={modalInitialQty}
       />

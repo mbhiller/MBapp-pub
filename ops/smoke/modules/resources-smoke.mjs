@@ -1,8 +1,40 @@
-/* ops/smoke/modules/resources-smoke.mjs */
-import { rid, withTag, createObject, listObjects, updateObject, deleteObject } from "../core.mjs";
+/* CRUD helpers for resource */
+import { createObject, listObjects, deleteObject, rid, withTag } from "../core.mjs";
+
 const TYPE = "resource";
-function scaffold(code){ const n=Date.now(); return { type: TYPE, id: rid("res"), name: withTag(`Resource ${n}`, code), status: "available", kind: "generic" }; }
-export async function createMany({ each = 1, code } = {}){ const ids=[]; for(let i=0;i<Number(each);i++){ const created=await createObject(TYPE, scaffold(code)); ids.push(created.id);} return { type: TYPE, created: ids }; }
-export async function listAll({ limit = 50 } = {}){ const page = await listObjects(TYPE, { limit }); return { type: TYPE, count: (page.items||[]).length, items: page.items }; }
-export async function updateSome({ limit = 5, code } = {}){ const page = await listObjects(TYPE, { limit }); const ids=[]; for(const it of page.items||[]){ const res=await updateObject(TYPE, it.id, { name: withTag(it.name||"Resource", code) }); ids.push(res.id);} return { type: TYPE, updated: ids.length, ids }; }
-export async function deleteAll(){ let total=0,next; do{ const page=await listObjects(TYPE,{ limit:50,next}); for(const it of page.items||[]){ await deleteObject(TYPE,it.id); total++; } next=page.next; }while(next); return { type: TYPE, deleted: total }; }
+
+export async function createMany({ each = 3, code = "res", kind = "stall" } = {}) {
+  const created = [];
+  for (let i = 0; i < each; i++) {
+    const id = rid("res");
+    const name = `${kind.toUpperCase()}-${i + 1}`;
+    const obj = await createObject(TYPE, {
+      type: TYPE,
+      id,
+      name,
+      resourceType: kind,              // map to schema values if different
+      status: "available",
+      capacity: kind === "arena" ? 10 : 1,
+      tags: [withTag(kind, code)],
+      notes: withTag("seeded", code),
+    });
+    created.push(obj.id);
+  }
+  return { type: TYPE, ids: created, created };
+}
+
+export async function listAll({ limit = 200 } = {}) {
+  let items = [], next;
+  do {
+    const page = await listObjects(TYPE, { limit: 50, next, by: "updatedAt", sort: "desc" });
+    items = items.concat(page.items || []);
+    next = page.next;
+  } while (next && items.length < limit);
+  return items;
+}
+
+export async function deleteAll() {
+  const items = await listAll();
+  for (const it of items) await deleteObject(TYPE, it.id);
+  return { type: TYPE, deleted: items.length };
+}

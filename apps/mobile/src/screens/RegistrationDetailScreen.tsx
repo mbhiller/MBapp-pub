@@ -1,180 +1,133 @@
 // apps/mobile/src/screens/RegistrationDetailScreen.tsx
 import React from "react";
-import { View, Text, TextInput, Pressable, Alert } from "react-native";
+import { View, Text, TextInput, Pressable, Alert, ScrollView } from "react-native";
 import { useRoute, RouteProp } from "@react-navigation/native";
 import { useColors } from "../features/_shared/useColors";
-import { createObject, updateObject, getObject } from "../api/client";
+import { createObject, getObject, updateObject, deleteObject } from "../api/client";
 import type { components } from "../api/generated-types";
-import type { RootStackParamList } from "../navigation/types";
-import FormScreen from "../features/_shared/FormScreen";
+import { registerRegistration, cancelRegistration, checkinRegistration } from "../features/registrations/actions";
 
 type Registration = components["schemas"]["Registration"];
 type Route = RouteProp<RootStackParamList, "RegistrationDetail">;
 
-const STATUS_VALUES = ["new","confirmed","cancelled"] as const;
-type RStatus = typeof STATUS_VALUES[number];
+type RootStackParamList = {
+  RegistrationDetail: { id?: string; mode?: "new" | "edit"; initial?: Partial<Registration> };
+};
 
 export default function RegistrationDetailScreen({ navigation }: any) {
   const { params } = useRoute<Route>();
-  const id   = params?.id;
-  const mode: "new" | "edit" | undefined = (params as any)?.mode;
-  const isNew = mode === "new" || !id;
-  const initial = (params?.initial ?? {}) as Partial<Registration>;
   const t = useColors();
+  const id = params?.id;
+  const mode = params?.mode as "new" | "edit" | undefined;
+  const isNew = mode === "new" || !id;
 
-  const [item, setItem] = React.useState<Registration | null>(null);
-  const [saving, setSaving] = React.useState(false);
-
-  const [attendeeName, setAttendeeName] = React.useState(String((initial as any)?.attendeeName ?? (initial as any)?.name ?? ""));
-  const [eventId, setEventId]           = React.useState(String((initial as any)?.eventId ?? ""));
-  const [clientId, setClientId]         = React.useState(String((initial as any)?.clientId ?? ""));
-  const [status, setStatus]             = React.useState<string>(String((initial as any)?.status ?? "new"));
-  const [notes, setNotes]               = React.useState(String((initial as any)?.notes ?? ""));
-
-  const statusTouched = React.useRef(false);
+  const [model, setModel] = React.useState<Partial<Registration>>(
+    params?.initial ?? ({ type: "registration", status: "pending" } as Partial<Registration>)
+  );
+  const [loading, setLoading] = React.useState(false);
 
   const load = React.useCallback(async () => {
-    if (!id || isNew) return;
-    const obj = await getObject<Registration>("registration", String(id));
-    setItem(obj);
-  }, [id, isNew]);
-
-  React.useEffect(() => { load(); }, [load]);
+    if (!id) return;
+    setLoading(true);
+    const res = (await getObject("registration", id)) as Registration;
+    setModel(res);
+    setLoading(false);
+  }, [id]);
 
   React.useEffect(() => {
-    if (!item) return;
-    setAttendeeName((v) => v || String((item as any)?.attendeeName ?? (item as any)?.name ?? ""));
-    setEventId((v)     => v || String((item as any)?.eventId ?? ""));
-    setClientId((v)    => v || String((item as any)?.clientId ?? ""));
-    if (!statusTouched.current) setStatus(String((item as any)?.status ?? "new"));
-    setNotes((v)       => v || String((item as any)?.notes ?? ""));
-  }, [item]);
+    if (!isNew) load();
+  }, [load, isNew]);
 
-  async function onCreate() {
-    if (!eventId.trim()) { Alert.alert("Event ID is required"); return; }
-    setSaving(true);
-    try {
-      await createObject<Registration>("registration", {
-        type: "registration",
-        attendeeName: attendeeName.trim() || undefined,
-        eventId: eventId.trim(),
-        clientId: clientId.trim() || undefined,
-        status: (STATUS_VALUES as unknown as string[]).includes(status) ? status as RStatus : "new",
-        notes: notes.trim() || undefined,
-      } as any);
-      navigation.goBack();
-    } catch (e: any) { Alert.alert("Error", e?.message ?? "Failed to create"); }
-    finally { setSaving(false); }
-  }
+  const onSave = React.useCallback(async () => {
+    const payload: Partial<Registration> = {
+      type: "registration",
+      eventId: model.eventId!,
+      clientId: model.clientId!,
+      clientName: model.clientName ?? null,
+      qty: (model as any).qty ?? 1,
+      status: model.status || "pending",
+      checkedInAt: (model as any).checkedInAt ?? null,
+    } as any;
 
-  async function onSaveEdits() {
-    if (!id) return;
-    setSaving(true);
-    try {
-      await updateObject<Registration>("registration", String(id), {
-        ...(attendeeName.trim() ? { attendeeName: attendeeName.trim() } : {}),
-        ...(eventId.trim() ? { eventId: eventId.trim() } : {}),
-        ...(clientId.trim() ? { clientId: clientId.trim() } : {}),
-        ...(status ? { status } : {}),
-        ...(notes.trim() ? { notes: notes.trim() } : {}),
-      } as any);
-      navigation.goBack();
-    } catch (e: any) { Alert.alert("Error", e?.message ?? "Failed to save"); }
-    finally { setSaving(false); }
-  }
+    if (isNew) {
+      const created = (await createObject<Registration>("registration", payload)) as Registration;
+      navigation.replace("RegistrationDetail", { id: created.id, mode: "edit" });
+    } else if (id) {
+      await updateObject("registration", id, payload);
+      await load();
+    }
+  }, [id, isNew, model, load, navigation]);
 
   return (
-    <FormScreen>
-      <View style={{ backgroundColor: t.colors.card, borderRadius: 12, borderWidth: 1, borderColor: t.colors.border, padding: 16 }}>
-        {/* Quick links when editing */}
-        {!isNew && id ? (
-          <View style={{ marginBottom: 12 }}>
-            {!!eventId && (
-              <Pressable
-                onPress={() => navigation.navigate("EventDetail", { id: eventId, mode: "edit" })}
-                style={{ backgroundColor: t.colors.card, borderColor: t.colors.border, borderWidth: 1, borderRadius: 10, padding: 12, marginBottom: 8 }}
-              >
-                <Text style={{ color: t.colors.text, fontWeight: "700" }}>Open event</Text>
-              </Pressable>
-            )}
-            {!!clientId && (
-              <Pressable
-                onPress={() => navigation.navigate("ClientDetail", { id: clientId, mode: "edit" })}
-                style={{ backgroundColor: t.colors.card, borderColor: t.colors.border, borderWidth: 1, borderRadius: 10, padding: 12 }}
-              >
-                <Text style={{ color: t.colors.text, fontWeight: "700" }}>Open client</Text>
-              </Pressable>
-            )}
-          </View>
-        ) : null}
-
-        <Field label="Attendee name" value={attendeeName} onChangeText={setAttendeeName} />
-        <Field label="Event ID *"    value={eventId}      onChangeText={setEventId} />
-        <Field label="Client ID"     value={clientId}     onChangeText={setClientId} />
-
-        <Label text="Status" />
-        <PillGroup
-          options={STATUS_VALUES as unknown as string[]}
-          value={status}
-          onChange={(v) => { statusTouched.current = true; setStatus(v); }}
-        />
-
-        <Field label="Notes" value={notes} onChangeText={setNotes} multiline />
-
+    <ScrollView style={{ flex: 1, backgroundColor: t.colors.background, padding: 12 }}>
+      <View style={{ marginBottom: 12, flexDirection: "row", justifyContent: "space-between" }}>
+        <Text style={{ color: t.colors.text, fontWeight: "700", fontSize: 18 }}>
+          {isNew ? "New Registration" : model.clientName || "Registration"}
+        </Text>
         <Pressable
-          onPress={isNew ? onCreate : onSaveEdits}
-          style={{ marginTop: 12, backgroundColor: t.colors.primary, padding: 14, borderRadius: 10, alignItems: "center" }}
+          onPress={onSave}
+          style={{
+            backgroundColor: t.colors.primary,
+            paddingHorizontal: 14,
+            paddingVertical: 8,
+            borderRadius: 8,
+          }}
         >
           <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>
-            {saving ? "Saving…" : isNew ? "Create" : "Save"}
+            {isNew ? "Create" : "Save"}
           </Text>
         </Pressable>
       </View>
-    </FormScreen>
-  );
-}
 
-function Label({ text }: { text: string }) {
-  const t = useColors();
-  return <Text style={{ marginBottom: 6, color: t.colors.muted }}>{text}</Text>;
-}
-function Field({ label, value, onChangeText, multiline, keyboardType }:{
-  label: string; value?: any; onChangeText: (v: any) => void; multiline?: boolean; keyboardType?: any;
-}) {
-  const t = useColors();
-  return (
-    <View style={{ marginBottom: 10 }}>
-      <Text style={{ marginBottom: 6, color: t.colors.muted }}>{label}</Text>
-      <TextInput
-        value={String(value ?? "")}
-        onChangeText={onChangeText}
-        multiline={multiline}
-        keyboardType={keyboardType}
-        autoCapitalize="none"
-        autoCorrect={false}
-        returnKeyType="done"
-        style={{ backgroundColor: t.colors.bg, color: t.colors.text, borderColor: t.colors.border, borderWidth: 1, borderRadius: 8, padding: 12, minHeight: multiline ? 80 : undefined }}
-        placeholderTextColor={t.colors.muted}
-      />
-    </View>
-  );
-}
-function PillGroup({ options, value, onChange }:{ options: string[]; value?: string; onChange: (v: string) => void; }) {
-  const t = useColors();
-  return (
-    <View style={{ flexDirection: "row", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-      {options.map((opt) => {
-        const selected = String(value ?? "") === opt;
-        return (
-          <Pressable key={opt} onPress={() => onChange(opt)} style={{
-            paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1,
-            borderColor: selected ? t.colors.primary : t.colors.border,
-            backgroundColor: selected ? t.colors.primary : t.colors.card, marginRight: 8, marginBottom: 8,
-          }}>
-            <Text style={{ color: selected ? t.colors.buttonText : t.colors.text, fontWeight: "600" }}>{opt}</Text>
-          </Pressable>
-        );
-      })}
-    </View>
+      <View style={{ gap: 12 }}>
+        <Text style={{ color: t.colors.text, fontWeight: "600" }}>Client Name</Text>
+        <TextInput
+          value={model.clientName || ""}
+          onChangeText={(v) => setModel({ ...model, clientName: v })}
+          placeholder="Client name"
+          placeholderTextColor={t.colors.textMuted}
+          style={{ borderWidth: 1, borderColor: t.colors.border, borderRadius: 8, padding: 10, color: t.colors.text }}
+        />
+
+        <Text style={{ color: t.colors.text, fontWeight: "600" }}>Qty</Text>
+        <TextInput
+          value={String((model as any).qty ?? 1)}
+          onChangeText={(v) => setModel({ ...model, qty: v ? Number(v) : 1 } as any)}
+          keyboardType="numeric"
+          placeholder="e.g. 1"
+          placeholderTextColor={t.colors.textMuted}
+          style={{ borderWidth: 1, borderColor: t.colors.border, borderRadius: 8, padding: 10, color: t.colors.text }}
+        />
+
+        {!isNew && (
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+            <Pressable
+              onPress={async () => { if (!id) return; await registerRegistration(id); await load(); }}
+              style={{ backgroundColor: t.colors.card, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}
+            >
+              <Text style={{ color: t.colors.text }}>Register</Text>
+            </Pressable>
+            <Pressable
+              onPress={async () => { if (!id) return; await checkinRegistration(id); await load(); }}
+              style={{ backgroundColor: t.colors.card, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}
+            >
+              <Text style={{ color: t.colors.text }}>Check in</Text>
+            </Pressable>
+            <Pressable
+              onPress={async () => { if (!id) return; await cancelRegistration(id); await load(); }}
+              style={{ backgroundColor: t.colors.card, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}
+            >
+              <Text style={{ color: t.colors.text }}>Cancel</Text>
+            </Pressable>
+            <Pressable
+              onPress={async () => { if (!id) return; await deleteObject("registration", id); navigation.goBack(); }}
+              style={{ backgroundColor: t.colors.danger, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}
+            >
+              <Text style={{ color: t.colors.buttonText }}>Delete</Text>
+            </Pressable>
+          </View>
+        )}
+      </View>
+    </ScrollView>
   );
 }

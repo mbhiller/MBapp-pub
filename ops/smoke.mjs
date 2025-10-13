@@ -18,6 +18,15 @@ import * as ScannerPick from "./smoke/flows/scanner-pick.mjs";
 import * as ScannerGuards from "./smoke/flows/scanner-guardrails.mjs";
 import * as SOBackorder from "./smoke/flows/salesOrder-backorder.mjs";
 import * as SORelease   from "./smoke/flows/salesOrder-release.mjs";
+import * as flowGoodsReceipt from "./smoke/flows/goodsReceipt-flow.mjs";
+import * as flowSeedAll from "./smoke/flows/seed-all.mjs";
+import * as FieldCoverage from "./smoke/reports/field-coverage.mjs";
+import * as flowReservations from "./smoke/flows/reservations-flow.mjs";
+import * as ResourcesMod from "./smoke/modules/resources-smoke.mjs";
+ import * as EventsFlow from "./smoke/flows/events-flow.mjs";
+ import * as RegsFlow   from "./smoke/flows/registrations-flow.mjs";
+ import * as FieldCov   from "./smoke/reports/field-coverage.mjs";
+
 
 
 
@@ -229,25 +238,54 @@ if (cmd === "smoke:salesOrder:release") {
   console.log(JSON.stringify(out, null, 2));
   process.exit(out.result === "PASS" ? 0 : 1);
 }
-  // Seed ALL
-if (cmd === "smoke:seed:all") {
-  requireEnv();
-  const modules = parseCsvList(arg.modules);            // optional: --modules inventory,products
-  const eachDefault = Number(arg.each || 1);            // default per-module count
-  const eachPer = parseEachPer(arg["each-per"]);        // optional overrides
-  const code = arg.code || `seed-${Date.now()}`;        // tag suffix
-
-  const out = { code, results: [] };
-  for (const m of modules) {
-    const api = MODULE_MAP[m];
-    if (!api?.createMany) { out.results.push({ module: m, error: "unsupported_or_missing" }); continue; }
-    const each = Number.isFinite(eachPer[m]) ? eachPer[m] : eachDefault;
-    const res = await api.createMany({ each, code }).catch(e => ({ error: e?.message || String(e) }));
-    out.results.push({ module: m, ...res });
-  }
-  console.log(JSON.stringify(out, null, 2));
-  return;
+//GOODS RECEIPTS ################################################################
+// PO receive flow
+if (cmd === "smoke:flow:goods-receipt") {
+  const qty = Number(arg.qty ?? 3);
+  const code = String(arg.code ?? "gr");
+  const out = await flowGoodsReceipt.run({ qty, code });
+  return console.log(JSON.stringify(out, null, 2));
 }
+// RESERVATIONS ###############################################################
+if (cmd === "smoke:flow:reservations") {
+  const kind = String(arg.kind ?? "stall");   // stall|rv|arena
+  const code = String(arg.code ?? "resv");
+  const durationMin = Number(arg.duration ?? 120);
+  const out = await flowReservations.run({ kind, code, durationMin });
+  return console.log(JSON.stringify(out, null, 2));
+}
+// RESOURCES ########################################################################
+if (cmd === "smoke:modules:resources:seed") {
+  const each = Number(arg.each ?? 3);
+  const kind = String(arg.kind ?? "stall");
+  const code = String(arg.code ?? "res");
+  const out = await ResourcesMod.createMany({ each, kind, code });
+  return console.log(JSON.stringify(out, null, 2));
+}
+  if (cmd === "smoke:events:flow")         return console.log(JSON.stringify(await EventsFlow.run(argv), null, 2));
+  if (cmd === "smoke:registrations:flow")  return console.log(JSON.stringify(await RegsFlow.run(argv),   null, 2));
+  if (cmd === "smoke:report:field-coverage") return console.log(JSON.stringify(await FieldCov.run(argv), null, 2));
+//SEED ALL ###########################################################################
+// seed-all flow
+if (cmd === "smoke:flow:seed-all") {
+  const lines = Number(arg.lines ?? arg.line ?? 2);
+  const qty = Number(arg.qty ?? 3);
+  const code = String(arg.code ?? "seed");
+  const out = await flowSeedAll.run({ lines, qty, code });
+  return console.log(JSON.stringify(out, null, 2));
+}
+//FIELD COVERAGE   ##############################################################################
+// field coverage report
+if (cmd === "smoke:report:field-coverage") {
+  const typesCSV =
+    arg.types ||
+    "product,inventory,purchaseOrder,salesOrder,goodsReceipt,salesFulfillment,vendor,client,employee";
+  const types = typesCSV.split(",").map((s) => s.trim()).filter(Boolean);
+  const limit = Number(arg.limit ?? 200);
+  const out = await FieldCoverage.run({ types, limit });
+  return console.log(JSON.stringify(out, null, 2));
+}
+
 
 // DELETE ALL (requires --yes)
 if (cmd === "smoke:delete:all") {

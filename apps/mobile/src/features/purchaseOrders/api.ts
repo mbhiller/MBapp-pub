@@ -1,46 +1,83 @@
-import { listObjects, getObject, createObject, updateObject, deleteObject } from "../../api/client";
-import type { Page } from "./types";
-import type { components } from "../../api/generated-types";
-type PurchaseOrder = components["schemas"]["PurchaseOrder"];
+// src/features/purchaseOrders/api.ts
+import { getObject, createObject, updateObject, apiClient } from "../../api/client";
 
-/** Normalize any server page shape into Page<T> */
-function toPage<T>(res: any, limit?: number): Page<T> {
-  if (Array.isArray(res)) return { items: res as T[], next: null, limit };
-  if (res?.items && Array.isArray(res.items)) return { items: res.items as T[], next: res.next ?? null, limit };
-  if (res?.data && Array.isArray(res.data)) return { items: res.data as T[], next: res.next ?? null, limit };
-  return { items: [], next: null, limit };
+/** ===== Types (use qty, same as Sales) ===== */
+
+export type PurchaseOrderLine = {
+  id: string;
+  itemId: string;
+  qty: number;                 // unified name
+  qtyReceived?: number;
+  note?: string;
+};
+
+export type PurchaseOrder = {
+  id: string;
+  poNumber?: string;
+  status:
+    | "draft"
+    | "submitted"
+    | "approved"
+    | "partiallyReceived"
+    | "received"
+    | "cancelled"
+    | "closed";
+  vendorId?: string;
+  vendorName?: string;
+  vendorEmail?: string;
+  vendorPhone?: string;
+  vendorAltPhone?: string;
+  billingAddress?: string;
+  shippingAddress?: string;
+  notes?: string;
+  lines?: PurchaseOrderLine[];
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type CreatePOBody = Partial<PurchaseOrder> & {
+  lines?: Array<Pick<PurchaseOrderLine, "itemId" | "qty" | "note">>;
+};
+
+/** allow id? so new lines can be created by backend */
+export type UpdatePOBody = Partial<PurchaseOrder> & {
+  lines?: Array<{ id?: string; itemId: string; qty: number; note?: string }>;
+};
+
+/** ===== CRUD via Objects API ===== */
+
+export async function getPO(id: string) {
+  return getObject<PurchaseOrder>("purchaseOrder", id);
 }
 
-/** List POs (sorted newest first) */
-export async function listPurchaseOrders(opts: {
-  limit?: number;
-  next?: string;
-  sort?: "asc" | "desc";
-  q?: string;
-} = {}): Promise<Page<PurchaseOrder>> {
-  const res = await listObjects<PurchaseOrder>("purchaseOrder", {
-    by: "updatedAt",
-    sort: opts.sort ?? "desc",
-    limit: opts.limit ?? 20,
-    next: opts.next,
-    q: opts.q,
-  });
-  return toPage<PurchaseOrder>(res, opts.limit);
+export async function createPO(body: CreatePOBody) {
+  // server expects qty for lines
+  return createObject<PurchaseOrder>("purchaseOrder", { type: "purchaseOrder", ...body } as any);
 }
 
-/** Get one PO */
-export const getPurchaseOrder = (id: string) => getObject<PurchaseOrder>("purchaseOrder", id);
-
-/** Create/Update PO (idempotency supported by client via opts.idempotencyKey if you pass it) */
-export async function savePurchaseOrder(input: Partial<PurchaseOrder>) {
-  if (input.id) {
-    return updateObject<PurchaseOrder>("purchaseOrder", String(input.id), input);
-  }
-  return createObject<PurchaseOrder>("purchaseOrder", { ...input, type: "purchaseOrder" });
+export async function updatePO(id: string, body: UpdatePOBody) {
+  // server expects qty for lines
+  return updateObject<PurchaseOrder>("purchaseOrder", id, body as any);
 }
 
-/** Optional delete */
-export async function deletePurchaseOrder(id: string): Promise<{ ok: true }> {
-  await deleteObject("purchaseOrder", id);
-  return { ok: true };
+/** ===== Actions that map to apps/api/src/purchasing ===== */
+
+export async function submitPO(id: string) {
+  return apiClient.post<PurchaseOrder>(`/purchaseOrders/${id}/submit`, {});
+}
+export async function approvePO(id: string) {
+  return apiClient.post<PurchaseOrder>(`/purchaseOrders/${id}/approve`, {});
+}
+export async function cancelPO(id: string) {
+  return apiClient.post<PurchaseOrder>(`/purchaseOrders/${id}/cancel`, {});
+}
+export async function closePO(id: string) {
+  return apiClient.post<PurchaseOrder>(`/purchaseOrders/${id}/close`, {});
+}
+
+/** ===== Receiving ===== */
+
+export type ReceiveLine = { lineId: string; deltaQty: number };
+export async function receivePO(id: string, lines: ReceiveLine[]) {
+  return apiClient.post<PurchaseOrder>(`/purchaseOrders/${id}/receive`, { lines });
 }

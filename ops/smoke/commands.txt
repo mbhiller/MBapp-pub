@@ -57,3 +57,8 @@ node ops/smoke.mjs smoke:reports:product-links --limit 500
 
 node ops/smoke.mjs smoke:salesOrder:reserve --stock 5 --qty 3 --code res --strict 1
 node ops/smoke.mjs smoke:salesOrder:fulfill --stock 5 --qty 3 --code ful --strict 1
+
+node ops/smoke.mjs smoke:events:flow            --code ev
+node ops/smoke.mjs smoke:registrations:flow     --code reg
+node ops/smoke.mjs smoke:reservation:flow       --code resv --durationMin 60
+node ops/smoke.mjs smoke:report:field-coverage  --limit 500

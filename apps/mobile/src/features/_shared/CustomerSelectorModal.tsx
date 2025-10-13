@@ -1,49 +1,50 @@
 // apps/mobile/src/features/_shared/CustomerSelectorModal.tsx
 import * as React from "react";
 import {
-  View, Text, Pressable, ActivityIndicator, Modal, Platform, KeyboardAvoidingView,
+  View,
+  Text,
+  TextInput,
+  Pressable,
+  ActivityIndicator,
+  Modal,
+  Platform,
+  KeyboardAvoidingView,
+  Keyboard,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { useColors } from "../_shared/useColors";
+import { CustomerPicker } from "../_shared/fields";
 import { getObject } from "../../api/client";
-import { ScannerPanel } from "../_shared/ScannerPanel";
-import { CustomerPicker } from "./fields";
-
-type CustomerRecord = {
-  id: string;
-  type: string;
-  name?: string;
-  email?: string;
-  phone?: string;
-  altPhone?: string;
-  billingAddress?: string;
-  shippingAddress?: string;
-  notes?: string;
-};
 
 export type CustomerSnapshot = {
   customerId: string;
-  customerName?: string;
-  customerEmail?: string;
-  customerPhone?: string;
-  customerAltPhone?: string;
-  billingAddress?: string;
-  shippingAddress?: string;
-  customerNotes?: string;
+  customerName?: string | null;
+  customerEmail?: string | null;
+  customerPhone?: string | null;
+  customerAltPhone?: string | null;
+  billingAddress?: string | null;
+  shippingAddress?: string | null;
+  customerNotes?: string | null;
 };
 
-function normalizeSnapshot(x: CustomerRecord): CustomerSnapshot {
-  return {
-    customerId: x.id,
-    customerName: x.name,
-    customerEmail: x.email,
-    customerPhone: x.phone,
-    customerAltPhone: x.altPhone,
-    billingAddress: x.billingAddress,
-    shippingAddress: x.shippingAddress,
-    customerNotes: x.notes,
-  };
+// ---- helpers to normalize cross-type fields ----
+function labelForParty(rec: any, fallback?: string) {
+  return (
+    rec?.name ??
+    rec?.displayName ??
+    rec?.legalName ??
+    rec?.companyName ??
+    rec?.fullName ??
+    fallback ??
+    rec?.id
+  );
+}
+function pickStr(...vals: Array<any>): string | undefined {
+  for (const v of vals) {
+    if (typeof v === "string" && v.trim()) return v;
+  }
+  return undefined;
 }
 
 export function CustomerSelectorModal({
@@ -51,67 +52,82 @@ export function CustomerSelectorModal({
   onClose,
   onSave,
   title = "Select Customer",
-  searchTypes = ["client", "customer", "vendor", "employee"],
+  initialCustomer, // optional pre-seed { id, label }
+  candidateTypes,  // e.g. ["employee","vendor","client","organization","contact","person"]
 }: {
   visible: boolean;
   onClose: () => void;
   onSave: (snap: CustomerSnapshot) => void;
   title?: string;
-  searchTypes?: string[];
+  initialCustomer?: { id: string; label?: string } | null;
+  candidateTypes?: string[];
 }) {
   const t = useColors();
+  const [picked, setPicked] = React.useState<{ id: string; label?: string } | null>(initialCustomer ?? null);
+  const [initialText, setInitialText] = React.useState<string>(initialCustomer?.label ?? "");
+  const [busy, setBusy] = React.useState(false);
 
-  const [selected, setSelected] = React.useState<CustomerRecord | null>(null);
-  const [scanValue, setScanValue] = React.useState("");
-  const [resolving, setResolving] = React.useState(false);
+  // default set of party collections to try when hydrating the record by id
+  const TYPES_DEFAULT = React.useMemo(
+    () => ["employee", "vendor", "client", "organization", "contact", "person", "customer", "patient"],
+    []
+  );
+  const typesToTry = candidateTypes && candidateTypes.length ? candidateTypes : TYPES_DEFAULT;
 
   React.useEffect(() => {
-    if (!visible) {
-      setSelected(null);
-      setScanValue("");
-      setResolving(false);
-    }
-  }, [visible]);
+  if (visible) {
+    setPicked(initialCustomer ?? null);
+    setInitialText(initialCustomer?.label ?? "");
+  } else {
+    setBusy(false);
+  }
+  // Track id/label independently to avoid stale seeds
+}, [visible, initialCustomer?.id, initialCustomer?.label]);
 
-  async function resolvePickedCustomer(partial: { id: string; label: string; type?: string }) {
-    setResolving(true);
+  async function save() {
+    if (!picked?.id || busy) return;
+    setBusy(true);
     try {
-      const tyList = partial.type ? [partial.type] : searchTypes;
-      for (const ty of tyList) {
+      // Try multiple collections to hydrate details for the snapshot
+      let c: any = null;
+      for (const ty of typesToTry) {
         try {
-          const rec = await getObject<CustomerRecord>(ty, partial.id);
-          if (rec?.id) { setSelected({ ...rec, type: ty }); return; }
-        } catch {}
+          const rec = await getObject<any>(ty, picked.id);
+          if (rec?.id) {
+            c = rec;
+            break;
+          }
+        } catch {
+          // ignore per-type failures; we'll try the next one
+        }
       }
-      // Fallback to at least keep id/label
-      setSelected({ id: partial.id, type: partial.type || "customer", name: partial.label });
+
+      const snap: CustomerSnapshot = {
+        customerId: picked.id,
+        customerName: labelForParty(c, picked.label) ?? null,
+        customerEmail: pickStr(c?.email, c?.primaryEmail, c?.workEmail) ?? null,
+        customerPhone: pickStr(c?.phone, c?.primaryPhone, c?.workPhone, c?.mobile) ?? null,
+        customerAltPhone: pickStr(c?.altPhone, c?.secondaryPhone) ?? null,
+        billingAddress: pickStr(c?.billingAddress, c?.address, c?.mailingAddress) ?? null,
+        shippingAddress: pickStr(c?.shippingAddress, c?.deliveryAddress) ?? null,
+        customerNotes: pickStr(c?.notes, c?.memo) ?? null,
+      };
+
+      onSave(snap);
     } finally {
-      setResolving(false);
+      setBusy(false);
     }
   }
-
-  async function saveChoice() {
-    if (selected?.id) { onSave(normalizeSnapshot(selected)); return; }
-
-    // Try to resolve by typed/scanned text
-    const idOrCode = scanValue.trim();
-    if (!idOrCode) return;
-    for (const ty of searchTypes) {
-      try {
-        const rec = await getObject<CustomerRecord>(ty, idOrCode);
-        if (rec?.id) { onSave(normalizeSnapshot({ ...rec, type: ty })); return; }
-      } catch {}
-    }
-    onClose();
-  }
-
-  const canSave = Boolean(selected?.id || scanValue.trim());
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <SafeAreaView
         style={{
-          flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", padding: 16,
+          flex: 1,
+          backgroundColor: "rgba(0,0,0,0.5)",
+          justifyContent: "center",
+          alignItems: "center",
+          padding: 16,
         }}
         edges={["top", "bottom"]}
       >
@@ -121,17 +137,26 @@ export function CustomerSelectorModal({
         >
           <View
             style={{
-              backgroundColor: t.colors.card, borderRadius: 12, borderWidth: 1, borderColor: t.colors.border, overflow: "hidden",
+              backgroundColor: t.colors.card,
+              borderRadius: 12,
+              borderWidth: 1,
+              borderColor: t.colors.border,
+              overflow: "hidden",
             }}
           >
             {/* Header */}
             <View
               style={{
-                height: 48, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-                borderBottomWidth: 1, borderBottomColor: t.colors.border,
+                height: 48,
+                paddingHorizontal: 12,
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                borderBottomWidth: 1,
+                borderBottomColor: t.colors.border,
               }}
             >
-              <Text style={{ color: t.colors.text, fontWeight: "700" as any }}>{title}</Text>
+              <Text style={{ color: t.colors.text, fontWeight: "700" as const }}>{title}</Text>
               <Pressable onPress={onClose} hitSlop={10} style={{ padding: 6 }}>
                 <Feather name="x" size={20} color={t.colors.text} />
               </Pressable>
@@ -139,54 +164,50 @@ export function CustomerSelectorModal({
 
             {/* Body */}
             <View style={{ padding: 12, gap: 12 }}>
-              {/* Row 1: Scanner */}
-              <ScannerPanel value={scanValue} onChange={setScanValue} />
+              <CustomerPicker
+                placeholder="Search customers…"
+                initialText={initialText}
+                onSelect={(r) => {
+                  setPicked({ id: r.id, label: r.label });
+                  Keyboard.dismiss();
+                }}
+              />
+            </View>
 
-              {/* Row 2: Autocomplete */}
-              <View>
-                <CustomerPicker
-                  placeholder="Search customers…"
-                  initialText=""
-                  onSelect={(res) => resolvePickedCustomer(res)}
-                />
-                {resolving ? (
-                  <View style={{ paddingTop: 8, flexDirection: "row", alignItems: "center", gap: 8 }}>
-                    <ActivityIndicator />
-                    <Text style={{ color: t.colors.textMuted }}>Loading details…</Text>
-                  </View>
-                ) : selected?.name ? (
-                  <Text style={{ color: t.colors.textMuted, marginTop: 6 }}>
-                    Selected: <Text style={{ color: t.colors.text, fontWeight: "600" as any }}>{selected.name}</Text>
-                    {selected.type ? <Text style={{ color: t.colors.textMuted }}> · {selected.type}</Text> : null}
-                  </Text>
-                ) : null}
-              </View>
-
-              {/* Footer */}
-              <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8 }}>
-                <Pressable
-                  onPress={onClose}
-                  style={{
-                    paddingHorizontal: 12, paddingVertical: 10,
-                    borderRadius: 8, borderWidth: 1, borderColor: t.colors.border, backgroundColor: t.colors.card,
-                  }}
-                >
-                  <Text style={{ color: t.colors.text }}>Cancel</Text>
-                </Pressable>
-                <Pressable
-                  onPress={saveChoice}
-                  disabled={!canSave}
-                  style={{
-                    paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10,
-                    backgroundColor: t.colors.primary, opacity: canSave ? 1 : 0.5,
-                  }}
-                  accessibilityState={{ disabled: !canSave }}
-                >
-                  <Text style={{ color: (t.colors as any).buttonText ?? "#fff", fontWeight: "700" as any }}>
+            {/* Footer */}
+            <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, padding: 12 }}>
+              <Pressable
+                onPress={onClose}
+                style={{
+                  paddingHorizontal: 12,
+                  paddingVertical: 10,
+                  borderRadius: 8,
+                  borderWidth: 1,
+                  borderColor: t.colors.border,
+                  backgroundColor: t.colors.card,
+                }}
+              >
+                <Text style={{ color: t.colors.text }}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={save}
+                disabled={!picked || busy}
+                style={{
+                  paddingHorizontal: 14,
+                  paddingVertical: 10,
+                  borderRadius: 10,
+                  backgroundColor: t.colors.primary,
+                  opacity: !picked || busy ? 0.6 : 1,
+                }}
+              >
+                {busy ? (
+                  <ActivityIndicator />
+                ) : (
+                  <Text style={{ color: (t.colors as any).buttonText ?? "#fff", fontWeight: "700" as const }}>
                     Save
                   </Text>
-                </Pressable>
-              </View>
+                )}
+              </Pressable>
             </View>
           </View>
         </KeyboardAvoidingView>

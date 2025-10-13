@@ -49,7 +49,7 @@ export type RootStackParamList = {
   RegistrationDetail: DetailParams;
 
   // Reservations (optionally filtered by resource)
-  ReservationsList: { resourceId?: string } | undefined;
+  ReservationsList: undefined;
   ReservationDetail: DetailParams;
 
   // Vendors

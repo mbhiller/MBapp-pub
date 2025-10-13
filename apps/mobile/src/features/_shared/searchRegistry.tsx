@@ -1,14 +1,16 @@
-// Central registry of autocomplete search types per use-case.
-const REGISTRY: Record<string, string[]> = {
-  // Sales
-  salesLine: ["product", "inventory"],
-  customer:  ["client", "customer", "vendor", "employee"],
+export type SearchKey =
+  | "salesLine"     // items for SO lines
+  | "customer"      // customers
+  | "purchaseLine"
+  | "vendor";
 
-  // You can add these later:
-  // purchaseLine: ["product", "inventory"],
-  // resourcePick: ["resource", "reservation"],
+const registry: Record<SearchKey, string[]> = {
+  salesLine: ["product", "inventory"],
+  customer: ["employee","vendor","client","organization","contact","person","customer","patient"],
+  purchaseLine: ["product","inventory"],
+  vendor: ["vendor","organization","supplier","contact","person"],
 };
 
-export function getSearchTypes(kind: keyof typeof REGISTRY | string): string[] {
-  return REGISTRY[kind] || [];
+export function getSearchTypes(key: SearchKey) {
+  return registry[key] ?? [];
 }

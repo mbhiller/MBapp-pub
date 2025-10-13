@@ -1,21 +1,42 @@
 import * as React from "react";
+import { TextInput } from "react-native";
 import { AutoCompleteField } from "./AutoCompleteField";
-import { getSearchTypes } from "./searchRegistry";
+import { getSearchTypes, type SearchKey } from "./searchRegistry";
 
-export type ResultItem = { id: string; label: string; type?: string };
+type Result = { id: string; label: string };
 
-export function SalesLinePicker(props: {
+type BaseProps = {
   placeholder?: string;
   initialText?: string;
-  onSelect: (item: ResultItem) => void;
-}) {
-  return <AutoCompleteField searchTypes={getSearchTypes("salesLine")} {...props} />;
+  inputRef?: React.RefObject<TextInput>;
+  onSelect: (r: Result) => void;
+  debounceMs?: number;
+  minChars?: number;
+};
+
+function PickerFor({ searchKey, ...p }: BaseProps & { searchKey: SearchKey }) {
+  return (
+    <AutoCompleteField
+      placeholder={p.placeholder}
+      initialText={p.initialText ?? ""}
+      searchTypes={getSearchTypes(searchKey)}
+      debounceMs={p.debounceMs ?? 220}
+      minChars={p.minChars ?? 1}
+      inputRef={p.inputRef}
+      onSelect={(r) => p.onSelect({ id: r.id, label: r.label })}
+      lockAfterPick={true}
+    />
+  );
 }
 
-export function CustomerPicker(props: {
-  placeholder?: string;
-  initialText?: string;
-  onSelect: (item: ResultItem) => void;
-}) {
-  return <AutoCompleteField searchTypes={getSearchTypes("customer")} {...props} />;
+export function SalesLinePicker(props: BaseProps) {
+  return <PickerFor searchKey="salesLine" {...props} />;
 }
+
+export function CustomerPicker(props: BaseProps) {
+  return <PickerFor searchKey="customer" {...props} />;
+}
+
+export function PurchaseLinePicker(p: BaseProps) { return <PickerFor searchKey="purchaseLine" {...p} />; }
+export function VendorPicker(p: BaseProps) { return <PickerFor searchKey="vendor" {...p} />; }
+

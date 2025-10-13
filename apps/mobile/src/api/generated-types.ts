@@ -1567,38 +1567,37 @@ export interface components {
              */
             kind: "good" | "service";
             sku?: string;
-            price?: number;
-            taxCode?: string;
+            price?: number | null;
+            taxCode?: string | null;
+            defaultItemId?: string | null;
+            tags?: string[];
             /**
              * @default active
              * @enum {string}
              */
             status: "active" | "inactive" | "archived";
-            notes?: string;
+            notes?: string | null;
         };
         InventoryItem: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
             type: "inventory";
-            /** @description Optional link to a product */
-            productId?: string;
             name: string;
             sku?: string;
-            /**
-             * @deprecated
-             * @description Deprecated – use /inventory/{id}/onhand
-             */
-            quantity?: number;
-            /** @description Unit of measure */
             uom?: string;
-            location?: string;
-            minQty?: number;
-            maxQty?: number;
+            productId?: string | null;
+            location?: string | null;
+            minQty?: number | null;
+            maxQty?: number | null;
+            /** @default false */
+            lotTracked: boolean;
+            barcode?: string | null;
+            tags?: string[];
             /**
              * @default active
              * @enum {string}
              */
             status: "active" | "inactive" | "archived";
-            notes?: string;
+            notes?: string | null;
         };
         InventoryMovement: {
             id?: string;
@@ -1656,40 +1655,47 @@ export interface components {
             /** @enum {string} */
             type: "resource";
             name: string;
-            code?: string;
+            code?: string | null;
+            /**
+             * @default other
+             * @enum {string}
+             */
+            resourceType: "stall" | "rv" | "arena" | "equipment" | "other";
+            /**
+             * @default available
+             * @enum {string}
+             */
+            status: "available" | "unavailable" | "maintenance";
+            capacity?: number | null;
+            location?: string | null;
+            tags?: string[];
             /** Format: uri */
-            url?: string;
+            url?: string | null;
             /** Format: date-time */
-            expiresAt?: string;
+            expiresAt?: string | null;
+            notes?: string | null;
         };
         Event: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
             type: "event";
             name: string;
-            description?: string;
-            location?: string;
+            description?: string | null;
+            location?: string | null;
             /** Format: date-time */
             startsAt: string;
             /** Format: date-time */
-            endsAt?: string;
+            endsAt?: string | null;
             /**
-             * Format: date-time
-             * @description Alias of startsAt (deprecated)
-             */
-            start?: string;
-            /**
-             * Format: date-time
-             * @description Alias of endsAt (deprecated)
-             */
-            end?: string;
-            /**
-             * @description Operational availability of the event
-             * @default available
+             * @default draft
              * @enum {string}
              */
             status: "draft" | "scheduled" | "open" | "closed" | "completed" | "cancelled" | "archived";
-            capacity?: number;
-            notes?: string;
+            capacity?: number | null;
+            timezone?: string | null;
+            organizerId?: string | null;
+            /** Format: date-time */
+            publishedAt?: string | null;
+            notes?: string | null;
         };
         Registration: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
@@ -1703,18 +1709,12 @@ export interface components {
             startsAt?: string | null;
             /** Format: date-time */
             endsAt?: string | null;
-            /**
-             * Format: date-time
-             * @description Alias of startsAt (deprecated)
-             */
-            start?: string | null;
-            /**
-             * Format: date-time
-             * @description Alias of endsAt (deprecated)
-             */
-            end?: string | null;
             /** Format: date-time */
             registeredAt?: string | null;
+            /** Format: date-time */
+            checkedInAt?: string | null;
+            /** Format: date-time */
+            checkedOutAt?: string | null;
             /**
              * @default pending
              * @enum {string}
@@ -1726,7 +1726,7 @@ export interface components {
             /** @enum {string} */
             type: "reservation";
             resourceId: string;
-            resourceName?: string;
+            resourceName?: string | null;
             eventId?: string | null;
             clientId: string;
             clientName?: string | null;
@@ -1734,16 +1734,9 @@ export interface components {
             startsAt: string;
             /** Format: date-time */
             endsAt: string;
-            /**
-             * Format: date-time
-             * @description Alias of startsAt (deprecated)
-             */
-            start?: string;
-            /**
-             * Format: date-time
-             * @description Alias of endsAt (deprecated)
-             */
-            end?: string;
+            rate?: number | null;
+            price?: number | null;
+            conflictKey?: string | null;
             /**
              * @default pending
              * @enum {string}
@@ -1792,27 +1785,91 @@ export interface components {
             notes?: string;
         };
         Organization: components["schemas"]["ObjectBase"] & {
-            /**
-             * @example organization
-             * @enum {string}
-             */
+            /** @enum {string} */
             type: "organization";
-            /** @example National Dressage Foundation */
             name: string;
-            /**
-             * @example federation
-             * @enum {string}
-             */
-            kind?: "club" | "federation" | "venueOp" | "sponsor";
-            /**
-             * @default active
-             * @enum {string}
-             */
-            status: "active" | "inactive" | "archived";
-            notes?: string | null;
-            metadata?: {
+            code?: string | null;
+            /** Format: uri */
+            website?: string | null;
+            phone?: string | null;
+            /** Format: email */
+            email?: string | null;
+            address?: string | null;
+            prefs?: {
                 [key: string]: unknown;
             } | null;
+            notes?: string | null;
+        };
+        Venue: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "venue";
+            name: string;
+            address?: string | null;
+            timezone?: string | null;
+            geo?: {
+                lat?: number;
+                lon?: number;
+            } | null;
+            notes?: string | null;
+        };
+        Division: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "division";
+            code?: string;
+            name: string;
+            description?: string | null;
+            fee?: number | null;
+            rules?: string[] | null;
+            notes?: string | null;
+        };
+        Class: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "class";
+            divisionId?: string | null;
+            code?: string;
+            name: string;
+            description?: string | null;
+            fee?: number | null;
+            order?: number | null;
+            rules?: string[] | null;
+            notes?: string | null;
+        };
+        Scorecard: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "scorecard";
+            eventId: string;
+            classId: string;
+            template?: {
+                [key: string]: unknown;
+            };
+            entries?: Record<string, never>[] | null;
+            /**
+             * @default draft
+             * @enum {string}
+             */
+            status: "draft" | "published" | "archived";
+            notes?: string | null;
+        };
+        Message: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "message";
+            /** @enum {string} */
+            channel: "push" | "sms" | "email";
+            subject?: string | null;
+            body: string;
+            segment?: {
+                [key: string]: unknown;
+            } | null;
+            /** Format: date-time */
+            scheduleAt?: string | null;
+            /** Format: date-time */
+            sentAt?: string | null;
+            /**
+             * @default queued
+             * @enum {string}
+             */
+            status: "queued" | "sending" | "sent" | "failed" | "cancelled";
+            notes?: string | null;
         };
         MoneyTotals: {
             subtotal?: number;
@@ -1884,13 +1941,13 @@ export interface components {
         };
         SalesOrderLine: {
             id?: string;
-            /** @description InventoryItem.id being sold */
             itemId: string;
             productId?: string | null;
             description?: string | null;
             uom: string;
-            /** @description Ordered quantity */
             qty: number;
+            /** @default 0 */
+            qtyCommitted: number;
             /** @default 0 */
             qtyFulfilled: number;
             unitPrice?: number | null;
@@ -1949,18 +2006,20 @@ export interface components {
             locationId?: string | null;
             lot?: string | null;
         };
-        GoodsReceipt: {
-            id?: string;
+        GoodsReceipt: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
             type: "goodsReceipt";
-            tenantId?: string;
             poId: string;
-            userId?: string | null;
             /** Format: date-time */
-            ts: string;
-            lines: components["schemas"]["GoodsReceiptLine"][];
+            ts?: string | null;
             notes?: string | null;
-            attachments?: string[];
+            lines?: {
+                lineId: string;
+                itemId?: string | null;
+                deltaQty: number;
+                lot?: string | null;
+                locationId?: string | null;
+            }[];
         };
         SalesFulfillmentLine: {
             lineId: string;
@@ -1968,20 +2027,20 @@ export interface components {
             locationId?: string | null;
             lot?: string | null;
         };
-        SalesFulfillment: {
-            id?: string;
+        SalesFulfillment: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
             type: "salesFulfillment";
-            tenantId?: string;
             soId: string;
-            userId?: string | null;
             /** Format: date-time */
-            ts: string;
-            lines: components["schemas"]["SalesFulfillmentLine"][];
-            carrier?: string | null;
-            tracking?: string | null;
+            ts?: string | null;
             notes?: string | null;
-            attachments?: string[];
+            lines?: {
+                lineId: string;
+                itemId?: string | null;
+                deltaQty: number;
+                lot?: string | null;
+                locationId?: string | null;
+            }[];
         };
         Integration: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */

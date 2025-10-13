@@ -1,4 +1,3 @@
-// apps/mobile/src/features/_shared/AutoCompleteField.tsx
 import * as React from "react";
 import { View, TextInput, Text, Pressable, ScrollView, ActivityIndicator, Keyboard } from "react-native";
 import { useColors } from "./useColors";
@@ -15,7 +14,6 @@ function mapToResultItems(type: string, rows: any[]): ResultItem[] {
     })
     .filter(Boolean) as ResultItem[];
 }
-
 async function searchPerType(type: string, q: string, limit: number) {
   const attempts: Array<Record<string, any>> = [{ q }, { query: q }];
   for (const body of attempts) {
@@ -26,7 +24,6 @@ async function searchPerType(type: string, q: string, limit: number) {
   }
   return [];
 }
-
 async function searchAcrossTypes(q: string, searchTypes: string[], limit: number) {
   const perTypeLimit = Math.max(3, Math.floor(limit / Math.max(1, searchTypes.length)));
   const results = await Promise.all(searchTypes.map((ty) => searchPerType(ty, q, perTypeLimit)));
@@ -64,7 +61,6 @@ export function AutoCompleteField({
   const t = useColors();
 
   const tiRef = React.useRef<TextInput>(null);
-  // prefer caller ref if provided
   const mergedRef = (inputRef as any) ?? tiRef;
 
   const [q, setQ] = React.useState(initialText);
@@ -82,37 +78,28 @@ export function AutoCompleteField({
   const mounted = React.useRef(true);
   React.useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
-  // Sync when parent updates initialText (e.g., opening modal pre-filled)
+  // Sync to external initialText (e.g., when opening an edit modal)
   React.useEffect(() => {
-    if (ignoreNextInitialHydrate.current) {
-      // we just picked; skip one external hydrate to avoid reverting to old typed text
-      ignoreNextInitialHydrate.current = false;
-      return;
-    }
-    if (typeof initialText === "string") {
-      internalSet.current = true;
-      setQ(initialText);
-      setOpen(false);
-      setResults([]);
-      if (lockAfterPick) {
-        lastPickedLabel.current = initialText;
-        locked.current = true;
-      }
+    if (ignoreNextInitialHydrate.current) { ignoreNextInitialHydrate.current = false; return; }
+    internalSet.current = true;
+    setQ(initialText ?? "");
+    setOpen(false);
+    setResults([]);
+    if (lockAfterPick) {
+      lastPickedLabel.current = initialText ?? "";
+      locked.current = true;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialText]);
 
-  // Debounced search (skips when locked / programmatic / right after a pick)
+  // Debounced search (skip when locked / programmatic / right after a pick)
   React.useEffect(() => {
     const query = q.trim();
 
     if (internalSet.current) { internalSet.current = false; return; }
 
-    // Cooldown to avoid "double-pick" / reopening list
     const now = Date.now();
-    if (now - justPickedAt.current < PICK_COOLDOWN_MS) {
-      setOpen(false); setResults([]); return;
-    }
+    if (now - justPickedAt.current < PICK_COOLDOWN_MS) { setOpen(false); setResults([]); return; }
 
     if (lockAfterPick && locked.current) {
       if (lastPickedLabel.current !== null && query !== lastPickedLabel.current) {
@@ -145,13 +132,12 @@ export function AutoCompleteField({
     if (lockAfterPick) locked.current = true;
     internalSet.current = true;
 
-    // Force the TextInput to display the picked label immediately
     try { (mergedRef?.current as TextInput | null)?.setNativeProps?.({ text: it.label }); } catch {}
     setQ(it.label);
     setOpen(false);
     setResults([]);
     justPickedAt.current = Date.now();
-    ignoreNextInitialHydrate.current = true; // prevent an external initialText sync from undoing our pick
+    ignoreNextInitialHydrate.current = true;
     Keyboard.dismiss();
     try { (mergedRef?.current as TextInput | null)?.blur?.(); } catch {}
 

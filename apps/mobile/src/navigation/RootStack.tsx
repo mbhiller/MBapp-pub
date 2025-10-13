@@ -68,11 +68,13 @@ import IntegrationDetailScreen from "../screens/IntegrationDetailScreen";
 import OrganizationsListScreen from "../screens/OrganizationsListScreen";
 import OrganizationDetailScreen from "../screens/OrganizationDetailScreen";
 
-import GoodsReceiptsListScreen from "../screens/GoodsReceiptsListScreen";
-import GoodsReceiptDetailScreen from "../screens/GoodsReceiptDetailScreen";
 
-import SalesFulfillmentsListScreen from "../screens/SalesFulfillmentsListScreen";
+import GoodsReceiptDetailScreen from "../screens/GoodsReceiptDetailScreen";
+import GoodsReceiptsListScreen from "../screens/GoodsReceiptsListScreen";
+
+
 import SalesFulfillmentDetailScreen from "../screens/SalesFulfillmentDetailScreen";
+import SalesFulfillmentsListScreen from "../screens/SalesFulfillmentsListScreen";
 
 import DevDiagnosticsScreen from "../features/dev/DevDiagnosticsScreen";
 // optional runs
@@ -161,11 +163,13 @@ export default function RootStack() {
       <Stack.Screen name="SalesOrdersList" component={SalesOrdersListScreen} options={{ title: "Sales" }} />
       <Stack.Screen name="SalesOrderDetail" component={SalesOrderDetailScreen} options={{ title: "Sales Order" }} />
 
-      <Stack.Screen name="GoodsReceiptsList" component={GoodsReceiptsListScreen} options={{ title: "Goods Receipts" }} />
+
       <Stack.Screen name="GoodsReceiptDetail" component={GoodsReceiptDetailScreen} options={{ title: "Goods Receipt" }} />
+      <Stack.Screen name="GoodsReceiptsList" component={GoodsReceiptsListScreen} options={{ title: "Goods Receipt" }} />
       
-      <Stack.Screen name="SalesFulfillmentsList" component={SalesFulfillmentsListScreen} options={{ title: "Sales Fulfillments" }} />
+
       <Stack.Screen name="SalesFulfillmentDetail" component={SalesFulfillmentDetailScreen} options={{ title: "Sales Fulfillment" }} />
+      <Stack.Screen name="SalesFulfillmentsList" component={SalesFulfillmentsListScreen} options={{ title: "Sales Fulfillment" }} />
 
       <Stack.Screen name="IntegrationsList" component={IntegrationsListScreen} options={{ title: "Integrations" }} />
       <Stack.Screen name="IntegrationDetail" component={IntegrationDetailScreen} options={{ title: "Integration" }} />
