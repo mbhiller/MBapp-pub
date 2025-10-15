@@ -1,7 +1,7 @@
 /* ops/smoke/flows/purchaseOrder-flow.mjs */
-import { rid, withTag, createObject, api } from "../core.mjs";
-import * as Inventory from "../modules/inventory-smoke.mjs";
-import * as Vendors from "../modules/vendors-smoke.mjs";
+import { rid, withTag, createObject, api } from "../../core.mjs";
+import * as Inventory from "../../modules/inventory-smoke.mjs";
+import * as Vendors from "../../modules/vendors-smoke.mjs";
 export async function run({ lines = 3, qty = 2, code = "po" } = {}) {
   const tag = String(code || "po");
   const inv = await Inventory.createMany({ each: lines, code: tag });

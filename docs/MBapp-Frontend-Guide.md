@@ -89,3 +89,47 @@ UX: chevrons collapse; ⋮ for actions; badges are not buttons.
 After every action: re-hydrate; show a light toast if notable.
 
 Keep smoke parity with backend guardrails.
+
+## Aligned Addenda — Tier 1 Canonical Model (Frontend)
+
+### Pickers & Lists (role-filtered Party views)
+- **Customers** = Party where role=customer (label can read “Customer” or “Client” in context).
+- **Vendors** = Party where role=vendor.
+- **Employees** = Party where role=employee.
+- **Bidders/Lessors/Lessee** as needed by module.
+
+**UI conventions**
+- Show **chips** for all roles on Party rows (“Acme — customer, vendor”).
+- Inline action: “+ Add role” creates a PartyRole without leaving the screen.
+- Deduping: if email/registry exists, route to existing Party (UNIQ# match).
+
+### Orders
+- **SO** detail uses **PartyPicker(role=customer)** for `customerId`.
+- **PO** detail uses **PartyPicker(role=vendor)** for `vendorId`.
+- When a Party is picked, pull defaults from **CustomerAccount/VendorAccount** (terms, price list, remit-to/bill-to) into the order draft.
+
+### Labor & Staffing UI
+- **Event detail → Staff tab**: list **EventStaffAssignment**, add/edit shifts, rate overrides, cost category.
+- **Timesheets**: “My Entries” (LaborEntry), **Approvals** (manager view), **Payroll Batches** (create/approve/post).
+- Posting feedback: toast with JE id/summary after batch post (dev builds).
+
+### Leasing UI
+- **Facilities/Resources → Leases** list with status (draft/active/terminated/expired).
+- **Lease detail**: resources, term, charge schedule, deposit. “Run Billing” (dev-only) triggers **LeaseBillingRun** and shows generated documents.
+
+### Auctions UI
+- Allow selecting our **Tenant Party** as a bidder in dev; badge/alert when self-related per **RelatedPartyRule**.
+- Settlement screen shows AR/AP created; if auto-offset enabled, show clearing entry reference.
+
+### Navigation & State
+- Keep role-filtered pickers as thin wrappers over the Parties endpoint.
+- Use focus-refetch hooks on detail→list returns so status badges & totals update.
+- Keyboard behavior: dismiss on navigate; preserve filter text unless an explicit reset is triggered.
+
+### QA / Dev Menu
+Add one-tap entries for:
+- Identity/roles seed
+- SO flow, PO flow
+- Staff→Labor→Payroll
+- Lease Billing Run
+- Auction self-bid smoke

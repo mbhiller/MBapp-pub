@@ -1,6 +1,6 @@
 npm run api:deploy -FunctionName "mbapp-nonprod-objects" -Region "us-east-1" -ApiBase "$Env:MBAPP_API_BASE"
 # env + token
- $env:MBAPP_BEARER = $(node ops/smoke.mjs login:dev --tenant DemoTenant --email dev@example.com --policy full --export)
+ 
 
 # per-module CRUD
 node ops/smoke.mjs smoke:vendors:create --each 2 --code seed
@@ -62,3 +62,18 @@ node ops/smoke.mjs smoke:events:flow            --code ev
 node ops/smoke.mjs smoke:registrations:flow     --code reg
 node ops/smoke.mjs smoke:reservation:flow       --code resv --durationMin 60
 node ops/smoke.mjs smoke:report:field-coverage  --limit 500
+
+
+
+
+###############################################################################################################################
+$env:MBAPP_BEARER = $(node ops/smoke.mjs login:dev --tenant DemoTenant --email dev@example.com --policy full --export)
+node ops/smoke.mjs smoke:purge:all
+node ops/smoke.mjs smoke:seed:all --products 6 --customers 4 --vendors 2 --resources 3 --events 2 --registrations 5 --reservations 4 --soLines 2 --poLines 3
+node ops/smoke.mjs smoke:verify:edits
+node ops/smoke.mjs smoke:registrations:edit-in-place
+node ops/smoke.mjs smoke:events:capacity-guard
+node ops/smoke.mjs smoke:reservations:conflict-guard
+
+# your existing commands still work; anything not matched is forwarded to _smoke.mjs
+node ops/smoke.mjs smoke:salesOrder:flow --lines 3 --qty 2 --code so

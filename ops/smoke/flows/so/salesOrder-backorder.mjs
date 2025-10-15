@@ -1,7 +1,7 @@
 // ops/smoke/flows/salesOrder-backorder.mjs
-import { rid, withTag, createObject, api } from "../core.mjs";
-import * as Inventory from "../modules/inventory-smoke.mjs";
-import * as Vendors from "../modules/vendors-smoke.mjs";
+import { rid, withTag, createObject, api } from "../../core.mjs";
+import * as Inventory from "../../modules/inventory-smoke.mjs";
+import * as Vendors from "../../modules/vendors-smoke.mjs";
 
 async function loadSO(id) {
   return api(`/objects/salesOrder/${encodeURIComponent(id)}`, { method: "GET" });

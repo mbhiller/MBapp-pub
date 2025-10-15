@@ -2256,36 +2256,3 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
       summary: Admin Audit
-
-# --- Added: account profile schemas ---
-components:
-  schemas:
-
-    CustomerAccount:
-      allOf:
-        - $ref: '#/components/schemas/ObjectBase'
-        - type: object
-          properties:
-            type: { type: string, enum: [customerAccount] }
-            partyId: { type: string }
-            termsId: { type: string, nullable: true }
-            creditLimit: { type: number, nullable: true }
-            priceListId: { type: string, nullable: true }
-            taxExempt: { type: boolean, default: false }
-            defaultBillToId: { type: string, nullable: true }
-            defaultShipToId: { type: string, nullable: true }
-          required: [partyId]
-
-    VendorAccount:
-      allOf:
-        - $ref: '#/components/schemas/ObjectBase'
-        - type: object
-          properties:
-            type: { type: string, enum: [vendorAccount] }
-            partyId: { type: string }
-            termsId: { type: string, nullable: true }
-            remitToAddressId: { type: string, nullable: true }
-            is1099: { type: boolean, default: false }
-            defaultExpenseAccount: { type: string, nullable: true }
-            defaultCOGSAccount: { type: string, nullable: true }
-          required: [partyId]

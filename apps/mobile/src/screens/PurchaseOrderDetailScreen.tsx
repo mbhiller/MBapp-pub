@@ -37,38 +37,15 @@ import {
   type PurchaseOrder,
   type PurchaseOrderLine,
 } from "../features/purchaseOrders/api";
+import { makeKey, normalizeLines, toPatchLines, type WithKey } from "../features/_shared/lineEditor";
 
 /* ---------- helpers ---------- */
 type RootStackParamList = { PurchaseOrderDetail: { id?: string; mode?: "new" | "edit" } };
 type ScreenRoute = RouteProp<RootStackParamList, "PurchaseOrderDetail">;
-
-function isTempId(id?: string | null) { return !!id && String(id).startsWith("TMP_"); }
-function s(v?: string | null) { return v == null ? undefined : v; }
-
-// ---- Stable key helpers ----
-type WithKey<T> = T & { _key: string };
 type WLine = WithKey<PurchaseOrderLine>;
 
-function makeKey(id?: string) {
-  return id && typeof id === "string" ? id : `CID_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-}
-function normalizeLines<T extends { id?: string; itemId: string; qty?: number; note?: string; qtyReceived?: number }>(
-  lines: T[] | undefined | null
-): Array<WithKey<Required<T>>> {
-  const src = Array.isArray(lines) ? lines : [];
-  return src.map((ln) => {
-    const qty = typeof ln.qty === "number" && !Number.isNaN(ln.qty) ? ln.qty : 1;
-    const qtyReceived = typeof (ln as any).qtyReceived === "number" ? (ln as any).qtyReceived : 0;
-    const _key = makeKey(ln.id);
-    return { ...ln, qty, qtyReceived, _key } as WithKey<Required<T>>;
-  });
-}
-function toPatchLines<T extends { id?: string; itemId: string; qty: number; note?: string }>(lines: Array<WithKey<T>>) {
-  return lines.map((l) => {
-    const id = typeof l.id === "string" && !/^TMP_|^CID_/.test(l.id) ? l.id : undefined;
-    return { id, itemId: l.itemId, qty: Number(l.qty) || 1, note: l.note };
-  });
-}
+function s(v?: string | null) { return v == null ? undefined : v; }
+
 
 export default function PurchaseOrderDetailScreen() {
   const route = useRoute<ScreenRoute>();

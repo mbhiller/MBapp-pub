@@ -53,3 +53,55 @@ Each exports `async function handle(event)`. Read path/query/body, use `authoriz
 
 ## 8) Smokes
 See the Handoff Quickstart for the canonical set.
+
+## Aligned Addenda — Tier 1 Canonical Model (Backend)
+
+### Identity & Roles (enforced)
+- **Party** is canonical. Roles are additive via **PartyRole** (`customer, vendor, employee, bidder, lessor, lessee, ...`).
+- **Guards:** When creating/updating:
+  - `SalesOrder.customerId` must reference a Party with role **customer**.
+  - `PurchaseOrder.vendorId` must reference a Party with role **vendor**.
+- **PartyLink** encodes relationships (`employs, owns, member_of, handles, affiliate, parent, subsidiary`).
+
+### Account Profiles (optional, not identities)
+- **CustomerAccount** (terms, credit limit, price list, tax flags, default bill/ship-to).
+- **VendorAccount** (terms, remit-to, 1099 flag, default expense/COGS).
+- Orders pull defaults at write-time; keep denormalized copies on the order for audit.
+
+### Labor & Staffing Posting
+- **EmployeeProfile** (employmentType, scope, payType, stdRate, GL defaults).
+- **EventStaffAssignment** (role, shift, rateOverride, costCategory=direct_labor|overhead).
+- **LaborEntry** → **PayrollBatch** (posted):
+  - If `eventId` present or `costCategory=direct_labor`: DR **COGS:DirectLabor**, CR **Wages Payable**.
+  - Else: DR **Opex:Wages**, CR **Wages Payable**.
+
+### Auctions (tenant as buyer/seller)
+- Our org is a Party; may hold `bidder, customer, vendor` roles.
+- Settlement posts AR/AP normally. If tenant is counterparty, optional auto-offset clears self AR/AP.
+
+### Leasing
+- **LeaseAgreement** (lessorPartyId, lesseePartyId, resourceIds, term, charges, deposit).
+- **LeaseBillingRun** generates Invoices (lessor→AR/Revenue) or Bills (lessee→AP/Expense/Prepaid).
+
+### Tenant & Related-Party
+- **TenantProfile.primaryPartyId** marks “us.”
+- **RelatedPartyRule** flags `self/subsidiary/affiliate/...`; options:
+  - `alertOnTransact`, `requireApproval`, `autoOffsetARAP` (creates clearing JE after document post).
+
+### Minimal Validators (pseudo-code)
+```ts
+assertRole(customerId, 'customer'); // SO write path
+assertRole(vendorId, 'vendor');     // PO write path
+
+if (isSelfCounterparty(partyId)) {
+  enforceRelatedPartyRules(docType, amount);
+}
+```
+
+### Smokes to wire
+- `smoke:identity:party-roles` (create Party → add roles → list by role)
+- `smoke:salesOrder:flow` + guard: customer role required
+- `smoke:purchaseOrder:flow` + guard: vendor role required
+- `smoke:labor:event-direct-labor` (staff→labor→batch→COGS post)
+- `smoke:lease:billing-run` (generate invoices/bills; verify postings)
+- `smoke:auction:self-bid` (optional)

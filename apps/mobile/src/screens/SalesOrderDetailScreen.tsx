@@ -31,10 +31,13 @@ import { ItemSelectorModal, type ItemSelection } from "../features/_shared/ItemS
 import { CustomerSelectorModal, type CustomerSnapshot } from "../features/_shared/CustomerSelectorModal";
 import { useColors } from "../features/_shared/useColors";
 import { Feather } from "@expo/vector-icons";
+import { makeKey, normalizeLines, toPatchLines, type WithKey } from "../features/_shared/lineEditor";
+
 
 /* ---------- helpers ---------- */
 type RootStackParamList = { SalesOrderDetail: { id?: string; mode?: "new" | "edit" } };
 type ScreenRoute = RouteProp<RootStackParamList, "SalesOrderDetail">;
+type WLine = WithKey<SalesOrderLine>;
 
 function Pill({ label, bg, fg }: { label: string; bg: string; fg: string }) {
   return (
@@ -50,29 +53,6 @@ function lineItemLabel(ln: Partial<SalesOrderLine>): string | undefined {
 }
 function isTempId(id?: string | null) { return !!id && String(id).startsWith("TMP_"); }
 
-// ---- Stable key helpers ----
-type WithKey<T> = T & { _key: string };
-type WLine = WithKey<SalesOrderLine>;
-
-function makeKey(id?: string) {
-  return id && typeof id === "string" ? id : `CID_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-}
-function normalizeLines<T extends { id?: string; itemId: string; qty?: number; note?: string }>(
-  lines: T[] | undefined | null
-): Array<WithKey<Required<T>>> {
-  const src = Array.isArray(lines) ? lines : [];
-  return src.map((ln) => {
-    const qty = typeof ln.qty === "number" && !Number.isNaN(ln.qty) ? ln.qty : 1;
-    const _key = makeKey(ln.id);
-    return { ...ln, qty, _key } as WithKey<Required<T>>;
-  });
-}
-function toPatchLines<T extends { id?: string; itemId: string; qty: number; note?: string }>(lines: Array<WithKey<T>>) {
-  return lines.map((l) => {
-    const id = typeof l.id === "string" && !/^TMP_|^CID_/.test(l.id) ? l.id : undefined;
-    return { id, itemId: l.itemId, qty: Number(l.qty) || 1, note: l.note };
-  });
-}
 
 export default function SalesOrderDetailScreen() {
   const route = useRoute<ScreenRoute>();

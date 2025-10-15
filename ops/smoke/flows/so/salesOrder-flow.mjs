@@ -1,8 +1,8 @@
 /* ops/smoke/flows/salesOrder-flow.mjs
  * Creates tagged inventory + product, links defaultItemId, creates SO and runs submit/commit
  */
-import { rid, withTag, createObject, api } from "../core.mjs";
-import * as Inventory from "../modules/inventory-smoke.mjs";
+import { rid, withTag, createObject, api } from "../../core.mjs";
+import * as Inventory from "../../modules/inventory-smoke.mjs";
 
 export async function run({ lines = 3, qty = 1, code = "so" } = {}) {
   const tag = String(code || "so");

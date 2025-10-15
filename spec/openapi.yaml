@@ -1635,6 +1635,139 @@ components:
       required:
         - permissions
         - roles
+    Party:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          required:
+            - type
+            - kind
+            - displayName
+            - status
+          properties:
+            type:
+              type: string
+              enum:
+                - party
+            kind:
+              type: string
+              enum:
+                - person
+                - organization
+                - animal
+            displayName:
+              type: string
+            firstName:
+              type: string
+            lastName:
+              type: string
+            email:
+              type: string
+              format: email
+            phone:
+              type: string
+            addresses:
+              type: array
+              items:
+                $ref: '#/components/schemas/Address'
+            tags:
+              type: array
+              items:
+                type: string
+            status:
+              type: string
+              enum:
+                - active
+                - inactive
+                - archived
+              default: active
+            notes:
+              type: string
+    PartyRole:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          required:
+            - type
+            - partyId
+            - role
+          properties:
+            type:
+              type: string
+              enum:
+                - partyRole
+            partyId:
+              type: string
+            role:
+              type: string
+              enum:
+                - customer
+                - vendor
+                - employee
+                - event_staff
+                - rider
+                - owner
+                - judge
+            active:
+              type: boolean
+              default: true
+            notes:
+              type: string
+    PartyLink:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          required:
+            - type
+            - aPartyId
+            - bPartyId
+            - kind
+          properties:
+            type:
+              type: string
+              enum:
+                - partyLink
+            aPartyId:
+              type: string
+            bPartyId:
+              type: string
+            kind:
+              type: string
+              enum:
+                - employs
+                - member_of
+                - owns
+                - handles
+                - parent
+                - affiliate
+            startsAt:
+              type: string
+              format: date-time
+            endsAt:
+              type: string
+              format: date-time
+            notes:
+              type: string
+    Address:
+      type: object
+      properties:
+        address1:
+          type: string
+        address2:
+          type: string
+          nullable: true
+        city:
+          type: string
+          nullable: true
+        state:
+          type: string
+          nullable: true
+        postal:
+          type: string
+          nullable: true
+        country:
+          type: string
+          nullable: true
     Client:
       allOf:
         - $ref: '#/components/schemas/ObjectBase'
@@ -1973,14 +2106,28 @@ components:
             notes:
               type: string
               nullable: true
+    EventLine:
+      type: object
+      properties:
+        id:
+          type: string
+        classId:
+          type: string
+        capacity:
+          type: number
+          nullable: true
+        fee:
+          type: number
+          nullable: true
+        note:
+          type: string
+          nullable: true
+      required:
+        - classId
     Event:
       allOf:
         - $ref: '#/components/schemas/ObjectBase'
         - type: object
-          required:
-            - type
-            - name
-            - startsAt
           properties:
             type:
               type: string
@@ -1988,21 +2135,12 @@ components:
                 - event
             name:
               type: string
-            description:
-              type: string
-              nullable: true
-            location:
-              type: string
-              nullable: true
             startsAt:
               type: string
               format: date-time
-            endsAt:
-              type: string
-              format: date-time
-              nullable: true
             status:
               type: string
+              default: draft
               enum:
                 - draft
                 - scheduled
@@ -2011,49 +2149,69 @@ components:
                 - completed
                 - cancelled
                 - archived
-              default: draft
-            capacity:
-              type: number
-              minimum: 0
-              nullable: true
-            timezone:
-              type: string
-              nullable: true
-            organizerId:
-              type: string
-              nullable: true
-            publishedAt:
-              type: string
-              format: date-time
-              nullable: true
-            notes:
-              type: string
-              nullable: true
+            lines:
+              type: array
+              items:
+                $ref: '#/components/schemas/EventLine'
+          required:
+            - type
+            - name
+            - startsAt
+    RegistrationLine:
+      type: object
+      properties:
+        id:
+          type: string
+        classId:
+          type: string
+        qty:
+          type: number
+          default: 1
+          minimum: 1
+        note:
+          type: string
+          nullable: true
+      required:
+        - classId
+        - qty
     Registration:
       allOf:
         - $ref: '#/components/schemas/ObjectBase'
         - type: object
-          required:
-            - type
-            - eventId
-            - clientId
-            - qty
           properties:
             type:
               type: string
               enum:
                 - registration
+            partyId:
+              type: string
+            partyKind:
+              type: string
+              enum:
+                - person
+                - organization
+                - animal
             eventId:
               type: string
             clientId:
               type: string
-            clientName:
-              type: string
-              nullable: true
             qty:
-              type: integer
-              minimum: 1
+              type: number
               default: 1
+              minimum: 1
+            lines:
+              type: array
+              items:
+                $ref: '#/components/schemas/RegistrationLine'
+            status:
+              type: string
+              default: pending
+              enum:
+                - pending
+                - confirmed
+                - checked_in
+                - checked_out
+                - cancelled
             startsAt:
               type: string
               format: date-time
@@ -2062,30 +2220,13 @@ components:
               type: string
               format: date-time
               nullable: true
-            registeredAt:
-              type: string
-              format: date-time
-              nullable: true
-            checkedInAt:
-              type: string
-              format: date-time
-              nullable: true
-            checkedOutAt:
-              type: string
-              format: date-time
-              nullable: true
-            status:
-              type: string
-              enum:
-                - pending
-                - confirmed
-                - checked_in
-                - checked_out
-                - cancelled
-              default: pending
             notes:
               type: string
               nullable: true
+          required:
+            - type
+            - eventId
+            - clientId
     Reservation:
       allOf:
         - $ref: '#/components/schemas/ObjectBase'
@@ -2101,6 +2242,14 @@ components:
               type: string
               enum:
                 - reservation
+            partyId:
+              type: string
+            partyKind:
+              type: string
+              enum:
+                - person
+                - organization
+                - animal
             resourceId:
               type: string
             resourceName:
@@ -2508,6 +2657,14 @@ components:
               type: string
               enum:
                 - purchaseOrder
+            partyId:
+              type: string
+            partyKind:
+              type: string
+              enum:
+                - person
+                - organization
+                - animal
             createdAt:
               type: string
               format: date-time
@@ -2641,6 +2798,14 @@ components:
               type: string
               enum:
                 - salesOrder
+            partyId:
+              type: string
+            partyKind:
+              type: string
+              enum:
+                - person
+                - organization
+                - animal
             createdAt:
               type: string
               format: date-time

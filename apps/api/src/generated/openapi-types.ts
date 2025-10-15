@@ -1520,6 +1520,57 @@ export interface components {
                 }[];
             };
         };
+        Party: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "party";
+            /** @enum {string} */
+            kind: "person" | "organization" | "animal";
+            displayName: string;
+            firstName?: string;
+            lastName?: string;
+            /** Format: email */
+            email?: string;
+            phone?: string;
+            addresses?: components["schemas"]["Address"][];
+            tags?: string[];
+            /**
+             * @default active
+             * @enum {string}
+             */
+            status: "active" | "inactive" | "archived";
+            notes?: string;
+        };
+        PartyRole: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "partyRole";
+            partyId: string;
+            /** @enum {string} */
+            role: "customer" | "vendor" | "employee" | "event_staff" | "rider" | "owner" | "judge";
+            /** @default true */
+            active: boolean;
+            notes?: string;
+        };
+        PartyLink: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "partyLink";
+            aPartyId: string;
+            bPartyId: string;
+            /** @enum {string} */
+            kind: "employs" | "member_of" | "owns" | "handles" | "parent" | "affiliate";
+            /** Format: date-time */
+            startsAt?: string;
+            /** Format: date-time */
+            endsAt?: string;
+            notes?: string;
+        };
+        Address: {
+            address1?: string;
+            address2?: string | null;
+            city?: string | null;
+            state?: string | null;
+            postal?: string | null;
+            country?: string | null;
+        };
         Client: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
             type: "client";
@@ -1675,56 +1726,61 @@ export interface components {
             expiresAt?: string | null;
             notes?: string | null;
         };
+        EventLine: {
+            id?: string;
+            classId: string;
+            capacity?: number | null;
+            fee?: number | null;
+            note?: string | null;
+        };
         Event: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
             type: "event";
             name: string;
-            description?: string | null;
-            location?: string | null;
             /** Format: date-time */
             startsAt: string;
-            /** Format: date-time */
-            endsAt?: string | null;
             /**
              * @default draft
              * @enum {string}
              */
             status: "draft" | "scheduled" | "open" | "closed" | "completed" | "cancelled" | "archived";
-            capacity?: number | null;
-            timezone?: string | null;
-            organizerId?: string | null;
-            /** Format: date-time */
-            publishedAt?: string | null;
-            notes?: string | null;
+            lines?: components["schemas"]["EventLine"][];
+        };
+        RegistrationLine: {
+            id?: string;
+            classId: string;
+            /** @default 1 */
+            qty: number;
+            note?: string | null;
         };
         Registration: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
             type: "registration";
+            partyId?: string;
+            /** @enum {string} */
+            partyKind?: "person" | "organization" | "animal";
             eventId: string;
             clientId: string;
-            clientName?: string | null;
             /** @default 1 */
             qty: number;
-            /** Format: date-time */
-            startsAt?: string | null;
-            /** Format: date-time */
-            endsAt?: string | null;
-            /** Format: date-time */
-            registeredAt?: string | null;
-            /** Format: date-time */
-            checkedInAt?: string | null;
-            /** Format: date-time */
-            checkedOutAt?: string | null;
+            lines?: components["schemas"]["RegistrationLine"][];
             /**
              * @default pending
              * @enum {string}
              */
             status: "pending" | "confirmed" | "checked_in" | "checked_out" | "cancelled";
+            /** Format: date-time */
+            startsAt?: string | null;
+            /** Format: date-time */
+            endsAt?: string | null;
             notes?: string | null;
         };
         Reservation: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
             type: "reservation";
+            partyId?: string;
+            /** @enum {string} */
+            partyKind?: "person" | "organization" | "animal";
             resourceId: string;
             resourceName?: string | null;
             eventId?: string | null;
@@ -1902,6 +1958,9 @@ export interface components {
             tenantId?: string;
             /** @enum {string} */
             type: "purchaseOrder";
+            partyId?: string;
+            /** @enum {string} */
+            partyKind?: "person" | "organization" | "animal";
             /** Format: date-time */
             createdAt?: string;
             /** Format: date-time */
@@ -1963,6 +2022,9 @@ export interface components {
             tenantId?: string;
             /** @enum {string} */
             type: "salesOrder";
+            partyId?: string;
+            /** @enum {string} */
+            partyKind?: "person" | "organization" | "animal";
             /** Format: date-time */
             createdAt?: string;
             /** Format: date-time */

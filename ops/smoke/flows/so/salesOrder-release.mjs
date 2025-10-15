@@ -1,7 +1,7 @@
 // ops/smoke/flows/salesOrder-release.mjs
-import { rid, withTag, createObject, api } from "../core.mjs";
-import * as Inventory from "../modules/inventory-smoke.mjs";
-import * as Vendors from "../modules/vendors-smoke.mjs";
+import { rid, withTag, createObject, api } from "../../core.mjs";
+import * as Inventory from "../../modules/inventory-smoke.mjs";
+import * as Vendors from "../../modules/vendors-smoke.mjs";
 
 async function onhand(itemId) {
   try { return await api(`/inventory/${encodeURIComponent(itemId)}/onhand`, { method:"GET" }); }
