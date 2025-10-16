@@ -1455,354 +1455,6 @@ components:
     NotFound:
       description: Not found
   schemas:
-    ObjectBase:
-      type: object
-      properties:
-        id:
-          type: string
-          readOnly: true
-        tenantId:
-          type: string
-          readOnly: true
-        type:
-          type: string
-        createdAt:
-          type: string
-          format: date-time
-          readOnly: true
-        updatedAt:
-          type: string
-          format: date-time
-          readOnly: true
-        metadata:
-          type: object
-          additionalProperties: true
-      required:
-        - id
-        - tenantId
-        - createdAt
-        - updatedAt
-    Error:
-      type: object
-      additionalProperties: false
-      properties:
-        message:
-          type: string
-          description: Human-readable summary
-        code:
-          type: string
-          description: Stable error code (e.g., insufficient_available_to_commit)
-        details:
-          type: array
-          items:
-            type: object
-            additionalProperties: true
-      required:
-        - message
-    AnyObject:
-      type: object
-      additionalProperties: true
-    View:
-      allOf:
-        - $ref: '#/components/schemas/ObjectBase'
-        - type: object
-          properties:
-            type:
-              type: string
-              enum:
-                - view
-            moduleKey:
-              type: string
-              description: e.g., products, inventory, events
-            name:
-              type: string
-            queryJSON:
-              type: object
-              additionalProperties: true
-            ownerId:
-              type: string
-              nullable: true
-            shared:
-              type: boolean
-            isDefault:
-              type: boolean
-          required:
-            - type
-            - moduleKey
-            - name
-            - queryJSON
-    ViewList:
-      type: object
-      properties:
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/View'
-        next:
-          type: string
-          nullable: true
-    WorkspaceTile:
-      type: object
-      properties:
-        moduleKey:
-          type: string
-        viewId:
-          type: string
-          nullable: true
-        inlineQuery:
-          type: object
-          additionalProperties: true
-          nullable: true
-        layout:
-          type: object
-          additionalProperties: true
-      required:
-        - moduleKey
-    Workspace:
-      allOf:
-        - $ref: '#/components/schemas/ObjectBase'
-        - type: object
-          properties:
-            type:
-              type: string
-              enum:
-                - workspace
-            name:
-              type: string
-            tiles:
-              type: array
-              items:
-                $ref: '#/components/schemas/WorkspaceTile'
-            ownerId:
-              type: string
-              nullable: true
-            shared:
-              type: boolean
-          required:
-            - type
-            - name
-            - tiles
-    WorkspaceList:
-      type: object
-      properties:
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/Workspace'
-        next:
-          type: string
-          nullable: true
-    Policy:
-      type: object
-      properties:
-        tenantId:
-          type: string
-        userId:
-          type: string
-        roles:
-          type: array
-          items:
-            type: string
-        permissions:
-          type: array
-          items:
-            type: string
-        ui:
-          type: object
-          properties:
-            allowedModuleKeys:
-              type: array
-              items:
-                type: string
-            allowedViews:
-              type: array
-              items:
-                type: object
-                properties:
-                  id:
-                    type: string
-                  moduleKey:
-                    type: string
-            allowedWorkspaces:
-              type: array
-              items:
-                type: object
-                properties:
-                  id:
-                    type: string
-                  name:
-                    type: string
-      required:
-        - permissions
-        - roles
-    Party:
-      allOf:
-        - $ref: '#/components/schemas/ObjectBase'
-        - type: object
-          required:
-            - type
-            - kind
-            - displayName
-            - status
-          properties:
-            type:
-              type: string
-              enum:
-                - party
-            kind:
-              type: string
-              enum:
-                - person
-                - organization
-                - animal
-            displayName:
-              type: string
-            firstName:
-              type: string
-            lastName:
-              type: string
-            email:
-              type: string
-              format: email
-            phone:
-              type: string
-            addresses:
-              type: array
-              items:
-                $ref: '#/components/schemas/Address'
-            tags:
-              type: array
-              items:
-                type: string
-            status:
-              type: string
-              enum:
-                - active
-                - inactive
-                - archived
-              default: active
-            notes:
-              type: string
-    PartyRole:
-      allOf:
-        - $ref: '#/components/schemas/ObjectBase'
-        - type: object
-          required:
-            - type
-            - partyId
-            - role
-          properties:
-            type:
-              type: string
-              enum:
-                - partyRole
-            partyId:
-              type: string
-            role:
-              type: string
-              enum:
-                - customer
-                - vendor
-                - employee
-                - event_staff
-                - rider
-                - owner
-                - judge
-            active:
-              type: boolean
-              default: true
-            notes:
-              type: string
-    PartyLink:
-      allOf:
-        - $ref: '#/components/schemas/ObjectBase'
-        - type: object
-          required:
-            - type
-            - aPartyId
-            - bPartyId
-            - kind
-          properties:
-            type:
-              type: string
-              enum:
-                - partyLink
-            aPartyId:
-              type: string
-            bPartyId:
-              type: string
-            kind:
-              type: string
-              enum:
-                - employs
-                - member_of
-                - owns
-                - handles
-                - parent
-                - affiliate
-            startsAt:
-              type: string
-              format: date-time
-            endsAt:
-              type: string
-              format: date-time
-            notes:
-              type: string
-    Address:
-      type: object
-      properties:
-        address1:
-          type: string
-        address2:
-          type: string
-          nullable: true
-        city:
-          type: string
-          nullable: true
-        state:
-          type: string
-          nullable: true
-        postal:
-          type: string
-          nullable: true
-        country:
-          type: string
-          nullable: true
-    Client:
-      allOf:
-        - $ref: '#/components/schemas/ObjectBase'
-        - type: object
-          required:
-            - type
-            - name
-          properties:
-            type:
-              type: string
-              enum:
-                - client
-            name:
-              type: string
-              minLength: 1
-            displayName:
-              type: string
-            firstName:
-              type: string
-            lastName:
-              type: string
-            email:
-              type: string
-              format: email
-            phone:
-              type: string
-            status:
-              type: string
-              enum:
-                - active
-                - inactive
-                - archived
-              default: active
-            notes:
-              type: string
     Account:
       allOf:
         - $ref: '#/components/schemas/ObjectBase'
@@ -1845,7 +1497,31 @@ components:
                 - inactive
                 - archived
               default: active
-    Product:
+    Address:
+      type: object
+      properties:
+        address1:
+          type: string
+        address2:
+          type: string
+          nullable: true
+        city:
+          type: string
+          nullable: true
+        state:
+          type: string
+          nullable: true
+        postal:
+          type: string
+          nullable: true
+        country:
+          type: string
+          nullable: true
+    AnyObject:
+      type: object
+      additionalProperties: true
+      properties: {}
+    Class:
       allOf:
         - $ref: '#/components/schemas/ObjectBase'
         - type: object
@@ -1856,41 +1532,439 @@ components:
             type:
               type: string
               enum:
-                - product
+                - class
+            divisionId:
+              type: string
+              nullable: true
+            code:
+              type: string
             name:
               type: string
-            kind:
+            description:
               type: string
-              enum:
-                - good
-                - service
-              default: good
-            sku:
-              type: string
-            price:
+              nullable: true
+            fee:
               type: number
-              minimum: 0
               nullable: true
-            taxCode:
-              type: string
+            order:
+              type: integer
               nullable: true
-            defaultItemId:
-              type: string
-              nullable: true
-            tags:
+            rules:
               type: array
               items:
                 type: string
+              nullable: true
+            notes:
+              type: string
+              nullable: true
+    CustomerAccount:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          properties:
+            type:
+              type: string
+              enum:
+                - customerAccount
+            partyId:
+              type: string
+            termsId:
+              type: string
+              nullable: true
+            creditLimit:
+              type: number
+              nullable: true
+            priceListId:
+              type: string
+              nullable: true
+            taxExempt:
+              type: boolean
+              default: false
+            defaultBillToId:
+              type: string
+              nullable: true
+            defaultShipToId:
+              type: string
+              nullable: true
+          required:
+            - partyId
+    Division:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          required:
+            - type
+            - name
+          properties:
+            type:
+              type: string
+              enum:
+                - division
+            code:
+              type: string
+            name:
+              type: string
+            description:
+              type: string
+              nullable: true
+            fee:
+              type: number
+              nullable: true
+            rules:
+              type: array
+              items:
+                type: string
+              nullable: true
+            notes:
+              type: string
+              nullable: true
+    Employee:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          required:
+            - type
+            - name
+          properties:
+            type:
+              type: string
+              enum:
+                - employee
+            name:
+              type: string
+              minLength: 1
+            displayName:
+              type: string
+            email:
+              type: string
+              format: email
+            phone:
+              type: string
+            role:
+              type: string
             status:
               type: string
               enum:
                 - active
                 - inactive
-                - archived
+                - terminated
               default: active
+            hiredAt:
+              type: string
+              format: date-time
+            startDate:
+              type: string
+              format: date-time
+              description: Alias of hiredAt for UI consistency
+            terminatedAt:
+              type: string
+              format: date-time
+            notes:
+              type: string
+    EpcBinding:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          properties:
+            type:
+              type: string
+              enum:
+                - epcBinding
+            epc:
+              type: string
+            itemId:
+              type: string
+            locationId:
+              type: string
+            lot:
+              type: string
+              nullable: true
+            state:
+              type: string
+              enum:
+                - active
+                - retired
+              default: active
+          required:
+            - type
+            - epc
+            - itemId
+    EPCMap:
+      type: object
+      required:
+        - id
+        - type
+        - epc
+        - itemId
+      properties:
+        id:
+          type: string
+          description: Use EPC string as id
+        type:
+          type: string
+          enum:
+            - epcMap
+          default: epcMap
+        epc:
+          type: string
+        itemId:
+          type: string
+        lotId:
+          type: string
+          nullable: true
+        locationId:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum:
+            - active
+            - retired
+          default: active
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    Error:
+      type: object
+      additionalProperties: false
+      properties:
+        message:
+          type: string
+          description: Human-readable summary
+        code:
+          type: string
+          description: Stable error code (e.g., insufficient_available_to_commit)
+        details:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+      required:
+        - message
+    Event:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          properties:
+            type:
+              type: string
+              enum:
+                - event
+            name:
+              type: string
+            description:
+              type: string
+            location:
+              type: string
+            startsAt:
+              type: string
+              format: date-time
+            endsAt:
+              type: string
+              format: date-time
+            start:
+              type: string
+              format: date-time
+              description: Alias of startsAt (deprecated)
+            end:
+              type: string
+              format: date-time
+              description: Alias of endsAt (deprecated)
+            status:
+              type: string
+              default: draft
+              enum:
+                - draft
+                - scheduled
+                - open
+                - closed
+                - completed
+                - cancelled
+                - archived
+            capacity:
+              type: number
+              minimum: 0
+            notes:
+              type: string
+            lines:
+              type: array
+              items:
+                $ref: '#/components/schemas/EventLine'
+          required:
+            - type
+            - name
+            - startsAt
+    EventLine:
+      type: object
+      properties:
+        id:
+          type: string
+        classId:
+          type: string
+        capacity:
+          type: number
+          nullable: true
+        fee:
+          type: number
+          nullable: true
+        note:
+          type: string
+          nullable: true
+      required:
+        - classId
+    GoodsReceipt:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          required:
+            - type
+            - poId
+            - ts
+            - lines
+          properties:
+            id:
+              type: string
+            type:
+              type: string
+              enum:
+                - goodsReceipt
+            tenantId:
+              type: string
+            poId:
+              type: string
+            userId:
+              type: string
+              nullable: true
+            ts:
+              type: string
+              format: date-time
+              nullable: true
+            lines:
+              type: array
+              items:
+                type: object
+                required:
+                  - lineId
+                  - deltaQty
+                properties:
+                  lineId:
+                    type: string
+                  itemId:
+                    type: string
+                    nullable: true
+                  deltaQty:
+                    type: number
+                  lot:
+                    type: string
+                    nullable: true
+                  locationId:
+                    type: string
+                    nullable: true
             notes:
               type: string
               nullable: true
+            attachments:
+              type: array
+              items:
+                type: string
+    GoodsReceiptLine:
+      type: object
+      required:
+        - lineId
+        - deltaQty
+      properties:
+        lineId:
+          type: string
+        deltaQty:
+          type: number
+        locationId:
+          type: string
+          nullable: true
+        lot:
+          type: string
+          nullable: true
+    Integration:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          properties:
+            type:
+              type: string
+              enum:
+                - integration
+            provider:
+              type: string
+              enum:
+                - shopify
+                - quickbooks
+                - rfid
+                - webhook
+                - streaming
+            status:
+              type: string
+              enum:
+                - disabled
+                - enabled
+            config:
+              type: object
+              additionalProperties: true
+          required:
+            - type
+            - provider
+            - status
+    IntegrationRun:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          properties:
+            type:
+              type: string
+              enum:
+                - integrationRun
+            integrationId:
+              type: string
+            startedAt:
+              type: string
+              format: date-time
+            finishedAt:
+              type: string
+              format: date-time
+              nullable: true
+            status:
+              type: string
+              enum:
+                - queued
+                - running
+                - success
+                - error
+            stats:
+              type: object
+              additionalProperties: true
+            error:
+              type: string
+              nullable: true
+          required:
+            - type
+            - integrationId
+            - startedAt
+            - status
+    InventoryAdjustmentRequest:
+      type: object
+      required:
+        - reason
+        - deltaQty
+      properties:
+        reason:
+          type: string
+          minLength: 1
+        deltaQty:
+          type: number
+        notes:
+          type: string
+          nullable: true
     InventoryItem:
       allOf:
         - $ref: '#/components/schemas/ObjectBase'
@@ -1903,15 +1977,19 @@ components:
               type: string
               enum:
                 - inventory
+            productId:
+              type: string
+              nullable: true
             name:
               type: string
             sku:
               type: string
+            quantity:
+              type: number
+              description: Deprecated – use /inventory/{id}/onhand
+              deprecated: true
             uom:
               type: string
-            productId:
-              type: string
-              nullable: true
             location:
               type: string
               nullable: true
@@ -1923,16 +2001,6 @@ components:
               type: number
               minimum: 0
               nullable: true
-            lotTracked:
-              type: boolean
-              default: false
-            barcode:
-              type: string
-              nullable: true
-            tags:
-              type: array
-              items:
-                type: string
             status:
               type: string
               enum:
@@ -1943,6 +2011,16 @@ components:
             notes:
               type: string
               nullable: true
+            lotTracked:
+              type: boolean
+              default: false
+            barcode:
+              type: string
+              nullable: true
+            tags:
+              type: array
+              items:
+                type: string
     InventoryMovement:
       type: object
       required:
@@ -2027,20 +2105,6 @@ components:
         asOf:
           type: string
           format: date-time
-    InventoryAdjustmentRequest:
-      type: object
-      required:
-        - reason
-        - deltaQty
-      properties:
-        reason:
-          type: string
-          minLength: 1
-        deltaQty:
-          type: number
-        notes:
-          type: string
-          nullable: true
     ListPageInventoryMovement:
       type: object
       properties:
@@ -2051,490 +2115,6 @@ components:
         next:
           type: string
           nullable: true
-    Resource:
-      allOf:
-        - $ref: '#/components/schemas/ObjectBase'
-        - type: object
-          required:
-            - type
-            - name
-          properties:
-            type:
-              type: string
-              enum:
-                - resource
-            name:
-              type: string
-            code:
-              type: string
-              nullable: true
-            resourceType:
-              type: string
-              enum:
-                - stall
-                - rv
-                - arena
-                - equipment
-                - other
-              default: other
-            status:
-              type: string
-              enum:
-                - available
-                - unavailable
-                - maintenance
-              default: available
-            capacity:
-              type: number
-              minimum: 0
-              nullable: true
-            location:
-              type: string
-              nullable: true
-            tags:
-              type: array
-              items:
-                type: string
-            url:
-              type: string
-              format: uri
-              nullable: true
-            expiresAt:
-              type: string
-              format: date-time
-              nullable: true
-            notes:
-              type: string
-              nullable: true
-    EventLine:
-      type: object
-      properties:
-        id:
-          type: string
-        classId:
-          type: string
-        capacity:
-          type: number
-          nullable: true
-        fee:
-          type: number
-          nullable: true
-        note:
-          type: string
-          nullable: true
-      required:
-        - classId
-    Event:
-      allOf:
-        - $ref: '#/components/schemas/ObjectBase'
-        - type: object
-          properties:
-            type:
-              type: string
-              enum:
-                - event
-            name:
-              type: string
-            startsAt:
-              type: string
-              format: date-time
-            status:
-              type: string
-              default: draft
-              enum:
-                - draft
-                - scheduled
-                - open
-                - closed
-                - completed
-                - cancelled
-                - archived
-            lines:
-              type: array
-              items:
-                $ref: '#/components/schemas/EventLine'
-          required:
-            - type
-            - name
-            - startsAt
-    RegistrationLine:
-      type: object
-      properties:
-        id:
-          type: string
-        classId:
-          type: string
-        qty:
-          type: number
-          default: 1
-          minimum: 1
-        note:
-          type: string
-          nullable: true
-      required:
-        - classId
-        - qty
-    Registration:
-      allOf:
-        - $ref: '#/components/schemas/ObjectBase'
-        - type: object
-          properties:
-            type:
-              type: string
-              enum:
-                - registration
-            partyId:
-              type: string
-            partyKind:
-              type: string
-              enum:
-                - person
-                - organization
-                - animal
-            eventId:
-              type: string
-            clientId:
-              type: string
-            qty:
-              type: number
-              default: 1
-              minimum: 1
-            lines:
-              type: array
-              items:
-                $ref: '#/components/schemas/RegistrationLine'
-            status:
-              type: string
-              default: pending
-              enum:
-                - pending
-                - confirmed
-                - checked_in
-                - checked_out
-                - cancelled
-            startsAt:
-              type: string
-              format: date-time
-              nullable: true
-            endsAt:
-              type: string
-              format: date-time
-              nullable: true
-            notes:
-              type: string
-              nullable: true
-          required:
-            - type
-            - eventId
-            - clientId
-    Reservation:
-      allOf:
-        - $ref: '#/components/schemas/ObjectBase'
-        - type: object
-          required:
-            - type
-            - resourceId
-            - clientId
-            - startsAt
-            - endsAt
-          properties:
-            type:
-              type: string
-              enum:
-                - reservation
-            partyId:
-              type: string
-            partyKind:
-              type: string
-              enum:
-                - person
-                - organization
-                - animal
-            resourceId:
-              type: string
-            resourceName:
-              type: string
-              nullable: true
-            eventId:
-              type: string
-              nullable: true
-            clientId:
-              type: string
-            clientName:
-              type: string
-              nullable: true
-            startsAt:
-              type: string
-              format: date-time
-            endsAt:
-              type: string
-              format: date-time
-            rate:
-              type: number
-              nullable: true
-            price:
-              type: number
-              nullable: true
-            conflictKey:
-              type: string
-              nullable: true
-            status:
-              type: string
-              enum:
-                - pending
-                - confirmed
-                - in_use
-                - checked_in
-                - completed
-                - cancelled
-              default: pending
-            notes:
-              type: string
-              nullable: true
-    Vendor:
-      allOf:
-        - $ref: '#/components/schemas/ObjectBase'
-        - type: object
-          required:
-            - type
-            - name
-          properties:
-            type:
-              type: string
-              enum:
-                - vendor
-            name:
-              type: string
-              minLength: 1
-            displayName:
-              type: string
-            email:
-              type: string
-              format: email
-            phone:
-              type: string
-            notes:
-              type: string
-            status:
-              type: string
-              enum:
-                - active
-                - inactive
-                - archived
-              default: active
-    Employee:
-      allOf:
-        - $ref: '#/components/schemas/ObjectBase'
-        - type: object
-          required:
-            - type
-            - name
-          properties:
-            type:
-              type: string
-              enum:
-                - employee
-            name:
-              type: string
-              minLength: 1
-            displayName:
-              type: string
-            email:
-              type: string
-              format: email
-            phone:
-              type: string
-            role:
-              type: string
-            status:
-              type: string
-              enum:
-                - active
-                - inactive
-                - terminated
-              default: active
-            hiredAt:
-              type: string
-              format: date-time
-            startDate:
-              type: string
-              format: date-time
-              description: Alias of hiredAt for UI consistency
-            terminatedAt:
-              type: string
-              format: date-time
-            notes:
-              type: string
-    Organization:
-      allOf:
-        - $ref: '#/components/schemas/ObjectBase'
-        - type: object
-          required:
-            - type
-            - name
-          properties:
-            type:
-              type: string
-              enum:
-                - organization
-            name:
-              type: string
-            code:
-              type: string
-              nullable: true
-            website:
-              type: string
-              format: uri
-              nullable: true
-            phone:
-              type: string
-              nullable: true
-            email:
-              type: string
-              format: email
-              nullable: true
-            address:
-              type: string
-              nullable: true
-            prefs:
-              type: object
-              additionalProperties: true
-              nullable: true
-            notes:
-              type: string
-              nullable: true
-    Venue:
-      allOf:
-        - $ref: '#/components/schemas/ObjectBase'
-        - type: object
-          required:
-            - type
-            - name
-          properties:
-            type:
-              type: string
-              enum:
-                - venue
-            name:
-              type: string
-            address:
-              type: string
-              nullable: true
-            timezone:
-              type: string
-              nullable: true
-            geo:
-              type: object
-              properties:
-                lat:
-                  type: number
-                lon:
-                  type: number
-              nullable: true
-            notes:
-              type: string
-              nullable: true
-    Division:
-      allOf:
-        - $ref: '#/components/schemas/ObjectBase'
-        - type: object
-          required:
-            - type
-            - name
-          properties:
-            type:
-              type: string
-              enum:
-                - division
-            code:
-              type: string
-            name:
-              type: string
-            description:
-              type: string
-              nullable: true
-            fee:
-              type: number
-              nullable: true
-            rules:
-              type: array
-              items:
-                type: string
-              nullable: true
-            notes:
-              type: string
-              nullable: true
-    Class:
-      allOf:
-        - $ref: '#/components/schemas/ObjectBase'
-        - type: object
-          required:
-            - type
-            - name
-          properties:
-            type:
-              type: string
-              enum:
-                - class
-            divisionId:
-              type: string
-              nullable: true
-            code:
-              type: string
-            name:
-              type: string
-            description:
-              type: string
-              nullable: true
-            fee:
-              type: number
-              nullable: true
-            order:
-              type: integer
-              nullable: true
-            rules:
-              type: array
-              items:
-                type: string
-              nullable: true
-            notes:
-              type: string
-              nullable: true
-    Scorecard:
-      allOf:
-        - $ref: '#/components/schemas/ObjectBase'
-        - type: object
-          required:
-            - type
-            - eventId
-            - classId
-          properties:
-            type:
-              type: string
-              enum:
-                - scorecard
-            eventId:
-              type: string
-            classId:
-              type: string
-            template:
-              type: object
-              additionalProperties: true
-            entries:
-              type: array
-              items:
-                type: object
-              nullable: true
-            status:
-              type: string
-              enum:
-                - draft
-                - published
-                - archived
-              default: draft
-            notes:
-              type: string
-              nullable: true
     Message:
       allOf:
         - $ref: '#/components/schemas/ObjectBase'
@@ -2596,51 +2176,302 @@ components:
           type: number
         total:
           type: number
-    PurchaseOrderLine:
+    ObjectBase:
       type: object
-      required:
-        - itemId
-        - qty
-        - uom
       properties:
         id:
           type: string
-        itemId:
+          readOnly: true
+        tenantId:
           type: string
-          description: InventoryItem.id
-        productId:
+          readOnly: true
+        type:
           type: string
-          nullable: true
-        description:
-          type: string
-          nullable: true
-        uom:
-          type: string
-        qty:
-          type: number
-          description: Ordered quantity
-        qtyReceived:
-          type: number
-          default: 0
-        unitPrice:
-          type: number
-          nullable: true
-        taxRate:
-          type: number
-          nullable: true
-        lineTotal:
-          type: number
-          nullable: true
-        locationId:
-          type: string
-          nullable: true
-        lot:
-          type: string
-          nullable: true
-        expectedDate:
+        createdAt:
           type: string
           format: date-time
-          nullable: true
+          readOnly: true
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+        metadata:
+          type: object
+          additionalProperties: true
+      required:
+        - id
+        - tenantId
+        - createdAt
+        - updatedAt
+    Organization:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          required:
+            - type
+            - name
+          properties:
+            type:
+              type: string
+              enum:
+                - organization
+            name:
+              type: string
+            kind:
+              type: string
+              enum:
+                - club
+                - federation
+                - venueOp
+                - sponsor
+              example: federation
+            status:
+              type: string
+              enum:
+                - active
+                - inactive
+                - archived
+              default: active
+            notes:
+              type: string
+              nullable: true
+            metadata:
+              type: object
+              additionalProperties: true
+              nullable: true
+            code:
+              type: string
+              nullable: true
+            website:
+              type: string
+              format: uri
+              nullable: true
+            phone:
+              type: string
+              nullable: true
+            email:
+              type: string
+              format: email
+              nullable: true
+            address:
+              type: string
+              nullable: true
+            prefs:
+              type: object
+              additionalProperties: true
+              nullable: true
+    Party:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          required:
+            - type
+            - kind
+            - displayName
+            - status
+          properties:
+            type:
+              type: string
+              enum:
+                - party
+            kind:
+              type: string
+              enum:
+                - person
+                - organization
+                - animal
+            displayName:
+              type: string
+            firstName:
+              type: string
+            lastName:
+              type: string
+            email:
+              type: string
+              format: email
+            phone:
+              type: string
+            addresses:
+              type: array
+              items:
+                $ref: '#/components/schemas/Address'
+            tags:
+              type: array
+              items:
+                type: string
+            status:
+              type: string
+              enum:
+                - active
+                - inactive
+                - archived
+              default: active
+            notes:
+              type: string
+            roleFlags:
+              type: object
+              additionalProperties:
+                type: boolean
+              description: Denormalized role membership for fast gates.
+            roles:
+              type: array
+              items:
+                type: string
+              description: Optional array for UI; roleFlags is the source of truth.
+    PartyLink:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          required:
+            - type
+            - aPartyId
+            - bPartyId
+            - kind
+          properties:
+            type:
+              type: string
+              enum:
+                - partyLink
+            aPartyId:
+              type: string
+            bPartyId:
+              type: string
+            kind:
+              type: string
+              enum:
+                - employs
+                - member_of
+                - owns
+                - handles
+                - parent
+                - affiliate
+            startsAt:
+              type: string
+              format: date-time
+            endsAt:
+              type: string
+              format: date-time
+            notes:
+              type: string
+    PartyRole:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          required:
+            - type
+            - partyId
+            - role
+          properties:
+            type:
+              type: string
+              enum:
+                - partyRole
+            partyId:
+              type: string
+            role:
+              type: string
+              enum:
+                - customer
+                - vendor
+                - employee
+                - event_staff
+                - rider
+                - owner
+                - judge
+            active:
+              type: boolean
+              default: true
+            notes:
+              type: string
+    Policy:
+      type: object
+      properties:
+        tenantId:
+          type: string
+        userId:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
+        permissions:
+          type: array
+          items:
+            type: string
+        ui:
+          type: object
+          properties:
+            allowedModuleKeys:
+              type: array
+              items:
+                type: string
+            allowedViews:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  moduleKey:
+                    type: string
+            allowedWorkspaces:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+      required:
+        - permissions
+        - roles
+    Product:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          required:
+            - type
+            - name
+          properties:
+            type:
+              type: string
+              enum:
+                - product
+            name:
+              type: string
+            kind:
+              type: string
+              enum:
+                - good
+                - service
+              default: good
+            sku:
+              type: string
+            price:
+              type: number
+              minimum: 0
+              nullable: true
+            taxCode:
+              type: string
+              nullable: true
+            status:
+              type: string
+              enum:
+                - active
+                - inactive
+                - archived
+              default: active
+            notes:
+              type: string
+              nullable: true
+            defaultItemId:
+              type: string
+              nullable: true
+            tags:
+              type: array
+              items:
+                type: string
     PurchaseOrder:
       allOf:
         - type: object
@@ -2657,14 +2488,6 @@ components:
               type: string
               enum:
                 - purchaseOrder
-            partyId:
-              type: string
-            partyKind:
-              type: string
-              enum:
-                - person
-                - organization
-                - animal
             createdAt:
               type: string
               format: date-time
@@ -2674,6 +2497,16 @@ components:
             metadata:
               type: object
               additionalProperties: true
+            vendorAccountId:
+              type: string
+            partyId:
+              type: string
+            partyKind:
+              type: string
+              enum:
+                - person
+                - organization
+                - animal
         - type: object
           properties:
             orderNumber:
@@ -2736,7 +2569,7 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/PurchaseOrderLine'
-    SalesOrderLine:
+    PurchaseOrderLine:
       type: object
       required:
         - itemId
@@ -2747,6 +2580,7 @@ components:
           type: string
         itemId:
           type: string
+          description: InventoryItem.id
         productId:
           type: string
           nullable: true
@@ -2757,10 +2591,8 @@ components:
           type: string
         qty:
           type: number
-        qtyCommitted:
-          type: number
-          default: 0
-        qtyFulfilled:
+          description: Ordered quantity
+        qtyReceived:
           type: number
           default: 0
         unitPrice:
@@ -2782,6 +2614,298 @@ components:
           type: string
           format: date-time
           nullable: true
+    Registration:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          properties:
+            type:
+              type: string
+              enum:
+                - registration
+            eventId:
+              type: string
+            clientId:
+              type: string
+            clientName:
+              type: string
+              nullable: true
+            qty:
+              type: number
+              default: 1
+              minimum: 1
+            startsAt:
+              type: string
+              format: date-time
+              nullable: true
+            endsAt:
+              type: string
+              format: date-time
+              nullable: true
+            start:
+              type: string
+              format: date-time
+              description: Alias of startsAt (deprecated)
+              nullable: true
+            end:
+              type: string
+              format: date-time
+              description: Alias of endsAt (deprecated)
+              nullable: true
+            registeredAt:
+              type: string
+              format: date-time
+              nullable: true
+            status:
+              type: string
+              default: pending
+              enum:
+                - pending
+                - confirmed
+                - checked_in
+                - checked_out
+                - cancelled
+            notes:
+              type: string
+              nullable: true
+            partyId:
+              type: string
+            partyKind:
+              type: string
+              enum:
+                - person
+                - organization
+                - animal
+            lines:
+              type: array
+              items:
+                $ref: '#/components/schemas/RegistrationLine'
+          required:
+            - type
+            - eventId
+            - clientId
+            - qty
+    RegistrationLine:
+      type: object
+      properties:
+        id:
+          type: string
+        classId:
+          type: string
+        qty:
+          type: number
+          default: 1
+          minimum: 1
+        note:
+          type: string
+          nullable: true
+      required:
+        - classId
+        - qty
+    Reservation:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          required:
+            - type
+            - resourceId
+            - clientId
+            - startsAt
+            - endsAt
+          properties:
+            type:
+              type: string
+              enum:
+                - reservation
+            resourceId:
+              type: string
+            resourceName:
+              type: string
+              nullable: true
+            eventId:
+              type: string
+              nullable: true
+            clientId:
+              type: string
+            clientName:
+              type: string
+              nullable: true
+            startsAt:
+              type: string
+              format: date-time
+            endsAt:
+              type: string
+              format: date-time
+            start:
+              type: string
+              format: date-time
+              description: Alias of startsAt (deprecated)
+            end:
+              type: string
+              format: date-time
+              description: Alias of endsAt (deprecated)
+            status:
+              type: string
+              enum:
+                - pending
+                - confirmed
+                - in_use
+                - checked_in
+                - completed
+                - cancelled
+              default: pending
+            notes:
+              type: string
+              nullable: true
+            partyId:
+              type: string
+            partyKind:
+              type: string
+              enum:
+                - person
+                - organization
+                - animal
+            rate:
+              type: number
+              nullable: true
+            price:
+              type: number
+              nullable: true
+            conflictKey:
+              type: string
+              nullable: true
+    Resource:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          required:
+            - type
+            - name
+          properties:
+            type:
+              type: string
+              enum:
+                - resource
+            name:
+              type: string
+            code:
+              type: string
+              nullable: true
+            url:
+              type: string
+              format: uri
+              nullable: true
+            expiresAt:
+              type: string
+              format: date-time
+              nullable: true
+            resourceType:
+              type: string
+              enum:
+                - stall
+                - rv
+                - arena
+                - equipment
+                - other
+              default: other
+            status:
+              type: string
+              enum:
+                - available
+                - unavailable
+                - maintenance
+              default: available
+            capacity:
+              type: number
+              minimum: 0
+              nullable: true
+            location:
+              type: string
+              nullable: true
+            tags:
+              type: array
+              items:
+                type: string
+            notes:
+              type: string
+              nullable: true
+    SalesFulfillment:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          required:
+            - type
+            - soId
+            - ts
+            - lines
+          properties:
+            id:
+              type: string
+            type:
+              type: string
+              enum:
+                - salesFulfillment
+            tenantId:
+              type: string
+            soId:
+              type: string
+            userId:
+              type: string
+              nullable: true
+            ts:
+              type: string
+              format: date-time
+              nullable: true
+            lines:
+              type: array
+              items:
+                type: object
+                required:
+                  - lineId
+                  - deltaQty
+                properties:
+                  lineId:
+                    type: string
+                  itemId:
+                    type: string
+                    nullable: true
+                  deltaQty:
+                    type: number
+                  lot:
+                    type: string
+                    nullable: true
+                  locationId:
+                    type: string
+                    nullable: true
+            carrier:
+              type: string
+              nullable: true
+            tracking:
+              type: string
+              nullable: true
+            notes:
+              type: string
+              nullable: true
+            attachments:
+              type: array
+              items:
+                type: string
+    SalesFulfillmentLine:
+      type: object
+      required:
+        - lineId
+        - deltaQty
+      properties:
+        lineId:
+          type: string
+        deltaQty:
+          type: number
+        locationId:
+          type: string
+          nullable: true
+        lot:
+          type: string
+          nullable: true
     SalesOrder:
       allOf:
         - type: object
@@ -2798,14 +2922,6 @@ components:
               type: string
               enum:
                 - salesOrder
-            partyId:
-              type: string
-            partyKind:
-              type: string
-              enum:
-                - person
-                - organization
-                - animal
             createdAt:
               type: string
               format: date-time
@@ -2815,6 +2931,16 @@ components:
             metadata:
               type: object
               additionalProperties: true
+            customerAccountId:
+              type: string
+            partyId:
+              type: string
+            partyKind:
+              type: string
+              enum:
+                - person
+                - organization
+                - animal
         - type: object
           properties:
             orderNumber:
@@ -2878,283 +3004,52 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/SalesOrderLine'
-    GoodsReceiptLine:
+    SalesOrderLine:
       type: object
       required:
-        - lineId
-        - deltaQty
-      properties:
-        lineId:
-          type: string
-        deltaQty:
-          type: number
-        locationId:
-          type: string
-          nullable: true
-        lot:
-          type: string
-          nullable: true
-    GoodsReceipt:
-      allOf:
-        - $ref: '#/components/schemas/ObjectBase'
-        - type: object
-          required:
-            - type
-            - poId
-          properties:
-            type:
-              type: string
-              enum:
-                - goodsReceipt
-            poId:
-              type: string
-            ts:
-              type: string
-              format: date-time
-              nullable: true
-            notes:
-              type: string
-              nullable: true
-            lines:
-              type: array
-              items:
-                type: object
-                required:
-                  - lineId
-                  - deltaQty
-                properties:
-                  lineId:
-                    type: string
-                  itemId:
-                    type: string
-                    nullable: true
-                  deltaQty:
-                    type: number
-                  lot:
-                    type: string
-                    nullable: true
-                  locationId:
-                    type: string
-                    nullable: true
-    SalesFulfillmentLine:
-      type: object
-      required:
-        - lineId
-        - deltaQty
-      properties:
-        lineId:
-          type: string
-        deltaQty:
-          type: number
-        locationId:
-          type: string
-          nullable: true
-        lot:
-          type: string
-          nullable: true
-    SalesFulfillment:
-      allOf:
-        - $ref: '#/components/schemas/ObjectBase'
-        - type: object
-          required:
-            - type
-            - soId
-          properties:
-            type:
-              type: string
-              enum:
-                - salesFulfillment
-            soId:
-              type: string
-            ts:
-              type: string
-              format: date-time
-              nullable: true
-            notes:
-              type: string
-              nullable: true
-            lines:
-              type: array
-              items:
-                type: object
-                required:
-                  - lineId
-                  - deltaQty
-                properties:
-                  lineId:
-                    type: string
-                  itemId:
-                    type: string
-                    nullable: true
-                  deltaQty:
-                    type: number
-                  lot:
-                    type: string
-                    nullable: true
-                  locationId:
-                    type: string
-                    nullable: true
-    Integration:
-      allOf:
-        - $ref: '#/components/schemas/ObjectBase'
-        - type: object
-          properties:
-            type:
-              type: string
-              enum:
-                - integration
-            provider:
-              type: string
-              enum:
-                - shopify
-                - quickbooks
-                - rfid
-                - webhook
-                - streaming
-            status:
-              type: string
-              enum:
-                - disabled
-                - enabled
-            config:
-              type: object
-              additionalProperties: true
-          required:
-            - type
-            - provider
-            - status
-    IntegrationRun:
-      allOf:
-        - $ref: '#/components/schemas/ObjectBase'
-        - type: object
-          properties:
-            type:
-              type: string
-              enum:
-                - integrationRun
-            integrationId:
-              type: string
-            startedAt:
-              type: string
-              format: date-time
-            finishedAt:
-              type: string
-              format: date-time
-              nullable: true
-            status:
-              type: string
-              enum:
-                - queued
-                - running
-                - success
-                - error
-            stats:
-              type: object
-              additionalProperties: true
-            error:
-              type: string
-              nullable: true
-          required:
-            - type
-            - integrationId
-            - startedAt
-            - status
-    EPCMap:
-      type: object
-      required:
-        - id
-        - type
-        - epc
         - itemId
+        - qty
+        - uom
       properties:
         id:
           type: string
-          description: Use EPC string as id
-        type:
-          type: string
-          enum:
-            - epcMap
-          default: epcMap
-        epc:
-          type: string
         itemId:
           type: string
-        lotId:
+        productId:
           type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        uom:
+          type: string
+        qty:
+          type: number
+        qtyFulfilled:
+          type: number
+          default: 0
+        unitPrice:
+          type: number
+          nullable: true
+        taxRate:
+          type: number
+          nullable: true
+        lineTotal:
+          type: number
           nullable: true
         locationId:
           type: string
           nullable: true
-        status:
+        lot:
           type: string
-          enum:
-            - active
-            - retired
-          default: active
-        createdAt:
+          nullable: true
+        expectedDate:
           type: string
           format: date-time
-        updatedAt:
-          type: string
-          format: date-time
-    EpcBinding:
-      allOf:
-        - $ref: '#/components/schemas/ObjectBase'
-        - type: object
-          properties:
-            type:
-              type: string
-              enum:
-                - epcBinding
-            epc:
-              type: string
-            itemId:
-              type: string
-            locationId:
-              type: string
-            lot:
-              type: string
-              nullable: true
-            state:
-              type: string
-              enum:
-                - active
-                - retired
-              default: active
-          required:
-            - type
-            - epc
-            - itemId
-    ScannerSession:
-      allOf:
-        - $ref: '#/components/schemas/ObjectBase'
-        - type: object
-          properties:
-            type:
-              type: string
-              enum:
-                - scannerSession
-            userId:
-              type: string
-            workspaceId:
-              type: string
-            status:
-              type: string
-              enum:
-                - active
-                - stopped
-            startedAt:
-              type: string
-              format: date-time
-            stoppedAt:
-              type: string
-              format: date-time
-              nullable: true
-          required:
-            - type
-            - userId
-            - status
-            - startedAt
+          nullable: true
+        qtyCommitted:
+          type: number
+          default: 0
     ScannerAction:
       allOf:
         - $ref: '#/components/schemas/ObjectBase'
@@ -3200,3 +3095,217 @@ components:
             - epc
             - itemId
             - ts
+    ScannerSession:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          properties:
+            type:
+              type: string
+              enum:
+                - scannerSession
+            userId:
+              type: string
+            workspaceId:
+              type: string
+            status:
+              type: string
+              enum:
+                - active
+                - stopped
+            startedAt:
+              type: string
+              format: date-time
+            stoppedAt:
+              type: string
+              format: date-time
+              nullable: true
+          required:
+            - type
+            - userId
+            - status
+            - startedAt
+    Scorecard:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          required:
+            - type
+            - eventId
+            - classId
+          properties:
+            type:
+              type: string
+              enum:
+                - scorecard
+            eventId:
+              type: string
+            classId:
+              type: string
+            template:
+              type: object
+              additionalProperties: true
+            entries:
+              type: array
+              items:
+                type: object
+              nullable: true
+            status:
+              type: string
+              enum:
+                - draft
+                - published
+                - archived
+              default: draft
+            notes:
+              type: string
+              nullable: true
+    VendorAccount:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          properties:
+            type:
+              type: string
+              enum:
+                - vendorAccount
+            partyId:
+              type: string
+            termsId:
+              type: string
+              nullable: true
+            remitToAddressId:
+              type: string
+              nullable: true
+            is1099:
+              type: boolean
+              default: false
+            defaultExpenseAccount:
+              type: string
+              nullable: true
+            defaultCOGSAccount:
+              type: string
+              nullable: true
+          required:
+            - partyId
+    Venue:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          required:
+            - type
+            - name
+          properties:
+            type:
+              type: string
+              enum:
+                - venue
+            name:
+              type: string
+            address:
+              type: string
+              nullable: true
+            timezone:
+              type: string
+              nullable: true
+            geo:
+              type: object
+              properties:
+                lat:
+                  type: number
+                lon:
+                  type: number
+              nullable: true
+            notes:
+              type: string
+              nullable: true
+    View:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          properties:
+            type:
+              type: string
+              enum:
+                - view
+            moduleKey:
+              type: string
+              description: e.g., products, inventory, events
+            name:
+              type: string
+            queryJSON:
+              type: object
+              additionalProperties: true
+            ownerId:
+              type: string
+              nullable: true
+            shared:
+              type: boolean
+            isDefault:
+              type: boolean
+          required:
+            - type
+            - moduleKey
+            - name
+            - queryJSON
+    ViewList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/View'
+        next:
+          type: string
+          nullable: true
+    Workspace:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          properties:
+            type:
+              type: string
+              enum:
+                - workspace
+            name:
+              type: string
+            tiles:
+              type: array
+              items:
+                $ref: '#/components/schemas/WorkspaceTile'
+            ownerId:
+              type: string
+              nullable: true
+            shared:
+              type: boolean
+          required:
+            - type
+            - name
+            - tiles
+    WorkspaceList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Workspace'
+        next:
+          type: string
+          nullable: true
+    WorkspaceTile:
+      type: object
+      properties:
+        moduleKey:
+          type: string
+        viewId:
+          type: string
+          nullable: true
+        inlineQuery:
+          type: object
+          additionalProperties: true
+          nullable: true
+        layout:
+          type: object
+          additionalProperties: true
+      required:
+        - moduleKey

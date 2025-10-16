@@ -1440,154 +1440,6 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        ObjectBase: {
-            readonly id: string;
-            readonly tenantId: string;
-            type?: string;
-            /** Format: date-time */
-            readonly createdAt: string;
-            /** Format: date-time */
-            readonly updatedAt: string;
-            metadata?: {
-                [key: string]: unknown;
-            };
-        };
-        Error: {
-            /** @description Human-readable summary */
-            message: string;
-            /** @description Stable error code (e.g., insufficient_available_to_commit) */
-            code?: string;
-            details?: {
-                [key: string]: unknown;
-            }[];
-        };
-        AnyObject: {
-            [key: string]: unknown;
-        };
-        View: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "view";
-            /** @description e.g., products, inventory, events */
-            moduleKey: string;
-            name: string;
-            queryJSON: {
-                [key: string]: unknown;
-            };
-            ownerId?: string | null;
-            shared?: boolean;
-            isDefault?: boolean;
-        };
-        ViewList: {
-            items?: components["schemas"]["View"][];
-            next?: string | null;
-        };
-        WorkspaceTile: {
-            moduleKey: string;
-            viewId?: string | null;
-            inlineQuery?: {
-                [key: string]: unknown;
-            } | null;
-            layout?: {
-                [key: string]: unknown;
-            };
-        };
-        Workspace: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "workspace";
-            name: string;
-            tiles: components["schemas"]["WorkspaceTile"][];
-            ownerId?: string | null;
-            shared?: boolean;
-        };
-        WorkspaceList: {
-            items?: components["schemas"]["Workspace"][];
-            next?: string | null;
-        };
-        Policy: {
-            tenantId?: string;
-            userId?: string;
-            roles: string[];
-            permissions: string[];
-            ui?: {
-                allowedModuleKeys?: string[];
-                allowedViews?: {
-                    id?: string;
-                    moduleKey?: string;
-                }[];
-                allowedWorkspaces?: {
-                    id?: string;
-                    name?: string;
-                }[];
-            };
-        };
-        Party: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "party";
-            /** @enum {string} */
-            kind: "person" | "organization" | "animal";
-            displayName: string;
-            firstName?: string;
-            lastName?: string;
-            /** Format: email */
-            email?: string;
-            phone?: string;
-            addresses?: components["schemas"]["Address"][];
-            tags?: string[];
-            /**
-             * @default active
-             * @enum {string}
-             */
-            status: "active" | "inactive" | "archived";
-            notes?: string;
-        };
-        PartyRole: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "partyRole";
-            partyId: string;
-            /** @enum {string} */
-            role: "customer" | "vendor" | "employee" | "event_staff" | "rider" | "owner" | "judge";
-            /** @default true */
-            active: boolean;
-            notes?: string;
-        };
-        PartyLink: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "partyLink";
-            aPartyId: string;
-            bPartyId: string;
-            /** @enum {string} */
-            kind: "employs" | "member_of" | "owns" | "handles" | "parent" | "affiliate";
-            /** Format: date-time */
-            startsAt?: string;
-            /** Format: date-time */
-            endsAt?: string;
-            notes?: string;
-        };
-        Address: {
-            address1?: string;
-            address2?: string | null;
-            city?: string | null;
-            state?: string | null;
-            postal?: string | null;
-            country?: string | null;
-        };
-        Client: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "client";
-            name: string;
-            displayName?: string;
-            firstName?: string;
-            lastName?: string;
-            /** Format: email */
-            email?: string;
-            phone?: string;
-            /**
-             * @default active
-             * @enum {string}
-             */
-            status: "active" | "inactive" | "archived";
-            notes?: string;
-        };
         Account: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
             type: "account";
@@ -1608,47 +1460,237 @@ export interface components {
              */
             status: "active" | "inactive" | "archived";
         };
-        Product: components["schemas"]["ObjectBase"] & {
+        Address: {
+            address1?: string;
+            address2?: string | null;
+            city?: string | null;
+            state?: string | null;
+            postal?: string | null;
+            country?: string | null;
+        };
+        AnyObject: {
+            [key: string]: unknown;
+        };
+        Class: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
-            type: "product";
+            type: "class";
+            divisionId?: string | null;
+            code?: string;
             name: string;
-            /**
-             * @default good
-             * @enum {string}
-             */
-            kind: "good" | "service";
-            sku?: string;
-            price?: number | null;
-            taxCode?: string | null;
-            defaultItemId?: string | null;
-            tags?: string[];
+            description?: string | null;
+            fee?: number | null;
+            order?: number | null;
+            rules?: string[] | null;
+            notes?: string | null;
+        };
+        CustomerAccount: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type?: "customerAccount";
+            partyId: string;
+            termsId?: string | null;
+            creditLimit?: number | null;
+            priceListId?: string | null;
+            /** @default false */
+            taxExempt: boolean;
+            defaultBillToId?: string | null;
+            defaultShipToId?: string | null;
+        };
+        Division: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "division";
+            code?: string;
+            name: string;
+            description?: string | null;
+            fee?: number | null;
+            rules?: string[] | null;
+            notes?: string | null;
+        };
+        Employee: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "employee";
+            name: string;
+            displayName?: string;
+            /** Format: email */
+            email?: string;
+            phone?: string;
+            role?: string;
             /**
              * @default active
              * @enum {string}
              */
-            status: "active" | "inactive" | "archived";
+            status: "active" | "inactive" | "terminated";
+            /** Format: date-time */
+            hiredAt?: string;
+            /**
+             * Format: date-time
+             * @description Alias of hiredAt for UI consistency
+             */
+            startDate?: string;
+            /** Format: date-time */
+            terminatedAt?: string;
+            notes?: string;
+        };
+        EpcBinding: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "epcBinding";
+            epc: string;
+            itemId: string;
+            locationId?: string;
+            lot?: string | null;
+            /**
+             * @default active
+             * @enum {string}
+             */
+            state: "active" | "retired";
+        };
+        EPCMap: {
+            /** @description Use EPC string as id */
+            id: string;
+            /**
+             * @default epcMap
+             * @enum {string}
+             */
+            type: "epcMap";
+            epc: string;
+            itemId: string;
+            lotId?: string | null;
+            locationId?: string | null;
+            /**
+             * @default active
+             * @enum {string}
+             */
+            status: "active" | "retired";
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            updatedAt?: string;
+        };
+        Error: {
+            /** @description Human-readable summary */
+            message: string;
+            /** @description Stable error code (e.g., insufficient_available_to_commit) */
+            code?: string;
+            details?: {
+                [key: string]: unknown;
+            }[];
+        };
+        Event: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "event";
+            name: string;
+            description?: string;
+            location?: string;
+            /** Format: date-time */
+            startsAt: string;
+            /** Format: date-time */
+            endsAt?: string;
+            /**
+             * Format: date-time
+             * @description Alias of startsAt (deprecated)
+             */
+            start?: string;
+            /**
+             * Format: date-time
+             * @description Alias of endsAt (deprecated)
+             */
+            end?: string;
+            /**
+             * @default draft
+             * @enum {string}
+             */
+            status: "draft" | "scheduled" | "open" | "closed" | "completed" | "cancelled" | "archived";
+            capacity?: number;
+            notes?: string;
+            lines?: components["schemas"]["EventLine"][];
+        };
+        EventLine: {
+            id?: string;
+            classId: string;
+            capacity?: number | null;
+            fee?: number | null;
+            note?: string | null;
+        };
+        GoodsReceipt: components["schemas"]["ObjectBase"] & {
+            id?: string;
+            /** @enum {string} */
+            type: "goodsReceipt";
+            tenantId?: string;
+            poId: string;
+            userId?: string | null;
+            /** Format: date-time */
+            ts: string | null;
+            lines: {
+                lineId: string;
+                itemId?: string | null;
+                deltaQty: number;
+                lot?: string | null;
+                locationId?: string | null;
+            }[];
+            notes?: string | null;
+            attachments?: string[];
+        };
+        GoodsReceiptLine: {
+            lineId: string;
+            deltaQty: number;
+            locationId?: string | null;
+            lot?: string | null;
+        };
+        Integration: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "integration";
+            /** @enum {string} */
+            provider: "shopify" | "quickbooks" | "rfid" | "webhook" | "streaming";
+            /** @enum {string} */
+            status: "disabled" | "enabled";
+            config?: {
+                [key: string]: unknown;
+            };
+        };
+        IntegrationRun: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "integrationRun";
+            integrationId: string;
+            /** Format: date-time */
+            startedAt: string;
+            /** Format: date-time */
+            finishedAt?: string | null;
+            /** @enum {string} */
+            status: "queued" | "running" | "success" | "error";
+            stats?: {
+                [key: string]: unknown;
+            };
+            error?: string | null;
+        };
+        InventoryAdjustmentRequest: {
+            reason: string;
+            deltaQty: number;
             notes?: string | null;
         };
         InventoryItem: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
             type: "inventory";
+            productId?: string | null;
             name: string;
             sku?: string;
+            /**
+             * @deprecated
+             * @description Deprecated – use /inventory/{id}/onhand
+             */
+            quantity?: number;
             uom?: string;
-            productId?: string | null;
             location?: string | null;
             minQty?: number | null;
             maxQty?: number | null;
-            /** @default false */
-            lotTracked: boolean;
-            barcode?: string | null;
-            tags?: string[];
             /**
              * @default active
              * @enum {string}
              */
             status: "active" | "inactive" | "archived";
             notes?: string | null;
+            /** @default false */
+            lotTracked: boolean;
+            barcode?: string | null;
+            tags?: string[];
         };
         InventoryMovement: {
             id?: string;
@@ -1693,218 +1735,9 @@ export interface components {
             /** Format: date-time */
             asOf?: string;
         };
-        InventoryAdjustmentRequest: {
-            reason: string;
-            deltaQty: number;
-            notes?: string | null;
-        };
         ListPageInventoryMovement: {
             items?: components["schemas"]["InventoryMovement"][];
             next?: string | null;
-        };
-        Resource: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "resource";
-            name: string;
-            code?: string | null;
-            /**
-             * @default other
-             * @enum {string}
-             */
-            resourceType: "stall" | "rv" | "arena" | "equipment" | "other";
-            /**
-             * @default available
-             * @enum {string}
-             */
-            status: "available" | "unavailable" | "maintenance";
-            capacity?: number | null;
-            location?: string | null;
-            tags?: string[];
-            /** Format: uri */
-            url?: string | null;
-            /** Format: date-time */
-            expiresAt?: string | null;
-            notes?: string | null;
-        };
-        EventLine: {
-            id?: string;
-            classId: string;
-            capacity?: number | null;
-            fee?: number | null;
-            note?: string | null;
-        };
-        Event: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "event";
-            name: string;
-            /** Format: date-time */
-            startsAt: string;
-            /**
-             * @default draft
-             * @enum {string}
-             */
-            status: "draft" | "scheduled" | "open" | "closed" | "completed" | "cancelled" | "archived";
-            lines?: components["schemas"]["EventLine"][];
-        };
-        RegistrationLine: {
-            id?: string;
-            classId: string;
-            /** @default 1 */
-            qty: number;
-            note?: string | null;
-        };
-        Registration: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "registration";
-            partyId?: string;
-            /** @enum {string} */
-            partyKind?: "person" | "organization" | "animal";
-            eventId: string;
-            clientId: string;
-            /** @default 1 */
-            qty: number;
-            lines?: components["schemas"]["RegistrationLine"][];
-            /**
-             * @default pending
-             * @enum {string}
-             */
-            status: "pending" | "confirmed" | "checked_in" | "checked_out" | "cancelled";
-            /** Format: date-time */
-            startsAt?: string | null;
-            /** Format: date-time */
-            endsAt?: string | null;
-            notes?: string | null;
-        };
-        Reservation: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "reservation";
-            partyId?: string;
-            /** @enum {string} */
-            partyKind?: "person" | "organization" | "animal";
-            resourceId: string;
-            resourceName?: string | null;
-            eventId?: string | null;
-            clientId: string;
-            clientName?: string | null;
-            /** Format: date-time */
-            startsAt: string;
-            /** Format: date-time */
-            endsAt: string;
-            rate?: number | null;
-            price?: number | null;
-            conflictKey?: string | null;
-            /**
-             * @default pending
-             * @enum {string}
-             */
-            status: "pending" | "confirmed" | "in_use" | "checked_in" | "completed" | "cancelled";
-            notes?: string | null;
-        };
-        Vendor: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "vendor";
-            name: string;
-            displayName?: string;
-            /** Format: email */
-            email?: string;
-            phone?: string;
-            notes?: string;
-            /**
-             * @default active
-             * @enum {string}
-             */
-            status: "active" | "inactive" | "archived";
-        };
-        Employee: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "employee";
-            name: string;
-            displayName?: string;
-            /** Format: email */
-            email?: string;
-            phone?: string;
-            role?: string;
-            /**
-             * @default active
-             * @enum {string}
-             */
-            status: "active" | "inactive" | "terminated";
-            /** Format: date-time */
-            hiredAt?: string;
-            /**
-             * Format: date-time
-             * @description Alias of hiredAt for UI consistency
-             */
-            startDate?: string;
-            /** Format: date-time */
-            terminatedAt?: string;
-            notes?: string;
-        };
-        Organization: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "organization";
-            name: string;
-            code?: string | null;
-            /** Format: uri */
-            website?: string | null;
-            phone?: string | null;
-            /** Format: email */
-            email?: string | null;
-            address?: string | null;
-            prefs?: {
-                [key: string]: unknown;
-            } | null;
-            notes?: string | null;
-        };
-        Venue: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "venue";
-            name: string;
-            address?: string | null;
-            timezone?: string | null;
-            geo?: {
-                lat?: number;
-                lon?: number;
-            } | null;
-            notes?: string | null;
-        };
-        Division: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "division";
-            code?: string;
-            name: string;
-            description?: string | null;
-            fee?: number | null;
-            rules?: string[] | null;
-            notes?: string | null;
-        };
-        Class: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "class";
-            divisionId?: string | null;
-            code?: string;
-            name: string;
-            description?: string | null;
-            fee?: number | null;
-            order?: number | null;
-            rules?: string[] | null;
-            notes?: string | null;
-        };
-        Scorecard: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "scorecard";
-            eventId: string;
-            classId: string;
-            template?: {
-                [key: string]: unknown;
-            };
-            entries?: Record<string, never>[] | null;
-            /**
-             * @default draft
-             * @enum {string}
-             */
-            status: "draft" | "published" | "archived";
-            notes?: string | null;
         };
         Message: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
@@ -1934,33 +1767,139 @@ export interface components {
             discount?: number;
             total?: number;
         };
-        PurchaseOrderLine: {
-            id?: string;
-            /** @description InventoryItem.id */
-            itemId: string;
-            productId?: string | null;
-            description?: string | null;
-            uom: string;
-            /** @description Ordered quantity */
-            qty: number;
-            /** @default 0 */
-            qtyReceived: number;
-            unitPrice?: number | null;
-            taxRate?: number | null;
-            lineTotal?: number | null;
-            locationId?: string | null;
-            lot?: string | null;
+        ObjectBase: {
+            readonly id: string;
+            readonly tenantId: string;
+            type?: string;
             /** Format: date-time */
-            expectedDate?: string | null;
+            readonly createdAt: string;
+            /** Format: date-time */
+            readonly updatedAt: string;
+            metadata?: {
+                [key: string]: unknown;
+            };
+        };
+        Organization: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "organization";
+            name: string;
+            /**
+             * @example federation
+             * @enum {string}
+             */
+            kind?: "club" | "federation" | "venueOp" | "sponsor";
+            /**
+             * @default active
+             * @enum {string}
+             */
+            status: "active" | "inactive" | "archived";
+            notes?: string | null;
+            metadata?: {
+                [key: string]: unknown;
+            } | null;
+            code?: string | null;
+            /** Format: uri */
+            website?: string | null;
+            phone?: string | null;
+            /** Format: email */
+            email?: string | null;
+            address?: string | null;
+            prefs?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        Party: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "party";
+            /** @enum {string} */
+            kind: "person" | "organization" | "animal";
+            displayName: string;
+            firstName?: string;
+            lastName?: string;
+            /** Format: email */
+            email?: string;
+            phone?: string;
+            addresses?: components["schemas"]["Address"][];
+            tags?: string[];
+            /**
+             * @default active
+             * @enum {string}
+             */
+            status: "active" | "inactive" | "archived";
+            notes?: string;
+            /** @description Denormalized role membership for fast gates. */
+            roleFlags?: {
+                [key: string]: boolean;
+            };
+            /** @description Optional array for UI; roleFlags is the source of truth. */
+            roles?: string[];
+        };
+        PartyLink: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "partyLink";
+            aPartyId: string;
+            bPartyId: string;
+            /** @enum {string} */
+            kind: "employs" | "member_of" | "owns" | "handles" | "parent" | "affiliate";
+            /** Format: date-time */
+            startsAt?: string;
+            /** Format: date-time */
+            endsAt?: string;
+            notes?: string;
+        };
+        PartyRole: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "partyRole";
+            partyId: string;
+            /** @enum {string} */
+            role: "customer" | "vendor" | "employee" | "event_staff" | "rider" | "owner" | "judge";
+            /** @default true */
+            active: boolean;
+            notes?: string;
+        };
+        Policy: {
+            tenantId?: string;
+            userId?: string;
+            roles: string[];
+            permissions: string[];
+            ui?: {
+                allowedModuleKeys?: string[];
+                allowedViews?: {
+                    id?: string;
+                    moduleKey?: string;
+                }[];
+                allowedWorkspaces?: {
+                    id?: string;
+                    name?: string;
+                }[];
+            };
+        };
+        Product: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "product";
+            name: string;
+            /**
+             * @default good
+             * @enum {string}
+             */
+            kind: "good" | "service";
+            sku?: string;
+            price?: number | null;
+            taxCode?: string | null;
+            /**
+             * @default active
+             * @enum {string}
+             */
+            status: "active" | "inactive" | "archived";
+            notes?: string | null;
+            defaultItemId?: string | null;
+            tags?: string[];
         };
         PurchaseOrder: {
             id?: string;
             tenantId?: string;
             /** @enum {string} */
             type: "purchaseOrder";
-            partyId?: string;
-            /** @enum {string} */
-            partyKind?: "person" | "organization" | "animal";
             /** Format: date-time */
             createdAt?: string;
             /** Format: date-time */
@@ -1968,6 +1907,10 @@ export interface components {
             metadata?: {
                 [key: string]: unknown;
             };
+            vendorAccountId?: string;
+            partyId?: string;
+            /** @enum {string} */
+            partyKind?: "person" | "organization" | "animal";
         } & {
             orderNumber?: string;
             vendorId?: string;
@@ -1998,17 +1941,17 @@ export interface components {
             };
             lines?: components["schemas"]["PurchaseOrderLine"][];
         };
-        SalesOrderLine: {
+        PurchaseOrderLine: {
             id?: string;
+            /** @description InventoryItem.id */
             itemId: string;
             productId?: string | null;
             description?: string | null;
             uom: string;
+            /** @description Ordered quantity */
             qty: number;
             /** @default 0 */
-            qtyCommitted: number;
-            /** @default 0 */
-            qtyFulfilled: number;
+            qtyReceived: number;
             unitPrice?: number | null;
             taxRate?: number | null;
             lineTotal?: number | null;
@@ -2017,14 +1960,139 @@ export interface components {
             /** Format: date-time */
             expectedDate?: string | null;
         };
+        Registration: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "registration";
+            eventId: string;
+            clientId: string;
+            clientName?: string | null;
+            /** @default 1 */
+            qty: number;
+            /** Format: date-time */
+            startsAt?: string | null;
+            /** Format: date-time */
+            endsAt?: string | null;
+            /**
+             * Format: date-time
+             * @description Alias of startsAt (deprecated)
+             */
+            start?: string | null;
+            /**
+             * Format: date-time
+             * @description Alias of endsAt (deprecated)
+             */
+            end?: string | null;
+            /** Format: date-time */
+            registeredAt?: string | null;
+            /**
+             * @default pending
+             * @enum {string}
+             */
+            status: "pending" | "confirmed" | "checked_in" | "checked_out" | "cancelled";
+            notes?: string | null;
+            partyId?: string;
+            /** @enum {string} */
+            partyKind?: "person" | "organization" | "animal";
+            lines?: components["schemas"]["RegistrationLine"][];
+        };
+        RegistrationLine: {
+            id?: string;
+            classId: string;
+            /** @default 1 */
+            qty: number;
+            note?: string | null;
+        };
+        Reservation: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "reservation";
+            resourceId: string;
+            resourceName?: string | null;
+            eventId?: string | null;
+            clientId: string;
+            clientName?: string | null;
+            /** Format: date-time */
+            startsAt: string;
+            /** Format: date-time */
+            endsAt: string;
+            /**
+             * Format: date-time
+             * @description Alias of startsAt (deprecated)
+             */
+            start?: string;
+            /**
+             * Format: date-time
+             * @description Alias of endsAt (deprecated)
+             */
+            end?: string;
+            /**
+             * @default pending
+             * @enum {string}
+             */
+            status: "pending" | "confirmed" | "in_use" | "checked_in" | "completed" | "cancelled";
+            notes?: string | null;
+            partyId?: string;
+            /** @enum {string} */
+            partyKind?: "person" | "organization" | "animal";
+            rate?: number | null;
+            price?: number | null;
+            conflictKey?: string | null;
+        };
+        Resource: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "resource";
+            name: string;
+            code?: string | null;
+            /** Format: uri */
+            url?: string | null;
+            /** Format: date-time */
+            expiresAt?: string | null;
+            /**
+             * @default other
+             * @enum {string}
+             */
+            resourceType: "stall" | "rv" | "arena" | "equipment" | "other";
+            /**
+             * @default available
+             * @enum {string}
+             */
+            status: "available" | "unavailable" | "maintenance";
+            capacity?: number | null;
+            location?: string | null;
+            tags?: string[];
+            notes?: string | null;
+        };
+        SalesFulfillment: components["schemas"]["ObjectBase"] & {
+            id?: string;
+            /** @enum {string} */
+            type: "salesFulfillment";
+            tenantId?: string;
+            soId: string;
+            userId?: string | null;
+            /** Format: date-time */
+            ts: string | null;
+            lines: {
+                lineId: string;
+                itemId?: string | null;
+                deltaQty: number;
+                lot?: string | null;
+                locationId?: string | null;
+            }[];
+            carrier?: string | null;
+            tracking?: string | null;
+            notes?: string | null;
+            attachments?: string[];
+        };
+        SalesFulfillmentLine: {
+            lineId: string;
+            deltaQty: number;
+            locationId?: string | null;
+            lot?: string | null;
+        };
         SalesOrder: {
             id?: string;
             tenantId?: string;
             /** @enum {string} */
             type: "salesOrder";
-            partyId?: string;
-            /** @enum {string} */
-            partyKind?: "person" | "organization" | "animal";
             /** Format: date-time */
             createdAt?: string;
             /** Format: date-time */
@@ -2032,6 +2100,10 @@ export interface components {
             metadata?: {
                 [key: string]: unknown;
             };
+            customerAccountId?: string;
+            partyId?: string;
+            /** @enum {string} */
+            partyKind?: "person" | "organization" | "animal";
         } & {
             orderNumber?: string;
             customerId?: string;
@@ -2062,120 +2134,24 @@ export interface components {
             };
             lines?: components["schemas"]["SalesOrderLine"][];
         };
-        GoodsReceiptLine: {
-            lineId: string;
-            deltaQty: number;
-            locationId?: string | null;
-            lot?: string | null;
-        };
-        GoodsReceipt: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "goodsReceipt";
-            poId: string;
-            /** Format: date-time */
-            ts?: string | null;
-            notes?: string | null;
-            lines?: {
-                lineId: string;
-                itemId?: string | null;
-                deltaQty: number;
-                lot?: string | null;
-                locationId?: string | null;
-            }[];
-        };
-        SalesFulfillmentLine: {
-            lineId: string;
-            deltaQty: number;
-            locationId?: string | null;
-            lot?: string | null;
-        };
-        SalesFulfillment: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "salesFulfillment";
-            soId: string;
-            /** Format: date-time */
-            ts?: string | null;
-            notes?: string | null;
-            lines?: {
-                lineId: string;
-                itemId?: string | null;
-                deltaQty: number;
-                lot?: string | null;
-                locationId?: string | null;
-            }[];
-        };
-        Integration: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "integration";
-            /** @enum {string} */
-            provider: "shopify" | "quickbooks" | "rfid" | "webhook" | "streaming";
-            /** @enum {string} */
-            status: "disabled" | "enabled";
-            config?: {
-                [key: string]: unknown;
-            };
-        };
-        IntegrationRun: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "integrationRun";
-            integrationId: string;
-            /** Format: date-time */
-            startedAt: string;
-            /** Format: date-time */
-            finishedAt?: string | null;
-            /** @enum {string} */
-            status: "queued" | "running" | "success" | "error";
-            stats?: {
-                [key: string]: unknown;
-            };
-            error?: string | null;
-        };
-        EPCMap: {
-            /** @description Use EPC string as id */
-            id: string;
-            /**
-             * @default epcMap
-             * @enum {string}
-             */
-            type: "epcMap";
-            epc: string;
+        SalesOrderLine: {
+            id?: string;
             itemId: string;
-            lotId?: string | null;
+            productId?: string | null;
+            description?: string | null;
+            uom: string;
+            qty: number;
+            /** @default 0 */
+            qtyFulfilled: number;
+            unitPrice?: number | null;
+            taxRate?: number | null;
+            lineTotal?: number | null;
             locationId?: string | null;
-            /**
-             * @default active
-             * @enum {string}
-             */
-            status: "active" | "retired";
-            /** Format: date-time */
-            createdAt?: string;
-            /** Format: date-time */
-            updatedAt?: string;
-        };
-        EpcBinding: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "epcBinding";
-            epc: string;
-            itemId: string;
-            locationId?: string;
             lot?: string | null;
-            /**
-             * @default active
-             * @enum {string}
-             */
-            state: "active" | "retired";
-        };
-        ScannerSession: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "scannerSession";
-            userId: string;
-            workspaceId?: string;
-            /** @enum {string} */
-            status: "active" | "stopped";
             /** Format: date-time */
-            startedAt: string;
-            /** Format: date-time */
-            stoppedAt?: string | null;
+            expectedDate?: string | null;
+            /** @default 0 */
+            qtyCommitted: number;
         };
         ScannerAction: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
@@ -2195,6 +2171,96 @@ export interface components {
             /** @default 1 */
             qty: number;
             notes?: string;
+        };
+        ScannerSession: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "scannerSession";
+            userId: string;
+            workspaceId?: string;
+            /** @enum {string} */
+            status: "active" | "stopped";
+            /** Format: date-time */
+            startedAt: string;
+            /** Format: date-time */
+            stoppedAt?: string | null;
+        };
+        Scorecard: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "scorecard";
+            eventId: string;
+            classId: string;
+            template?: {
+                [key: string]: unknown;
+            };
+            entries?: Record<string, never>[] | null;
+            /**
+             * @default draft
+             * @enum {string}
+             */
+            status: "draft" | "published" | "archived";
+            notes?: string | null;
+        };
+        VendorAccount: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type?: "vendorAccount";
+            partyId: string;
+            termsId?: string | null;
+            remitToAddressId?: string | null;
+            /** @default false */
+            is1099: boolean;
+            defaultExpenseAccount?: string | null;
+            defaultCOGSAccount?: string | null;
+        };
+        Venue: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "venue";
+            name: string;
+            address?: string | null;
+            timezone?: string | null;
+            geo?: {
+                lat?: number;
+                lon?: number;
+            } | null;
+            notes?: string | null;
+        };
+        View: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "view";
+            /** @description e.g., products, inventory, events */
+            moduleKey: string;
+            name: string;
+            queryJSON: {
+                [key: string]: unknown;
+            };
+            ownerId?: string | null;
+            shared?: boolean;
+            isDefault?: boolean;
+        };
+        ViewList: {
+            items?: components["schemas"]["View"][];
+            next?: string | null;
+        };
+        Workspace: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "workspace";
+            name: string;
+            tiles: components["schemas"]["WorkspaceTile"][];
+            ownerId?: string | null;
+            shared?: boolean;
+        };
+        WorkspaceList: {
+            items?: components["schemas"]["Workspace"][];
+            next?: string | null;
+        };
+        WorkspaceTile: {
+            moduleKey: string;
+            viewId?: string | null;
+            inlineQuery?: {
+                [key: string]: unknown;
+            } | null;
+            layout?: {
+                [key: string]: unknown;
+            };
         };
     };
     responses: {
