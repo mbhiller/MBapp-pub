@@ -1,31 +1,31 @@
 #!/usr/bin/env node
 /* ops/smoke.mjs — modular orchestrator */
 import { API_BASE, requireEnv, setBearer, writeTokenFiles, ps1SetEnvLine } from "./smoke/core.mjs";
-import * as Inventory from "./smoke/modules/inventory-smoke.mjs";
-import * as Products from "./smoke/modules/products-smoke.mjs";
-import * as Clients from "./smoke/modules/clients-smoke.mjs";
-import * as Vendors from "./smoke/modules/vendors-smoke.mjs";
-import * as Employees from "./smoke/modules/employees-smoke.mjs";
-import * as Resources from "./smoke/modules/resources-smoke.mjs";
-import * as Reservations from "./smoke/modules/reservations-smoke.mjs";
-import * as SOFlow from "./smoke/flows/so/salesOrder-flow.mjs";
-import * as POFlow from "./smoke/flows/po/purchaseOrder-flow.mjs";
-import * as ResvFlow from "./smoke/flows/reservation-flow.mjs";
-import * as ScannerFlow from "./smoke/flows/scanner-flow.mjs";
-import * as Guardrails from "./smoke/flows/guardrails.mjs";
-import * as LinksReport from "./smoke/reports/product-links.mjs";
-import * as ScannerPick from "./smoke/flows/scanner-pick.mjs";
-import * as ScannerGuards from "./smoke/flows/scanner-guardrails.mjs";
-import * as SOBackorder from "./smoke/flows/so/salesOrder-backorder.mjs";
-import * as SORelease   from "./smoke/flows/so/salesOrder-release.mjs";
-import * as flowGoodsReceipt from "./smoke/flows/goodsReceipts/goodsReceipt-flow.mjs";
-import * as flowSeedAll from "./smoke/flows/seed-all.mjs";
-import * as FieldCoverage from "./smoke/reports/field-coverage.mjs";
-import * as flowReservations from "./smoke/flows/reservation-flow.mjs";
-import * as ResourcesMod from "./smoke/modules/resources-smoke.mjs";
- import * as EventsFlow from "./smoke/flows/events-flow.mjs";
- import * as RegsFlow   from "./smoke/flows/registrations-flow.mjs";
- import * as FieldCov   from "./smoke/reports/field-coverage.mjs";
+// import * as Inventory from "./smoke/modules/inventory-smoke.mjs";
+// import * as Products from "./smoke/modules/products-smoke.mjs";
+// import * as Clients from "./smoke/modules/clients-smoke.mjs";
+// import * as Vendors from "./smoke/modules/vendors-smoke.mjs";
+// import * as Employees from "./smoke/modules/employees-smoke.mjs";
+// import * as Resources from "./smoke/modules/resources-smoke.mjs";
+// import * as Reservations from "./smoke/modules/reservations-smoke.mjs";
+// import * as SOFlow from "./smoke/flows/so/salesOrder-flow.mjs";
+// import * as POFlow from "./smoke/flows/po/purchaseOrder-flow.mjs";
+// import * as ResvFlow from "./smoke/flows/reservation-flow.mjs";
+// import * as ScannerFlow from "./smoke/flows/scanner-flow.mjs";
+// import * as Guardrails from "./smoke/flows/guardrails.mjs";
+// import * as LinksReport from "./smoke/reports/product-links.mjs";
+// import * as ScannerPick from "./smoke/flows/scanner-pick.mjs";
+// import * as ScannerGuards from "./smoke/flows/scanner-guardrails.mjs";
+// import * as SOBackorder from "./smoke/flows/so/salesOrder-backorder.mjs";
+// import * as SORelease   from "./smoke/flows/so/salesOrder-release.mjs";
+// import * as flowGoodsReceipt from "./smoke/flows/goodsReceipts/goodsReceipt-flow.mjs";
+// import * as flowSeedAll from "./smoke/flows/seed-all.mjs";
+// import * as FieldCoverage from "./smoke/reports/field-coverage.mjs";
+// import * as flowReservations from "./smoke/flows/reservation-flow.mjs";
+// import * as ResourcesMod from "./smoke/modules/resources-smoke.mjs";
+//  import * as EventsFlow from "./smoke/flows/events-flow.mjs";
+//  import * as RegsFlow   from "./smoke/flows/registrations-flow.mjs";
+//  import * as FieldCov   from "./smoke/reports/field-coverage.mjs";
 
 
 
@@ -77,7 +77,7 @@ function policyPreset(name) {
   return n === "read" ? READ : n === "write" ? WRITE : FULL;
 }
 
-const MODULE_MAP = { inventory: Inventory, products: Products, clients: Clients, vendors: Vendors, employees: Employees, resources: Resources, reservations: Reservations };
+//const MODULE_MAP = { inventory: Inventory, products: Products, clients: Clients, vendors: Vendors, employees: Employees, resources: Resources, reservations: Reservations };
 
 async function main() {
   const [, , cmd, ...rest] = process.argv;

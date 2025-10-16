@@ -41,7 +41,7 @@ $env:EXPO_PUBLIC_ENV = $Env
 $env:EXPO_PUBLIC_API_BASE = $ApiBase
 $env:EXPO_PUBLIC_TENANT_ID = $TenantId
 
-$env:JWT_SECRET ="D7wyU6vxk38sZMQfsuSCoJWKNF+6z0YIEKWXRK5Qhxdvq/RfRsWwLhtInVZfUSH6wiojOFQaXn8E+1CcF5RERg==" 
+$Env:MBAPP_JWT_SECRET ="D7wyU6vxk38sZMQfsuSCoJWKNF+6z0YIEKWXRK5Qhxdvq/RfRsWwLhtInVZfUSH6wiojOFQaXn8E+1CcF5RERg==" 
 
 Write-Host "Environment set:" -ForegroundColor Cyan
 [PSCustomObject]@{
@@ -58,7 +58,7 @@ Write-Host "Environment set:" -ForegroundColor Cyan
   Table_PK = $Table_PK
   Counters_PK = $COUNTERS_Table_PK
   Counters_SK = $COUNTERS_Table_SK
-  JWT_SECRET = $env:JWT_SECRET
+  JWT_SECRET = $Env:MBAPP_JWT_SECRET
 } | Format-List | Out-String | Write-Host
 
 Write-Host "Tip: dot-source to persist: . `"$($MyInvocation.MyCommand.Path)`"" -ForegroundColor DarkGray
