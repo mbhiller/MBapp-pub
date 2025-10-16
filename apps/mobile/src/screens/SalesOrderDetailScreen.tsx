@@ -28,7 +28,7 @@ import {
   type SalesOrderLine,
 } from "../features/salesOrders/api";
 import { ItemSelectorModal, type ItemSelection } from "../features/_shared/ItemSelectorModal";
-import { CustomerSelectorModal, type CustomerSnapshot } from "../features/_shared/CustomerSelectorModal";
+import { CustomerSelectorModal, type CustomerSnapshot } from "../features/parties/PartySelectorModal";
 import { useColors } from "../features/_shared/useColors";
 import { Feather } from "@expo/vector-icons";
 import { makeKey, normalizeLines, toPatchLines, type WithKey } from "../features/_shared/lineEditor";

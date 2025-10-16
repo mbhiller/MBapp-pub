@@ -1,90 +1,51 @@
 // apps/mobile/src/features/_shared/useRefetchOnFocus.ts
-import * as React from "react";
-import { AppState, AppStateStatus } from "react-native";
-import { useFocusEffect, useIsFocused } from "@react-navigation/native";
-
-type Opts = {
-  /** Delay (ms) before calling refetch after focus/foreground. Default: 0 */
-  debounceMs?: number;
-  /** Also refetch when app returns to foreground (screen must be focused). Default: true */
-  onAppForeground?: boolean;
-  /** Fire on the initial mount-focus as well. Default: true */
-  fireOnMount?: boolean;
-};
+import { useCallback, useEffect } from "react";
+import { useFocusEffect } from "@react-navigation/native";
 
 /**
- * Calls `refetch` whenever the screen becomes focused.
- * - Optional debounce (to avoid double work during rapid nav).
- * - Optional foreground refetch when app comes back to ACTIVE.
- * - No memory leaks: all timers/listeners are cleaned up.
+ * Back-compat signature:
+ *   useRefetchOnFocus(load)                    // focus only
+ *   useRefetchOnFocus(load, [dep1, dep2])      // old array style
+ *   useRefetchOnFocus(load, { deps:[...], when:true, refetchOnMount:true }) // new object style
  */
+export type RefetchOpts = {
+  /** Re-run when these change (also used for focus effect memoization). */
+  deps?: any[];
+  /** Gate whether we refetch at all (default true). */
+  when?: boolean;
+  /** Also run once on mount when true (default true). */
+  refetchOnMount?: boolean;
+};
+
 export function useRefetchOnFocus(
-  refetch: () => void | Promise<unknown>,
-  opts: Opts = {}
+  load: () => void | Promise<void>,
+  optsOrDeps?: any[] | RefetchOpts
 ) {
-  const { debounceMs = 0, onAppForeground = true, fireOnMount = true } = opts;
+  const opts: RefetchOpts = Array.isArray(optsOrDeps)
+    ? { deps: optsOrDeps }
+    : (optsOrDeps ?? {});
 
-  // Keep the latest refetch without re-subscribing listeners
-  const refetchRef = React.useRef(refetch);
-  React.useEffect(() => {
-    refetchRef.current = refetch;
-  }, [refetch]);
+  const deps = opts.deps ?? [];
+  const when = opts.when ?? true;
+  const refetchOnMount = opts.refetchOnMount ?? true;
 
-  // Utility: run (debounced) once
-  const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const run = React.useCallback(() => {
-    // clear any pending timer first
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
+  // Run once on mount (or when deps change), if enabled
+  useEffect(() => {
+    if (when && refetchOnMount) {
+      void load();
     }
-    if (debounceMs > 0) {
-      timerRef.current = setTimeout(() => {
-        timerRef.current = null;
-        refetchRef.current?.();
-      }, debounceMs);
-    } else {
-      refetchRef.current?.();
-    }
-  }, [debounceMs]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [when, refetchOnMount, ...deps]);
 
-  // Refetch when the screen gains focus
+  // Re-run whenever the screen regains focus
   useFocusEffect(
-    React.useCallback(() => {
-      if (fireOnMount) run();
-
-      // Cleanup clears any in-flight debounce timer
-      return () => {
-        if (timerRef.current) {
-          clearTimeout(timerRef.current);
-          timerRef.current = null;
-        }
-      };
-    }, [run, fireOnMount])
+    useCallback(() => {
+      if (!when) return;
+      void load();
+      // no cleanup needed
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [when, ...deps])
   );
-
-  // Optionally refetch when app foregrounds, but only if this screen is focused
-  const isFocused = useIsFocused();
-  React.useEffect(() => {
-    if (!onAppForeground) return;
-
-    const onChange = (state: AppStateStatus) => {
-      if (state === "active" && isFocused) {
-        run();
-      }
-    };
-
-    const sub = AppState.addEventListener("change", onChange);
-    return () => sub.remove();
-  }, [onAppForeground, isFocused, run]);
-
-  // Also clear any timer on unmount (belt & suspenders)
-  React.useEffect(() => {
-    return () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
-    };
-  }, []);
 }
+
+export default useRefetchOnFocus;

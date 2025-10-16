@@ -1,0 +1,4 @@
+.\ops\Set-MBEnv.ps1 -Login -Show
+ 
+ 
+ node ops/smoke/smoke.mjs smoke:parties:happy

@@ -20,9 +20,8 @@ import ProductDetailScreen from "../screens/ProductDetailScreen";
 import ObjectsListScreen from "../screens/ObjectsListScreen";
 import ObjectDetailScreen from "../screens/ObjectDetailScreen";
 
-// Clients
-import ClientsListScreen from "../screens/ClientsListScreen";
-import ClientDetailScreen from "../screens/ClientDetailScreen";
+import PartyListScreen from "../screens/PartyListScreen";
+import PartyDetailScreen from "../screens/PartyDetailScreen";
 
 // Accounts
 import AccountsListScreen from "../screens/AccountsListScreen";
@@ -42,9 +41,6 @@ import RegistrationDetailScreen from "../screens/RegistrationDetailScreen";
 import ReservationsListScreen from "../screens/ReservationsListScreen";
 import ReservationDetailScreen from "../screens/ReservationDetailScreen";
 
-// Vendors / Employees
-import VendorsListScreen from "../screens/VendorsListScreen";
-import VendorDetailScreen from "../screens/VendorDetailScreen";
 
 import EmployeesListScreen from "../screens/EmployeesListScreen";
 import EmployeeDetailScreen from "../screens/EmployeeDetailScreen";
@@ -110,7 +106,16 @@ export default function RootStack() {
 
       <Stack.Screen name="Hub" component={ModuleHubScreen} options={{ title: "Hub" }} />
       <Stack.Screen name="DevDiagnostics" component={DevDiagnosticsScreen} options={{ title: "Dev Diagnostics" }} />
-
+      <Stack.Screen
+        name="PartyList"
+        component={PartyListScreen}
+        options={{ title: "Parties" }}
+      />
+      <Stack.Screen
+        name="PartyDetail"
+        component={PartyDetailScreen}
+        options={{ title: "Party" }}
+      />
       {/* Products */}
       <Stack.Screen name="ProductsList" component={ProductsListScreen} options={{ title: "Products" }} />
       <Stack.Screen name="ProductDetail" component={ProductDetailScreen} options={{ title: "Product" }} />
@@ -122,9 +127,6 @@ export default function RootStack() {
       {/* Tenants */}
       <Stack.Screen name="Tenants" component={TenantsScreen} options={{ title: "Tenants" }} />
 
-      {/* Clients */}
-      <Stack.Screen name="ClientsList" component={ClientsListScreen} options={{ title: "Clients" }} />
-      <Stack.Screen name="ClientDetail" component={ClientDetailScreen} options={{ title: "Client" }} />
 
       {/* Accounts */}
       <Stack.Screen name="AccountsList" component={AccountsListScreen} options={{ title: "Accounts" }} />
@@ -145,9 +147,6 @@ export default function RootStack() {
       <Stack.Screen name="ReservationsList" component={ReservationsListScreen} options={{ title: "Reservations" }} />
       <Stack.Screen name="ReservationDetail" component={ReservationDetailScreen} options={{ title: "Reservation" }} />
 
-      {/* Vendors / Employees */}
-      <Stack.Screen name="VendorsList" component={VendorsListScreen} options={{ title: "Vendors" }} />
-      <Stack.Screen name="VendorDetail" component={VendorDetailScreen} options={{ title: "Vendor" }} />
       
       <Stack.Screen name="EmployeesList" component={EmployeesListScreen} options={{ title: "Employees" }} />
       <Stack.Screen name="EmployeeDetail" component={EmployeeDetailScreen} options={{ title: "Employee" }} />

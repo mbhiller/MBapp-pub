@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, feat/**, feature/** ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  spec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - run: pnpm -w -r install
+      - name: Typegen (if spec exists)
+        run: |
+          if [ -d spec ]; then pnpm --filter spec... typegen || true; fi
+
+  api:
+    runs-on: ubuntu-latest
+    needs: [spec]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - run: pnpm -w -r install
+      - run: pnpm --filter @mbapp/api... build
+
+  mobile:
+    runs-on: ubuntu-latest
+    needs: [spec]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - run: pnpm -w -r install
+      - run: pnpm --filter @mbapp/mobile... tsc --noEmit
+
+  smokes:
+    runs-on: ubuntu-latest
+    needs: [api]
+    strategy:
+      fail-fast: false
+      matrix:
+        test: [ "smoke:parties:happy", "smoke:inventory:guards", "smoke:orders:so:happy", "smoke:orders:po:happy" ]
+    env:
+      MBAPP_API_BASE: ${{ secrets.MBAPP_API_BASE }}
+      MBAPP_TENANT_ID: ${{ secrets.MBAPP_TENANT_ID }}
+      MBAPP_API_KEY: ${{ secrets.MBAPP_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: List tests
+        run: node ./ops/smoke/smoke.mjs list || true
+      - name: Run smoke
+        run: node ./ops/smoke/smoke.mjs "${{ matrix.test }}"

@@ -28,9 +28,8 @@ export type RootStackParamList = {
   ProductsList: undefined;
   ProductDetail: DetailParams;
 
-  // Clients
-  ClientsList: undefined;
-  ClientDetail: DetailParams;
+  PartyList: { role?: string; q?: string } | undefined;
+  PartyDetail: { id?: string; mode?: "new" } | undefined;
 
   // Accounts
   AccountsList: undefined;
@@ -52,9 +51,7 @@ export type RootStackParamList = {
   ReservationsList: undefined;
   ReservationDetail: DetailParams;
 
-  // Vendors
-  VendorsList: undefined;
-  VendorDetail: DetailParams;
+
 
   // Employees
   EmployeesList: undefined;

@@ -1,6 +1,8 @@
 // apps/src/api/index.ts
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
 import { getAuth, requirePerm, policyFromAuth } from "./auth/middleware";
+import { buildCtx, attachCtxToEvent } from "./shared/ctx";
+
 
 /* Routes */
 // Views
@@ -76,7 +78,7 @@ const json = (statusCode: number, body: unknown): APIGatewayProxyResultV2 => ({
     "content-type": "application/json",
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "OPTIONS,GET,POST,PUT,DELETE",
-    "access-control-allow-headers": "Authorization,Content-Type,Idempotency-Key,X-Tenant-Id",
+    "access-control-allow-headers": "Authorization,Content-Type,Idempotency-Key,X-Tenant-Id,Accept",
   },
   body: JSON.stringify(body),
 });
@@ -100,7 +102,7 @@ const corsOk = (): APIGatewayProxyResultV2 => ({
   headers: {
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "OPTIONS,GET,POST,PUT,DELETE",
-    "access-control-allow-headers": "Authorization,Content-Type,Idempotency-Key,X-Tenant-Id",
+    "access-control-allow-headers": "Authorization,Content-Type,Idempotency-Key,X-Tenant-Id,Accept",
   },
 });
 
@@ -160,6 +162,11 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
     // Authenticated
     const auth = await getAuth(event);
     injectPreAuth(event, auth);
+
+    // Build a typed ctx (includes idempotencyKey + requestId) and attach it
+    const ctx = buildCtx(event, auth);
+    attachCtxToEvent(event, ctx);
+
 
     if (method === "GET" && path === "/auth/policy") {
       return json(200, policyFromAuth(auth));

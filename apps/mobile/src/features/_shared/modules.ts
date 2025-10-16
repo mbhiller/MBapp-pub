@@ -55,14 +55,13 @@ export const MODULES: readonly ModuleEntry[] = [
 
   // Domain modules (guarded)
   { key: "products",      title: "Products",         screen: "ProductsList",     icon: "package",         required: ["product:read"] },
-  { key: "clients",       title: "Clients",          screen: "ClientsList",      icon: "users",           required: ["client:read"] },
+  { key: "parties",       title: "Parties",          screen: "PartyList",      icon: "users",           required: ["parties:read"] },
   { key: "accounts",      title: "Accounts",         screen: "AccountsList",     icon: "book",            required: ["account:read"] },
   { key: "inventory",     title: "Inventory",        screen: "InventoryList",    icon: "boxes",           required: ["inventory:read"] },
   { key: "events",        title: "Events",           screen: "EventsList",       icon: "calendar",        required: ["event:read"] },
   { key: "registrations", title: "Registrations",    screen: "RegistrationsList",icon: "id-badge",        required: ["registration:read"] },
   { key: "reservations",  title: "Reservations",     screen: "ReservationsList", icon: "clock",           required: ["reservation:read"] },
   { key: "resources",     title: "Resources",        screen: "ResourcesList",    icon: "warehouse",       required: ["resource:read"] },
-  { key: "vendors",       title: "Vendors",          screen: "VendorsList",      icon: "store",           required: ["vendor:read"] },
   { key: "employees",     title: "Employees",        screen: "EmployeesList",    icon: "user-tie",        required: ["employee:read"] },
   { key: "organization", title: "Organizations",  screen: "OrganizationsList", icon: "building",  required: ["organization:read"] },
 

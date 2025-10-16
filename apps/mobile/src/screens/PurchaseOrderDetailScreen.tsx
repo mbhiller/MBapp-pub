@@ -19,7 +19,7 @@ import { Feather } from "@expo/vector-icons";
 import {
   CustomerSelectorModal,
   type CustomerSnapshot,
-} from "../features/_shared/CustomerSelectorModal";
+} from "../features/parties/PartySelectorModal";
 import {
   ItemSelectorModal,
   type ItemSelection,

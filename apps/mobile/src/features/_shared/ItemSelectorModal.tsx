@@ -1,165 +1,141 @@
-import * as React from "react";
-import { View, Text, TextInput, Pressable, ActivityIndicator, Modal, Platform, KeyboardAvoidingView, Keyboard } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { Feather } from "@expo/vector-icons";
-import { useColors } from "../_shared/useColors";
-import { SalesLinePicker } from "../_shared/fields";
-import { ScannerPanel } from "../_shared/ScannerPanel";
-import { resolveEpc } from "../_shared/epc";
-import { getObject } from "../../api/client";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { View, Text, TextInput, ScrollView, Pressable, ActivityIndicator, Keyboard } from "react-native";
+import { useColors } from "./useColors";
+import { searchObjects } from "../../api/client";
 
-export type ItemSelection = { itemId: string; qty: number };
+type Obj = Record<string, any>;
 
-export function ItemSelectorModal({
-  visible,
-  onClose,
-  onSave,
-  title = "Select Item",
-  initialQty = 1,
-  initialItem,
-}: {
-  visible: boolean;
+type ResultItem = {
+  id: string;
+  label: string;
+  type?: string;
+  raw?: Obj;
+};
+
+function mapToResultItems(type: string, rows: Obj[]): ResultItem[] {
+  return rows
+    .map((r) => {
+      const id = String(r?.id ?? r?.itemId ?? r?.productId ?? r?.sku ?? r?.code ?? "");
+      const label = String(r?.name ?? r?.label ?? r?.sku ?? r?.code ?? r?.id ?? "");
+      return id ? { id, label, type, raw: r } : null;
+    })
+    .filter(Boolean) as ResultItem[];
+}
+
+type Props = {
+  /** "product" to search products, "item" to search inventory items */
+  mode?: "product" | "item";
+  /** Optional extra filters passed to the search endpoint */
+  filters?: Obj;
+  /** Called when user selects one; modal should be closed by parent */
+  onSelect: (sel: ResultItem) => void;
+  /** Called when user closes without selection */
   onClose: () => void;
-  onSave: (sel: ItemSelection) => void;
-  title?: string;
-  initialQty?: number;
-  initialItem?: { id: string; label?: string; type?: string } | null;
-}) {
+  /** Autostart search text */
+  initialQuery?: string;
+  /** Placeholder to show in the search input */
+  placeholder?: string;
+  /** Optional: render right-side info per row (e.g., stock/counters) */
+  renderRight?: (raw: Obj) => React.ReactNode;
+};
+
+export default function ItemSelectorModal({
+  mode = "product",
+  filters = {},
+  onSelect,
+  onClose,
+  initialQuery = "",
+  placeholder,
+  renderRight,
+}: Props) {
   const t = useColors();
+  const [q, setQ] = useState(initialQuery);
+  const [busy, setBusy] = useState(false);
+  const [rows, setRows] = useState<ResultItem[]>([]);
+  const [open, setOpen] = useState(true);
+  const mounted = useRef(true);
 
-  const [picked, setPicked] = React.useState<{ id: string; label?: string } | null>(null);
-  const [initialText, setInitialText] = React.useState<string>("");
-  const [resolving, setResolving] = React.useState(false);
+  const typeKey = mode === "item" ? "inventoryItems" : "products";
+  const hint = placeholder ?? (mode === "item" ? "Search items (sku, code, name)..." : "Search products...");
 
-  const [qtyInput, setQtyInput] = React.useState<string>(String(initialQty ?? 1));
-  const [scanValue, setScanValue] = React.useState("");
-  const [busy, setBusy] = React.useState(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
-  React.useEffect(() => {
-    if (!visible) {
-      setPicked(null);
-      setInitialText("");
-      setQtyInput(String(initialQty ?? 1));
-      setScanValue("");
-      setResolving(false);
-      setBusy(false);
-      return;
-    }
-    setQtyInput(String(initialQty ?? 1));
-    if (initialItem?.id) {
-      if (initialItem.label) {
-        setPicked({ id: initialItem.id, label: initialItem.label });
-        setInitialText(initialItem.label);
-      } else {
-        (async () => {
-          setResolving(true);
-          try {
-            const tryTypes = initialItem.type ? [initialItem.type] : ["product", "inventory"];
-            let label = "";
-            for (const ty of tryTypes) {
-              try {
-                const rec = await getObject<any>(ty, initialItem.id);
-                if (rec?.id) { label = rec?.name ?? rec?.label ?? rec?.sku ?? rec?.code ?? rec.id; break; }
-              } catch {}
-            }
-            setPicked({ id: initialItem.id, label: label || initialItem.id });
-            setInitialText(label || initialItem.id);
-          } finally {
-            setResolving(false);
-          }
-        })();
-      }
-    } else {
-      setPicked(null);
-      setInitialText("");
-    }
-  }, [visible, initialItem, initialQty]);
-
-  const canSave = Boolean((picked?.id || scanValue.trim()) && (qtyInput.trim().length > 0));
-
-  function onPick(res: { id: string; label: string }) {
-    setPicked({ id: res.id, label: res.label });
-    setInitialText(res.label);
-    Keyboard.dismiss();
-  }
-  function onQtyChange(text: string) {
-    const digitsOnly = text.replace(/[^\d]/g, "");
-    setQtyInput(digitsOnly);
-  }
-  function normalizeQty(): number {
-    const n = parseInt(qtyInput, 10);
-    if (!Number.isFinite(n) || n < 1) return 1;
-    return n;
-  }
-
-  async function save() {
-    if (!canSave || busy) return;
+  async function runSearch(query: string) {
     setBusy(true);
     try {
-      let itemId = picked?.id ?? scanValue.trim();
-      if (!picked?.id && scanValue.trim()) {
-        try {
-          const res = await resolveEpc(scanValue.trim()).catch(() => null);
-          if (res?.itemId) itemId = res.itemId;
-        } catch {}
-      }
-      const qty = normalizeQty();
-      if (!itemId || qty <= 0) return;
-      onSave({ itemId, qty });
+      const body: Obj = { q: query, ...filters };
+      const page = await searchObjects<Obj>(typeKey, body, { limit: 25 });
+      const list = mapToResultItems(typeKey, page.items as any);
+      if (mounted.current) setRows(list);
+    } catch (e) {
+      if (mounted.current) setRows([]);
     } finally {
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   }
 
+  useEffect(() => { runSearch(q); }, [q, typeKey]);
+
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <SafeAreaView style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", padding: 16 }} edges={["top","bottom"]}>
-        <KeyboardAvoidingView behavior={Platform.select({ ios: "padding", android: undefined })} style={{ width: "96%", maxWidth: 640 }}>
-          <View style={{ backgroundColor: t.colors.card, borderRadius: 12, borderWidth: 1, borderColor: t.colors.border, overflow: "hidden" }}>
-            {/* Header */}
-            <View style={{ height: 48, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomWidth: 1, borderBottomColor: t.colors.border }}>
-              <Text style={{ color: t.colors.text, fontWeight: "700" as const }}>{title}</Text>
-              <Pressable onPress={onClose} hitSlop={10} style={{ padding: 6 }}>
-                <Feather name="x" size={20} color={t.colors.text} />
-              </Pressable>
-            </View>
+    <View style={{ flex: 1, backgroundColor: t.colors.background, padding: 12 }}>
+      <Text style={{ color: t.colors.text, fontSize: 18, fontWeight: "700", marginBottom: 8 }}>
+        {mode === "item" ? "Select Item" : "Select Product"}
+      </Text>
+      <TextInput
+        autoFocus
+        value={q}
+        onChangeText={(v) => { setQ(v); setOpen(true); }}
+        placeholder={hint}
+        placeholderTextColor={t.colors.textMuted}
+        style={{ borderWidth: 1, borderColor: t.colors.border, borderRadius: 8, padding: 10, color: t.colors.text, marginBottom: 6 }}
+      />
 
-            {/* Body */}
-            <View style={{ padding: 12, gap: 12 }}>
-              <ScannerPanel value={scanValue} onChange={setScanValue} />
-              <SalesLinePicker placeholder="Search items…" initialText={initialText} onSelect={onPick} />
-              {resolving ? <Text style={{ color: t.colors.textMuted }}>Loading item…</Text> : null}
+      {busy && <ActivityIndicator style={{ padding: 8 }} />}
 
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <Text style={{ color: t.colors.text, width: 60 }}>Qty</Text>
-                <TextInput
-                  value={qtyInput}
-                  onChangeText={onQtyChange}
-                  keyboardType="number-pad"
-                  returnKeyType="done"
-                  placeholder="Qty"
-                  placeholderTextColor={t.colors.textMuted}
-                  onSubmitEditing={save}
-                  style={{
-                    flex: 1, height: 44, borderWidth: 1, borderColor: t.colors.border, borderRadius: 8,
-                    paddingHorizontal: 10, paddingVertical: 10,
-                    backgroundColor: (t.colors as any).inputBg ?? t.colors.card, color: t.colors.text,
-                  }}
-                />
+      {open && (
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          style={{ maxHeight: 420, borderTopWidth: 1, borderColor: t.colors.border }}
+        >
+          {rows.map((ri) => (
+            <Pressable
+              key={`${ri.type}:${ri.id}`}
+              onPress={() => {
+                onSelect(ri);
+                // Immediately close & freeze; parent will close modal
+                setOpen(false);
+                Keyboard.dismiss();
+                onClose();
+              }}
+              style={{ padding: 12, borderBottomWidth: 1, borderBottomColor: t.colors.border, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
+            >
+              <View>
+                <Text style={{ color: t.colors.text, fontWeight: "600" }}>{ri.label}</Text>
+                <Text style={{ color: t.colors.textMuted, fontSize: 12 }}>{ri.id}</Text>
               </View>
-
-              <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8 }}>
-                <Pressable onPress={onClose} style={{ paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: t.colors.border, backgroundColor: t.colors.card }}>
-                  <Text style={{ color: t.colors.text }}>Cancel</Text>
-                </Pressable>
-                <Pressable onPress={save} disabled={!canSave || busy} style={{ paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, backgroundColor: t.colors.primary, opacity: !canSave || busy ? 0.6 : 1 }}>
-                  {busy ? <ActivityIndicator /> : <Text style={{ color: (t.colors as any).buttonText ?? "#fff", fontWeight: "700" as const }}>Save</Text>}
-                </Pressable>
+              <View>
+                {renderRight ? renderRight(ri.raw || {}) : null}
               </View>
+            </Pressable>
+          ))}
+
+          {!busy && rows.length === 0 && (
+            <View style={{ padding: 16 }}>
+              <Text style={{ color: t.colors.textMuted }}>No results.</Text>
             </View>
-          </View>
-        </KeyboardAvoidingView>
-      </SafeAreaView>
-    </Modal>
+          )}
+        </ScrollView>
+      )}
+
+      <Pressable
+        onPress={onClose}
+        style={{ marginTop: 12, alignSelf: "flex-start", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: t.colors.border }}
+      >
+        <Text style={{ color: t.colors.text }}>Close</Text>
+      </Pressable>
+    </View>
   );
 }
