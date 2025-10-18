@@ -2,7 +2,7 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
 import crypto from "crypto";
 import { createObject, getObjectById } from "../objects/repo";
-import { upsertDelta } from "../inventory/counters";
+// import { upsertDelta } from "../inventory/counters";
 
 type ActionType = "receive" | "pick" | "count" | "move";
 type Body = {

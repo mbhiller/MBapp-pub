@@ -72,6 +72,9 @@ import GoodsReceiptsListScreen from "../screens/GoodsReceiptsListScreen";
 import SalesFulfillmentDetailScreen from "../screens/SalesFulfillmentDetailScreen";
 import SalesFulfillmentsListScreen from "../screens/SalesFulfillmentsListScreen";
 
+import RoutePlanListScreen from "../screens/RoutePlanListScreen";
+import RoutePlanDetailScreen from "../screens/RoutePlanDetailScreen";
+
 import DevDiagnosticsScreen from "../features/dev/DevDiagnosticsScreen";
 // optional runs
 // import IntegrationRunsListScreen from "../screens/IntegrationRunsListScreen";
@@ -174,8 +177,10 @@ export default function RootStack() {
       <Stack.Screen name="IntegrationDetail" component={IntegrationDetailScreen} options={{ title: "Integration" }} />
       
       <Stack.Screen name="OrganizationsList" component={OrganizationsListScreen} options={{ title: "Organizations" }}/>
-      <Stack.Screen name="OrganizationDetail" component={OrganizationDetailScreen} options={{ title: "Organization" }}
-/>
+      <Stack.Screen name="OrganizationDetail" component={OrganizationDetailScreen} options={{ title: "Organization" }}/>
+
+      <Stack.Screen name="RoutePlanList" component={RoutePlanListScreen} />
+      <Stack.Screen name="RoutePlanDetail" component={RoutePlanDetailScreen} />
     {/* <Stack.Screen name="IntegrationRunsList" component={IntegrationRunsListScreen} options={{ title: "Runs" }} /> */}
     </Stack.Navigator>
   );

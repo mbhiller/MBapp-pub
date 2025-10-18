@@ -70,8 +70,9 @@ export const MODULES: readonly ModuleEntry[] = [
   { key: "salesOrders",    title: "Sales",           screen: "SalesOrdersList",    icon: "cart-plus",      required: ["salesorder:read"] },
 
   // Operational docs
-  { key: "goodsReceipts",  title: "Goods Receipts",  screen: "GoodsReceiptsList",   icon: "inbox-arrow-down", required: ["goodsreceipt:read"] },
-  { key: "SalesFulfillments", title: "Sales Fulfillments", screen: "SalesFulfillmentsList", icon: "truck", required: ["fulfillment:read"] },
+  { key: "goodsRceipts",  title: "Goods Receipts",  screen: "GoodsReceiptsList",   icon: "inbox-arrow-down", required: ["goodsreceipt:read"] },
+  { key: "salesFulfillments", title: "Sales Fulfillments", screen: "SalesFulfillmentsList", icon: "truck", required: ["fulfillment:read"] },
+  { key: "routePlans", title: "Route Plans", screen: "RoutePlanList", icon: "truck", required: ["routing:read"] },
 
   // Integrations
   { key: "integrations",   title: "Integrations",    screen: "IntegrationsList",   icon: "plug",           required: ["integration:read"] },

@@ -175,7 +175,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get computed on-hand for an inventory item */
+        /** Get computed counters for an inventory item */
         get: {
             parameters: {
                 query?: never;
@@ -187,14 +187,14 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description On-hand computed for the inventory item */
+                /** @description Computed counters (array with one element) */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
                         "application/json": {
-                            items?: components["schemas"]["InventoryOnHand"][];
+                            items?: components["schemas"]["InventoryCounters"][];
                         };
                     };
                 };
@@ -217,7 +217,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Batch on-hand query */
+        /** Batch counters query (array) */
         post: {
             parameters: {
                 query?: never;
@@ -231,7 +231,7 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
-                        ids?: string[];
+                        itemIds: string[];
                     };
                 };
             };
@@ -243,7 +243,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            items?: components["schemas"]["InventoryOnHand"][];
+                            items?: components["schemas"]["InventoryCounters"][];
                         };
                     };
                 };
@@ -278,7 +278,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Paged list of inventory movements */
+                /** @description Paged list of inventory movements (array) */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -970,6 +970,57 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/routing/graph": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upsert nodes and edges for routing (idempotent) */
+        post: operations["upsertRoutingGraph"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/routing/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create a route plan from tasks and objective */
+        post: operations["createRoutePlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/routing/plan/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a route plan by id */
+        get: operations["getRoutePlan"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1693,41 +1744,23 @@ export interface components {
             tags?: string[];
         };
         InventoryMovement: {
-            id?: string;
-            /** @enum {string} */
-            type: "inventoryMovement";
-            /**
-             * Format: date-time
-             * @description Event timestamp
-             */
-            ts: string;
-            /**
-             * Format: date-time
-             * @description Mirror of ts for UI lists
-             */
-            readonly createdAt?: string;
-            /** @description Inventory item id */
+            id: string;
             itemId: string;
-            /** @description Mirror of itemId for client convenience */
-            inventoryId?: string;
-            deltaQty: number;
-            uom: string;
-            locationId?: string | null;
-            lot?: string | null;
-            /**
-             * @description Source document type
-             * @enum {string}
-             */
-            sourceType: "PO" | "SO" | "ADJ";
-            /**
-             * @description Derived from sourceType
-             * @enum {string|null}
-             */
-            kind?: "receive" | "fulfill" | "adjust" | null;
-            sourceId: string;
-            lineId?: string | null;
-            notes?: string | null;
+            /** @enum {string} */
+            action: "receive" | "reserve" | "commit" | "fulfill" | "adjust" | "release";
+            qty: number;
+            /** Format: date-time */
+            at?: string;
+            note?: string;
+            actorId?: string;
+            refId?: string;
+            /** @enum {string} */
+            readonly docType?: "inventoryMovement";
         };
+        /**
+         * @deprecated
+         * @description Deprecated – use InventoryCounters & GET /inventory/{id}/onhand
+         */
         InventoryOnHand: {
             id: string;
             qtyOnHand: number;
@@ -1736,7 +1769,9 @@ export interface components {
             asOf?: string;
         };
         ListPageInventoryMovement: {
-            items?: components["schemas"]["InventoryMovement"][];
+            itemId: string;
+            items: components["schemas"]["InventoryMovement"][];
+            /** @description Opaque cursor for next page (if any) */
             next?: string | null;
         };
         Message: components["schemas"]["ObjectBase"] & {
@@ -2261,6 +2296,94 @@ export interface components {
             layout?: {
                 [key: string]: unknown;
             };
+        };
+        InventoryCounters: {
+            itemId: string;
+            onHand: number;
+            reserved: number;
+            available: number;
+            /** Format: date-time */
+            asOf?: string;
+        };
+        LocationNode: {
+            id: string;
+            name: string;
+            /** @enum {string} */
+            kind: "facility" | "hub" | "address" | "geo";
+            coords?: {
+                lat?: number;
+                lng?: number;
+            };
+            attributes?: {
+                [key: string]: unknown;
+            };
+            /** @default true */
+            active: boolean;
+        };
+        PathEdge: {
+            id: string;
+            fromNodeId: string;
+            toNodeId: string;
+            distanceKm: number;
+            durationMin?: number;
+            cost?: number;
+            /** @default false */
+            isClosed: boolean;
+            attributes?: {
+                [key: string]: unknown;
+            };
+        };
+        Carrier: {
+            id: string;
+            name: string;
+            modes?: ("ground" | "air" | "horse" | "internal")[];
+            contactPartyId?: string;
+            attributes?: {
+                [key: string]: unknown;
+            };
+        };
+        DeliveryTask: {
+            id: string;
+            /** @description SO/PO/Reservation id or composite */
+            orderRef?: string;
+            partyId: string;
+            fromNodeId: string;
+            toNodeId: string;
+            window?: {
+                /** Format: date-time */
+                start?: string;
+                /** Format: date-time */
+                end?: string;
+            };
+            /** @enum {string} */
+            status?: "draft" | "planned" | "enroute" | "delivered" | "failed" | "cancelled";
+            attributes?: {
+                [key: string]: unknown;
+            };
+        };
+        RoutePlan: {
+            id: string;
+            /** @enum {string} */
+            objective: "shortest" | "fastest" | "cheapest" | "balanced";
+            constraints?: {
+                closures?: string[];
+                forbiddenNodes?: string[];
+                maxHoursPerDriver?: number;
+            };
+            carrierId?: string;
+            tasks: {
+                id?: string;
+            }[];
+            summary?: {
+                distanceKm?: number;
+                totalDurationMin?: number;
+                totalCost?: number;
+            };
+            /**
+             * @default draft
+             * @enum {string}
+             */
+            status: "draft" | "planned" | "executed" | "archived";
         };
     };
     responses: {
@@ -2959,6 +3082,87 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    upsertRoutingGraph: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    nodes?: components["schemas"]["LocationNode"][];
+                    edges?: components["schemas"]["PathEdge"][];
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    createRoutePlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    objective?: "shortest" | "fastest" | "cheapest" | "balanced";
+                    constraints?: components["schemas"]["RoutePlan"]["constraints"];
+                    carrierId?: string;
+                    tasks?: components["schemas"]["DeliveryTask"][];
+                    graph?: {
+                        nodes?: components["schemas"]["LocationNode"][];
+                        edges?: components["schemas"]["PathEdge"][];
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description Created plan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoutePlan"];
+                };
+            };
+        };
+    };
+    getRoutePlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Route plan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoutePlan"];
+                };
+            };
         };
     };
     listAudit: {

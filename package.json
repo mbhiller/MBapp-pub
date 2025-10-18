@@ -1,5 +1,6 @@
 {
   "name": "mbapp-monorepo",
+  "type": "module",
   "private": true,
   "workspaces": [
     "apps/*",

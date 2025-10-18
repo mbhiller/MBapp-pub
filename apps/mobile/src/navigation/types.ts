@@ -83,5 +83,8 @@ export type RootStackParamList = {
   // ✅ Sales Fulfillments (added)
   SalesFulfillmentsList: undefined;
   SalesFulfillmentDetail: DetailParams;
+
+  RoutePlanList: undefined;
+  RoutePlanDetail: DetailParams;
   
 };

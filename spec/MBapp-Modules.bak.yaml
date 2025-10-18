@@ -2,7 +2,8 @@ openapi: 3.0.3
 info:
   title: MBapp API
   version: '2025-09-25'
-  description: Single-source-of-truth API for MBapp objects, views, workspaces, and tools.
+  description: Single-source-of-truth API for MBapp objects, views, workspaces, and
+    tools.
   license:
     url: https://license.mbapp.dev
     name: MIT
@@ -690,69 +691,31 @@ components:
               type: string
     InventoryMovement:
       type: object
-      required:
-      - id
-      - itemId
-      - action
-      - qty
+      required: [id, itemId, type, qty]
       properties:
-        id:
+        id: { type: string }
+        itemId: { type: string }
+        type:
           type: string
-        itemId:
-          type: string
-        action:
-          type: string
-          enum:
-          - receive
-          - reserve
-          - commit
-          - fulfill
-          - adjust
-          - release
-        qty:
-          type: number
-        at:
-          type: string
-          format: date-time
-        note:
-          type: string
-        actorId:
-          type: string
-        refId:
-          type: string
-        docType:
-          type: string
-          readOnly: true
-          enum:
-          - inventoryMovement
-    InventoryOnHand:
+          enum: [receive, reserve, commit, fulfill, adjust, release]
+        qty: { type: number }
+        at: { type: string, format: date-time }
+        note: { type: string }
+        actorId: { type: string }
+        refId: { type: string }
+
+    InventoryCounters:
       type: object
-      required:
-      - id
-      - qtyOnHand
+      required: [itemId, onHand, reserved, available]
       properties:
-        id:
-          type: string
-        qtyOnHand:
-          type: number
-          minimum: 0
-        qtyAvailable:
-          type: number
-          minimum: 0
-          nullable: true
-        asOf:
-          type: string
-          format: date-time
-      deprecated: true
-      description: Deprecated – use InventoryCounters & GET /inventory/{id}/onhand
+        itemId: { type: string }
+        onHand: { type: number }
+        reserved: { type: number }
+        available: { type: number }
+        asOf: { type: string, format: date-time }
     ListPageInventoryMovement:
       type: object
-      required:
-      - itemId
-      - items
       properties:
-        itemId:
-          type: string
         items:
           type: array
           items:
@@ -760,7 +723,6 @@ components:
         next:
           type: string
           nullable: true
-          description: Opaque cursor for next page (if any)
     Message:
       allOf:
       - $ref: '#/components/schemas/ObjectBase'
@@ -956,13 +918,11 @@ components:
             type: string
           roleFlags:
             type: object
-            additionalProperties:
-              type: boolean
-            description: Denormalized role membership for fast gates.
+            additionalProperties: { type: boolean }
+            description: "Denormalized role membership for fast gates."
           roles:
             type: array
-            items:
-              type: string
+            items: { type: string }
             description: Optional array for UI; roleFlags is the source of truth.
     PartyLink:
       allOf:
@@ -1955,109 +1915,6 @@ components:
           additionalProperties: true
       required:
       - moduleKey
-    InventoryCounters:
-      type: object
-      required:
-      - itemId
-      - onHand
-      - reserved
-      - available
-      properties:
-        itemId:
-          type: string
-        onHand:
-          type: number
-        reserved:
-          type: number
-        available:
-          type: number
-        asOf:
-          type: string
-          format: date-time
-    LocationNode:
-      type: object
-      required: [id, name, kind]
-      properties:
-        id: { type: string }
-        name: { type: string }
-        kind: { type: string, enum: [facility, hub, address, geo] }
-        coords:
-          type: object
-          properties:
-            lat: { type: number }
-            lng: { type: number }
-        attributes: { type: object, additionalProperties: true }
-        active: { type: boolean, default: true }
-    PathEdge:
-      type: object
-      required: [id, fromNodeId, toNodeId, distanceKm]
-      properties:
-        id: { type: string }
-        fromNodeId: { type: string }
-        toNodeId: { type: string }
-        distanceKm: { type: number }
-        durationMin: { type: number }
-        cost: { type: number }
-        isClosed: { type: boolean, default: false }
-        attributes: { type: object, additionalProperties: true }
-    Carrier:
-      type: object
-      required: [id, name]
-      properties:
-        id: { type: string }
-        name: { type: string }
-        modes:
-          type: array
-          items: { type: string, enum: [ground, air, horse, internal] }
-        contactPartyId: { type: string }
-        attributes: { type: object, additionalProperties: true }
-    DeliveryTask:
-      type: object
-      required: [id, partyId, fromNodeId, toNodeId]
-      properties:
-        id: { type: string }
-        orderRef: { type: string, description: "SO/PO/Reservation id or composite" }
-        partyId: { type: string }
-        fromNodeId: { type: string }
-        toNodeId: { type: string }
-        window:
-          type: object
-          properties:
-            start: { type: string, format: date-time }
-            end: { type: string, format: date-time }
-        status:
-          type: string
-          enum: [draft, planned, enroute, delivered, failed, cancelled]
-        attributes: { type: object, additionalProperties: true }
-    RoutePlan:
-      type: object
-      required: [id, objective, tasks]
-      properties:
-        id: { type: string }
-        objective: { type: string, enum: [shortest, fastest, cheapest, balanced] }
-        constraints:
-          type: object
-          properties:
-            closures:
-              type: array
-              items: { type: string, description: "edge ids closed" }
-            forbiddenNodes:
-              type: array
-              items: { type: string }
-            maxHoursPerDriver: { type: number }
-        carrierId: { type: string }
-        tasks:
-          type: array
-          items:
-            type: object
-            properties: { id: { type: string } }
-        summary:
-          type: object
-          properties:
-            distanceKm: { type: number }
-            totalDurationMin: { type: number }
-            totalCost: { type: number }
-        status: { type: string, enum: [draft, planned, executed, archived], default: draft }
 security:
 - bearerAuth: []
 paths:
@@ -2636,7 +2493,7 @@ paths:
       summary: Delete a Workspace
   /inventory/{id}/onhand:
     get:
-      summary: Get computed counters for an inventory item
+      summary: Get computed on-hand for an inventory item
       parameters:
       - in: path
         name: id
@@ -2645,7 +2502,7 @@ paths:
           type: string
       responses:
         '200':
-          description: Computed counters (array with one element)
+          description: On-hand computed for the inventory item
           content:
             application/json:
               schema:
@@ -2654,12 +2511,12 @@ paths:
                   items:
                     type: array
                     items:
-                      $ref: '#/components/schemas/InventoryCounters'
+                      $ref: '#/components/schemas/InventoryOnHand'
   /inventory/onhand:batch:
     post:
       tags:
       - Inventory
-      summary: Batch counters query (array)
+      summary: Batch on-hand query
       parameters:
       - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -2668,10 +2525,8 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-              - itemIds
               properties:
-                itemIds:
+                ids:
                   type: array
                   items:
                     type: string
@@ -2686,7 +2541,7 @@ paths:
                   items:
                     type: array
                     items:
-                      $ref: '#/components/schemas/InventoryCounters'
+                      $ref: '#/components/schemas/InventoryOnHand'
   /inventory/{id}/movements:
     get:
       summary: List movements for an inventory item
@@ -2716,7 +2571,7 @@ paths:
           default: desc
       responses:
         '200':
-          description: Paged list of inventory movements (array)
+          description: Paged list of inventory movements
           content:
             application/json:
               schema:
@@ -2910,11 +2765,11 @@ paths:
   /sales/so/{id}:commit:
     post:
       summary: Commit/allocate inventory for a sales order
-      description: 'Default is **non-strict** (will commit and return `200` even if short on stock; response
-        may include `shortages[]`).
+      description: 'Default is **non-strict** (will commit and return `200` even if
+        short on stock; response may include `shortages[]`).
 
-        Pass `strict=1` (query) or `{ "strict": true }` (body) to require full availability (returns `409`
-        with `shortages[]`).
+        Pass `strict=1` (query) or `{ "strict": true }` (body) to require full availability
+        (returns `409` with `shortages[]`).
 
         '
       parameters:
@@ -2931,7 +2786,8 @@ paths:
           enum:
           - 0
           - 1
-        description: When 1, require full availability; otherwise partial commits are allowed.
+        description: When 1, require full availability; otherwise partial commits
+          are allowed.
       - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: false
@@ -3147,76 +3003,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SalesOrder'
-  /routing/graph:
-    post:
-      operationId: upsertRoutingGraph
-      summary: Upsert nodes and edges for routing (idempotent)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                nodes: { type: array, items: { $ref: '#/components/schemas/LocationNode' } }
-                edges: { type: array, items: { $ref: '#/components/schemas/PathEdge' } }
-      responses:
-        '200': { description: 'OK' }
-
-  /routing/plan:
-    post:
-      operationId: createRoutePlan
-      summary: Create a route plan from tasks and objective
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                objective:
-                  type: string
-                  enum: [shortest, fastest, cheapest, balanced]
-                constraints:
-                  $ref: '#/components/schemas/RoutePlan/properties/constraints'
-                carrierId:
-                  type: string
-                tasks:
-                  type: array
-                  items: { $ref: '#/components/schemas/DeliveryTask' }
-                # Optional: allow an inline graph for MVP compute
-                graph:
-                  type: object
-                  properties:
-                    nodes:
-                      type: array
-                      items: { $ref: '#/components/schemas/LocationNode' }
-                    edges:
-                      type: array
-                      items: { $ref: '#/components/schemas/PathEdge' }
-      responses:
-        '200':
-          description: Created plan
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/RoutePlan' }
-
-
-  /routing/plan/{id}:
-    get:
-      operationId: getRoutePlan
-      summary: Get a route plan by id
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }
-      responses:
-        '200':
-          description: Route plan
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/RoutePlan' }
   /events/registration/{id}:cancel:
     post:
       summary: Cancel a registration

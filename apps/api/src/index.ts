@@ -27,7 +27,7 @@ import * as ObjSearch from "./objects/search";
 // Dev auth
 import * as DevLogin from "./auth/dev-login";
 // Actions
-// Purchase Orders
+/*// Purchase Orders
 import * as PoSubmit   from "./purchasing/po-submit";
 import * as PoApprove  from "./purchasing/po-approve";
 import * as PoReceive  from "./purchasing/po-receive";
@@ -41,7 +41,7 @@ import * as SoCancel   from "./sales/so-cancel";
 import * as SoClose    from "./sales/so-close";
 import * as SoReserve  from "./sales/so-reserve";
 import * as SoRelease  from "./sales/so-release"; // <-- added
-
+*/
 // Inventory on-hand (computed from movements)
 import * as InvOnHandGet from "./inventory/onhand-get";
 import * as InvOnHandBatch from "./inventory/onhand-batch";
@@ -65,12 +65,17 @@ import * as GcDelete from "./tools/gc-delete-type";
 import * as GcListAll   from "./tools/gc-list-all";
 import * as GcDeleteKeys from "./tools/gc-delete-keys";
 
+
+import * as RoutingGraphUpsert from "./routing/graph-upsert";
+import * as RoutingPlanCreate from "./routing/plan-create";
+import * as RoutingPlanGet from "./routing/plan-get";
+/*
 // EPC & SCANNERS
 import * as EpcResolve from "./epc/resolve";
 import * as ScannerSessions from "./scanner/sessions";
 import * as ScannerActions from "./scanner/actions";
 import * as ScannerSim from "./scanner/simulate";
-
+*/
 /* Helpers */
 const json = (statusCode: number, body: unknown): APIGatewayProxyResultV2 => ({
   statusCode,
@@ -208,6 +213,7 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
 
     /* ========= Actions ========= */
     // Purchasing PO actions
+    /*
     {
       const m = match(/^\/purchasing\/po\/([^/]+):(submit|approve|receive|cancel|close)$/i, path);
       if (m) {
@@ -240,37 +246,61 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
         return methodNotAllowed();
       }
     }
-
-    // Inventory on-hand (computed)
+*/
+    // Inventory — onhand (computed)
     {
-      const m = match(/^\/inventory\/([^/]+)\/onhand$/i, path);
-      if (m) {
-        const [itemId] = m;
+      const m = path.match(/^\/inventory\/([^/]+)\/onhand$/i);
+      if (method === "GET" && m) {
+        const [, id] = m;
         requirePerm(auth, "inventory:read");
-        return InvOnHandGet.handle(withId(event, itemId));
+        return InvOnHandGet.handle({ ...event, pathParameters: { ...(event.pathParameters||{}), id } });
       }
     }
 
-    // Inventory onhand-batch
+    // Inventory — onhand batch (computed)
     if (method === "POST" && path === "/inventory/onhand:batch") {
       requirePerm(auth, "inventory:read");
-      return InvOnHandBatch.handle(event);
+      const body = JSON.parse(event.body || "{}");
+      const itemIds = Array.isArray(body?.itemIds) ? body.itemIds : [];
+      return InvOnHandBatch.handle({ ...event, body: JSON.stringify({ itemIds }) });
     }
 
-    // Inventory movements (computed)
+    // Inventory — movements (computed)
     {
-      const m = match(/^\/inventory\/([^/]+)\/movements$/i, path);
-      if (m) {
-        const [itemId] = m;
+      const m = path.match(/^\/inventory\/([^/]+)\/movements$/i);
+      if (method === "GET" && m) {
+        const [, id] = m;
         requirePerm(auth, "inventory:read");
-        return InvMovements.handle(withId(event, itemId));
+        return InvMovements.handle({ ...event, pathParameters: { ...(event.pathParameters||{}), id } });
       }
     }
+
 
     // Rich inventory search (label + uom + counters)
     if (path === "/inventory/search" && method === "POST") {
       requirePerm(auth, "inventory:read");
       return InvSearch.handle(event);
+    }
+
+    // Routing & Delivery 
+    if (method === "POST" && path === "/routing/graph") {
+      // perms here, handlers stay pure
+      requirePerm(auth, "routing:write");
+      return RoutingGraphUpsert.handle(event);
+    }
+
+    if (method === "POST" && path === "/routing/plan") {
+      requirePerm(auth, "routing:write");
+      return RoutingPlanCreate.handle(event);
+    }
+
+    {
+      const m = match(/^\/routing\/plan\/([^/]+)$/i, path);
+      if (m && method === "GET") {
+        const [id] = m;
+        requirePerm(auth, "routing:read");
+        return RoutingPlanGet.handle(withId(event, id));
+      }
     }
 
     // Event Registration actions
@@ -298,7 +328,7 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
         return methodNotAllowed();
       }
     }
-
+/*
     // --- EPC: resolve a tag to an item ---
     if (method === "GET" && path === "/epc/resolve") {
       requirePerm(auth, "inventory:read");
@@ -324,7 +354,7 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
       requirePerm(auth, "admin:seed");
       return ScannerSim.handle(event);
     }
-
+*/
     // Tools: GC
     const gcList = match(/^\/tools\/gc\/([^/]+)$/i, path);
     if (gcList && method === "GET")    { requirePerm(auth, "admin:reset"); return GcList.handle(withTypeId(event, { type: gcList[0] })); }
