@@ -714,9 +714,9 @@ paths:
         - $ref: '#/components/parameters/IdempotencyKey'
         - in: path
           name: id
+          required: true
           schema:
             type: string
-          required: true
       responses:
         '200':
           description: OK
@@ -724,6 +724,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PurchaseOrder'
+        '409':
+          description: Guardrail violation (e.g., invalid status transition)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /purchasing/po/{id}:approve:
     post:
       summary: Approve purchase order
@@ -741,9 +747,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PurchaseOrder'
+        '409':
+          description: Only submitted can approve
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /purchasing/po/{id}:receive:
     post:
       summary: Receive against purchase order lines
+      description: Allowed from **approved** or **partially_fulfilled**. Over-receive returns 409.
       parameters:
         - in: path
           name: id
@@ -756,33 +769,24 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                idempotencyKey:
-                  type: string
-                  deprecated: true
-                lines:
-                  type: array
-                  items:
-                    type: object
-                    required:
-                      - lineId
-                      - deltaQty
-                    properties:
-                      lineId:
-                        type: string
-                      deltaQty:
-                        type: number
-                      locationId:
-                        type: string
-                      lot:
-                        type: string
+              $ref: '#/components/schemas/PurchaseOrderReceiveRequest'
       responses:
         '200':
           description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurchaseOrder'
+        '409':
+          description: Over-receive or invalid status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /purchasing/po/{id}:cancel:
     post:
       summary: Cancel purchase order
+      description: Allowed from **draft**/**submitted**. Returns 409 otherwise.
       parameters:
         - in: path
           name: id
@@ -797,9 +801,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PurchaseOrder'
+        '409':
+          description: Guardrail violation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /purchasing/po/{id}:close:
     post:
       summary: Close purchase order
+      description: Allowed from **fulfilled**. Returns 409 otherwise.
       parameters:
         - in: path
           name: id
@@ -814,8 +825,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PurchaseOrder'
+        '409':
+          description: Guardrail violation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /purchase-orders/{id}/receive-line:
     post:
+      deprecated: true
       tags:
         - Purchasing
       summary: Receive a specific PO line
@@ -840,6 +858,7 @@ paths:
                   type: string
                 qty:
                   type: number
+                  minimum: 1
                 lot:
                   type: string
                   nullable: true
@@ -874,8 +893,8 @@ paths:
     post:
       summary: Commit/allocate inventory for a sales order
       description: |
-        Default is **non-strict** (will commit and return `200` even if short on stock; response may include `shortages[]`).
-        Pass `strict=1` (query) or `{ "strict": true }` (body) to require full availability (returns `409` with `shortages[]`).
+        Default is non-strict (200 with `shortages[]` when partially available).
+        Set `?strict=1` or `{ "strict": true }` to require full availability (409 on shortage).
       parameters:
         - in: path
           name: id
@@ -884,47 +903,57 @@ paths:
             type: string
         - in: query
           name: strict
-          required: false
           schema:
             type: integer
             enum:
               - 0
               - 1
-          description: When 1, require full availability; otherwise partial commits are allowed.
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: false
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                strict:
-                  type: boolean
-                  description: Same as ?strict=1
+              $ref: '#/components/schemas/SalesCommitRequest'
       responses:
         '200':
           description: OK (may include `shortages[]` when non-strict)
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: '#/components/schemas/SalesOrder'
-                  - type: object
-                    properties:
-                      shortages:
-                        type: array
-                        items:
-                          type: object
-                          properties:
-                            lineId:
-                              type: string
-                            itemId:
-                              type: string
-                            backordered:
-                              type: number
+                $ref: '#/components/schemas/SalesCommitResponse'
         '409':
           description: Insufficient availability in strict mode
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SalesCommitResponse'
+  /sales/so/{id}:reserve:
+    post:
+      summary: Reserve specific line quantities on a sales order
+      description: Valid from **submitted** or **committed**.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SalesOrderReserveRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SalesOrder'
+        '409':
+          description: Insufficient availability
           content:
             application/json:
               schema:
@@ -941,82 +970,10 @@ paths:
                           type: string
                         itemId:
                           type: string
-                        backordered:
+                        requested:
                           type: number
-  /sales/so/{id}:fulfill:
-    post:
-      summary: Fulfill items on a sales order
-      parameters:
-        - in: path
-          name: id
-          required: true
-          schema:
-            type: string
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                idempotencyKey:
-                  type: string
-                  deprecated: true
-                lines:
-                  type: array
-                  items:
-                    type: object
-                    required:
-                      - lineId
-                      - deltaQty
-                    properties:
-                      lineId:
-                        type: string
-                      deltaQty:
-                        type: number
-                        description: Quantity shipped/picked (positive)
-                      locationId:
-                        type: string
-                      lot:
-                        type: string
-      responses:
-        '200':
-          description: OK
-  /sales/so/{id}:cancel:
-    post:
-      summary: Cancel sales order
-      parameters:
-        - in: path
-          name: id
-          required: true
-          schema:
-            type: string
-        - $ref: '#/components/parameters/IdempotencyKey'
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SalesOrder'
-  /sales/so/{id}:close:
-    post:
-      summary: Close sales order
-      parameters:
-        - in: path
-          name: id
-          required: true
-          schema:
-            type: string
-        - $ref: '#/components/parameters/IdempotencyKey'
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SalesOrder'
+                        available:
+                          type: number
   /sales/so/{id}:release:
     post:
       summary: Release previously reserved quantity
@@ -1032,9 +989,36 @@ paths:
         content:
           application/json:
             schema:
+              $ref: '#/components/schemas/SalesOrderReleaseRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SalesOrder'
+        '409':
+          description: Guardrail violation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /sales/so/{id}:fulfill:
+    post:
+      summary: Fulfill (ship/pick) SO lines
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
               type: object
-              required:
-                - lines
               properties:
                 lines:
                   type: array
@@ -1049,9 +1033,36 @@ paths:
                         type: string
                       deltaQty:
                         type: number
-                        minimum: 0
-                      reason:
+                        minimum: 1
+                        description: Quantity shipped/picked
+                      locationId:
                         type: string
+                      lot:
+                        type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SalesOrder'
+        '409':
+          description: Guardrail violation (over-fulfill or invalid status)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /sales/so/{id}:cancel:
+    post:
+      summary: Cancel sales order
+      description: Blocked when **net reservations > 0** or **any fulfillments** exist.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '200':
           description: OK
@@ -1065,6 +1076,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /sales/so/{id}:close:
+    post:
+      summary: Close sales order (allowed from fulfilled)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SalesOrder'
   /sales-orders/{id}/fulfill-line:
     post:
       deprecated: true
@@ -2536,32 +2564,71 @@ components:
               type: array
               items:
                 type: string
+    PurchaseOrderLine:
+      type: object
+      required:
+        - id
+        - itemId
+        - qty
+        - uom
+      properties:
+        id:
+          type: string
+        itemId:
+          type: string
+          description: InventoryItem.id
+        productId:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        uom:
+          type: string
+        qty:
+          type: number
+          minimum: 0
+          description: Ordered quantity
+        qtyReceived:
+          type: number
+          default: 0
+        unitPrice:
+          type: number
+          nullable: true
+        taxRate:
+          type: number
+          nullable: true
+        lineTotal:
+          type: number
+          nullable: true
+        locationId:
+          type: string
+          nullable: true
+        lot:
+          type: string
+          nullable: true
+        expectedDate:
+          type: string
+          format: date-time
+          nullable: true
     PurchaseOrder:
       allOf:
+        - $ref: '#/components/schemas/ObjectBase'
         - type: object
           required:
             - type
             - vendorId
             - status
           properties:
-            id:
-              type: string
-            tenantId:
-              type: string
             type:
               type: string
               enum:
                 - purchaseOrder
-            createdAt:
-              type: string
-              format: date-time
-            updatedAt:
-              type: string
-              format: date-time
-            metadata:
-              type: object
-              additionalProperties: true
             vendorAccountId:
+              type: string
+            vendorId:
+              type: string
+            vendorName:
               type: string
             partyId:
               type: string
@@ -2571,13 +2638,7 @@ components:
                 - person
                 - organization
                 - animal
-        - type: object
-          properties:
             orderNumber:
-              type: string
-            vendorId:
-              type: string
-            vendorName:
               type: string
             status:
               type: string
@@ -2585,9 +2646,10 @@ components:
                 - draft
                 - submitted
                 - approved
-                - partially_received
-                - received
+                - partially_fulfilled
+                - fulfilled
                 - cancelled
+                - closed
             currency:
               type: string
               default: USD
@@ -2633,51 +2695,32 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/PurchaseOrderLine'
-    PurchaseOrderLine:
+    PurchaseOrderReceiveRequest:
       type: object
       required:
-        - itemId
-        - qty
-        - uom
+        - lines
       properties:
-        id:
+        idempotencyKey:
           type: string
-        itemId:
-          type: string
-          description: InventoryItem.id
-        productId:
-          type: string
-          nullable: true
-        description:
-          type: string
-          nullable: true
-        uom:
-          type: string
-        qty:
-          type: number
-          description: Ordered quantity
-        qtyReceived:
-          type: number
-          default: 0
-        unitPrice:
-          type: number
-          nullable: true
-        taxRate:
-          type: number
-          nullable: true
-        lineTotal:
-          type: number
-          nullable: true
-        locationId:
-          type: string
-          nullable: true
-        lot:
-          type: string
-          nullable: true
-        expectedDate:
-          type: string
-          format: date-time
-          nullable: true
+          deprecated: true
+        lines:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required:
+              - lineId
+              - deltaQty
+            properties:
+              lineId:
+                type: string
+              deltaQty:
+                type: number
+                minimum: 1
+              locationId:
+                type: string
+              lot:
+                type: string
     Registration:
       allOf:
         - $ref: '#/components/schemas/ObjectBase'
@@ -2893,6 +2936,23 @@ components:
             notes:
               type: string
               nullable: true
+    SalesFulfillmentLine:
+      type: object
+      required:
+        - lineId
+        - deltaQty
+      properties:
+        lineId:
+          type: string
+        deltaQty:
+          type: number
+          minimum: 1
+        locationId:
+          type: string
+          nullable: true
+        lot:
+          type: string
+          nullable: true
     SalesFulfillment:
       allOf:
         - $ref: '#/components/schemas/ObjectBase'
@@ -2903,14 +2963,10 @@ components:
             - ts
             - lines
           properties:
-            id:
-              type: string
             type:
               type: string
               enum:
                 - salesFulfillment
-            tenantId:
-              type: string
             soId:
               type: string
             userId:
@@ -2919,28 +2975,10 @@ components:
             ts:
               type: string
               format: date-time
-              nullable: true
             lines:
               type: array
               items:
-                type: object
-                required:
-                  - lineId
-                  - deltaQty
-                properties:
-                  lineId:
-                    type: string
-                  itemId:
-                    type: string
-                    nullable: true
-                  deltaQty:
-                    type: number
-                  lot:
-                    type: string
-                    nullable: true
-                  locationId:
-                    type: string
-                    nullable: true
+                $ref: '#/components/schemas/SalesFulfillmentLine'
             carrier:
               type: string
               nullable: true
@@ -2954,50 +2992,22 @@ components:
               type: array
               items:
                 type: string
-    SalesFulfillmentLine:
-      type: object
-      required:
-        - lineId
-        - deltaQty
-      properties:
-        lineId:
-          type: string
-        deltaQty:
-          type: number
-        locationId:
-          type: string
-          nullable: true
-        lot:
-          type: string
-          nullable: true
     SalesOrder:
       allOf:
+        - $ref: '#/components/schemas/ObjectBase'
         - type: object
           required:
             - type
-            - customerId
+            - partyId
             - status
           properties:
-            id:
-              type: string
-            tenantId:
-              type: string
             type:
               type: string
               enum:
                 - salesOrder
-            createdAt:
-              type: string
-              format: date-time
-            updatedAt:
-              type: string
-              format: date-time
-            metadata:
-              type: object
-              additionalProperties: true
-            customerAccountId:
-              type: string
             partyId:
+              type: string
+            customerId:
               type: string
             partyKind:
               type: string
@@ -3005,11 +3015,7 @@ components:
                 - person
                 - organization
                 - animal
-        - type: object
-          properties:
             orderNumber:
-              type: string
-            customerId:
               type: string
             customerName:
               type: string
@@ -3068,9 +3074,22 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/SalesOrderLine'
+            backorders:
+              type: array
+              description: Present when non-strict commit recorded shortages
+              items:
+                type: object
+                properties:
+                  lineId:
+                    type: string
+                  itemId:
+                    type: string
+                  backordered:
+                    type: number
     SalesOrderLine:
       type: object
       required:
+        - id
         - itemId
         - qty
         - uom
@@ -3089,6 +3108,10 @@ components:
           type: string
         qty:
           type: number
+          minimum: 0
+        qtyCommitted:
+          type: number
+          default: 0
         qtyFulfilled:
           type: number
           default: 0
@@ -3111,9 +3134,6 @@ components:
           type: string
           format: date-time
           nullable: true
-        qtyCommitted:
-          type: number
-          default: 0
     ScannerAction:
       allOf:
         - $ref: '#/components/schemas/ObjectBase'
@@ -3189,6 +3209,69 @@ components:
             - userId
             - status
             - startedAt
+    SalesOrderReserveRequest:
+      type: object
+      required:
+        - lines
+      properties:
+        lines:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required:
+              - lineId
+              - deltaQty
+            properties:
+              lineId:
+                type: string
+              deltaQty:
+                type: number
+                minimum: 1
+    SalesOrderReleaseRequest:
+      type: object
+      required:
+        - lines
+      properties:
+        lines:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required:
+              - lineId
+              - deltaQty
+            properties:
+              lineId:
+                type: string
+              deltaQty:
+                type: number
+                minimum: 1
+              reason:
+                type: string
+    SalesCommitRequest:
+      type: object
+      properties:
+        strict:
+          type: boolean
+          description: Same as ?strict=1
+    SalesCommitResponse:
+      allOf:
+        - $ref: '#/components/schemas/SalesOrder'
+        - type: object
+          properties:
+            shortages:
+              type: array
+              description: Present when strict=false and availability is partial
+              items:
+                type: object
+                properties:
+                  lineId:
+                    type: string
+                  itemId:
+                    type: string
+                  backordered:
+                    type: number
     Scorecard:
       allOf:
         - $ref: '#/components/schemas/ObjectBase'

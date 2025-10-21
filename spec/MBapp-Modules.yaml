@@ -653,7 +653,7 @@ components:
             type: string
           quantity:
             type: number
-            description: Deprecated – use /inventory/{id}/onhand
+            description: "Deprecated \u2013 use /inventory/{id}/onhand"
             deprecated: true
           uom:
             type: string
@@ -744,7 +744,7 @@ components:
           type: string
           format: date-time
       deprecated: true
-      description: Deprecated – use InventoryCounters & GET /inventory/{id}/onhand
+      description: "Deprecated \u2013 use InventoryCounters & GET /inventory/{id}/onhand"
     ListPageInventoryMovement:
       type: object
       required:
@@ -812,43 +812,21 @@ components:
     MoneyTotals:
       type: object
       properties:
-        subtotal:
-          type: number
-        tax:
-          type: number
-        shipping:
-          type: number
-        discount:
-          type: number
-        total:
-          type: number
+        subtotal: { type: number }
+        tax:      { type: number }
+        shipping: { type: number }
+        discount: { type: number }
+        total:    { type: number }
     ObjectBase:
       type: object
       properties:
-        id:
-          type: string
-          readOnly: true
-        tenantId:
-          type: string
-          readOnly: true
-        type:
-          type: string
-        createdAt:
-          type: string
-          format: date-time
-          readOnly: true
-        updatedAt:
-          type: string
-          format: date-time
-          readOnly: true
-        metadata:
-          type: object
-          additionalProperties: true
-      required:
-      - id
-      - tenantId
-      - createdAt
-      - updatedAt
+        id:        { type: string, readOnly: true }
+        tenantId:  { type: string, readOnly: true }
+        type:      { type: string }
+        createdAt: { type: string, format: date-time, readOnly: true }
+        updatedAt: { type: string, format: date-time, readOnly: true }
+        metadata:  { type: object, additionalProperties: true }
+      required: [id, tenantId, createdAt, updatedAt]
     Organization:
       allOf:
       - $ref: '#/components/schemas/ObjectBase'
@@ -1118,148 +1096,83 @@ components:
             type: array
             items:
               type: string
+    PurchaseOrderLine:
+      type: object
+      required: [id, itemId, qty, uom]
+      properties:
+        id:          { type: string }
+        itemId:      { type: string, description: InventoryItem.id }
+        productId:   { type: string, nullable: true }
+        description: { type: string, nullable: true }
+        uom:         { type: string }
+        qty:         { type: number, minimum: 0, description: Ordered quantity }
+        qtyReceived: { type: number, default: 0 }   # server-computed
+        unitPrice:   { type: number, nullable: true }
+        taxRate:     { type: number, nullable: true }
+        lineTotal:   { type: number, nullable: true }
+        locationId:  { type: string, nullable: true }
+        lot:         { type: string, nullable: true }
+        expectedDate: { type: string, format: date-time, nullable: true }
+
     PurchaseOrder:
       allOf:
+      - $ref: '#/components/schemas/ObjectBase'
       - type: object
-        required:
-        - type
-        - vendorId
-        - status
+        required: [type, vendorId, status]
         properties:
-          id:
-            type: string
-          tenantId:
-            type: string
-          type:
-            type: string
-            enum:
-            - purchaseOrder
-          createdAt:
-            type: string
-            format: date-time
-          updatedAt:
-            type: string
-            format: date-time
-          metadata:
-            type: object
-            additionalProperties: true
-          vendorAccountId:
-            type: string
-          partyId:
-            type: string
-          partyKind:
-            type: string
-            enum:
-            - person
-            - organization
-            - animal
-      - type: object
-        properties:
-          orderNumber:
-            type: string
-          vendorId:
-            type: string
-          vendorName:
-            type: string
+          type:          { type: string, enum: [purchaseOrder] }
+          vendorAccountId: { type: string }
+          vendorId:      { type: string }     # canonical
+          vendorName:    { type: string }
+          partyId:       { type: string }     # optional alias if you wire parties generically
+          partyKind:     { type: string, enum: [person, organization, animal] }
+          orderNumber:   { type: string }
           status:
             type: string
-            enum:
-            - draft
-            - submitted
-            - approved
-            - partially_received
-            - received
-            - cancelled
-          currency:
-            type: string
-            default: USD
-          notes:
-            type: string
-          totals:
-            $ref: '#/components/schemas/MoneyTotals'
+            enum: [draft, submitted, approved, partially_fulfilled, fulfilled, cancelled, closed]
+          currency:      { type: string, default: USD }
+          notes:         { type: string }
+          totals:        { $ref: '#/components/schemas/MoneyTotals' }
           shipTo:
             type: object
             properties:
-              name:
-                type: string
-              address1:
-                type: string
-              address2:
-                type: string
-              city:
-                type: string
-              state:
-                type: string
-              postal:
-                type: string
-              country:
-                type: string
+              name:    { type: string }
+              address1: { type: string }
+              address2: { type: string }
+              city:    { type: string }
+              state:   { type: string }
+              postal:  { type: string }
+              country: { type: string }
           billTo:
             type: object
             properties:
-              name:
-                type: string
-              address1:
-                type: string
-              address2:
-                type: string
-              city:
-                type: string
-              state:
-                type: string
-              postal:
-                type: string
-              country:
-                type: string
+              name:    { type: string }
+              address1: { type: string }
+              address2: { type: string }
+              city:    { type: string }
+              state:   { type: string }
+              postal:  { type: string }
+              country: { type: string }
           lines:
             type: array
-            items:
-              $ref: '#/components/schemas/PurchaseOrderLine'
-    PurchaseOrderLine:
+            items: { $ref: '#/components/schemas/PurchaseOrderLine' }
+
+    PurchaseOrderReceiveRequest:
       type: object
-      required:
-      - itemId
-      - qty
-      - uom
+      required: [lines]
       properties:
-        id:
-          type: string
-        itemId:
-          type: string
-          description: InventoryItem.id
-        productId:
-          type: string
-          nullable: true
-        description:
-          type: string
-          nullable: true
-        uom:
-          type: string
-        qty:
-          type: number
-          description: Ordered quantity
-        qtyReceived:
-          type: number
-          default: 0
-        unitPrice:
-          type: number
-          nullable: true
-        taxRate:
-          type: number
-          nullable: true
-        lineTotal:
-          type: number
-          nullable: true
-        locationId:
-          type: string
-          nullable: true
-        lot:
-          type: string
-          nullable: true
-        expectedDate:
-          type: string
-          format: date-time
-          nullable: true
+        idempotencyKey: { type: string, deprecated: true }
+        lines:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [lineId, deltaQty]
+            properties:
+              lineId:     { type: string }
+              deltaQty:   { type: number, minimum: 1 }
+              locationId: { type: string }
+              lot:        { type: string }
     Registration:
       allOf:
       - $ref: '#/components/schemas/ObjectBase'
@@ -1475,227 +1388,101 @@ components:
           notes:
             type: string
             nullable: true
+    SalesFulfillmentLine:
+      type: object
+      required: [lineId, deltaQty]
+      properties:
+        lineId:     { type: string }
+        deltaQty:   { type: number, minimum: 1 }
+        locationId: { type: string, nullable: true }
+        lot:        { type: string, nullable: true }
     SalesFulfillment:
       allOf:
       - $ref: '#/components/schemas/ObjectBase'
       - type: object
-        required:
-        - type
-        - soId
-        - ts
-        - lines
+        required: [type, soId, ts, lines]
         properties:
-          id:
-            type: string
-          type:
-            type: string
-            enum:
-            - salesFulfillment
-          tenantId:
-            type: string
-          soId:
-            type: string
-          userId:
-            type: string
-            nullable: true
-          ts:
-            type: string
-            format: date-time
-            nullable: true
+          type:     { type: string, enum: [salesFulfillment] }
+          soId:     { type: string }
+          userId:   { type: string, nullable: true }
+          ts:       { type: string, format: date-time }
           lines:
             type: array
-            items:
-              type: object
-              required:
-              - lineId
-              - deltaQty
-              properties:
-                lineId:
-                  type: string
-                itemId:
-                  type: string
-                  nullable: true
-                deltaQty:
-                  type: number
-                lot:
-                  type: string
-                  nullable: true
-                locationId:
-                  type: string
-                  nullable: true
-          carrier:
-            type: string
-            nullable: true
-          tracking:
-            type: string
-            nullable: true
-          notes:
-            type: string
-            nullable: true
+            items: { $ref: '#/components/schemas/SalesFulfillmentLine' }
+          carrier:     { type: string, nullable: true }
+          tracking:    { type: string, nullable: true }
+          notes:       { type: string, nullable: true }
           attachments:
             type: array
-            items:
-              type: string
-    SalesFulfillmentLine:
-      type: object
-      required:
-      - lineId
-      - deltaQty
-      properties:
-        lineId:
-          type: string
-        deltaQty:
-          type: number
-        locationId:
-          type: string
-          nullable: true
-        lot:
-          type: string
-          nullable: true
+            items: { type: string }
     SalesOrder:
       allOf:
+      - $ref: '#/components/schemas/ObjectBase'
       - type: object
-        required:
-        - type
-        - customerId
-        - status
+        required: [type, partyId, status]
         properties:
-          id:
-            type: string
-          tenantId:
-            type: string
-          type:
-            type: string
-            enum:
-            - salesOrder
-          createdAt:
-            type: string
-            format: date-time
-          updatedAt:
-            type: string
-            format: date-time
-          metadata:
-            type: object
-            additionalProperties: true
-          customerAccountId:
-            type: string
-          partyId:
-            type: string
-          partyKind:
-            type: string
-            enum:
-            - person
-            - organization
-            - animal
-      - type: object
-        properties:
-          orderNumber:
-            type: string
-          customerId:
-            type: string
-          customerName:
-            type: string
+          type:          { type: string, enum: [salesOrder] }
+          partyId:       { type: string }   # canonical
+          customerId:    { type: string }   # legacy alias (optional)
+          partyKind:     { type: string, enum: [person, organization, animal] }
+          orderNumber:   { type: string }
+          customerName:  { type: string }
           status:
             type: string
-            enum:
-            - draft
-            - submitted
-            - committed
-            - partially_fulfilled
-            - fulfilled
-            - cancelled
-            - closed
-          currency:
-            type: string
-            default: USD
-          notes:
-            type: string
-          totals:
-            $ref: '#/components/schemas/MoneyTotals'
+            enum: [draft, submitted, committed, partially_fulfilled, fulfilled, cancelled, closed]
+          currency:      { type: string, default: USD }
+          notes:         { type: string }
+          totals:        { $ref: '#/components/schemas/MoneyTotals' }
           billTo:
             type: object
             properties:
-              name:
-                type: string
-              address1:
-                type: string
-              address2:
-                type: string
-              city:
-                type: string
-              state:
-                type: string
-              postal:
-                type: string
-              country:
-                type: string
+              name:    { type: string }
+              address1: { type: string }
+              address2: { type: string }
+              city:    { type: string }
+              state:   { type: string }
+              postal:  { type: string }
+              country: { type: string }
           shipTo:
             type: object
             properties:
-              name:
-                type: string
-              address1:
-                type: string
-              address2:
-                type: string
-              city:
-                type: string
-              state:
-                type: string
-              postal:
-                type: string
-              country:
-                type: string
+              name:    { type: string }
+              address1: { type: string }
+              address2: { type: string }
+              city:    { type: string }
+              state:   { type: string }
+              postal:  { type: string }
+              country: { type: string }
           lines:
             type: array
+            items: { $ref: '#/components/schemas/SalesOrderLine' }
+          backorders:
+            type: array
+            description: Present when non-strict commit recorded shortages
             items:
-              $ref: '#/components/schemas/SalesOrderLine'
+              type: object
+              properties:
+                lineId:      { type: string }
+                itemId:      { type: string }
+                backordered: { type: number }
     SalesOrderLine:
       type: object
-      required:
-      - itemId
-      - qty
-      - uom
+      required: [id, itemId, qty, uom]
       properties:
-        id:
-          type: string
-        itemId:
-          type: string
-        productId:
-          type: string
-          nullable: true
-        description:
-          type: string
-          nullable: true
-        uom:
-          type: string
-        qty:
-          type: number
-        qtyFulfilled:
-          type: number
-          default: 0
-        unitPrice:
-          type: number
-          nullable: true
-        taxRate:
-          type: number
-          nullable: true
-        lineTotal:
-          type: number
-          nullable: true
-        locationId:
-          type: string
-          nullable: true
-        lot:
-          type: string
-          nullable: true
-        expectedDate:
-          type: string
-          format: date-time
-          nullable: true
-        qtyCommitted:
-          type: number
-          default: 0
+        id:            { type: string }
+        itemId:        { type: string }
+        productId:     { type: string, nullable: true }
+        description:   { type: string, nullable: true }
+        uom:           { type: string }                # UI treats as non-editable
+        qty:           { type: number, minimum: 0 }
+        qtyCommitted:  { type: number, default: 0 }    # server-computed
+        qtyFulfilled:  { type: number, default: 0 }    # server-computed
+        unitPrice:     { type: number, nullable: true }
+        taxRate:       { type: number, nullable: true }
+        lineTotal:     { type: number, nullable: true }
+        locationId:    { type: string, nullable: true }
+        lot:           { type: string, nullable: true }
+        expectedDate:  { type: string, format: date-time, nullable: true }
     ScannerAction:
       allOf:
       - $ref: '#/components/schemas/ObjectBase'
@@ -1771,6 +1558,54 @@ components:
         - userId
         - status
         - startedAt
+    SalesOrderReserveRequest:
+      type: object
+      required: [lines]
+      properties:
+        lines:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [lineId, deltaQty]
+            properties:
+              lineId:   { type: string }
+              deltaQty: { type: number, minimum: 1 }
+
+    SalesOrderReleaseRequest:
+      type: object
+      required: [lines]
+      properties:
+        lines:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [lineId, deltaQty]
+            properties:
+              lineId:   { type: string }
+              deltaQty: { type: number, minimum: 1 }
+              reason:   { type: string }
+
+    SalesCommitRequest:
+      type: object
+      properties:
+        strict: { type: boolean, description: 'Same as ?strict=1' }
+
+    SalesCommitResponse:
+      allOf:
+      - $ref: '#/components/schemas/SalesOrder'
+      - type: object
+        properties:
+          shortages:
+            type: array
+            description: Present when strict=false and availability is partial
+            items:
+              type: object
+              properties:
+                lineId:      { type: string }
+                itemId:      { type: string }
+                backordered: { type: number }
     Scorecard:
       allOf:
       - $ref: '#/components/schemas/ObjectBase'
@@ -1976,88 +1811,181 @@ components:
           format: date-time
     LocationNode:
       type: object
-      required: [id, name, kind]
+      required:
+      - id
+      - name
+      - kind
       properties:
-        id: { type: string }
-        name: { type: string }
-        kind: { type: string, enum: [facility, hub, address, geo] }
+        id:
+          type: string
+        name:
+          type: string
+        kind:
+          type: string
+          enum:
+          - facility
+          - hub
+          - address
+          - geo
         coords:
           type: object
           properties:
-            lat: { type: number }
-            lng: { type: number }
-        attributes: { type: object, additionalProperties: true }
-        active: { type: boolean, default: true }
+            lat:
+              type: number
+            lng:
+              type: number
+        attributes:
+          type: object
+          additionalProperties: true
+        active:
+          type: boolean
+          default: true
     PathEdge:
       type: object
-      required: [id, fromNodeId, toNodeId, distanceKm]
+      required:
+      - id
+      - fromNodeId
+      - toNodeId
+      - distanceKm
       properties:
-        id: { type: string }
-        fromNodeId: { type: string }
-        toNodeId: { type: string }
-        distanceKm: { type: number }
-        durationMin: { type: number }
-        cost: { type: number }
-        isClosed: { type: boolean, default: false }
-        attributes: { type: object, additionalProperties: true }
+        id:
+          type: string
+        fromNodeId:
+          type: string
+        toNodeId:
+          type: string
+        distanceKm:
+          type: number
+        durationMin:
+          type: number
+        cost:
+          type: number
+        isClosed:
+          type: boolean
+          default: false
+        attributes:
+          type: object
+          additionalProperties: true
     Carrier:
       type: object
-      required: [id, name]
+      required:
+      - id
+      - name
       properties:
-        id: { type: string }
-        name: { type: string }
+        id:
+          type: string
+        name:
+          type: string
         modes:
           type: array
-          items: { type: string, enum: [ground, air, horse, internal] }
-        contactPartyId: { type: string }
-        attributes: { type: object, additionalProperties: true }
+          items:
+            type: string
+            enum:
+            - ground
+            - air
+            - horse
+            - internal
+        contactPartyId:
+          type: string
+        attributes:
+          type: object
+          additionalProperties: true
     DeliveryTask:
       type: object
-      required: [id, partyId, fromNodeId, toNodeId]
+      required:
+      - id
+      - partyId
+      - fromNodeId
+      - toNodeId
       properties:
-        id: { type: string }
-        orderRef: { type: string, description: "SO/PO/Reservation id or composite" }
-        partyId: { type: string }
-        fromNodeId: { type: string }
-        toNodeId: { type: string }
+        id:
+          type: string
+        orderRef:
+          type: string
+          description: SO/PO/Reservation id or composite
+        partyId:
+          type: string
+        fromNodeId:
+          type: string
+        toNodeId:
+          type: string
         window:
           type: object
           properties:
-            start: { type: string, format: date-time }
-            end: { type: string, format: date-time }
+            start:
+              type: string
+              format: date-time
+            end:
+              type: string
+              format: date-time
         status:
           type: string
-          enum: [draft, planned, enroute, delivered, failed, cancelled]
-        attributes: { type: object, additionalProperties: true }
+          enum:
+          - draft
+          - planned
+          - enroute
+          - delivered
+          - failed
+          - cancelled
+        attributes:
+          type: object
+          additionalProperties: true
     RoutePlan:
       type: object
-      required: [id, objective, tasks]
+      required:
+      - id
+      - objective
+      - tasks
       properties:
-        id: { type: string }
-        objective: { type: string, enum: [shortest, fastest, cheapest, balanced] }
+        id:
+          type: string
+        objective:
+          type: string
+          enum:
+          - shortest
+          - fastest
+          - cheapest
+          - balanced
         constraints:
           type: object
           properties:
             closures:
               type: array
-              items: { type: string, description: "edge ids closed" }
+              items:
+                type: string
+                description: edge ids closed
             forbiddenNodes:
               type: array
-              items: { type: string }
-            maxHoursPerDriver: { type: number }
-        carrierId: { type: string }
+              items:
+                type: string
+            maxHoursPerDriver:
+              type: number
+        carrierId:
+          type: string
         tasks:
           type: array
           items:
             type: object
-            properties: { id: { type: string } }
+            properties:
+              id:
+                type: string
         summary:
           type: object
           properties:
-            distanceKm: { type: number }
-            totalDurationMin: { type: number }
-            totalCost: { type: number }
-        status: { type: string, enum: [draft, planned, executed, archived], default: draft }
+            distanceKm:
+              type: number
+            totalDurationMin:
+              type: number
+            totalCost:
+              type: number
+        status:
+          type: string
+          enum:
+          - draft
+          - planned
+          - executed
+          - archived
+          default: draft
 security:
 - bearerAuth: []
 paths:
@@ -2748,405 +2676,320 @@ paths:
     post:
       summary: Submit purchase order
       parameters:
-      - $ref: '#/components/parameters/IdempotencyKey'
-      - in: path
-        name: id
-        schema:
-          type: string
-        required: true
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
       responses:
         '200':
           description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PurchaseOrder'
+          content: { application/json: { schema: { $ref: '#/components/schemas/PurchaseOrder' } } }
+        '409':
+          description: Guardrail violation (e.g., invalid status transition)
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
   /purchasing/po/{id}:approve:
     post:
       summary: Approve purchase order
       parameters:
-      - in: path
-        name: id
-        required: true
-        schema:
-          type: string
-      - $ref: '#/components/parameters/IdempotencyKey'
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '200':
           description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PurchaseOrder'
+          content: { application/json: { schema: { $ref: '#/components/schemas/PurchaseOrder' } } }
+        '409':
+          description: Only submitted can approve
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
   /purchasing/po/{id}:receive:
     post:
       summary: Receive against purchase order lines
+      description: Allowed from **approved** or **partially_fulfilled**. Over-receive returns 409.
       parameters:
-      - in: path
-        name: id
-        required: true
-        schema:
-          type: string
-      - $ref: '#/components/parameters/IdempotencyKey'
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              properties:
-                idempotencyKey:
-                  type: string
-                  deprecated: true
-                lines:
-                  type: array
-                  items:
-                    type: object
-                    required:
-                    - lineId
-                    - deltaQty
-                    properties:
-                      lineId:
-                        type: string
-                      deltaQty:
-                        type: number
-                      locationId:
-                        type: string
-                      lot:
-                        type: string
+            schema: { $ref: '#/components/schemas/PurchaseOrderReceiveRequest' }
       responses:
         '200':
           description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/PurchaseOrder' } } }
+        '409':
+          description: Over-receive or invalid status
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
   /purchasing/po/{id}:cancel:
     post:
       summary: Cancel purchase order
+      description: Allowed from **draft**/**submitted**. Returns 409 otherwise.
       parameters:
-      - in: path
-        name: id
-        required: true
-        schema:
-          type: string
-      - $ref: '#/components/parameters/IdempotencyKey'
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '200':
           description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PurchaseOrder'
+          content: { application/json: { schema: { $ref: '#/components/schemas/PurchaseOrder' } } }
+        '409':
+          description: Guardrail violation
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
   /purchasing/po/{id}:close:
     post:
       summary: Close purchase order
+      description: Allowed from **fulfilled**. Returns 409 otherwise.
       parameters:
-      - in: path
-        name: id
-        required: true
-        schema:
-          type: string
-      - $ref: '#/components/parameters/IdempotencyKey'
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '200':
           description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PurchaseOrder'
+          content: { application/json: { schema: { $ref: '#/components/schemas/PurchaseOrder' } } }
+        '409':
+          description: Guardrail violation
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
+  # (Optional) Deprecated single-line receive helper
   /purchase-orders/{id}/receive-line:
     post:
-      tags:
-      - Purchasing
+      deprecated: true
+      tags: [Purchasing]
       summary: Receive a specific PO line
       parameters:
-      - $ref: '#/components/parameters/IdempotencyKey'
-      - in: path
-        name: id
-        required: true
-        schema:
-          type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required:
-              - lineId
-              - qty
+              required: [lineId, qty]
               properties:
-                lineId:
-                  type: string
-                qty:
-                  type: number
-                lot:
-                  type: string
-                  nullable: true
-                location:
-                  type: string
-                  nullable: true
+                lineId:  { type: string }
+                qty:     { type: number, minimum: 1 }
+                lot:     { type: string, nullable: true }
+                location: { type: string, nullable: true }
       responses:
         '200':
           description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PurchaseOrder'
+          content: { application/json: { schema: { $ref: '#/components/schemas/PurchaseOrder' } } }
   /sales/so/{id}:submit:
     post:
       summary: Submit sales order
       parameters:
-      - in: path
-        name: id
-        required: true
-        schema:
-          type: string
-      - $ref: '#/components/parameters/IdempotencyKey'
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '200':
           description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SalesOrder'
+          content: { application/json: { schema: { $ref: '#/components/schemas/SalesOrder' } } }
+
   /sales/so/{id}:commit:
     post:
       summary: Commit/allocate inventory for a sales order
-      description: 'Default is **non-strict** (will commit and return `200` even if short on stock; response
-        may include `shortages[]`).
-
-        Pass `strict=1` (query) or `{ "strict": true }` (body) to require full availability (returns `409`
-        with `shortages[]`).
-
-        '
+      description: |
+        Default is non-strict (200 with `shortages[]` when partially available).
+        Set `?strict=1` or `{ "strict": true }` to require full availability (409 on shortage).
       parameters:
-      - in: path
-        name: id
-        required: true
-        schema:
-          type: string
-      - in: query
-        name: strict
-        required: false
-        schema:
-          type: integer
-          enum:
-          - 0
-          - 1
-        description: When 1, require full availability; otherwise partial commits are allowed.
-      - $ref: '#/components/parameters/IdempotencyKey'
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - in: query
+          name: strict
+          schema: { type: integer, enum: [0, 1] }
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: false
         content:
           application/json:
-            schema:
-              type: object
-              properties:
-                strict:
-                  type: boolean
-                  description: Same as ?strict=1
+            schema: { $ref: '#/components/schemas/SalesCommitRequest' }
       responses:
         '200':
           description: OK (may include `shortages[]` when non-strict)
-          content:
-            application/json:
-              schema:
-                allOf:
-                - $ref: '#/components/schemas/SalesOrder'
-                - type: object
-                  properties:
-                    shortages:
-                      type: array
-                      items:
-                        type: object
-                        properties:
-                          lineId:
-                            type: string
-                          itemId:
-                            type: string
-                          backordered:
-                            type: number
+          content: { application/json: { schema: { $ref: '#/components/schemas/SalesCommitResponse' } } }
         '409':
           description: Insufficient availability in strict mode
+          content: { application/json: { schema: { $ref: '#/components/schemas/SalesCommitResponse' } } }
+
+  /sales/so/{id}:reserve:
+    post:
+      summary: Reserve specific line quantities on a sales order
+      description: Valid from **submitted** or **committed**.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SalesOrderReserveRequest' }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/SalesOrder' } } }
+        '409':
+          description: Insufficient availability
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  message:
-                    type: string
+                  message: { type: string }
                   shortages:
                     type: array
                     items:
                       type: object
                       properties:
-                        lineId:
-                          type: string
-                        itemId:
-                          type: string
-                        backordered:
-                          type: number
-  /sales/so/{id}:fulfill:
-    post:
-      summary: Fulfill items on a sales order
-      parameters:
-      - in: path
-        name: id
-        required: true
-        schema:
-          type: string
-      - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                idempotencyKey:
-                  type: string
-                  deprecated: true
-                lines:
-                  type: array
-                  items:
-                    type: object
-                    required:
-                    - lineId
-                    - deltaQty
-                    properties:
-                      lineId:
-                        type: string
-                      deltaQty:
-                        type: number
-                        description: Quantity shipped/picked (positive)
-                      locationId:
-                        type: string
-                      lot:
-                        type: string
-      responses:
-        '200':
-          description: OK
-  /sales/so/{id}:cancel:
-    post:
-      summary: Cancel sales order
-      parameters:
-      - in: path
-        name: id
-        required: true
-        schema:
-          type: string
-      - $ref: '#/components/parameters/IdempotencyKey'
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SalesOrder'
-  /sales/so/{id}:close:
-    post:
-      summary: Close sales order
-      parameters:
-      - in: path
-        name: id
-        required: true
-        schema:
-          type: string
-      - $ref: '#/components/parameters/IdempotencyKey'
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SalesOrder'
+                        lineId:    { type: string }
+                        itemId:    { type: string }
+                        requested: { type: number }
+                        available: { type: number }
+
   /sales/so/{id}:release:
     post:
       summary: Release previously reserved quantity
       parameters:
-      - in: path
-        name: id
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
         required: true
-        schema:
-          type: string
-      - $ref: '#/components/parameters/IdempotencyKey'
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SalesOrderReleaseRequest' }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/SalesOrder' } } }
+        '409':
+          description: Guardrail violation
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
+  /sales/so/{id}:fulfill:
+    post:
+      summary: Fulfill (ship/pick) SO lines
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required:
-              - lines
               properties:
                 lines:
                   type: array
                   minItems: 1
                   items:
                     type: object
-                    required:
-                    - lineId
-                    - deltaQty
+                    required: [lineId, deltaQty]
                     properties:
-                      lineId:
-                        type: string
-                      deltaQty:
-                        type: number
-                        minimum: 0
-                      reason:
-                        type: string
+                      lineId:     { type: string }
+                      deltaQty:   { type: number, minimum: 1, description: Quantity shipped/picked }
+                      locationId: { type: string }
+                      lot:        { type: string }
       responses:
         '200':
           description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SalesOrder'
+          content: { application/json: { schema: { $ref: '#/components/schemas/SalesOrder' } } }
+        '409':
+          description: Guardrail violation (over-fulfill or invalid status)
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
+  /sales/so/{id}:cancel:
+    post:
+      summary: Cancel sales order
+      description: Blocked when **net reservations > 0** or **any fulfillments** exist.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/SalesOrder' } } }
         '409':
           description: Guardrail violation
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
+  /sales/so/{id}:close:
+    post:
+      summary: Close sales order (allowed from fulfilled)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/SalesOrder' } } }
+
+  # Deprecated single-line fulfill (keep if you still expose it)
   /sales-orders/{id}/fulfill-line:
     post:
       deprecated: true
       description: Use `POST /sales/so/{id}:fulfill` instead.
-      tags:
-      - Sales
+      tags: [Sales]
       summary: Fulfill a specific SO line
       parameters:
-      - $ref: '#/components/parameters/IdempotencyKey'
-      - in: path
-        name: id
-        required: true
-        schema:
-          type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required:
-              - lineId
-              - qty
+              required: [lineId, qty]
               properties:
-                lineId:
-                  type: string
-                qty:
-                  type: number
-                lot:
-                  type: string
-                  nullable: true
-                location:
-                  type: string
-                  nullable: true
+                lineId: { type: string }
+                qty:    { type: number }
+                lot:    { type: string, nullable: true }
+                location: { type: string, nullable: true }
       responses:
         '200':
           description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SalesOrder'
+          content: { application/json: { schema: { $ref: '#/components/schemas/SalesOrder' } } }
   /routing/graph:
     post:
       operationId: upsertRoutingGraph
@@ -3158,11 +3001,17 @@ paths:
             schema:
               type: object
               properties:
-                nodes: { type: array, items: { $ref: '#/components/schemas/LocationNode' } }
-                edges: { type: array, items: { $ref: '#/components/schemas/PathEdge' } }
+                nodes:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/LocationNode'
+                edges:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/PathEdge'
       responses:
-        '200': { description: 'OK' }
-
+        '200':
+          description: OK
   /routing/plan:
     post:
       operationId: createRoutePlan
@@ -3176,47 +3025,54 @@ paths:
               properties:
                 objective:
                   type: string
-                  enum: [shortest, fastest, cheapest, balanced]
+                  enum:
+                  - shortest
+                  - fastest
+                  - cheapest
+                  - balanced
                 constraints:
                   $ref: '#/components/schemas/RoutePlan/properties/constraints'
                 carrierId:
                   type: string
                 tasks:
                   type: array
-                  items: { $ref: '#/components/schemas/DeliveryTask' }
-                # Optional: allow an inline graph for MVP compute
+                  items:
+                    $ref: '#/components/schemas/DeliveryTask'
                 graph:
                   type: object
                   properties:
                     nodes:
                       type: array
-                      items: { $ref: '#/components/schemas/LocationNode' }
+                      items:
+                        $ref: '#/components/schemas/LocationNode'
                     edges:
                       type: array
-                      items: { $ref: '#/components/schemas/PathEdge' }
+                      items:
+                        $ref: '#/components/schemas/PathEdge'
       responses:
         '200':
           description: Created plan
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/RoutePlan' }
-
-
+              schema:
+                $ref: '#/components/schemas/RoutePlan'
   /routing/plan/{id}:
     get:
       operationId: getRoutePlan
       summary: Get a route plan by id
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
       responses:
         '200':
           description: Route plan
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/RoutePlan' }
+              schema:
+                $ref: '#/components/schemas/RoutePlan'
   /events/registration/{id}:cancel:
     post:
       summary: Cancel a registration

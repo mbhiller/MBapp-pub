@@ -375,6 +375,15 @@ export interface paths {
                         "application/json": components["schemas"]["PurchaseOrder"];
                     };
                 };
+                /** @description Guardrail violation (e.g., invalid status transition) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -416,6 +425,15 @@ export interface paths {
                         "application/json": components["schemas"]["PurchaseOrder"];
                     };
                 };
+                /** @description Only submitted can approve */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -433,7 +451,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Receive against purchase order lines */
+        /**
+         * Receive against purchase order lines
+         * @description Allowed from **approved** or **partially_fulfilled**. Over-receive returns 409.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -448,16 +469,7 @@ export interface paths {
             };
             requestBody: {
                 content: {
-                    "application/json": {
-                        /** @deprecated */
-                        idempotencyKey?: string;
-                        lines?: {
-                            lineId: string;
-                            deltaQty: number;
-                            locationId?: string;
-                            lot?: string;
-                        }[];
-                    };
+                    "application/json": components["schemas"]["PurchaseOrderReceiveRequest"];
                 };
             };
             responses: {
@@ -466,7 +478,18 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["PurchaseOrder"];
+                    };
+                };
+                /** @description Over-receive or invalid status */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
                 };
             };
         };
@@ -485,7 +508,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Cancel purchase order */
+        /**
+         * Cancel purchase order
+         * @description Allowed from **draft**\/**submitted**. Returns 409 otherwise.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -507,6 +533,15 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["PurchaseOrder"];
+                    };
+                };
+                /** @description Guardrail violation */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
                     };
                 };
             };
@@ -526,7 +561,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Close purchase order */
+        /**
+         * Close purchase order
+         * @description Allowed from **fulfilled**. Returns 409 otherwise.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -550,6 +588,15 @@ export interface paths {
                         "application/json": components["schemas"]["PurchaseOrder"];
                     };
                 };
+                /** @description Guardrail violation */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -567,7 +614,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Receive a specific PO line */
+        /**
+         * Receive a specific PO line
+         * @deprecated
+         */
         post: {
             parameters: {
                 query?: never;
@@ -660,14 +710,13 @@ export interface paths {
         put?: never;
         /**
          * Commit/allocate inventory for a sales order
-         * @description Default is **non-strict** (will commit and return `200` even if short on stock; response may include `shortages[]`).
-         *     Pass `strict=1` (query) or `{ "strict": true }` (body) to require full availability (returns `409` with `shortages[]`).
+         * @description Default is non-strict (200 with `shortages[]` when partially available).
+         *     Set `?strict=1` or `{ "strict": true }` to require full availability (409 on shortage).
          *
          */
         post: {
             parameters: {
                 query?: {
-                    /** @description When 1, require full availability; otherwise partial commits are allowed. */
                     strict?: 0 | 1;
                 };
                 header?: {
@@ -681,10 +730,7 @@ export interface paths {
             };
             requestBody?: {
                 content: {
-                    "application/json": {
-                        /** @description Same as ?strict=1 */
-                        strict?: boolean;
-                    };
+                    "application/json": components["schemas"]["SalesCommitRequest"];
                 };
             };
             responses: {
@@ -694,13 +740,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["SalesOrder"] & {
-                            shortages?: {
-                                lineId?: string;
-                                itemId?: string;
-                                backordered?: number;
-                            }[];
-                        };
+                        "application/json": components["schemas"]["SalesCommitResponse"];
                     };
                 };
                 /** @description Insufficient availability in strict mode */
@@ -709,14 +749,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": {
-                            message?: string;
-                            shortages?: {
-                                lineId?: string;
-                                itemId?: string;
-                                backordered?: number;
-                            }[];
-                        };
+                        "application/json": components["schemas"]["SalesCommitResponse"];
                     };
                 };
             };
@@ -727,7 +760,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/sales/so/{id}:fulfill": {
+    "/sales/so/{id}:reserve": {
         parameters: {
             query?: never;
             header?: never;
@@ -736,7 +769,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Fulfill items on a sales order */
+        /**
+         * Reserve specific line quantities on a sales order
+         * @description Valid from **submitted** or **committed**.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -751,58 +787,9 @@ export interface paths {
             };
             requestBody: {
                 content: {
-                    "application/json": {
-                        /** @deprecated */
-                        idempotencyKey?: string;
-                        lines?: {
-                            lineId: string;
-                            /** @description Quantity shipped/picked (positive) */
-                            deltaQty: number;
-                            locationId?: string;
-                            lot?: string;
-                        }[];
-                    };
+                    "application/json": components["schemas"]["SalesOrderReserveRequest"];
                 };
             };
-            responses: {
-                /** @description OK */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/sales/so/{id}:cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Cancel sales order */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /** @description Optional idempotency key for safe retries. */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
             responses: {
                 /** @description OK */
                 200: {
@@ -813,45 +800,21 @@ export interface paths {
                         "application/json": components["schemas"]["SalesOrder"];
                     };
                 };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/sales/so/{id}:close": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Close sales order */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /** @description Optional idempotency key for safe retries. */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description OK */
-                200: {
+                /** @description Insufficient availability */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["SalesOrder"];
+                        "application/json": {
+                            message?: string;
+                            shortages?: {
+                                lineId?: string;
+                                itemId?: string;
+                                requested?: number;
+                                available?: number;
+                            }[];
+                        };
                     };
                 };
             };
@@ -886,13 +849,7 @@ export interface paths {
             };
             requestBody: {
                 content: {
-                    "application/json": {
-                        lines: {
-                            lineId: string;
-                            deltaQty: number;
-                            reason?: string;
-                        }[];
-                    };
+                    "application/json": components["schemas"]["SalesOrderReleaseRequest"];
                 };
             };
             responses: {
@@ -912,6 +869,162 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sales/so/{id}:fulfill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Fulfill (ship/pick) SO lines */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        lines?: {
+                            lineId: string;
+                            /** @description Quantity shipped/picked */
+                            deltaQty: number;
+                            locationId?: string;
+                            lot?: string;
+                        }[];
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SalesOrder"];
+                    };
+                };
+                /** @description Guardrail violation (over-fulfill or invalid status) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sales/so/{id}:cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel sales order
+         * @description Blocked when **net reservations > 0** or **any fulfillments** exist.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SalesOrder"];
+                    };
+                };
+                /** @description Guardrail violation */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sales/so/{id}:close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Close sales order (allowed from fulfilled) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SalesOrder"];
                     };
                 };
             };
@@ -1930,28 +2043,37 @@ export interface components {
             defaultItemId?: string | null;
             tags?: string[];
         };
-        PurchaseOrder: {
-            id?: string;
-            tenantId?: string;
+        PurchaseOrderLine: {
+            id: string;
+            /** @description InventoryItem.id */
+            itemId: string;
+            productId?: string | null;
+            description?: string | null;
+            uom: string;
+            /** @description Ordered quantity */
+            qty: number;
+            /** @default 0 */
+            qtyReceived: number;
+            unitPrice?: number | null;
+            taxRate?: number | null;
+            lineTotal?: number | null;
+            locationId?: string | null;
+            lot?: string | null;
+            /** Format: date-time */
+            expectedDate?: string | null;
+        };
+        PurchaseOrder: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
             type: "purchaseOrder";
-            /** Format: date-time */
-            createdAt?: string;
-            /** Format: date-time */
-            updatedAt?: string;
-            metadata?: {
-                [key: string]: unknown;
-            };
             vendorAccountId?: string;
+            vendorId: string;
+            vendorName?: string;
             partyId?: string;
             /** @enum {string} */
             partyKind?: "person" | "organization" | "animal";
-        } & {
             orderNumber?: string;
-            vendorId?: string;
-            vendorName?: string;
             /** @enum {string} */
-            status?: "draft" | "submitted" | "approved" | "partially_received" | "received" | "cancelled";
+            status: "draft" | "submitted" | "approved" | "partially_fulfilled" | "fulfilled" | "cancelled" | "closed";
             /** @default USD */
             currency: string;
             notes?: string;
@@ -1976,24 +2098,15 @@ export interface components {
             };
             lines?: components["schemas"]["PurchaseOrderLine"][];
         };
-        PurchaseOrderLine: {
-            id?: string;
-            /** @description InventoryItem.id */
-            itemId: string;
-            productId?: string | null;
-            description?: string | null;
-            uom: string;
-            /** @description Ordered quantity */
-            qty: number;
-            /** @default 0 */
-            qtyReceived: number;
-            unitPrice?: number | null;
-            taxRate?: number | null;
-            lineTotal?: number | null;
-            locationId?: string | null;
-            lot?: string | null;
-            /** Format: date-time */
-            expectedDate?: string | null;
+        PurchaseOrderReceiveRequest: {
+            /** @deprecated */
+            idempotencyKey?: string;
+            lines: {
+                lineId: string;
+                deltaQty: number;
+                locationId?: string;
+                lot?: string;
+            }[];
         };
         Registration: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
@@ -2096,55 +2209,36 @@ export interface components {
             tags?: string[];
             notes?: string | null;
         };
-        SalesFulfillment: components["schemas"]["ObjectBase"] & {
-            id?: string;
-            /** @enum {string} */
-            type: "salesFulfillment";
-            tenantId?: string;
-            soId: string;
-            userId?: string | null;
-            /** Format: date-time */
-            ts: string | null;
-            lines: {
-                lineId: string;
-                itemId?: string | null;
-                deltaQty: number;
-                lot?: string | null;
-                locationId?: string | null;
-            }[];
-            carrier?: string | null;
-            tracking?: string | null;
-            notes?: string | null;
-            attachments?: string[];
-        };
         SalesFulfillmentLine: {
             lineId: string;
             deltaQty: number;
             locationId?: string | null;
             lot?: string | null;
         };
-        SalesOrder: {
-            id?: string;
-            tenantId?: string;
+        SalesFulfillment: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "salesFulfillment";
+            soId: string;
+            userId?: string | null;
+            /** Format: date-time */
+            ts: string;
+            lines: components["schemas"]["SalesFulfillmentLine"][];
+            carrier?: string | null;
+            tracking?: string | null;
+            notes?: string | null;
+            attachments?: string[];
+        };
+        SalesOrder: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
             type: "salesOrder";
-            /** Format: date-time */
-            createdAt?: string;
-            /** Format: date-time */
-            updatedAt?: string;
-            metadata?: {
-                [key: string]: unknown;
-            };
-            customerAccountId?: string;
-            partyId?: string;
+            partyId: string;
+            customerId?: string;
             /** @enum {string} */
             partyKind?: "person" | "organization" | "animal";
-        } & {
             orderNumber?: string;
-            customerId?: string;
             customerName?: string;
             /** @enum {string} */
-            status?: "draft" | "submitted" | "committed" | "partially_fulfilled" | "fulfilled" | "cancelled" | "closed";
+            status: "draft" | "submitted" | "committed" | "partially_fulfilled" | "fulfilled" | "cancelled" | "closed";
             /** @default USD */
             currency: string;
             notes?: string;
@@ -2168,14 +2262,22 @@ export interface components {
                 country?: string;
             };
             lines?: components["schemas"]["SalesOrderLine"][];
+            /** @description Present when non-strict commit recorded shortages */
+            backorders?: {
+                lineId?: string;
+                itemId?: string;
+                backordered?: number;
+            }[];
         };
         SalesOrderLine: {
-            id?: string;
+            id: string;
             itemId: string;
             productId?: string | null;
             description?: string | null;
             uom: string;
             qty: number;
+            /** @default 0 */
+            qtyCommitted: number;
             /** @default 0 */
             qtyFulfilled: number;
             unitPrice?: number | null;
@@ -2185,8 +2287,6 @@ export interface components {
             lot?: string | null;
             /** Format: date-time */
             expectedDate?: string | null;
-            /** @default 0 */
-            qtyCommitted: number;
         };
         ScannerAction: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
@@ -2218,6 +2318,31 @@ export interface components {
             startedAt: string;
             /** Format: date-time */
             stoppedAt?: string | null;
+        };
+        SalesOrderReserveRequest: {
+            lines: {
+                lineId: string;
+                deltaQty: number;
+            }[];
+        };
+        SalesOrderReleaseRequest: {
+            lines: {
+                lineId: string;
+                deltaQty: number;
+                reason?: string;
+            }[];
+        };
+        SalesCommitRequest: {
+            /** @description Same as ?strict=1 */
+            strict?: boolean;
+        };
+        SalesCommitResponse: components["schemas"]["SalesOrder"] & {
+            /** @description Present when strict=false and availability is partial */
+            shortages?: {
+                lineId?: string;
+                itemId?: string;
+                backordered?: number;
+            }[];
         };
         Scorecard: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */

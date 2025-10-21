@@ -13,9 +13,6 @@
     "lint:ci": "eslint . --ext .ts,.tsx --max-warnings=0",
     "test": "npm run test -ws --if-present",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "gen:types:mobile": "openapi-typescript ./spec/openapi.yaml -o ./apps/mobile/src/api/generated-types.ts",
-    "tools:ping": "node apps/src/tools/ping.mjs",
-    "tools:seed": "node apps/api/src/tools/seed.mjs",
     "tools:smoke": "node apps/api/src/tools/smoke.mjs",
     "spec:bundle": "redocly bundle spec/MBapp-Modules.yaml -o spec/openapi.yaml",
     "spec:types:api": "openapi-typescript spec/openapi.yaml -o apps/api/src/generated/openapi-types.ts",
@@ -23,8 +20,12 @@
     "spec:lint": "redocly lint spec/MBapp-Modules.yaml",
     "spec:docs": "redocly build-docs spec/openapi.yaml -o docs/api",
     "api:build": "esbuild apps/api/src/index.ts --bundle --platform=node --target=node20 --outfile=apps/api/dist/bootstrap.js",
-    "api:smoke": "node apps/api/scripts/smoke.mjs",
-    "api:deploy": "powershell -ExecutionPolicy Bypass -File ops/Publish-ObjectsLambda-Daily.ps1"
+    "api:deploy": "powershell -ExecutionPolicy Bypass -File ops/Publish-ObjectsLambda-Daily.ps1",
+    "smoke:list": "node ops/smoke/smoke.mjs list",
+    "smoke:sales:happy": "node ops/smoke/smoke.mjs smoke:sales:happy",
+    "smoke:sales:guards": "node ops/smoke/smoke.mjs smoke:sales:guards",
+    "smoke:purchasing:happy": "node ops/smoke/smoke.mjs smoke:purchasing:happy",
+    "smoke:purchasing:guards": "node ops/smoke/smoke.mjs smoke:purchasing:guards"
   },
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "^3.882.0",

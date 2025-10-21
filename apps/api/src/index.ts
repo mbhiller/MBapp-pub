@@ -3,7 +3,6 @@ import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda
 import { getAuth, requirePerm, policyFromAuth } from "./auth/middleware";
 import { buildCtx, attachCtxToEvent } from "./shared/ctx";
 
-
 /* Routes */
 // Views
 import * as ViewsList   from "./views/list";
@@ -26,8 +25,9 @@ import * as ObjDelete from "./objects/delete";
 import * as ObjSearch from "./objects/search";
 // Dev auth
 import * as DevLogin from "./auth/dev-login";
+
 // Actions
-/*// Purchase Orders
+// Purchase Orders
 import * as PoSubmit   from "./purchasing/po-submit";
 import * as PoApprove  from "./purchasing/po-approve";
 import * as PoReceive  from "./purchasing/po-receive";
@@ -40,8 +40,8 @@ import * as SoFulfill  from "./sales/so-fulfill";
 import * as SoCancel   from "./sales/so-cancel";
 import * as SoClose    from "./sales/so-close";
 import * as SoReserve  from "./sales/so-reserve";
-import * as SoRelease  from "./sales/so-release"; // <-- added
-*/
+import * as SoRelease  from "./sales/so-release";
+
 // Inventory on-hand (computed from movements)
 import * as InvOnHandGet from "./inventory/onhand-get";
 import * as InvOnHandBatch from "./inventory/onhand-batch";
@@ -60,22 +60,23 @@ import * as ResCancel  from "./resources/reservation-cancel";
 import * as ResStart   from "./resources/reservation-start";
 import * as ResEnd     from "./resources/reservation-end";
 
+// Tools
 import * as GcList   from "./tools/gc-list-type";
 import * as GcDelete from "./tools/gc-delete-type";
 import * as GcListAll   from "./tools/gc-list-all";
 import * as GcDeleteKeys from "./tools/gc-delete-keys";
 
-
+// Routing & Delivery
 import * as RoutingGraphUpsert from "./routing/graph-upsert";
 import * as RoutingPlanCreate from "./routing/plan-create";
 import * as RoutingPlanGet from "./routing/plan-get";
-/*
-// EPC & SCANNERS
+
+// EPC & SCANNERS (uncommented per request)
 import * as EpcResolve from "./epc/resolve";
 import * as ScannerSessions from "./scanner/sessions";
 import * as ScannerActions from "./scanner/actions";
 import * as ScannerSim from "./scanner/simulate";
-*/
+
 /* Helpers */
 const json = (statusCode: number, body: unknown): APIGatewayProxyResultV2 => ({
   statusCode,
@@ -172,7 +173,6 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
     const ctx = buildCtx(event, auth);
     attachCtxToEvent(event, ctx);
 
-
     if (method === "GET" && path === "/auth/policy") {
       return json(200, policyFromAuth(auth));
     }
@@ -213,7 +213,6 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
 
     /* ========= Actions ========= */
     // Purchasing PO actions
-    /*
     {
       const m = match(/^\/purchasing\/po\/([^/]+):(submit|approve|receive|cancel|close)$/i, path);
       if (m) {
@@ -246,7 +245,7 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
         return methodNotAllowed();
       }
     }
-*/
+
     // Inventory — onhand (computed)
     {
       const m = path.match(/^\/inventory\/([^/]+)\/onhand$/i);
@@ -275,7 +274,6 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
       }
     }
 
-
     // Rich inventory search (label + uom + counters)
     if (path === "/inventory/search" && method === "POST") {
       requirePerm(auth, "inventory:read");
@@ -284,7 +282,6 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
 
     // Routing & Delivery 
     if (method === "POST" && path === "/routing/graph") {
-      // perms here, handlers stay pure
       requirePerm(auth, "routing:write");
       return RoutingGraphUpsert.handle(event);
     }
@@ -303,58 +300,32 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
       }
     }
 
-    // Event Registration actions
-    {
-      const m = match(/^\/events\/registration\/([^/]+):(cancel|checkin|checkout)$/i, path);
-      if (m) {
-        const [id, action] = m;
-        requirePerm(auth, "registration:write");
-        if (action === "cancel")   return RegCancel.handle(withId(event, id));
-        if (action === "checkin")  return RegCheckin.handle(withId(event, id));
-        if (action === "checkout") return RegCheckout.handle(withId(event, id));
-        return methodNotAllowed();
-      }
-    }
-
-    // Resource Reservation actions
-    {
-      const m = match(/^\/resources\/reservation\/([^/]+):(cancel|start|end)$/i, path);
-      if (m) {
-        const [id, action] = m;
-        requirePerm(auth, "reservation:write");
-        if (action === "cancel") return ResCancel.handle(withId(event, id));
-        if (action === "start")  return ResStart.handle(withId(event, id));
-        if (action === "end")    return ResEnd.handle(withId(event, id));
-        return methodNotAllowed();
-      }
-    }
-/*
-    // --- EPC: resolve a tag to an item ---
+    // EPC: resolve a tag to an item
     if (method === "GET" && path === "/epc/resolve") {
       requirePerm(auth, "inventory:read");
-      // Handler reads ?epc=... itself from event.queryStringParameters
+      // Handler reads ?epc=... from event.queryStringParameters
       return EpcResolve.handle(event);
     }
 
-    // --- Scanner sessions: start/stop ---
+    // Scanner sessions: start/stop
     if (method === "POST" && path === "/scanner/sessions") {
       requirePerm(auth, "scanner:use");
       return ScannerSessions.handle(event);
     }
 
-    // --- Scanner actions: receive | pick | count | move ---
+    // Scanner actions: receive | pick | count | move
     if (method === "POST" && path === "/scanner/actions") {
       requirePerm(auth, "scanner:use");
       // If you pass idempotency in headers today, the handler will consume it.
       return ScannerActions.handle(event);
     }
 
-    // --- Dev-only: simulate EPCs for testing ---
+    // Dev-only: simulate EPCs for testing
     if (method === "POST" && path === "/scanner/simulate") {
       requirePerm(auth, "admin:seed");
       return ScannerSim.handle(event);
     }
-*/
+
     // Tools: GC
     const gcList = match(/^\/tools\/gc\/([^/]+)$/i, path);
     if (gcList && method === "GET")    { requirePerm(auth, "admin:reset"); return GcList.handle(withTypeId(event, { type: gcList[0] })); }
