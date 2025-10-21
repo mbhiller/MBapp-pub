@@ -658,6 +658,169 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/purchasing/suggest-po": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Build a PO draft from backorder requests */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        requests?: {
+                            backorderRequestId: string;
+                        }[];
+                        vendorId?: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description Draft PO (not persisted) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PurchaseOrder"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/purchasing/po:create-from-suggestion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Persist a PurchaseOrder draft returned by suggest-po */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        draft: components["schemas"]["PurchaseOrder"];
+                    };
+                };
+            };
+            responses: {
+                /** @description Created draft */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PurchaseOrder"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/objects/backorderRequest/{id}:ignore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark a BackorderRequest as ignored */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Updated BackorderRequest */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BackorderRequest"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/objects/backorderRequest/{id}:convert": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark a BackorderRequest as converted (attached to a PO) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Updated BackorderRequest */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BackorderRequest"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/sales/so/{id}:submit": {
         parameters: {
             query?: never;
@@ -1635,6 +1798,22 @@ export interface components {
         AnyObject: {
             [key: string]: unknown;
         };
+        BackorderRequest: {
+            id: string;
+            /** @enum {string} */
+            type: "backorderRequest";
+            soId: string;
+            soLineId: string;
+            itemId: string;
+            qty: number;
+            /** Format: date-time */
+            createdAt: string;
+            /**
+             * @default open
+             * @enum {string}
+             */
+            status: "open" | "ignored" | "converted";
+        };
         Class: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
             type: "class";
@@ -2033,6 +2212,14 @@ export interface components {
             kind: "good" | "service";
             sku?: string;
             price?: number | null;
+            /**
+             * @description If false, never auto-suggest PO for shortages.
+             * @default true
+             */
+            reorderEnabled: boolean;
+            preferredVendorId?: string | null;
+            minOrderQty?: number | null;
+            leadTimeDays?: number | null;
             taxCode?: string | null;
             /**
              * @default active

@@ -80,7 +80,12 @@ async function ensureOnHand(itemId, qty){
   return { ok:false, attempts:[{r1,oh1},{r2,oh2},{r3,oh3}] };
 }
 
-
+async function createProduct(body) {
+  return await post(`/objects/product`, { type:"product", kind:"good", name:`${body?.name ?? "Prod"}-${Date.now()}`, sku:`SKU-${Math.random().toString(36).slice(2,7)}`, ...body });
+}
+async function createInventoryForProduct(productId, name = "Item") {
+  return await post(`/objects/inventory`, { type:"inventory", name:`${name}-${Date.now()}`, productId, uom:"ea" });
+}
 /* minimal api wrapper so seeders can call /objects/<type> consistently */
 const api = {
   async post(path, body) {
@@ -414,8 +419,88 @@ const tests = {
     const ok = up.ok && plan.ok && distance >= 12;
     return { name:"smoke:routing:closure", ok, status: ok?"PASS":"FAIL", summary:{ distanceKm:distance, closed:["A-B"] }, artifacts:{ up, plan } };
   },
-};
+/* ===================== Sprint E: Backorders & Product Flags ===================== */
+  "smoke:product:flags": async ()=>{
+    await ensureBearer();
+    const created = await createProduct({ name:"DoNotReorder", reorderEnabled:false });
+    if(!created.ok) return { test:"product-flags", result:"FAIL", created };
+    const got = await get(`/objects/product/${encodeURIComponent(created.body.id)}`);
+    const pass = got.ok && got.body?.reorderEnabled === false;
+    return { test:"product-flags", result: pass?"PASS":"FAIL", product:{ created:created.body, fetched:got.body } };
+  },
 
+  "smoke:backorders:worklist": async ()=>{
+    await ensureBearer();
+    const { partyId } = await seedParties(api);
+    // Product defaults to reorderEnabled=true
+    const prod = await createProduct({ name:"Backorderable" });
+    const inv  = await createInventoryForProduct(prod.body.id, "BO-Item");
+    if(!inv.ok) return { test:"backorders-worklist", result:"FAIL", inv };
+    // Draft SO with qty on zero stock to force shortage
+    const so = await post(`/objects/salesOrder`, {
+      type:"salesOrder", status:"draft", partyId, customerId: partyId,
+      lines:[{ id:"L1", itemId:inv.body.id, uom:"ea", qty:5 }]
+    });
+    if(!so.ok) return { test:"backorders-worklist", result:"FAIL", so };
+    await post(`/sales/so/${encodeURIComponent(so.body.id)}:submit`, {}, { "Idempotency-Key": idem() });
+    const commit = await post(`/sales/so/${encodeURIComponent(so.body.id)}:commit`, { strict:false }, { "Idempotency-Key": idem() });
+    if(!commit.ok) return { test:"backorders-worklist", result:"FAIL", commit };
+    // Worklist should have at least one open request referencing this SO
+    const list = await post(`/objects/backorderRequest/search`, { q: so.body.id });
+    const count = Array.isArray(list.body?.items) ? list.body.items.length : 0;
+    const pass = list.ok && count > 0;
+    return { test:"backorders-worklist", result: pass?"PASS":"FAIL", soId:so.body.id, count, sample:list.body?.items?.[0] };
+  },
+
+  "smoke:backorders:ignore-convert": async ()=>{
+    await ensureBearer();
+    const { partyId } = await seedParties(api);
+    // Seed a fresh shortage to guarantee one open BackorderRequest
+    const prod = await createProduct({ name:"BO-IgnConv" });
+    const inv  = await createInventoryForProduct(prod.body.id, "BO-IgnConv");
+    const so   = await post(`/objects/salesOrder`, {
+      type:"salesOrder", status:"draft", partyId, customerId: partyId,
+      lines:[{ id:"L1", itemId:inv.body.id, uom:"ea", qty:3 }]
+    });
+    await post(`/sales/so/${encodeURIComponent(so.body.id)}:submit`, {}, { "Idempotency-Key": idem() });
+    await post(`/sales/so/${encodeURIComponent(so.body.id)}:commit`, { strict:false }, { "Idempotency-Key": idem() });
+    const wl = await post(`/objects/backorderRequest/search`, { q: so.body.id });
+    const id = wl.body?.items?.[0]?.id;
+    if(!id) return { test:"backorders-ignore-convert", result:"FAIL", reason:"no-open-requests", wl:wl.body };
+    const ign  = await post(`/objects/backorderRequest/${encodeURIComponent(id)}:ignore`, {});
+    const conv = await post(`/objects/backorderRequest/${encodeURIComponent(id)}:convert`, {});
+    const pass = ign.ok && conv.ok;
+    return { test:"backorders-ignore-convert", result: pass?"PASS":"FAIL", id, ignore:ign.body, convert:conv.body };
+  },
+
+  "smoke:po:suggest-draft": async ()=>{
+    await ensureBearer();
+    const { vendorId } = await seedVendor(api); // vendor you can pass to suggest-po
+    // DNR (excluded) + OK (minOrderQty=10)
+    const dnr = await createProduct({ name:"NoReorder", reorderEnabled:false });
+    const okp = await createProduct({ name:"ReorderOK", minOrderQty:10 });    const invD = await createInventoryForProduct(dnr.body.id, "DNR-Item");
+    const invO = await createInventoryForProduct(okp.body.id, "OK-Item");
+    // Make two open BackorderRequests manually (generic objects create)
+    const bo1 = await post(`/objects/backorderRequest`, { type:"backorderRequest", soId:"so_x", soLineId:"ln1", itemId: invD.body.id, qty:3, status:"open" });
+    const bo2 = await post(`/objects/backorderRequest`, { type:"backorderRequest", soId:"so_y", soLineId:"ln2", itemId: invO.body.id, qty:2, status:"open" });
+    if(!bo1.ok || !bo2.ok) return { test:"po-suggest-draft", result:"FAIL", bo1, bo2 };
+    const sugg = await post(`/purchasing/suggest-po`, { requests:[{ backorderRequestId:bo1.body.id }, { backorderRequestId:bo2.body.id }], vendorId }, { "Idempotency-Key": idem() });
+    if(!sugg.ok) return { test:"po-suggest-draft", result:"FAIL", sugg };
+    const draft = sugg.body;
+    const hasOK = (draft?.lines||[]).some(l=>l.itemId===invO.body.id && l.qty===10);
+    const hasDNR = (draft?.lines||[]).some(l=>l.itemId===invD.body.id);
+    const pass = hasOK && !hasDNR;
+    return { test:"po-suggest-draft", result: pass?"PASS":"FAIL", vendorId:draft.vendorId, lines:draft.lines, expectations:{ okItemQty:10, excludeDNR:true } };
+  },
+
+  "smoke:epc:resolve": async ()=>{
+    await ensureBearer();
+    // minimal assertion: unknown EPC returns 404 (happy-path added when EPC seeds exist)
+    const r = await get(`/epc/resolve?epc=EPC-NOT-FOUND-${Date.now()}`);
+    const pass = r.status === 404;
+    return { test:"epc-resolve", result: pass?"PASS":"FAIL", status:r.status, body:r.body };
+  }
+  };
 const cmd=process.argv[2]??"list";
 if(cmd==="list"){ console.log(Object.keys(tests)); process.exit(0); }
 const fn=tests[cmd];

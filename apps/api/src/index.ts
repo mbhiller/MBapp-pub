@@ -77,6 +77,14 @@ import * as ScannerSessions from "./scanner/sessions";
 import * as ScannerActions from "./scanner/actions";
 import * as ScannerSim from "./scanner/simulate";
 
+// Purchasing suggestions
+import * as PoSuggest from "./purchasing/suggest-po";
+import * as PoCreateFromSuggestion from "./purchasing/po-create-from-suggestion";
+
+// Backorders
+import * as BoIgnore  from "./backorders/request-ignore";
+import * as BoConvert from "./backorders/request-convert";
+
 /* Helpers */
 const json = (statusCode: number, body: unknown): APIGatewayProxyResultV2 => ({
   statusCode,
@@ -305,6 +313,27 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
       requirePerm(auth, "inventory:read");
       // Handler reads ?epc=... from event.queryStringParameters
       return EpcResolve.handle(event);
+    }
+
+    // Purchasing suggestion endpoints
+    if (method === "POST" && path === "/purchasing/suggest-po") {
+      requirePerm(auth, "purchase:write");
+      return PoSuggest.handle(event);
+    }
+    if (method === "POST" && path === "/purchasing/po:create-from-suggestion") {
+      requirePerm(auth, "purchase:write");
+      return PoCreateFromSuggestion.handle(event);
+    }
+
+    // Backorder request actions
+    {
+      const m = match(/^\/objects\/backorderRequest\/([^/]+):(ignore|convert)$/i, path);
+      if (m) {
+        const [id, action] = m;
+        if (action === "ignore")  { requirePerm(auth, "objects:write"); return BoIgnore.handle(withId(event, id)); }
+        if (action === "convert") { requirePerm(auth, "objects:write"); return BoConvert.handle(withId(event, id)); }
+        return methodNotAllowed();
+      }
     }
 
     // Scanner sessions: start/stop

@@ -3,6 +3,7 @@ import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda
 import { ddb, tableObjects } from "../common/ddb";
 import { GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 import * as InvOnHandBatch from "../inventory/onhand-batch";
+import { getObjectById, createObject } from "../objects/repo";
 
 type SOStatus =
   | "draft"
@@ -83,6 +84,14 @@ async function saveSO(order: SalesOrder): Promise<void> {
   const out: SalesOrder = { ...order, updatedAt: now };
   await ddb.send(new PutCommand({ TableName: tableObjects, Item: out }));
 }
+
+async function getProductForItem(tenantId: string, itemId: string) {
+  const inv = await getObjectById({ tenantId, type: "inventory", id: itemId }).catch(() => null);
+  const productId = (inv as any)?.productId;
+  if (!productId) return null;
+  return await getObjectById({ tenantId, type: "product", id: productId }).catch(() => null);
+}
+function boId() { return "bo_" + Math.random().toString(36).slice(2, 10); }
 
 export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   try {
@@ -178,6 +187,30 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     
     await saveSO(so);
     log(event, "so-commit.saved", { id: so.id, before, after: so.status, strict, shortagesCount: shortages.length });
+
+    // Create BackorderRequest rows for actionable shortages (reorderEnabled only)
+    if (!strict && shortages.length > 0) {
+      const tenantId = (event as any)?.requestContext?.authorizer?.mbapp?.tenantId as string;
+      const now = new Date().toISOString();
+      for (const s of shortages) {
+        const product = await getProductForItem(tenantId, s.itemId);
+        const reorderEnabled = product == null ? true : (product as any).reorderEnabled !== false;
+        if (!reorderEnabled) continue;
+        const bo = {
+          id: boId(),
+          type: "backorderRequest",
+          tenantId,
+          soId: so.id,
+          soLineId: s.lineId,
+          itemId: s.itemId,
+          qty: s.backordered,
+          status: "open",
+          createdAt: now,
+          updatedAt: now,
+        };
+         await createObject({ tenantId, type: "backorderRequest", body: bo });
+      }
+    }
 
     // Return order plus shortages[] (for UI awareness)
     return json(200, { ...so, shortages: shortages.length ? shortages : undefined });

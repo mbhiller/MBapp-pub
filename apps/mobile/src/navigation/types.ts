@@ -17,51 +17,14 @@ export type ScanParams = {
 export type RootStackParamList = {
   // Hub / global
   Hub: undefined;
-  Tenants: undefined;
-  DevDiagnostics: undefined;
 
-  // Objects (generic)
-  ObjectsList: undefined;
-  ObjectDetail: DetailParams;
-
-  // Products
-  ProductsList: undefined;
-  ProductDetail: DetailParams;
-
+  // Parties
   PartyList: { role?: string; q?: string } | undefined;
   PartyDetail: { id?: string; mode?: "new" } | undefined;
-
-  // Accounts
-  AccountsList: undefined;
-  AccountDetail: DetailParams;
 
   // Inventory
   InventoryList: undefined;
   InventoryDetail: DetailParams;
-
-  // Events & Registrations
-  EventsList: undefined;
-  EventDetail: DetailParams;
-
-  // Registrations list can be filtered by a specific event
-  RegistrationsList: { eventId?: string } | undefined;
-  RegistrationDetail: DetailParams;
-
-  // Reservations (optionally filtered by resource)
-  ReservationsList: undefined;
-  ReservationDetail: DetailParams;
-
-
-
-  // Employees
-  EmployeesList: undefined;
-  EmployeeDetail: DetailParams;
-  //
-  OrganizationsList: undefined;
-  OrganizationDetail: DetailParams;
-  // Resources
-  ResourcesList: undefined;
-  ResourceDetail: DetailParams;
 
   // Purchasing
   PurchaseOrdersList: undefined;
@@ -71,19 +34,7 @@ export type RootStackParamList = {
   SalesOrdersList: undefined;
   SalesOrderDetail: DetailParams;
 
-  // Integrations
-  IntegrationsList: undefined;
-  IntegrationDetail: DetailParams;
-  // IntegrationRunsList?: undefined; // if/when you enable it
-
-  // ✅ Goods Receipts (added)
-  GoodsReceiptsList: undefined;
-  GoodsReceiptDetail: DetailParams;
-
-  // ✅ Sales Fulfillments (added)
-  SalesFulfillmentsList: undefined;
-  SalesFulfillmentDetail: DetailParams;
-
+  // Routing and Delivery
   RoutePlanList: undefined;
   RoutePlanDetail: DetailParams;
   

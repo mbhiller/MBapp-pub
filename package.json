@@ -25,7 +25,12 @@
     "smoke:sales:happy": "node ops/smoke/smoke.mjs smoke:sales:happy",
     "smoke:sales:guards": "node ops/smoke/smoke.mjs smoke:sales:guards",
     "smoke:purchasing:happy": "node ops/smoke/smoke.mjs smoke:purchasing:happy",
-    "smoke:purchasing:guards": "node ops/smoke/smoke.mjs smoke:purchasing:guards"
+    "smoke:purchasing:guards": "node ops/smoke/smoke.mjs smoke:purchasing:guards",
+    "smoke:product:flags":"node ops/smoke/smoke.mjs smoke:product:flags",
+    "smoke:backorders:worklist":"node ops/smoke/smoke.mjs smoke:backorders:worklist",
+    "smoke:backorders:ignore-convert":"node ops/smoke/smoke.mjs smoke:backorders:ignore-convert",
+    "smoke:po:suggest-draft":"node ops/smoke/smoke.mjs smoke:po:suggest-draft",
+    "smoke:epc:resolve":"node ops/smoke/smoke.mjs smoke:epc:resolve"
   },
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "^3.882.0",

@@ -188,6 +188,18 @@ components:
       type: object
       additionalProperties: true
       properties: {}
+    BackorderRequest:
+      type: object
+      required: [id, type, soId, soLineId, itemId, qty, createdAt, status]
+      properties:
+        id:          { type: string }
+        type:        { type: string, enum: [backorderRequest] }
+        soId:        { type: string }
+        soLineId:    { type: string }
+        itemId:      { type: string }
+        qty:         { type: number }
+        createdAt:   { type: string, format: date-time }
+        status:      { type: string, enum: [open, ignored, converted], default: open }
     Class:
       allOf:
       - $ref: '#/components/schemas/ObjectBase'
@@ -1075,6 +1087,19 @@ components:
           price:
             type: number
             minimum: 0
+            nullable: true
+          reorderEnabled:
+            type: boolean
+            description: "If false, never auto-suggest PO for shortages."
+            default: true
+          preferredVendorId:
+            type: string
+            nullable: true
+          minOrderQty:
+            type: number
+            nullable: true
+          leadTimeDays:
+            type: number
             nullable: true
           taxCode:
             type: string
@@ -2793,6 +2818,85 @@ paths:
         '200':
           description: OK
           content: { application/json: { schema: { $ref: '#/components/schemas/PurchaseOrder' } } }
+  /purchasing/suggest-po:
+    post:
+      tags: [Purchasing]
+      summary: Build a PO draft from backorder requests
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                requests:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [backorderRequestId]
+                    properties:
+                      backorderRequestId: { type: string }
+                vendorId: { type: string, nullable: true }
+      responses:
+        "200":
+          description: Draft PO (not persisted)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurchaseOrder'
+
+  /purchasing/po:create-from-suggestion:
+    post:
+      tags: [Purchasing]
+      summary: Persist a PurchaseOrder draft returned by suggest-po
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [draft]
+              properties:
+                draft: { $ref: '#/components/schemas/PurchaseOrder' }
+      responses:
+        "200":
+          description: Created draft
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PurchaseOrder' }
+
+  /objects/backorderRequest/{id}:ignore:
+    post:
+      tags: [Objects]
+      summary: Mark a BackorderRequest as ignored
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+      responses:
+        "200":
+          description: Updated BackorderRequest
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BackorderRequest' }
+
+  /objects/backorderRequest/{id}:convert:
+    post:
+      tags: [Objects]
+      summary: Mark a BackorderRequest as converted (attached to a PO)
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+      responses:
+        "200":
+          description: Updated BackorderRequest
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BackorderRequest' }  
   /sales/so/{id}:submit:
     post:
       summary: Submit sales order
