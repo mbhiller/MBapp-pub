@@ -1,75 +1,59 @@
+// apps/api/src/sales/so-cancel.ts
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
-import * as ObjGet from "../objects/get";
-import * as ObjUpdate from "../objects/update";
-import { upsertDelta } from "../inventory/counters";
-import { getAuth, requirePerm } from "../auth/middleware";
+import { ddb, tableObjects } from "../common/ddb";
+import { GetCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
+import { assertSoCancelable } from "../shared/statusGuards";
+import { netReservationsForSO } from "../shared/reservationSummary";
 
-const json = (c: number, b: unknown): APIGatewayProxyResultV2 => ({
-  statusCode: c,
-  headers: { "content-type": "application/json" },
-  body: JSON.stringify(b),
-});
-
-const withTypeId = (e: any, type: string, id?: string, body?: any) => {
-  const out: any = { ...e };
-  out.queryStringParameters = { ...(e.queryStringParameters || {}), type };
-  out.pathParameters = { ...(e.pathParameters || {}), type, ...(id ? { id } : {}) };
-  if (body !== undefined) out.body = JSON.stringify(body);
-  return out;
+type SalesOrder = {
+  pk: string; sk: string; id: string; type: "salesOrder";
+  status: "draft"|"submitted"|"approved"|"committed"|"partially_fulfilled"|"fulfilled"|"cancelled"|"closed";
+  [k: string]: any;
 };
 
+const json = (s: number, b: unknown): APIGatewayProxyResultV2 => ({
+  statusCode: s,
+  headers: {
+    "content-type":"application/json",
+    "access-control-allow-origin":"*",
+    "access-control-allow-methods":"OPTIONS,GET,POST,PUT,DELETE",
+    "access-control-allow-headers":"Authorization,Content-Type,Idempotency-Key,X-Tenant-Id,Accept",
+  },
+  body: JSON.stringify(b)
+});
+const tid = (e: APIGatewayProxyEventV2) =>
+  (e as any)?.requestContext?.authorizer?.mbapp?.tenantId || (e.headers?.["X-Tenant-Id"] as string) || "";
+
+async function loadSO(tenantId: string, id: string): Promise<SalesOrder|null> {
+  const res = await ddb.send(new GetCommand({ TableName: tableObjects, Key: { pk: tenantId, sk: `salesOrder#${id}` } }));
+  return (res.Item as SalesOrder) ?? null;
+}
+
+/** Compute net reservations and presence of fulfillments for this SO. */
+
+
 export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
-  const id = event.pathParameters?.id || "";
-  if (!id) return json(400, { message: "Missing id" });
-
   try {
-    const auth = await getAuth(event);
-    requirePerm(auth, "sales:cancel");
-    const tenantId = String(auth?.tenantId || "").trim();
-    if (!tenantId) return json(400, { message: "tenantId missing (auth)" });
+    const tenantId = tid(event);
+    const id = event.pathParameters?.id;
+    if (!tenantId || !id) return json(400, { message: "Missing tenant or id" });
 
-    // Load SO
-    const getRes = await ObjGet.handle(withTypeId(event, "salesOrder", id));
-    if (getRes.statusCode !== 200 || !getRes.body) return json(getRes.statusCode || 500, { where: "getSO", body: getRes.body || null });
-    const so = JSON.parse(getRes.body);
+    const so = await loadSO(tenantId, id);
+    if (!so) return json(404, { message: "Sales order not found" });
 
-    if (String(so.status) === "closed")  return json(409, { message: "Cannot cancel a closed order" });
-    if (String(so.status) === "cancelled") return json(200, so); // idempotent
+    const { net, fulfilled } = await netReservationsForSO(tenantId, so.id);
+    const hasReservations = net > 0;
+    const hasFulfillments = fulfilled;
 
-    const next = {
-      ...so,
-      metadata: { ...(so.metadata || {}) },
-    };
-    const reservedMap: Record<string, number> = { ...(next.metadata.reservedMap || {}) };
 
-    // Release any remaining reserved per line
-    for (const line of Array.isArray(next.lines) ? next.lines : []) {
-      const lineId = String(line.id);
-      const itemId = String(line.itemId);
-      const reserved = Math.max(0, Number(reservedMap[lineId] ?? 0));
-      if (reserved > 0) {
-        try {
-          await upsertDelta(tenantId, itemId, 0, -reserved);
-        } catch (e: any) {
-          return json(500, {
-            message: "release_reserved_failed",
-            where: "upsertDelta(cancel)",
-            itemId,
-            reserved,
-            err: String(e?.message || e),
-          });
-        }
-        reservedMap[lineId] = 0;
-      }
-    }
+    // Enforce guardrails (will 409 accordingly)
+    assertSoCancelable(so.status as any, hasReservations, hasFulfillments);
 
-    next.metadata.reservedMap = reservedMap;
-    next.status = "cancelled";
-
-    const putRes = await ObjUpdate.handle(withTypeId(event, "salesOrder", id, next));
-    if (putRes.statusCode !== 200) return json(putRes.statusCode || 500, { where: "updateSO", body: putRes.body || null });
-    return putRes;
-  } catch (e: any) {
-    return json(500, { where: "so-cancel:outer", err: String(e?.message || e) });
+    const updated = { ...so, status: "cancelled", updatedAt: new Date().toISOString() };
+    await ddb.send(new PutCommand({ TableName: tableObjects, Item: updated }));
+    return json(200, updated);
+  } catch (err: any) {
+    const statusCode = err?.statusCode ?? 500;
+    return json(statusCode, { message: err?.message ?? "Internal Server Error" });
   }
 }

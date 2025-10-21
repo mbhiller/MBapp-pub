@@ -28,9 +28,8 @@ export type RootStackParamList = {
   ProductsList: undefined;
   ProductDetail: DetailParams;
 
-  // Clients
-  ClientsList: undefined;
-  ClientDetail: DetailParams;
+  PartyList: { role?: string; q?: string } | undefined;
+  PartyDetail: { id?: string; mode?: "new" } | undefined;
 
   // Accounts
   AccountsList: undefined;
@@ -49,12 +48,10 @@ export type RootStackParamList = {
   RegistrationDetail: DetailParams;
 
   // Reservations (optionally filtered by resource)
-  ReservationsList: { resourceId?: string } | undefined;
+  ReservationsList: undefined;
   ReservationDetail: DetailParams;
 
-  // Vendors
-  VendorsList: undefined;
-  VendorDetail: DetailParams;
+
 
   // Employees
   EmployeesList: undefined;
@@ -86,5 +83,8 @@ export type RootStackParamList = {
   // ✅ Sales Fulfillments (added)
   SalesFulfillmentsList: undefined;
   SalesFulfillmentDetail: DetailParams;
+
+  RoutePlanList: undefined;
+  RoutePlanDetail: DetailParams;
   
 };

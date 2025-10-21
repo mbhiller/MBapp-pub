@@ -1,25 +1,16 @@
 // apps/mobile/src/features/registrations/actions.ts
 import { apiClient } from "../../api/client";
-import type { components } from "../../api/generated-types";
-type Schemas = components["schemas"];
 
-export async function cancelRegistration(id: string): Promise<Schemas["Registration"]> {
-  return apiClient.post<Schemas["Registration"]>(
-    `/events/registration/${encodeURIComponent(id)}:cancel`,
-    {}
-  );
+const newIdempotencyKey = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+const idem = () => ({ "Idempotency-Key": newIdempotencyKey() });
+
+// Endpoints aligned to earlier smoke flows: /events/registration/{id}:*
+export function registerRegistration(id: string) {
+  return apiClient.post(`/events/registration/${encodeURIComponent(id)}:register`, {}, idem());
 }
-
-export async function checkinRegistration(id: string): Promise<Schemas["Registration"]> {
-  return apiClient.post<Schemas["Registration"]>(
-    `/events/registration/${encodeURIComponent(id)}:checkin`,
-    {}
-  );
+export function cancelRegistration(id: string) {
+  return apiClient.post(`/events/registration/${encodeURIComponent(id)}:cancel`, {}, idem());
 }
-
-export async function checkoutRegistration(id: string): Promise<Schemas["Registration"]> {
-  return apiClient.post<Schemas["Registration"]>(
-    `/events/registration/${encodeURIComponent(id)}:checkout`,
-    {}
-  );
+export function checkinRegistration(id: string) {
+  return apiClient.post(`/events/registration/${encodeURIComponent(id)}:checkin`, {}, idem());
 }

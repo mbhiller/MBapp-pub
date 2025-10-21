@@ -1,1 +1,0 @@
-{   "MBAPP_API_BASE": "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com",   "MBAPP_TENANT_ID": "DemoTenant",   "MBAPP_BEARER_SET": false,   "AWS_REGION": "us-east-1" }

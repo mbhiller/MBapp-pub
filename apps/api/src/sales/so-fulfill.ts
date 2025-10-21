@@ -1,153 +1,157 @@
 // apps/api/src/sales/so-fulfill.ts
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
-import * as ObjGet from "../objects/get";
-import * as ObjUpdate from "../objects/update";
-import { upsertDelta, getOnHand } from "../inventory/counters";
-import { getAuth, requirePerm } from "../auth/middleware";
+import { ddb, tableObjects } from "../common/ddb";
+import { GetCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 
-const json = (c: number, b: unknown): APIGatewayProxyResultV2 => ({
-  statusCode: c,
-  headers: { "content-type": "application/json" },
-  body: JSON.stringify(b),
-});
-
-const withTypeId = (e: any, type: string, id?: string, body?: any) => {
-  const out: any = { ...e };
-  out.queryStringParameters = { ...(e.queryStringParameters || {}), type };
-  out.pathParameters = { ...(e.pathParameters || {}), type, ...(id ? { id } : {}) };
-  if (body !== undefined) out.body = JSON.stringify(body);
-  return out;
+type LineReq = { lineId: string; deltaQty: number; locationId?: string; lot?: string };
+type SOLine = { id: string; itemId: string; qty: number; uom?: string };
+type SalesOrder = {
+  pk: string; sk: string; id: string; type: "salesOrder";
+  status: "draft"|"submitted"|"approved"|"committed"|"partially_fulfilled"|"fulfilled"|"cancelled"|"closed";
+  lines?: SOLine[];
+  [k: string]: any;
 };
 
-const bodyOf = <T = any>(e: APIGatewayProxyEventV2) => (e.body ? (JSON.parse(e.body) as T) : ({} as any));
-const header = (e: APIGatewayProxyEventV2, k: string) => e.headers?.[k] || e.headers?.[k.toLowerCase()];
+const DEBUG = process.env.MBAPP_DEBUG === "1" || process.env.DEBUG === "1";
+const log = (event: APIGatewayProxyEventV2, tag: string, data: Record<string, any>) => {
+  if (!DEBUG) return;
+  const reqId = (event.requestContext as any)?.requestId;
+  try { console.log(JSON.stringify({ tag, reqId, ...data })); } catch {}
+};
 
-const STRICT_COUNTERS = true; // fail the call if counters update fails
+const json = (s: number, b: unknown): APIGatewayProxyResultV2 => ({
+  statusCode: s,
+  headers: {
+    "content-type":"application/json",
+    "access-control-allow-origin":"*",
+    "access-control-allow-methods":"OPTIONS,GET,POST,PUT,DELETE",
+    "access-control-allow-headers":"Authorization,Content-Type,Idempotency-Key,X-Tenant-Id,Accept",
+  },
+  body: JSON.stringify(b)
+});
+const tid = (e: APIGatewayProxyEventV2) =>
+  (e as any)?.requestContext?.authorizer?.mbapp?.tenantId || (e.headers?.["X-Tenant-Id"] as string) || "";
+const parse = <T=any>(e: APIGatewayProxyEventV2): T => { try { return JSON.parse(e.body||"{}"); } catch { return {} as any; } };
 
-type FulfillLineReq = { lineId: string; deltaQty: number };
-type FulfillReq = { idempotencyKey?: string; lines: FulfillLineReq[] };
+async function loadSO(tenantId: string, id: string): Promise<SalesOrder|null> {
+  const res = await ddb.send(new GetCommand({ TableName: tableObjects, Key: { pk: tenantId, sk: `salesOrder#${id}` } }));
+  return (res.Item as SalesOrder) ?? null;
+}
+
+function rid(prefix="mv") { return `${prefix}_${Math.random().toString(36).slice(2,8)}${Date.now().toString(36).slice(-4)}`; }
+
+/** Sum prior fulfill movements per line for this SO to prevent over-ship. */
+/** Sum prior fulfill movements per line for this SO to prevent over-ship. */
+async function fulfilledSoFar(tenantId: string, soId: string): Promise<Record<string, number>> {
+  const q = await ddb.send(new QueryCommand({
+    TableName: tableObjects,
+    KeyConditionExpression: "pk = :pk AND begins_with(sk, :pref)",
+    ExpressionAttributeValues: { ":pk": tenantId, ":pref": "inventoryMovement#" },
+    // alias reserved words
+    ProjectionExpression: "#soId, #soLineId, #action, #qty",
+    ExpressionAttributeNames: {
+      "#soId": "soId",
+      "#soLineId": "soLineId",
+      "#action": "action", // reserved word fix
+      "#qty": "qty",
+    },
+  }));
+  const out: Record<string, number> = {};
+  for (const it of q.Items ?? []) {
+    const a = (it as any)["action"];
+    if ((it as any)["soId"] === soId && a === "fulfill") {
+      const line = String((it as any)["soLineId"] ?? "");
+      out[line] = (out[line] ?? 0) + Number((it as any)["qty"] ?? 0);
+    }
+  }
+  return out;
+}
+
 
 export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
-  const id = event.pathParameters?.id || "";
-  if (!id) return json(400, { message: "Missing id" });
-
   try {
-    const auth = await getAuth(event);
-    requirePerm(auth, "sales:fulfill");
-    const tenantId = String(auth?.tenantId || "").trim();
-    if (!tenantId) return json(400, { message: "tenantId missing (auth)" });
+    const tenantId = tid(event);
+    const id = event.pathParameters?.id;
+    if (!tenantId || !id) return json(400, { message: "Missing tenant or id" });
 
-    const idemKey = header(event, "Idempotency-Key") || bodyOf<FulfillReq>(event).idempotencyKey;
+    const body = parse<{ lines: LineReq[] }>(event);
+    const reqLines = Array.isArray(body?.lines) ? body.lines : [];
+    if (reqLines.length === 0) return json(400, { message: "lines[] required" });
 
-    // Load SO
-    const getRes = await ObjGet.handle(withTypeId(event, "salesOrder", id));
-    if (getRes.statusCode !== 200 || !getRes.body) return json(getRes.statusCode || 500, { where: "getSO", body: getRes.body || null });
-    const so = JSON.parse(getRes.body);
+    const so = await loadSO(tenantId, id);
+    if (!so) return json(404, { message: "Sales order not found" });
+    log(event, "so-fulfill.load", { id: so.id, status: so.status, reqCount: reqLines.length });
 
-    // Guard invalid states
-    if (String(so.status) === "cancelled" || String(so.status) === "closed") {
-      return json(409, { message: `Cannot fulfill when status is ${so.status}` });
-    }
-    const st = String(so.status);
-    if (st === "cancelled" || st === "closed") {
-      return json(409, { message: `Cannot fulfill when status is ${st}` });
-    }
-    if (st === "fulfilled") {
-      return json(200, { message: "already_fulfilled", id });
-    }
-    if (!["committed", "partially_fulfilled"].includes(st)) {
-      return json(409, { message: `Cannot fulfill unless committed or partially_fulfilled (status=${st})` });
+    // Guard status: allow fulfill from committed or partially_fulfilled
+    if (!["committed", "partially_fulfilled"].includes(so.status)) {
+      return json(409, { message: `Cannot fulfill from status=${so.status}` });
     }
 
-    // Parse request
-    const req = bodyOf<FulfillReq>(event);
-    const reqLines = Array.isArray(req.lines) ? req.lines : [];
-    if (reqLines.length === 0) return json(400, { message: "No lines to fulfill" });
+    const linesById = new Map<string, SOLine>((so.lines ?? []).map(l => [l.id, l]));
+    for (const l of reqLines) {
+      if (!l?.lineId || typeof l.deltaQty !== "number" || l.deltaQty <= 0) {
+        return json(400, { message: "Each line requires { lineId, deltaQty>0 }" });
+      }
+      if (!linesById.has(l.lineId)) {
+        return json(404, { message: `Unknown lineId ${l.lineId}` });
+      }
+    }
 
-    // Defensive copies
-    const next = {
-      ...so,
-      lines: Array.isArray(so.lines) ? so.lines.map((l: any) => ({ ...l })) : [],
-      metadata: { ...(so.metadata || {}) },
-    };
-    const reservedMap: Record<string, number> = { ...(next.metadata.reservedMap || {}) };
+    // Prevent over-fulfillment
+    const shipped = await fulfilledSoFar(tenantId, so.id);
+    const now = new Date().toISOString();
 
-    // Apply each requested fulfillment
     for (const r of reqLines) {
-      
-      const idx = next.lines.findIndex((l: any) => String(l.id) === String(r.lineId));
-      if (idx === -1) continue;
-
-      const line = next.lines[idx];
-      const itemId = String(line.itemId);
-      const ordered   = Number(line.qty ?? 0);
-      const fulfilled = Number(line.qtyFulfilled ?? 0);
-      const reserved  = Math.max(0, Number(reservedMap[String(line.id)] ?? 0));
-
-      // 👇 The key change:
-      // 1) Take the user's requested qty as-is (non-negative).
-      const requested = Math.max(0, Number(r.deltaQty ?? 0));
-      if (requested <= 0) continue;
-
-      // 2) Preflight against *physical on-hand* with the *requested* qty.
-      const counters = await getOnHand(tenantId, itemId);
-      if (counters.onHand < requested) {
-        return json(409, {
-          message: "insufficient_onhand_to_fulfill",
-          itemId,
-          need: requested,
-          onHand: counters.onHand,
-        });
+      const line = linesById.get(r.lineId)!;
+      const already = shipped[r.lineId] ?? 0;
+      const willBe = already + Number(r.deltaQty);
+      if (willBe > Number(line.qty ?? 0)) {
+        log(event, "so-fulfill.guard", { lineId: r.lineId, qtyOrdered: line.qty, already, attempt: r.deltaQty });
+        return json(409, { message: "Over-fulfillment blocked", lineId: r.lineId, ordered: line.qty, fulfilledSoFar: already, attempt: r.deltaQty });
       }
-
-      // 3) Only after passing on-hand guard, clamp to remaining order qty to ship.
-      const remainingOrder = Math.max(0, ordered - fulfilled);
-      const deltaToShip = Math.min(requested, remainingOrder);
-      if (deltaToShip <= 0) continue;
-
-      // Consume reserved up to the shipped amount
-      const reservedToConsume = Math.min(deltaToShip, reserved);
-
-      try {
-        await upsertDelta(tenantId, itemId, -deltaToShip, -reservedToConsume);
-      } catch (e: any) {
-        const code = (e?.code || "").toString();
-        const name = (e?.name || "").toString();
-        const isQty = code === "INSUFFICIENT_QTY" || name.includes("ConditionalCheckFailed");
-        const msg = isQty ? "insufficient_onhand_to_fulfill" : "upsert_failed";
-        if (STRICT_COUNTERS) {
-          return json(isQty ? 409 : 500, {
-            message: msg,
-            itemId,
-            deltas: { dOnHand: -deltaToShip, dReserved: -reservedToConsume },
-            err: String(e?.message || e),
-          });
-        }
-        console.error("upsertDelta(fulfill) failed", { itemId, err: e });
-      }
-
-      // Update SO state
-      line.qtyFulfilled = fulfilled + deltaToShip;
-      reservedMap[String(line.id)] = Math.max(0, reserved - reservedToConsume);
     }
 
-    // Status transitions
-    const anyFulfilled = next.lines.some((l: any) => Number(l.qtyFulfilled ?? 0) > 0);
-    const allFulfilled =
-      next.lines.length > 0 && next.lines.every((l: any) => Number(l.qtyFulfilled ?? 0) >= Number(l.qty ?? 0));
-    if (allFulfilled) next.status = "fulfilled";
-    else if (anyFulfilled) next.status = "partially_fulfilled";
-
-    // Persist reservedMap back
-    next.metadata.reservedMap = reservedMap;
-
-    // Save SO
-    const putRes = await ObjUpdate.handle(withTypeId(event, "salesOrder", id, next));
-    if (putRes.statusCode !== 200) {
-      return json(putRes.statusCode || 500, { where: "updateSO", body: putRes.body || null });
+    // Write inventoryMovement rows (action: fulfill)
+    let mvCount = 0;
+    for (const r of reqLines) {
+      const line = linesById.get(r.lineId)!;
+      const item = {
+        pk: tenantId,
+        sk: `inventoryMovement#${rid()}`,
+        id: rid(),
+        type: "inventoryMovement",
+        action: "fulfill",
+        itemId: line.itemId,
+        qty: Number(r.deltaQty),
+        soId: so.id,
+        soLineId: line.id,
+        locationId: r.locationId,
+        lot: r.lot,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await ddb.send(new PutCommand({ TableName: tableObjects, Item: item }));
+      mvCount++;
     }
-    return putRes;
-  } catch (e: any) {
-    return json(500, { where: "so-fulfill:outer", err: String(e?.message || e) });
+    log(event, "so-fulfill.movements", { count: mvCount });
+
+    // Decide new status: if all lines fully shipped → fulfilled, else partially_fulfilled
+    const shippedNow = await fulfilledSoFar(tenantId, so.id);
+    let allFull = true;
+    for (const ln of so.lines ?? []) {
+      const qtyOrdered = Number(ln.qty ?? 0);
+      const got = shippedNow[ln.id] ?? 0;
+      if (got < qtyOrdered) { allFull = false; break; }
+    }
+    const nextStatus = allFull ? "fulfilled" : "partially_fulfilled";
+
+    const updated: SalesOrder = { ...so, status: nextStatus, updatedAt: now };
+    await ddb.send(new PutCommand({ TableName: tableObjects, Item: updated }));
+    log(event, "so-fulfill.saved", { id: so.id, status: nextStatus });
+
+    return json(200, updated);
+  } catch (err: any) {
+    log(event, "so-fulfill.error", { message: err?.message });
+    return json(500, { message: err?.message ?? "Internal Server Error" });
   }
 }

@@ -2,7 +2,9 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
 import crypto from "crypto";
 import { createObject, getObjectById } from "../objects/repo";
-import { upsertDelta } from "../inventory/counters";
+import { receiveStock, releaseStock, consumeStock } from "../shared/db";
+
+// import { upsertDelta } from "../inventory/counters";
 
 type ActionType = "receive" | "pick" | "count" | "move";
 type Body = {
@@ -57,10 +59,11 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
   const itemId = (epcMap as any).itemId as string;
   try {
     if (action === "receive") {
-      await upsertDelta(tenantId, itemId, +1, 0);
+      await receiveStock(tenantId, itemId, 1);
     } else if (action === "pick") {
       // business rule: require reservation; this may throw a guardrail error
-      await upsertDelta(tenantId, itemId, -1, -1);
+      await releaseStock(tenantId, itemId, 1);
+      await consumeStock(tenantId, itemId, 1);
     }
     // "count" and "move": no counter change yet
   } catch (err: any) {

@@ -1,69 +1,108 @@
+// apps/mobile/src/screens/RegistrationsListScreen.tsx
 import React from "react";
-import { View, FlatList, Text, Pressable, RefreshControl } from "react-native";
-import { Registrations } from "../features/registrations/hooks";
+import { View, FlatList, Text, Pressable, TextInput, RefreshControl } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
+import { listObjects } from "../api/client";
+import type { components } from "../api/generated-types";
 import { useColors } from "../features/_shared/useColors";
-import { useRefetchOnFocus } from "../features/_shared/useRefetchOnFocus";
 
-export default function RegistrationsListScreen({ navigation, route }: any) {
+type Registration = components["schemas"]["Registration"];
+
+type Props = { navigation: any; route?: { params?: { eventId?: string } } };
+
+export default function RegistrationsListScreen({ navigation, route }: Props) {
   const t = useColors();
-  const eventId = route?.params?.eventId as string | undefined;
-
-  const ql = Registrations.useList({ limit: 20, eventId });
-  const { data, refetch } = ql;
-
+  const eventId = route?.params?.eventId;
+  const [items, setItems] = React.useState<Registration[]>([]);
+  const [search, setSearch] = React.useState("");
+  const [next, setNext] = React.useState<string | undefined>(undefined);
   const [pulling, setPulling] = React.useState(false);
-  const refetchStable = React.useCallback(() => {
-    if (!ql.isRefetching && !ql.isLoading) refetch();
-  }, [refetch, ql.isRefetching, ql.isLoading]);
-  useRefetchOnFocus(refetchStable, { debounceMs: 150 });
+  const [loading, setLoading] = React.useState(false);
 
-  const onPull = React.useCallback(async () => {
+  const load = React.useCallback(
+    async (reset = false) => {
+      setLoading(true);
+      const page = await listObjects<Registration>("registration", {
+        limit: 30,
+        q: search || undefined,
+        next: reset ? undefined : next,
+        by: "updatedAt",
+        sort: "desc",
+        eventId: eventId || undefined,
+      } as any);
+      setItems((prev) => (reset ? page.items : [...prev, ...page.items]));
+      setNext(page.next);
+      setLoading(false);
+    },
+    [search, next, eventId]
+  );
+
+  useFocusEffect(
+    React.useCallback(() => {
+      load(true);
+      return () => {};
+    }, [load])
+  );
+
+  const onRefresh = React.useCallback(async () => {
     setPulling(true);
-    try { await refetch(); } finally { setPulling(false); }
-  }, [refetch]);
-
-  const items = data?.items ?? [];
+    await load(true);
+    setPulling(false);
+  }, [load]);
 
   return (
-    <View style={{ flex: 1, backgroundColor: t.colors.background, padding: 12 }}>
+    <View style={{ flex: 1, backgroundColor: t.colors.background }}>
+      <View style={{ padding: 12, borderBottomWidth: 1, borderColor: t.colors.border }}>
+        <TextInput
+          value={search}
+          onChangeText={setSearch}
+          placeholder="Search registrations"
+          placeholderTextColor={t.colors.textMuted}
+          onSubmitEditing={() => load(true)}
+          style={{
+            borderWidth: 1,
+            borderColor: t.colors.border,
+            borderRadius: 8,
+            paddingHorizontal: 12,
+            color: t.colors.text,
+          }}
+        />
+      </View>
+
       <FlatList
         data={items}
-        keyExtractor={(i, idx) => String(i.id ?? idx)}
-        refreshControl={<RefreshControl refreshing={pulling} onRefresh={onPull} />}
-        renderItem={({ item }) => {
-          const status = (item as any)?.status ? String((item as any).status) : undefined;
-          const when = item?.startsAt
-            ? `Starts: ${new Date(item.startsAt).toLocaleString()}`
-            : item?.registeredAt
-            ? `Registered: ${new Date(item.registeredAt).toLocaleString()}`
-            : undefined;
-
-          return (
-            <Pressable
-              onPress={() => navigation.navigate("RegistrationDetail", { id: String(item.id), mode: "edit" })}
-              style={{
-                backgroundColor: t.colors.card,
-                borderColor: t.colors.border,
-                borderWidth: 1, borderRadius: 12,
-                marginBottom: 10, padding: 12,
-              }}
-            >
-              <Text style={{ color: t.colors.text, fontWeight: "700", fontSize: 16 }}>
-                {(item as any)?.clientId || "(no client)"}
-              </Text>
-              {!!status && <Text style={{ color: t.colors.muted, marginTop: 2 }}>Status: {status}</Text>}
-              {!!when && <Text style={{ color: t.colors.muted, marginTop: 2 }}>{when}</Text>}
-            </Pressable>
-          );
-        }}
-        ListEmptyComponent={
-          <Text style={{ color: t.colors.muted, textAlign: "center", marginTop: 24 }}>No registrations yet.</Text>
+        keyExtractor={(x) => x.id}
+        refreshControl={
+          <RefreshControl tintColor={t.colors.text} refreshing={pulling} onRefresh={onRefresh} />
         }
-        contentContainerStyle={{ paddingBottom: 72 }}
+        onEndReached={() => next && !loading && load(false)}
+        onEndReachedThreshold={0.4}
+        renderItem={({ item }) => (
+          <Pressable
+            onPress={() => navigation.navigate("RegistrationDetail", { id: item.id, mode: "edit" })}
+            style={{ padding: 12, borderBottomWidth: 1, borderColor: t.colors.border }}
+          >
+            <Text style={{ color: t.colors.text, fontWeight: "600" }}>
+              {item.clientName || item.clientId}
+            </Text>
+            <Text style={{ color: t.colors.textMuted, marginTop: 4 }}>
+              {item.status} · {item.registeredAt?.slice(0, 16) || ""}
+            </Text>
+          </Pressable>
+        )}
       />
+
       <Pressable
-        onPress={() => navigation.navigate("RegistrationDetail", { mode: "new", ...(eventId ? { initial: { eventId } } : {}) })}
-        style={{ position: "absolute", right: 16, bottom: 16, backgroundColor: t.colors.primary, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 999 }}
+        onPress={() => navigation.navigate("RegistrationDetail", { mode: "new" })}
+        style={{
+          position: "absolute",
+          right: 20,
+          bottom: 30,
+          backgroundColor: t.colors.primary,
+          paddingHorizontal: 20,
+          paddingVertical: 14,
+          borderRadius: 24,
+        }}
       >
         <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>+ New</Text>
       </Pressable>

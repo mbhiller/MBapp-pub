@@ -1,0 +1,3255 @@
+openapi: 3.0.3
+info:
+  title: MBapp API
+  version: '2025-09-25'
+  description: Single-source-of-truth API for MBapp objects, views, workspaces, and
+    tools.
+  license:
+    url: https://license.mbapp.dev
+    name: MIT
+servers:
+- url: https://api.mbapp.dev
+tags:
+- name: Objects
+  description: Generic object CRUD, list, search, and actions by type.
+- name: Auth
+  description: Authentication and policy.
+- name: Views
+  description: Saved per-module user views (filters/sorts/columns).
+- name: Workspaces
+  description: Role-aware cross-module compositions (tiles).
+- name: Tools
+  description: Dev/ops helpers for non-prod use.
+- name: Admin
+  description: Administrative and audit endpoints.
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    IdempotencyKey:
+      in: header
+      name: Idempotency-Key
+      required: false
+      schema:
+        type: string
+      description: Optional idempotency key for safe retries.
+    TenantHeader:
+      name: x-tenant-id
+      in: header
+      required: true
+      schema:
+        type: string
+    TypePath:
+      name: type
+      in: path
+      required: true
+      schema:
+        type: string
+    IdPath:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    Next:
+      name: next
+      in: query
+      schema:
+        type: string
+    Q:
+      name: q
+      in: query
+      schema:
+        type: string
+    Fields:
+      name: fields
+      in: query
+      schema:
+        type: string
+        description: Comma-separated field projection
+  responses:
+    ErrorResponse:
+      description: Error response
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+              code:
+                type: string
+              details:
+                type: object
+                additionalProperties: true
+    ListPage:
+      description: Paged list of objects
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              items:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AnyObject'
+              next:
+                type: string
+                nullable: true
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+    Unauthorized:
+      description: Unauthorized
+    Forbidden:
+      description: Forbidden
+    NotFound:
+      description: Not found
+  schemas:
+    Account:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        required:
+        - type
+        - name
+        properties:
+          type:
+            type: string
+            enum:
+            - account
+          name:
+            type: string
+            minLength: 1
+          number:
+            type: string
+            minLength: 1
+          currency:
+            type: string
+            pattern: ^[A-Z]{3}$
+            default: USD
+          accountType:
+            type: string
+            description: e.g., asset, liability, revenue, expense, equity
+            enum:
+            - asset
+            - liability
+            - revenue
+            - expense
+            - equity
+          balance:
+            type: number
+            description: Current balance (display only)
+            readOnly: true
+          status:
+            type: string
+            enum:
+            - active
+            - inactive
+            - archived
+            default: active
+    Address:
+      type: object
+      properties:
+        address1:
+          type: string
+        address2:
+          type: string
+          nullable: true
+        city:
+          type: string
+          nullable: true
+        state:
+          type: string
+          nullable: true
+        postal:
+          type: string
+          nullable: true
+        country:
+          type: string
+          nullable: true
+    AnyObject:
+      type: object
+      additionalProperties: true
+      properties: {}
+    Class:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        required:
+        - type
+        - name
+        properties:
+          type:
+            type: string
+            enum:
+            - class
+          divisionId:
+            type: string
+            nullable: true
+          code:
+            type: string
+          name:
+            type: string
+          description:
+            type: string
+            nullable: true
+          fee:
+            type: number
+            nullable: true
+          order:
+            type: integer
+            nullable: true
+          rules:
+            type: array
+            items:
+              type: string
+            nullable: true
+          notes:
+            type: string
+            nullable: true
+    CustomerAccount:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        properties:
+          type:
+            type: string
+            enum:
+            - customerAccount
+          partyId:
+            type: string
+          termsId:
+            type: string
+            nullable: true
+          creditLimit:
+            type: number
+            nullable: true
+          priceListId:
+            type: string
+            nullable: true
+          taxExempt:
+            type: boolean
+            default: false
+          defaultBillToId:
+            type: string
+            nullable: true
+          defaultShipToId:
+            type: string
+            nullable: true
+        required:
+        - partyId
+    Division:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        required:
+        - type
+        - name
+        properties:
+          type:
+            type: string
+            enum:
+            - division
+          code:
+            type: string
+          name:
+            type: string
+          description:
+            type: string
+            nullable: true
+          fee:
+            type: number
+            nullable: true
+          rules:
+            type: array
+            items:
+              type: string
+            nullable: true
+          notes:
+            type: string
+            nullable: true
+    Employee:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        required:
+        - type
+        - name
+        properties:
+          type:
+            type: string
+            enum:
+            - employee
+          name:
+            type: string
+            minLength: 1
+          displayName:
+            type: string
+          email:
+            type: string
+            format: email
+          phone:
+            type: string
+          role:
+            type: string
+          status:
+            type: string
+            enum:
+            - active
+            - inactive
+            - terminated
+            default: active
+          hiredAt:
+            type: string
+            format: date-time
+          startDate:
+            type: string
+            format: date-time
+            description: Alias of hiredAt for UI consistency
+          terminatedAt:
+            type: string
+            format: date-time
+          notes:
+            type: string
+    EpcBinding:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        properties:
+          type:
+            type: string
+            enum:
+            - epcBinding
+          epc:
+            type: string
+          itemId:
+            type: string
+          locationId:
+            type: string
+          lot:
+            type: string
+            nullable: true
+          state:
+            type: string
+            enum:
+            - active
+            - retired
+            default: active
+        required:
+        - type
+        - epc
+        - itemId
+    EPCMap:
+      type: object
+      required:
+      - id
+      - type
+      - epc
+      - itemId
+      properties:
+        id:
+          type: string
+          description: Use EPC string as id
+        type:
+          type: string
+          enum:
+          - epcMap
+          default: epcMap
+        epc:
+          type: string
+        itemId:
+          type: string
+        lotId:
+          type: string
+          nullable: true
+        locationId:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum:
+          - active
+          - retired
+          default: active
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    Error:
+      type: object
+      additionalProperties: false
+      properties:
+        message:
+          type: string
+          description: Human-readable summary
+        code:
+          type: string
+          description: Stable error code (e.g., insufficient_available_to_commit)
+        details:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+      required:
+      - message
+    Event:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        properties:
+          type:
+            type: string
+            enum:
+            - event
+          name:
+            type: string
+          description:
+            type: string
+          location:
+            type: string
+          startsAt:
+            type: string
+            format: date-time
+          endsAt:
+            type: string
+            format: date-time
+          start:
+            type: string
+            format: date-time
+            description: Alias of startsAt (deprecated)
+          end:
+            type: string
+            format: date-time
+            description: Alias of endsAt (deprecated)
+          status:
+            type: string
+            default: draft
+            enum:
+            - draft
+            - scheduled
+            - open
+            - closed
+            - completed
+            - cancelled
+            - archived
+          capacity:
+            type: number
+            minimum: 0
+          notes:
+            type: string
+          lines:
+            type: array
+            items:
+              $ref: '#/components/schemas/EventLine'
+        required:
+        - type
+        - name
+        - startsAt
+    EventLine:
+      type: object
+      properties:
+        id:
+          type: string
+        classId:
+          type: string
+        capacity:
+          type: number
+          nullable: true
+        fee:
+          type: number
+          nullable: true
+        note:
+          type: string
+          nullable: true
+      required:
+      - classId
+    GoodsReceipt:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        required:
+        - type
+        - poId
+        - ts
+        - lines
+        properties:
+          id:
+            type: string
+          type:
+            type: string
+            enum:
+            - goodsReceipt
+          tenantId:
+            type: string
+          poId:
+            type: string
+          userId:
+            type: string
+            nullable: true
+          ts:
+            type: string
+            format: date-time
+            nullable: true
+          lines:
+            type: array
+            items:
+              type: object
+              required:
+              - lineId
+              - deltaQty
+              properties:
+                lineId:
+                  type: string
+                itemId:
+                  type: string
+                  nullable: true
+                deltaQty:
+                  type: number
+                lot:
+                  type: string
+                  nullable: true
+                locationId:
+                  type: string
+                  nullable: true
+          notes:
+            type: string
+            nullable: true
+          attachments:
+            type: array
+            items:
+              type: string
+    GoodsReceiptLine:
+      type: object
+      required:
+      - lineId
+      - deltaQty
+      properties:
+        lineId:
+          type: string
+        deltaQty:
+          type: number
+        locationId:
+          type: string
+          nullable: true
+        lot:
+          type: string
+          nullable: true
+    Integration:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        properties:
+          type:
+            type: string
+            enum:
+            - integration
+          provider:
+            type: string
+            enum:
+            - shopify
+            - quickbooks
+            - rfid
+            - webhook
+            - streaming
+          status:
+            type: string
+            enum:
+            - disabled
+            - enabled
+          config:
+            type: object
+            additionalProperties: true
+        required:
+        - type
+        - provider
+        - status
+    IntegrationRun:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        properties:
+          type:
+            type: string
+            enum:
+            - integrationRun
+          integrationId:
+            type: string
+          startedAt:
+            type: string
+            format: date-time
+          finishedAt:
+            type: string
+            format: date-time
+            nullable: true
+          status:
+            type: string
+            enum:
+            - queued
+            - running
+            - success
+            - error
+          stats:
+            type: object
+            additionalProperties: true
+          error:
+            type: string
+            nullable: true
+        required:
+        - type
+        - integrationId
+        - startedAt
+        - status
+    InventoryAdjustmentRequest:
+      type: object
+      required:
+      - reason
+      - deltaQty
+      properties:
+        reason:
+          type: string
+          minLength: 1
+        deltaQty:
+          type: number
+        notes:
+          type: string
+          nullable: true
+    InventoryItem:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        required:
+        - type
+        - name
+        properties:
+          type:
+            type: string
+            enum:
+            - inventory
+          productId:
+            type: string
+            nullable: true
+          name:
+            type: string
+          sku:
+            type: string
+          quantity:
+            type: number
+            description: Deprecated – use /inventory/{id}/onhand
+            deprecated: true
+          uom:
+            type: string
+          location:
+            type: string
+            nullable: true
+          minQty:
+            type: number
+            minimum: 0
+            nullable: true
+          maxQty:
+            type: number
+            minimum: 0
+            nullable: true
+          status:
+            type: string
+            enum:
+            - active
+            - inactive
+            - archived
+            default: active
+          notes:
+            type: string
+            nullable: true
+          lotTracked:
+            type: boolean
+            default: false
+          barcode:
+            type: string
+            nullable: true
+          tags:
+            type: array
+            items:
+              type: string
+    InventoryMovement:
+      type: object
+      required: [id, itemId, type, qty]
+      properties:
+        id: { type: string }
+        itemId: { type: string }
+        type:
+          type: string
+          enum: [receive, reserve, commit, fulfill, adjust, release]
+        qty: { type: number }
+        at: { type: string, format: date-time }
+        note: { type: string }
+        actorId: { type: string }
+        refId: { type: string }
+
+    InventoryCounters:
+      type: object
+      required: [itemId, onHand, reserved, available]
+      properties:
+        itemId: { type: string }
+        onHand: { type: number }
+        reserved: { type: number }
+        available: { type: number }
+        asOf: { type: string, format: date-time }
+    ListPageInventoryMovement:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/InventoryMovement'
+        next:
+          type: string
+          nullable: true
+    Message:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        required:
+        - type
+        - channel
+        - body
+        properties:
+          type:
+            type: string
+            enum:
+            - message
+          channel:
+            type: string
+            enum:
+            - push
+            - sms
+            - email
+          subject:
+            type: string
+            nullable: true
+          body:
+            type: string
+          segment:
+            type: object
+            additionalProperties: true
+            nullable: true
+          scheduleAt:
+            type: string
+            format: date-time
+            nullable: true
+          sentAt:
+            type: string
+            format: date-time
+            nullable: true
+          status:
+            type: string
+            enum:
+            - queued
+            - sending
+            - sent
+            - failed
+            - cancelled
+            default: queued
+          notes:
+            type: string
+            nullable: true
+    MoneyTotals:
+      type: object
+      properties:
+        subtotal:
+          type: number
+        tax:
+          type: number
+        shipping:
+          type: number
+        discount:
+          type: number
+        total:
+          type: number
+    ObjectBase:
+      type: object
+      properties:
+        id:
+          type: string
+          readOnly: true
+        tenantId:
+          type: string
+          readOnly: true
+        type:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+        metadata:
+          type: object
+          additionalProperties: true
+      required:
+      - id
+      - tenantId
+      - createdAt
+      - updatedAt
+    Organization:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        required:
+        - type
+        - name
+        properties:
+          type:
+            type: string
+            enum:
+            - organization
+          name:
+            type: string
+          kind:
+            type: string
+            enum:
+            - club
+            - federation
+            - venueOp
+            - sponsor
+            example: federation
+          status:
+            type: string
+            enum:
+            - active
+            - inactive
+            - archived
+            default: active
+          notes:
+            type: string
+            nullable: true
+          metadata:
+            type: object
+            additionalProperties: true
+            nullable: true
+          code:
+            type: string
+            nullable: true
+          website:
+            type: string
+            format: uri
+            nullable: true
+          phone:
+            type: string
+            nullable: true
+          email:
+            type: string
+            format: email
+            nullable: true
+          address:
+            type: string
+            nullable: true
+          prefs:
+            type: object
+            additionalProperties: true
+            nullable: true
+    Party:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        required:
+        - type
+        - kind
+        - displayName
+        - status
+        properties:
+          type:
+            type: string
+            enum:
+            - party
+          kind:
+            type: string
+            enum:
+            - person
+            - organization
+            - animal
+          displayName:
+            type: string
+          firstName:
+            type: string
+          lastName:
+            type: string
+          email:
+            type: string
+            format: email
+          phone:
+            type: string
+          addresses:
+            type: array
+            items:
+              $ref: '#/components/schemas/Address'
+          tags:
+            type: array
+            items:
+              type: string
+          status:
+            type: string
+            enum:
+            - active
+            - inactive
+            - archived
+            default: active
+          notes:
+            type: string
+          roleFlags:
+            type: object
+            additionalProperties: { type: boolean }
+            description: "Denormalized role membership for fast gates."
+          roles:
+            type: array
+            items: { type: string }
+            description: Optional array for UI; roleFlags is the source of truth.
+    PartyLink:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        required:
+        - type
+        - aPartyId
+        - bPartyId
+        - kind
+        properties:
+          type:
+            type: string
+            enum:
+            - partyLink
+          aPartyId:
+            type: string
+          bPartyId:
+            type: string
+          kind:
+            type: string
+            enum:
+            - employs
+            - member_of
+            - owns
+            - handles
+            - parent
+            - affiliate
+          startsAt:
+            type: string
+            format: date-time
+          endsAt:
+            type: string
+            format: date-time
+          notes:
+            type: string
+    PartyRole:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        required:
+        - type
+        - partyId
+        - role
+        properties:
+          type:
+            type: string
+            enum:
+            - partyRole
+          partyId:
+            type: string
+          role:
+            type: string
+            enum:
+            - customer
+            - vendor
+            - employee
+            - event_staff
+            - rider
+            - owner
+            - judge
+          active:
+            type: boolean
+            default: true
+          notes:
+            type: string
+    Policy:
+      type: object
+      properties:
+        tenantId:
+          type: string
+        userId:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
+        permissions:
+          type: array
+          items:
+            type: string
+        ui:
+          type: object
+          properties:
+            allowedModuleKeys:
+              type: array
+              items:
+                type: string
+            allowedViews:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  moduleKey:
+                    type: string
+            allowedWorkspaces:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+      required:
+      - permissions
+      - roles
+    Product:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        required:
+        - type
+        - name
+        properties:
+          type:
+            type: string
+            enum:
+            - product
+          name:
+            type: string
+          kind:
+            type: string
+            enum:
+            - good
+            - service
+            default: good
+          sku:
+            type: string
+          price:
+            type: number
+            minimum: 0
+            nullable: true
+          taxCode:
+            type: string
+            nullable: true
+          status:
+            type: string
+            enum:
+            - active
+            - inactive
+            - archived
+            default: active
+          notes:
+            type: string
+            nullable: true
+          defaultItemId:
+            type: string
+            nullable: true
+          tags:
+            type: array
+            items:
+              type: string
+    PurchaseOrder:
+      allOf:
+      - type: object
+        required:
+        - type
+        - vendorId
+        - status
+        properties:
+          id:
+            type: string
+          tenantId:
+            type: string
+          type:
+            type: string
+            enum:
+            - purchaseOrder
+          createdAt:
+            type: string
+            format: date-time
+          updatedAt:
+            type: string
+            format: date-time
+          metadata:
+            type: object
+            additionalProperties: true
+          vendorAccountId:
+            type: string
+          partyId:
+            type: string
+          partyKind:
+            type: string
+            enum:
+            - person
+            - organization
+            - animal
+      - type: object
+        properties:
+          orderNumber:
+            type: string
+          vendorId:
+            type: string
+          vendorName:
+            type: string
+          status:
+            type: string
+            enum:
+            - draft
+            - submitted
+            - approved
+            - partially_received
+            - received
+            - cancelled
+          currency:
+            type: string
+            default: USD
+          notes:
+            type: string
+          totals:
+            $ref: '#/components/schemas/MoneyTotals'
+          shipTo:
+            type: object
+            properties:
+              name:
+                type: string
+              address1:
+                type: string
+              address2:
+                type: string
+              city:
+                type: string
+              state:
+                type: string
+              postal:
+                type: string
+              country:
+                type: string
+          billTo:
+            type: object
+            properties:
+              name:
+                type: string
+              address1:
+                type: string
+              address2:
+                type: string
+              city:
+                type: string
+              state:
+                type: string
+              postal:
+                type: string
+              country:
+                type: string
+          lines:
+            type: array
+            items:
+              $ref: '#/components/schemas/PurchaseOrderLine'
+    PurchaseOrderLine:
+      type: object
+      required:
+      - itemId
+      - qty
+      - uom
+      properties:
+        id:
+          type: string
+        itemId:
+          type: string
+          description: InventoryItem.id
+        productId:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        uom:
+          type: string
+        qty:
+          type: number
+          description: Ordered quantity
+        qtyReceived:
+          type: number
+          default: 0
+        unitPrice:
+          type: number
+          nullable: true
+        taxRate:
+          type: number
+          nullable: true
+        lineTotal:
+          type: number
+          nullable: true
+        locationId:
+          type: string
+          nullable: true
+        lot:
+          type: string
+          nullable: true
+        expectedDate:
+          type: string
+          format: date-time
+          nullable: true
+    Registration:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        properties:
+          type:
+            type: string
+            enum:
+            - registration
+          eventId:
+            type: string
+          clientId:
+            type: string
+          clientName:
+            type: string
+            nullable: true
+          qty:
+            type: number
+            default: 1
+            minimum: 1
+          startsAt:
+            type: string
+            format: date-time
+            nullable: true
+          endsAt:
+            type: string
+            format: date-time
+            nullable: true
+          start:
+            type: string
+            format: date-time
+            description: Alias of startsAt (deprecated)
+            nullable: true
+          end:
+            type: string
+            format: date-time
+            description: Alias of endsAt (deprecated)
+            nullable: true
+          registeredAt:
+            type: string
+            format: date-time
+            nullable: true
+          status:
+            type: string
+            default: pending
+            enum:
+            - pending
+            - confirmed
+            - checked_in
+            - checked_out
+            - cancelled
+          notes:
+            type: string
+            nullable: true
+          partyId:
+            type: string
+          partyKind:
+            type: string
+            enum:
+            - person
+            - organization
+            - animal
+          lines:
+            type: array
+            items:
+              $ref: '#/components/schemas/RegistrationLine'
+        required:
+        - type
+        - eventId
+        - clientId
+        - qty
+    RegistrationLine:
+      type: object
+      properties:
+        id:
+          type: string
+        classId:
+          type: string
+        qty:
+          type: number
+          default: 1
+          minimum: 1
+        note:
+          type: string
+          nullable: true
+      required:
+      - classId
+      - qty
+    Reservation:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        required:
+        - type
+        - resourceId
+        - clientId
+        - startsAt
+        - endsAt
+        properties:
+          type:
+            type: string
+            enum:
+            - reservation
+          resourceId:
+            type: string
+          resourceName:
+            type: string
+            nullable: true
+          eventId:
+            type: string
+            nullable: true
+          clientId:
+            type: string
+          clientName:
+            type: string
+            nullable: true
+          startsAt:
+            type: string
+            format: date-time
+          endsAt:
+            type: string
+            format: date-time
+          start:
+            type: string
+            format: date-time
+            description: Alias of startsAt (deprecated)
+          end:
+            type: string
+            format: date-time
+            description: Alias of endsAt (deprecated)
+          status:
+            type: string
+            enum:
+            - pending
+            - confirmed
+            - in_use
+            - checked_in
+            - completed
+            - cancelled
+            default: pending
+          notes:
+            type: string
+            nullable: true
+          partyId:
+            type: string
+          partyKind:
+            type: string
+            enum:
+            - person
+            - organization
+            - animal
+          rate:
+            type: number
+            nullable: true
+          price:
+            type: number
+            nullable: true
+          conflictKey:
+            type: string
+            nullable: true
+    Resource:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        required:
+        - type
+        - name
+        properties:
+          type:
+            type: string
+            enum:
+            - resource
+          name:
+            type: string
+          code:
+            type: string
+            nullable: true
+          url:
+            type: string
+            format: uri
+            nullable: true
+          expiresAt:
+            type: string
+            format: date-time
+            nullable: true
+          resourceType:
+            type: string
+            enum:
+            - stall
+            - rv
+            - arena
+            - equipment
+            - other
+            default: other
+          status:
+            type: string
+            enum:
+            - available
+            - unavailable
+            - maintenance
+            default: available
+          capacity:
+            type: number
+            minimum: 0
+            nullable: true
+          location:
+            type: string
+            nullable: true
+          tags:
+            type: array
+            items:
+              type: string
+          notes:
+            type: string
+            nullable: true
+    SalesFulfillment:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        required:
+        - type
+        - soId
+        - ts
+        - lines
+        properties:
+          id:
+            type: string
+          type:
+            type: string
+            enum:
+            - salesFulfillment
+          tenantId:
+            type: string
+          soId:
+            type: string
+          userId:
+            type: string
+            nullable: true
+          ts:
+            type: string
+            format: date-time
+            nullable: true
+          lines:
+            type: array
+            items:
+              type: object
+              required:
+              - lineId
+              - deltaQty
+              properties:
+                lineId:
+                  type: string
+                itemId:
+                  type: string
+                  nullable: true
+                deltaQty:
+                  type: number
+                lot:
+                  type: string
+                  nullable: true
+                locationId:
+                  type: string
+                  nullable: true
+          carrier:
+            type: string
+            nullable: true
+          tracking:
+            type: string
+            nullable: true
+          notes:
+            type: string
+            nullable: true
+          attachments:
+            type: array
+            items:
+              type: string
+    SalesFulfillmentLine:
+      type: object
+      required:
+      - lineId
+      - deltaQty
+      properties:
+        lineId:
+          type: string
+        deltaQty:
+          type: number
+        locationId:
+          type: string
+          nullable: true
+        lot:
+          type: string
+          nullable: true
+    SalesOrder:
+      allOf:
+      - type: object
+        required:
+        - type
+        - customerId
+        - status
+        properties:
+          id:
+            type: string
+          tenantId:
+            type: string
+          type:
+            type: string
+            enum:
+            - salesOrder
+          createdAt:
+            type: string
+            format: date-time
+          updatedAt:
+            type: string
+            format: date-time
+          metadata:
+            type: object
+            additionalProperties: true
+          customerAccountId:
+            type: string
+          partyId:
+            type: string
+          partyKind:
+            type: string
+            enum:
+            - person
+            - organization
+            - animal
+      - type: object
+        properties:
+          orderNumber:
+            type: string
+          customerId:
+            type: string
+          customerName:
+            type: string
+          status:
+            type: string
+            enum:
+            - draft
+            - submitted
+            - committed
+            - partially_fulfilled
+            - fulfilled
+            - cancelled
+            - closed
+          currency:
+            type: string
+            default: USD
+          notes:
+            type: string
+          totals:
+            $ref: '#/components/schemas/MoneyTotals'
+          billTo:
+            type: object
+            properties:
+              name:
+                type: string
+              address1:
+                type: string
+              address2:
+                type: string
+              city:
+                type: string
+              state:
+                type: string
+              postal:
+                type: string
+              country:
+                type: string
+          shipTo:
+            type: object
+            properties:
+              name:
+                type: string
+              address1:
+                type: string
+              address2:
+                type: string
+              city:
+                type: string
+              state:
+                type: string
+              postal:
+                type: string
+              country:
+                type: string
+          lines:
+            type: array
+            items:
+              $ref: '#/components/schemas/SalesOrderLine'
+    SalesOrderLine:
+      type: object
+      required:
+      - itemId
+      - qty
+      - uom
+      properties:
+        id:
+          type: string
+        itemId:
+          type: string
+        productId:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        uom:
+          type: string
+        qty:
+          type: number
+        qtyFulfilled:
+          type: number
+          default: 0
+        unitPrice:
+          type: number
+          nullable: true
+        taxRate:
+          type: number
+          nullable: true
+        lineTotal:
+          type: number
+          nullable: true
+        locationId:
+          type: string
+          nullable: true
+        lot:
+          type: string
+          nullable: true
+        expectedDate:
+          type: string
+          format: date-time
+          nullable: true
+        qtyCommitted:
+          type: number
+          default: 0
+    ScannerAction:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        properties:
+          type:
+            type: string
+            enum:
+            - scannerAction
+          action:
+            type: string
+            enum:
+            - pick
+            - receive
+            - count
+            - move
+          epc:
+            type: string
+            description: EPC as scanned
+          itemId:
+            type: string
+          ts:
+            type: string
+            format: date-time
+          sessionId:
+            type: string
+          soId:
+            type: string
+          lineId:
+            type: string
+          fromLocationId:
+            type: string
+          toLocationId:
+            type: string
+          qty:
+            type: number
+            default: 1
+          notes:
+            type: string
+        required:
+        - type
+        - action
+        - epc
+        - itemId
+        - ts
+    ScannerSession:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        properties:
+          type:
+            type: string
+            enum:
+            - scannerSession
+          userId:
+            type: string
+          workspaceId:
+            type: string
+          status:
+            type: string
+            enum:
+            - active
+            - stopped
+          startedAt:
+            type: string
+            format: date-time
+          stoppedAt:
+            type: string
+            format: date-time
+            nullable: true
+        required:
+        - type
+        - userId
+        - status
+        - startedAt
+    Scorecard:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        required:
+        - type
+        - eventId
+        - classId
+        properties:
+          type:
+            type: string
+            enum:
+            - scorecard
+          eventId:
+            type: string
+          classId:
+            type: string
+          template:
+            type: object
+            additionalProperties: true
+          entries:
+            type: array
+            items:
+              type: object
+            nullable: true
+          status:
+            type: string
+            enum:
+            - draft
+            - published
+            - archived
+            default: draft
+          notes:
+            type: string
+            nullable: true
+    VendorAccount:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        properties:
+          type:
+            type: string
+            enum:
+            - vendorAccount
+          partyId:
+            type: string
+          termsId:
+            type: string
+            nullable: true
+          remitToAddressId:
+            type: string
+            nullable: true
+          is1099:
+            type: boolean
+            default: false
+          defaultExpenseAccount:
+            type: string
+            nullable: true
+          defaultCOGSAccount:
+            type: string
+            nullable: true
+        required:
+        - partyId
+    Venue:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        required:
+        - type
+        - name
+        properties:
+          type:
+            type: string
+            enum:
+            - venue
+          name:
+            type: string
+          address:
+            type: string
+            nullable: true
+          timezone:
+            type: string
+            nullable: true
+          geo:
+            type: object
+            properties:
+              lat:
+                type: number
+              lon:
+                type: number
+            nullable: true
+          notes:
+            type: string
+            nullable: true
+    View:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        properties:
+          type:
+            type: string
+            enum:
+            - view
+          moduleKey:
+            type: string
+            description: e.g., products, inventory, events
+          name:
+            type: string
+          queryJSON:
+            type: object
+            additionalProperties: true
+          ownerId:
+            type: string
+            nullable: true
+          shared:
+            type: boolean
+          isDefault:
+            type: boolean
+        required:
+        - type
+        - moduleKey
+        - name
+        - queryJSON
+    ViewList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/View'
+        next:
+          type: string
+          nullable: true
+    Workspace:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        properties:
+          type:
+            type: string
+            enum:
+            - workspace
+          name:
+            type: string
+          tiles:
+            type: array
+            items:
+              $ref: '#/components/schemas/WorkspaceTile'
+          ownerId:
+            type: string
+            nullable: true
+          shared:
+            type: boolean
+        required:
+        - type
+        - name
+        - tiles
+    WorkspaceList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Workspace'
+        next:
+          type: string
+          nullable: true
+    WorkspaceTile:
+      type: object
+      properties:
+        moduleKey:
+          type: string
+        viewId:
+          type: string
+          nullable: true
+        inlineQuery:
+          type: object
+          additionalProperties: true
+          nullable: true
+        layout:
+          type: object
+          additionalProperties: true
+      required:
+      - moduleKey
+security:
+- bearerAuth: []
+paths:
+  /objects/{type}:
+    get:
+      tags:
+      - Objects
+      operationId: listObjects
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/TypePath'
+      - $ref: '#/components/parameters/Q'
+      - $ref: '#/components/parameters/Limit'
+      - $ref: '#/components/parameters/Next'
+      - $ref: '#/components/parameters/Fields'
+      responses:
+        '200':
+          $ref: '#/components/responses/ListPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Get Objects by Type
+    post:
+      tags:
+      - Objects
+      operationId: createObject
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/TypePath'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnyObject'
+      responses:
+        '200':
+          description: Created
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Post Objects
+  /objects/{type}/list:
+    get:
+      tags:
+      - Objects
+      operationId: listObjectsExplicit
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/TypePath'
+      - $ref: '#/components/parameters/Q'
+      - $ref: '#/components/parameters/Limit'
+      - $ref: '#/components/parameters/Next'
+      - $ref: '#/components/parameters/Fields'
+      responses:
+        '200':
+          $ref: '#/components/responses/ListPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Get Objects List
+  /objects/{type}/search:
+    get:
+      tags:
+      - Objects
+      operationId: searchObjects
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/TypePath'
+      - $ref: '#/components/parameters/Q'
+      - $ref: '#/components/parameters/Limit'
+      - $ref: '#/components/parameters/Next'
+      - $ref: '#/components/parameters/Fields'
+      responses:
+        '200':
+          $ref: '#/components/responses/ListPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Search Objects by Type
+  /objects/{type}/{id}:
+    get:
+      tags:
+      - Objects
+      operationId: getObject
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/TypePath'
+      - $ref: '#/components/parameters/IdPath'
+      - $ref: '#/components/parameters/Fields'
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      summary: Get Objects by Type and ID
+    put:
+      tags:
+      - Objects
+      operationId: replaceObject
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/TypePath'
+      - $ref: '#/components/parameters/IdPath'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnyObject'
+      responses:
+        '200':
+          description: Updated
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      summary: Update Objects
+    delete:
+      tags:
+      - Objects
+      operationId: deleteObject
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/TypePath'
+      - $ref: '#/components/parameters/IdPath'
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      summary: Delete Objects
+  /auth/policy:
+    get:
+      tags:
+      - Auth
+      operationId: getPolicy
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Policy'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Get AUTH
+  /views:
+    get:
+      tags:
+      - Views
+      operationId: listViews
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: moduleKey
+        in: query
+        schema:
+          type: string
+      - name: ownerId
+        in: query
+        schema:
+          type: string
+      - name: shared
+        in: query
+        schema:
+          type: boolean
+      - name: isDefault
+        in: query
+        schema:
+          type: boolean
+      - $ref: '#/components/parameters/Limit'
+      - $ref: '#/components/parameters/Next'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ViewList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '400':
+          description: Bad request
+      summary: List Views (role-aware)
+    post:
+      tags:
+      - Views
+      operationId: createView
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/View'
+      responses:
+        '200':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/View'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Create a View
+  /views/{id}:
+    get:
+      tags:
+      - Views
+      operationId: getView
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/View'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '400':
+          description: Bad request
+      summary: Get a View
+    put:
+      tags:
+      - Views
+      operationId: replaceView
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/View'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/View'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      summary: Replace a View
+    patch:
+      tags:
+      - Views
+      operationId: updateView
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              $ref: '#/components/schemas/View'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/View'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      summary: Update a View (partial)
+    delete:
+      tags:
+      - Views
+      operationId: deleteView
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '400':
+          description: Bad request
+      summary: Delete a View
+  /workspaces:
+    get:
+      tags:
+      - Workspaces
+      operationId: listWorkspaces
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: ownerId
+        in: query
+        schema:
+          type: string
+      - name: shared
+        in: query
+        schema:
+          type: boolean
+      - $ref: '#/components/parameters/Limit'
+      - $ref: '#/components/parameters/Next'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '400':
+          description: Bad request
+      summary: List Workspaces (role-aware)
+    post:
+      tags:
+      - Workspaces
+      operationId: createWorkspace
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Workspace'
+      responses:
+        '200':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspace'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Create a Workspace
+  /workspaces/{id}:
+    get:
+      tags:
+      - Workspaces
+      operationId: getWorkspace
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspace'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '400':
+          description: Bad request
+      summary: Get a Workspace
+    put:
+      tags:
+      - Workspaces
+      operationId: replaceWorkspace
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Workspace'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspace'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      summary: Replace a Workspace
+    patch:
+      tags:
+      - Workspaces
+      operationId: updateWorkspace
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspace'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      summary: Update a Workspace (partial)
+    delete:
+      tags:
+      - Workspaces
+      operationId: deleteWorkspace
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '400':
+          description: Bad request
+      summary: Delete a Workspace
+  /inventory/{id}/onhand:
+    get:
+      summary: Get computed on-hand for an inventory item
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: On-hand computed for the inventory item
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/InventoryOnHand'
+  /inventory/onhand:batch:
+    post:
+      tags:
+      - Inventory
+      summary: Batch on-hand query
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ids:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/InventoryOnHand'
+  /inventory/{id}/movements:
+    get:
+      summary: List movements for an inventory item
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: next
+        schema:
+          type: string
+          nullable: true
+      - in: query
+        name: limit
+        schema:
+          type: integer
+          default: 50
+      - in: query
+        name: sort
+        schema:
+          type: string
+          enum:
+          - asc
+          - desc
+          default: desc
+      responses:
+        '200':
+          description: Paged list of inventory movements
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListPageInventoryMovement'
+  /inventory/{id}/adjust:
+    post:
+      summary: Adjust on-hand (creates movement)
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InventoryAdjustmentRequest'
+      responses:
+        '200':
+          description: Adjustment recorded as an inventory movement
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InventoryMovement'
+  /purchasing/po/{id}:submit:
+    post:
+      summary: Submit purchase order
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurchaseOrder'
+  /purchasing/po/{id}:approve:
+    post:
+      summary: Approve purchase order
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurchaseOrder'
+  /purchasing/po/{id}:receive:
+    post:
+      summary: Receive against purchase order lines
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                idempotencyKey:
+                  type: string
+                  deprecated: true
+                lines:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                    - lineId
+                    - deltaQty
+                    properties:
+                      lineId:
+                        type: string
+                      deltaQty:
+                        type: number
+                      locationId:
+                        type: string
+                      lot:
+                        type: string
+      responses:
+        '200':
+          description: OK
+  /purchasing/po/{id}:cancel:
+    post:
+      summary: Cancel purchase order
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurchaseOrder'
+  /purchasing/po/{id}:close:
+    post:
+      summary: Close purchase order
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurchaseOrder'
+  /purchase-orders/{id}/receive-line:
+    post:
+      tags:
+      - Purchasing
+      summary: Receive a specific PO line
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - lineId
+              - qty
+              properties:
+                lineId:
+                  type: string
+                qty:
+                  type: number
+                lot:
+                  type: string
+                  nullable: true
+                location:
+                  type: string
+                  nullable: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurchaseOrder'
+  /sales/so/{id}:submit:
+    post:
+      summary: Submit sales order
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SalesOrder'
+  /sales/so/{id}:commit:
+    post:
+      summary: Commit/allocate inventory for a sales order
+      description: 'Default is **non-strict** (will commit and return `200` even if
+        short on stock; response may include `shortages[]`).
+
+        Pass `strict=1` (query) or `{ "strict": true }` (body) to require full availability
+        (returns `409` with `shortages[]`).
+
+        '
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: strict
+        required: false
+        schema:
+          type: integer
+          enum:
+          - 0
+          - 1
+        description: When 1, require full availability; otherwise partial commits
+          are allowed.
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                strict:
+                  type: boolean
+                  description: Same as ?strict=1
+      responses:
+        '200':
+          description: OK (may include `shortages[]` when non-strict)
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/SalesOrder'
+                - type: object
+                  properties:
+                    shortages:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          lineId:
+                            type: string
+                          itemId:
+                            type: string
+                          backordered:
+                            type: number
+        '409':
+          description: Insufficient availability in strict mode
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  shortages:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        lineId:
+                          type: string
+                        itemId:
+                          type: string
+                        backordered:
+                          type: number
+  /sales/so/{id}:fulfill:
+    post:
+      summary: Fulfill items on a sales order
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                idempotencyKey:
+                  type: string
+                  deprecated: true
+                lines:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                    - lineId
+                    - deltaQty
+                    properties:
+                      lineId:
+                        type: string
+                      deltaQty:
+                        type: number
+                        description: Quantity shipped/picked (positive)
+                      locationId:
+                        type: string
+                      lot:
+                        type: string
+      responses:
+        '200':
+          description: OK
+  /sales/so/{id}:cancel:
+    post:
+      summary: Cancel sales order
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SalesOrder'
+  /sales/so/{id}:close:
+    post:
+      summary: Close sales order
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SalesOrder'
+  /sales/so/{id}:release:
+    post:
+      summary: Release previously reserved quantity
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - lines
+              properties:
+                lines:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required:
+                    - lineId
+                    - deltaQty
+                    properties:
+                      lineId:
+                        type: string
+                      deltaQty:
+                        type: number
+                        minimum: 0
+                      reason:
+                        type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SalesOrder'
+        '409':
+          description: Guardrail violation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /sales-orders/{id}/fulfill-line:
+    post:
+      deprecated: true
+      description: Use `POST /sales/so/{id}:fulfill` instead.
+      tags:
+      - Sales
+      summary: Fulfill a specific SO line
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - lineId
+              - qty
+              properties:
+                lineId:
+                  type: string
+                qty:
+                  type: number
+                lot:
+                  type: string
+                  nullable: true
+                location:
+                  type: string
+                  nullable: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SalesOrder'
+  /events/registration/{id}:cancel:
+    post:
+      summary: Cancel a registration
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Updated registration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Registration'
+  /events/registration/{id}:checkin:
+    post:
+      summary: Check in a registration
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Updated registration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Registration'
+  /events/registration/{id}:checkout:
+    post:
+      summary: Check out a registration
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Updated registration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Registration'
+  /resources/reservation/{id}:cancel:
+    post:
+      summary: Cancel a reservation
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Updated reservation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+  /resources/reservation/{id}:start:
+    post:
+      summary: Start a reservation (resource now in use)
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Updated reservation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+  /resources/reservation/{id}:end:
+    post:
+      summary: End a reservation (resource returned)
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Updated reservation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+  /epc/resolve:
+    get:
+      summary: Resolve EPC to item
+      parameters:
+      - in: query
+        name: epc
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  itemId:
+                    type: string
+                  status:
+                    type: string
+        '404':
+          description: Not found
+  /scanner/sessions:
+    post:
+      summary: Start/stop a scanner session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                op:
+                  type: string
+                  enum:
+                  - start
+                  - stop
+                sessionId:
+                  type: string
+                  description: Required for stop
+                workspaceId:
+                  type: string
+                  nullable: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScannerSession'
+  /scanner/actions:
+    post:
+      summary: Record a scanner action (pick/receive/count/move)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - action
+              - epc
+              properties:
+                action:
+                  type: string
+                  enum:
+                  - pick
+                  - receive
+                  - count
+                  - move
+                epc:
+                  type: string
+                qty:
+                  type: number
+                  default: 1
+                soId:
+                  type: string
+                lineId:
+                  type: string
+                fromLocationId:
+                  type: string
+                toLocationId:
+                  type: string
+      responses:
+        '200':
+          description: Recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScannerAction'
+        '409':
+          description: Guardrail violation
+  /scanner/simulate:
+    post:
+      summary: Dev only - generate EPCs bound to itemIds
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                count:
+                  type: integer
+                  default: 10
+                  minimum: 1
+                  maximum: 1000
+                itemId:
+                  type: string
+                  nullable: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  created:
+                    type: integer
+  /admin/audit:
+    get:
+      tags:
+      - Admin
+      operationId: listAudit
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: since
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 100
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Admin Audit

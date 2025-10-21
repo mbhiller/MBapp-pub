@@ -1,25 +1,19 @@
 // apps/mobile/src/features/reservations/actions.ts
 import { apiClient } from "../../api/client";
-import type { components } from "../../api/generated-types";
-type Schemas = components["schemas"];
 
-export async function cancelReservation(id: string): Promise<Schemas["Reservation"]> {
-  return apiClient.post<Schemas["Reservation"]>(
-    `/resources/reservation/${encodeURIComponent(id)}:cancel`,
-    {}
-  );
+const newIdempotencyKey = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+const idem = () => ({ "Idempotency-Key": newIdempotencyKey() });
+
+// REST shape: /reservations/{id}:action
+export function holdReservation(id: string) {
+  return apiClient.post(`/reservations/${encodeURIComponent(id)}:hold`, {}, idem());
 }
-
-export async function startReservation(id: string): Promise<Schemas["Reservation"]> {
-  return apiClient.post<Schemas["Reservation"]>(
-    `/resources/reservation/${encodeURIComponent(id)}:start`,
-    {}
-  );
+export function confirmReservation(id: string) {
+  return apiClient.post(`/reservations/${encodeURIComponent(id)}:confirm`, {}, idem());
 }
-
-export async function endReservation(id: string): Promise<Schemas["Reservation"]> {
-  return apiClient.post<Schemas["Reservation"]>(
-    `/resources/reservation/${encodeURIComponent(id)}:end`,
-    {}
-  );
+export function releaseReservation(id: string) {
+  return apiClient.post(`/reservations/${encodeURIComponent(id)}:release`, {}, idem());
+}
+export function reassignReservation(id: string, toResourceId: string) {
+  return apiClient.post(`/reservations/${encodeURIComponent(id)}:reassign`, { toResourceId }, idem());
 }

@@ -1,16 +1,13 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
-import {
-  DynamoDBDocumentClient,
-  PutCommand,
-  DeleteCommand,
-} from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, PutCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 
 import { ok, bad, notfound, error } from "../common/responses";
 import { getObjectById, updateObject, buildSkuLock } from "./repo";
+import { markPartyRole } from "../common/party";
 import { getAuth, requirePerm } from "../auth/middleware";
+import { ensurePartyRole } from "../common/validators";
 
-// Match repo.ts envs
 const TABLE = process.env.MBAPP_OBJECTS_TABLE || process.env.MBAPP_TABLE || "mbapp_objects";
 const PK    = process.env.MBAPP_TABLE_PK || "pk";
 const SK    = process.env.MBAPP_TABLE_SK || "sk";
@@ -30,18 +27,16 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const existing = await getObjectById({ tenantId: auth.tenantId, type, id });
     if (!existing) return notfound("Not Found");
 
-    // === SKU uniqueness (products only) on change ===
-    if (type === "product") {
+    // 1) Product SKU change → acquire new lock and delete old constant-SK lock
+    if (String(type).toLowerCase() === "product") {
       const oldSku = (existing as any)?.sku;
       const newSku = patch?.sku;
-
       if (newSku && newSku !== oldSku) {
-        // Acquire new lock (fail if taken)
         const newLock = buildSkuLock(auth.tenantId, id, String(newSku));
         await ddb.send(new PutCommand({
           TableName: TABLE,
           Item: newLock,
-          ConditionExpression: `attribute_not_exists(#pk) AND attribute_not_exists(#sk)`,
+          ConditionExpression: "attribute_not_exists(#pk) AND attribute_not_exists(#sk)",
           ExpressionAttributeNames: { "#pk": PK, "#sk": SK },
         })).catch((e: any) => {
           if (e?.name === "ConditionalCheckFailedException") {
@@ -50,20 +45,53 @@ export async function handle(event: APIGatewayProxyEventV2) {
           throw e;
         });
 
-        // Release old lock if there was one
         if (oldSku) {
           await ddb.send(new DeleteCommand({
             TableName: TABLE,
             Key: {
               [PK]: `UNIQ#${auth.tenantId}#product#SKU#${oldSku}`,
-              [SK]: `${auth.tenantId}|product|${id}`,
+              [SK]: `SKU`,
             },
           })).catch(() => {});
         }
       }
     }
 
+    // 2) Tier-1 gate on update (SO/PO require party role)
+    try {
+      const t = String(type || "");
+      const isSO = t.toLowerCase() === "salesorder";
+      const isPO = t.toLowerCase() === "purchaseorder";
+      if (isSO || isPO) {
+        let pid = patch?.partyId as string | undefined;
+        if (!pid) {
+          pid = (existing as any)?.partyId || (existing as any)?.customerId || (existing as any)?.vendorId;
+        }
+        if (!pid) return bad("Missing partyId");
+        await ensurePartyRole({ tenantId: auth.tenantId, partyId: String(pid), role: isSO ? "customer" : "vendor" });
+      }
+    } catch (e: any) {
+      const msg = e?.message || "role_validation_failed";
+      const sc  = e?.statusCode || 400;
+      return { statusCode: sc, headers: { "content-type":"application/json" }, body: JSON.stringify({ message: msg }) };
+    }
+
+    // 3) Apply update
     const updated = await updateObject({ tenantId: auth.tenantId, type, id, body: patch });
+
+    // 4) If we updated a partyRole, keep Party.roleFlags in sync
+    if (String(type).toLowerCase() === "partyrole") {
+      const partyId: string | undefined =
+        patch?.partyId ?? (updated as any)?.partyId ?? (existing as any)?.partyId;
+      const role: string | undefined =
+        patch?.role    ?? (updated as any)?.role    ?? (existing as any)?.role;
+      const active: boolean =
+        (patch?.active ?? (updated as any)?.active ?? (existing as any)?.active ?? true) === true;
+      if (partyId && role) {
+        await markPartyRole({ tenantId: auth.tenantId, partyId, role, active });
+      }
+    }
+
     return ok(updated);
   } catch (e: any) {
     return error(e);

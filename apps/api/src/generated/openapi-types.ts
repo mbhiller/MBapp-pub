@@ -175,7 +175,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get computed on-hand for an inventory item */
+        /** Get computed counters for an inventory item */
         get: {
             parameters: {
                 query?: never;
@@ -187,14 +187,14 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description On-hand computed for the inventory item */
+                /** @description Computed counters (array with one element) */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
                         "application/json": {
-                            items?: components["schemas"]["InventoryOnHand"][];
+                            items?: components["schemas"]["InventoryCounters"][];
                         };
                     };
                 };
@@ -217,7 +217,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Batch on-hand query */
+        /** Batch counters query (array) */
         post: {
             parameters: {
                 query?: never;
@@ -231,7 +231,7 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
-                        ids?: string[];
+                        itemIds: string[];
                     };
                 };
             };
@@ -243,7 +243,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            items?: components["schemas"]["InventoryOnHand"][];
+                            items?: components["schemas"]["InventoryCounters"][];
                         };
                     };
                 };
@@ -278,7 +278,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Paged list of inventory movements */
+                /** @description Paged list of inventory movements (array) */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -375,6 +375,15 @@ export interface paths {
                         "application/json": components["schemas"]["PurchaseOrder"];
                     };
                 };
+                /** @description Guardrail violation (e.g., invalid status transition) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -416,6 +425,15 @@ export interface paths {
                         "application/json": components["schemas"]["PurchaseOrder"];
                     };
                 };
+                /** @description Only submitted can approve */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -433,7 +451,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Receive against purchase order lines */
+        /**
+         * Receive against purchase order lines
+         * @description Allowed from **approved** or **partially_fulfilled**. Over-receive returns 409.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -448,16 +469,7 @@ export interface paths {
             };
             requestBody: {
                 content: {
-                    "application/json": {
-                        /** @deprecated */
-                        idempotencyKey?: string;
-                        lines?: {
-                            lineId: string;
-                            deltaQty: number;
-                            locationId?: string;
-                            lot?: string;
-                        }[];
-                    };
+                    "application/json": components["schemas"]["PurchaseOrderReceiveRequest"];
                 };
             };
             responses: {
@@ -466,7 +478,18 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["PurchaseOrder"];
+                    };
+                };
+                /** @description Over-receive or invalid status */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
                 };
             };
         };
@@ -485,7 +508,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Cancel purchase order */
+        /**
+         * Cancel purchase order
+         * @description Allowed from **draft**\/**submitted**. Returns 409 otherwise.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -507,6 +533,15 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["PurchaseOrder"];
+                    };
+                };
+                /** @description Guardrail violation */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
                     };
                 };
             };
@@ -526,7 +561,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Close purchase order */
+        /**
+         * Close purchase order
+         * @description Allowed from **fulfilled**. Returns 409 otherwise.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -550,6 +588,15 @@ export interface paths {
                         "application/json": components["schemas"]["PurchaseOrder"];
                     };
                 };
+                /** @description Guardrail violation */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -567,7 +614,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Receive a specific PO line */
+        /**
+         * Receive a specific PO line
+         * @deprecated
+         */
         post: {
             parameters: {
                 query?: never;
@@ -658,10 +708,17 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Commit/allocate inventory for a sales order */
+        /**
+         * Commit/allocate inventory for a sales order
+         * @description Default is non-strict (200 with `shortages[]` when partially available).
+         *     Set `?strict=1` or `{ "strict": true }` to require full availability (409 on shortage).
+         *
+         */
         post: {
             parameters: {
-                query?: never;
+                query?: {
+                    strict?: 0 | 1;
+                };
                 header?: {
                     /** @description Optional idempotency key for safe retries. */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -671,15 +728,28 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["SalesCommitRequest"];
+                };
+            };
             responses: {
-                /** @description OK */
+                /** @description OK (may include `shortages[]` when non-strict) */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["SalesOrder"];
+                        "application/json": components["schemas"]["SalesCommitResponse"];
+                    };
+                };
+                /** @description Insufficient availability in strict mode */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SalesCommitResponse"];
                     };
                 };
             };
@@ -690,7 +760,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/sales/so/{id}:fulfill": {
+    "/sales/so/{id}:reserve": {
         parameters: {
             query?: never;
             header?: never;
@@ -699,7 +769,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Fulfill items on a sales order */
+        /**
+         * Reserve specific line quantities on a sales order
+         * @description Valid from **submitted** or **committed**.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -714,58 +787,9 @@ export interface paths {
             };
             requestBody: {
                 content: {
-                    "application/json": {
-                        /** @deprecated */
-                        idempotencyKey?: string;
-                        lines?: {
-                            lineId: string;
-                            /** @description Quantity shipped/picked (positive) */
-                            deltaQty: number;
-                            locationId?: string;
-                            lot?: string;
-                        }[];
-                    };
+                    "application/json": components["schemas"]["SalesOrderReserveRequest"];
                 };
             };
-            responses: {
-                /** @description OK */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/sales/so/{id}:cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Cancel sales order */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /** @description Optional idempotency key for safe retries. */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
             responses: {
                 /** @description OK */
                 200: {
@@ -776,45 +800,21 @@ export interface paths {
                         "application/json": components["schemas"]["SalesOrder"];
                     };
                 };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/sales/so/{id}:close": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Close sales order */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /** @description Optional idempotency key for safe retries. */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description OK */
-                200: {
+                /** @description Insufficient availability */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["SalesOrder"];
+                        "application/json": {
+                            message?: string;
+                            shortages?: {
+                                lineId?: string;
+                                itemId?: string;
+                                requested?: number;
+                                available?: number;
+                            }[];
+                        };
                     };
                 };
             };
@@ -838,7 +838,64 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SalesOrderReleaseRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SalesOrder"];
+                    };
+                };
+                /** @description Guardrail violation */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sales/so/{id}:fulfill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Fulfill (ship/pick) SO lines */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
                 path: {
                     id: string;
                 };
@@ -847,9 +904,13 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
-                        lineId: string;
-                        deltaQty: number;
-                        reason?: string;
+                        lines?: {
+                            lineId: string;
+                            /** @description Quantity shipped/picked */
+                            deltaQty: number;
+                            locationId?: string;
+                            lot?: string;
+                        }[];
                     };
                 };
             };
@@ -859,14 +920,112 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["SalesOrder"];
+                    };
+                };
+                /** @description Guardrail violation (over-fulfill or invalid status) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sales/so/{id}:cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel sales order
+         * @description Blocked when **net reservations > 0** or **any fulfillments** exist.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SalesOrder"];
+                    };
                 };
                 /** @description Guardrail violation */
                 409: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sales/so/{id}:close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Close sales order (allowed from fulfilled) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SalesOrder"];
+                    };
                 };
             };
         };
@@ -885,7 +1044,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Fulfill a specific SO line */
+        /**
+         * Fulfill a specific SO line
+         * @deprecated
+         * @description Use `POST /sales/so/{id}:fulfill` instead.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -920,6 +1083,57 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/routing/graph": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upsert nodes and edges for routing (idempotent) */
+        post: operations["upsertRoutingGraph"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/routing/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create a route plan from tasks and objective */
+        post: operations["createRoutePlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/routing/plan/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a route plan by id */
+        get: operations["getRoutePlan"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1390,94 +1604,6 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        ObjectBase: {
-            readonly id: string;
-            readonly tenantId: string;
-            type?: string;
-            /** Format: date-time */
-            readonly createdAt: string;
-            /** Format: date-time */
-            readonly updatedAt: string;
-            metadata?: {
-                [key: string]: unknown;
-            };
-        };
-        AnyObject: {
-            [key: string]: unknown;
-        };
-        View: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "view";
-            /** @description e.g., products, inventory, events */
-            moduleKey: string;
-            name: string;
-            queryJSON: {
-                [key: string]: unknown;
-            };
-            ownerId?: string | null;
-            shared?: boolean;
-            isDefault?: boolean;
-        };
-        ViewList: {
-            items?: components["schemas"]["View"][];
-            next?: string | null;
-        };
-        WorkspaceTile: {
-            moduleKey: string;
-            viewId?: string | null;
-            inlineQuery?: {
-                [key: string]: unknown;
-            } | null;
-            layout?: {
-                [key: string]: unknown;
-            };
-        };
-        Workspace: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "workspace";
-            name: string;
-            tiles: components["schemas"]["WorkspaceTile"][];
-            ownerId?: string | null;
-            shared?: boolean;
-        };
-        WorkspaceList: {
-            items?: components["schemas"]["Workspace"][];
-            next?: string | null;
-        };
-        Policy: {
-            tenantId?: string;
-            userId?: string;
-            roles: string[];
-            permissions: string[];
-            ui?: {
-                allowedModuleKeys?: string[];
-                allowedViews?: {
-                    id?: string;
-                    moduleKey?: string;
-                }[];
-                allowedWorkspaces?: {
-                    id?: string;
-                    name?: string;
-                }[];
-            };
-        };
-        Client: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "client";
-            name: string;
-            displayName?: string;
-            firstName?: string;
-            lastName?: string;
-            /** Format: email */
-            email?: string;
-            phone?: string;
-            /**
-             * @default active
-             * @enum {string}
-             */
-            status: "active" | "inactive" | "archived";
-            notes?: string;
-        };
         Account: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
             type: "account";
@@ -1498,110 +1624,119 @@ export interface components {
              */
             status: "active" | "inactive" | "archived";
         };
-        Product: components["schemas"]["ObjectBase"] & {
+        Address: {
+            address1?: string;
+            address2?: string | null;
+            city?: string | null;
+            state?: string | null;
+            postal?: string | null;
+            country?: string | null;
+        };
+        AnyObject: {
+            [key: string]: unknown;
+        };
+        Class: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
-            type: "product";
+            type: "class";
+            divisionId?: string | null;
+            code?: string;
             name: string;
-            /**
-             * @default good
-             * @enum {string}
-             */
-            kind: "good" | "service";
-            sku?: string;
-            price?: number;
-            taxCode?: string;
+            description?: string | null;
+            fee?: number | null;
+            order?: number | null;
+            rules?: string[] | null;
+            notes?: string | null;
+        };
+        CustomerAccount: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type?: "customerAccount";
+            partyId: string;
+            termsId?: string | null;
+            creditLimit?: number | null;
+            priceListId?: string | null;
+            /** @default false */
+            taxExempt: boolean;
+            defaultBillToId?: string | null;
+            defaultShipToId?: string | null;
+        };
+        Division: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "division";
+            code?: string;
+            name: string;
+            description?: string | null;
+            fee?: number | null;
+            rules?: string[] | null;
+            notes?: string | null;
+        };
+        Employee: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "employee";
+            name: string;
+            displayName?: string;
+            /** Format: email */
+            email?: string;
+            phone?: string;
+            role?: string;
             /**
              * @default active
              * @enum {string}
              */
-            status: "active" | "inactive" | "archived";
-            notes?: string;
-        };
-        InventoryItem: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "inventory";
-            /** @description Optional link to a product */
-            productId?: string;
-            name: string;
-            sku?: string;
-            /**
-             * @deprecated
-             * @description Deprecated – use /inventory/{id}/onhand
-             */
-            quantity?: number;
-            /** @description Unit of measure */
-            uom?: string;
-            location?: string;
-            minQty?: number;
-            maxQty?: number;
-            /**
-             * @default active
-             * @enum {string}
-             */
-            status: "active" | "inactive" | "archived";
-            notes?: string;
-        };
-        InventoryMovement: {
-            id?: string;
-            /** @enum {string} */
-            type: "inventoryMovement";
+            status: "active" | "inactive" | "terminated";
+            /** Format: date-time */
+            hiredAt?: string;
             /**
              * Format: date-time
-             * @description Event timestamp
+             * @description Alias of hiredAt for UI consistency
              */
-            ts: string;
-            /**
-             * Format: date-time
-             * @description Mirror of ts for UI lists
-             */
-            readonly createdAt?: string;
-            /** @description Inventory item id */
+            startDate?: string;
+            /** Format: date-time */
+            terminatedAt?: string;
+            notes?: string;
+        };
+        EpcBinding: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "epcBinding";
+            epc: string;
             itemId: string;
-            /** @description Mirror of itemId for client convenience */
-            inventoryId?: string;
-            deltaQty: number;
-            uom: string;
-            locationId?: string | null;
+            locationId?: string;
             lot?: string | null;
             /**
-             * @description Source document type
+             * @default active
              * @enum {string}
              */
-            sourceType: "PO" | "SO" | "ADJ";
-            /**
-             * @description Derived from sourceType
-             * @enum {string|null}
-             */
-            kind?: "receive" | "fulfill" | "adjust" | null;
-            sourceId: string;
-            lineId?: string | null;
-            notes?: string | null;
+            state: "active" | "retired";
         };
-        InventoryOnHand: {
+        EPCMap: {
+            /** @description Use EPC string as id */
             id: string;
-            qtyOnHand: number;
-            qtyAvailable?: number | null;
+            /**
+             * @default epcMap
+             * @enum {string}
+             */
+            type: "epcMap";
+            epc: string;
+            itemId: string;
+            lotId?: string | null;
+            locationId?: string | null;
+            /**
+             * @default active
+             * @enum {string}
+             */
+            status: "active" | "retired";
             /** Format: date-time */
-            asOf?: string;
+            createdAt?: string;
+            /** Format: date-time */
+            updatedAt?: string;
         };
-        InventoryAdjustmentRequest: {
-            reason: string;
-            deltaQty: number;
-            notes?: string | null;
-        };
-        ListPageInventoryMovement: {
-            items?: components["schemas"]["InventoryMovement"][];
-            next?: string | null;
-        };
-        Resource: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "resource";
-            name: string;
+        Error: {
+            /** @description Human-readable summary */
+            message: string;
+            /** @description Stable error code (e.g., insufficient_available_to_commit) */
             code?: string;
-            /** Format: uri */
-            url?: string;
-            /** Format: date-time */
-            expiresAt?: string;
+            details?: {
+                [key: string]: unknown;
+            }[];
         };
         Event: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
@@ -1624,13 +1759,354 @@ export interface components {
              */
             end?: string;
             /**
-             * @description Operational availability of the event
-             * @default available
+             * @default draft
              * @enum {string}
              */
             status: "draft" | "scheduled" | "open" | "closed" | "completed" | "cancelled" | "archived";
             capacity?: number;
             notes?: string;
+            lines?: components["schemas"]["EventLine"][];
+        };
+        EventLine: {
+            id?: string;
+            classId: string;
+            capacity?: number | null;
+            fee?: number | null;
+            note?: string | null;
+        };
+        GoodsReceipt: components["schemas"]["ObjectBase"] & {
+            id?: string;
+            /** @enum {string} */
+            type: "goodsReceipt";
+            tenantId?: string;
+            poId: string;
+            userId?: string | null;
+            /** Format: date-time */
+            ts: string | null;
+            lines: {
+                lineId: string;
+                itemId?: string | null;
+                deltaQty: number;
+                lot?: string | null;
+                locationId?: string | null;
+            }[];
+            notes?: string | null;
+            attachments?: string[];
+        };
+        GoodsReceiptLine: {
+            lineId: string;
+            deltaQty: number;
+            locationId?: string | null;
+            lot?: string | null;
+        };
+        Integration: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "integration";
+            /** @enum {string} */
+            provider: "shopify" | "quickbooks" | "rfid" | "webhook" | "streaming";
+            /** @enum {string} */
+            status: "disabled" | "enabled";
+            config?: {
+                [key: string]: unknown;
+            };
+        };
+        IntegrationRun: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "integrationRun";
+            integrationId: string;
+            /** Format: date-time */
+            startedAt: string;
+            /** Format: date-time */
+            finishedAt?: string | null;
+            /** @enum {string} */
+            status: "queued" | "running" | "success" | "error";
+            stats?: {
+                [key: string]: unknown;
+            };
+            error?: string | null;
+        };
+        InventoryAdjustmentRequest: {
+            reason: string;
+            deltaQty: number;
+            notes?: string | null;
+        };
+        InventoryItem: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "inventory";
+            productId?: string | null;
+            name: string;
+            sku?: string;
+            /**
+             * @deprecated
+             * @description Deprecated – use /inventory/{id}/onhand
+             */
+            quantity?: number;
+            uom?: string;
+            location?: string | null;
+            minQty?: number | null;
+            maxQty?: number | null;
+            /**
+             * @default active
+             * @enum {string}
+             */
+            status: "active" | "inactive" | "archived";
+            notes?: string | null;
+            /** @default false */
+            lotTracked: boolean;
+            barcode?: string | null;
+            tags?: string[];
+        };
+        InventoryMovement: {
+            id: string;
+            itemId: string;
+            /** @enum {string} */
+            action: "receive" | "reserve" | "commit" | "fulfill" | "adjust" | "release";
+            qty: number;
+            /** Format: date-time */
+            at?: string;
+            note?: string;
+            actorId?: string;
+            refId?: string;
+            /** @enum {string} */
+            readonly docType?: "inventoryMovement";
+        };
+        /**
+         * @deprecated
+         * @description Deprecated – use InventoryCounters & GET /inventory/{id}/onhand
+         */
+        InventoryOnHand: {
+            id: string;
+            qtyOnHand: number;
+            qtyAvailable?: number | null;
+            /** Format: date-time */
+            asOf?: string;
+        };
+        ListPageInventoryMovement: {
+            itemId: string;
+            items: components["schemas"]["InventoryMovement"][];
+            /** @description Opaque cursor for next page (if any) */
+            next?: string | null;
+        };
+        Message: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "message";
+            /** @enum {string} */
+            channel: "push" | "sms" | "email";
+            subject?: string | null;
+            body: string;
+            segment?: {
+                [key: string]: unknown;
+            } | null;
+            /** Format: date-time */
+            scheduleAt?: string | null;
+            /** Format: date-time */
+            sentAt?: string | null;
+            /**
+             * @default queued
+             * @enum {string}
+             */
+            status: "queued" | "sending" | "sent" | "failed" | "cancelled";
+            notes?: string | null;
+        };
+        MoneyTotals: {
+            subtotal?: number;
+            tax?: number;
+            shipping?: number;
+            discount?: number;
+            total?: number;
+        };
+        ObjectBase: {
+            readonly id: string;
+            readonly tenantId: string;
+            type?: string;
+            /** Format: date-time */
+            readonly createdAt: string;
+            /** Format: date-time */
+            readonly updatedAt: string;
+            metadata?: {
+                [key: string]: unknown;
+            };
+        };
+        Organization: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "organization";
+            name: string;
+            /**
+             * @example federation
+             * @enum {string}
+             */
+            kind?: "club" | "federation" | "venueOp" | "sponsor";
+            /**
+             * @default active
+             * @enum {string}
+             */
+            status: "active" | "inactive" | "archived";
+            notes?: string | null;
+            metadata?: {
+                [key: string]: unknown;
+            } | null;
+            code?: string | null;
+            /** Format: uri */
+            website?: string | null;
+            phone?: string | null;
+            /** Format: email */
+            email?: string | null;
+            address?: string | null;
+            prefs?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        Party: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "party";
+            /** @enum {string} */
+            kind: "person" | "organization" | "animal";
+            displayName: string;
+            firstName?: string;
+            lastName?: string;
+            /** Format: email */
+            email?: string;
+            phone?: string;
+            addresses?: components["schemas"]["Address"][];
+            tags?: string[];
+            /**
+             * @default active
+             * @enum {string}
+             */
+            status: "active" | "inactive" | "archived";
+            notes?: string;
+            /** @description Denormalized role membership for fast gates. */
+            roleFlags?: {
+                [key: string]: boolean;
+            };
+            /** @description Optional array for UI; roleFlags is the source of truth. */
+            roles?: string[];
+        };
+        PartyLink: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "partyLink";
+            aPartyId: string;
+            bPartyId: string;
+            /** @enum {string} */
+            kind: "employs" | "member_of" | "owns" | "handles" | "parent" | "affiliate";
+            /** Format: date-time */
+            startsAt?: string;
+            /** Format: date-time */
+            endsAt?: string;
+            notes?: string;
+        };
+        PartyRole: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "partyRole";
+            partyId: string;
+            /** @enum {string} */
+            role: "customer" | "vendor" | "employee" | "event_staff" | "rider" | "owner" | "judge";
+            /** @default true */
+            active: boolean;
+            notes?: string;
+        };
+        Policy: {
+            tenantId?: string;
+            userId?: string;
+            roles: string[];
+            permissions: string[];
+            ui?: {
+                allowedModuleKeys?: string[];
+                allowedViews?: {
+                    id?: string;
+                    moduleKey?: string;
+                }[];
+                allowedWorkspaces?: {
+                    id?: string;
+                    name?: string;
+                }[];
+            };
+        };
+        Product: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "product";
+            name: string;
+            /**
+             * @default good
+             * @enum {string}
+             */
+            kind: "good" | "service";
+            sku?: string;
+            price?: number | null;
+            taxCode?: string | null;
+            /**
+             * @default active
+             * @enum {string}
+             */
+            status: "active" | "inactive" | "archived";
+            notes?: string | null;
+            defaultItemId?: string | null;
+            tags?: string[];
+        };
+        PurchaseOrderLine: {
+            id: string;
+            /** @description InventoryItem.id */
+            itemId: string;
+            productId?: string | null;
+            description?: string | null;
+            uom: string;
+            /** @description Ordered quantity */
+            qty: number;
+            /** @default 0 */
+            qtyReceived: number;
+            unitPrice?: number | null;
+            taxRate?: number | null;
+            lineTotal?: number | null;
+            locationId?: string | null;
+            lot?: string | null;
+            /** Format: date-time */
+            expectedDate?: string | null;
+        };
+        PurchaseOrder: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "purchaseOrder";
+            vendorAccountId?: string;
+            vendorId: string;
+            vendorName?: string;
+            partyId?: string;
+            /** @enum {string} */
+            partyKind?: "person" | "organization" | "animal";
+            orderNumber?: string;
+            /** @enum {string} */
+            status: "draft" | "submitted" | "approved" | "partially_fulfilled" | "fulfilled" | "cancelled" | "closed";
+            /** @default USD */
+            currency: string;
+            notes?: string;
+            totals?: components["schemas"]["MoneyTotals"];
+            shipTo?: {
+                name?: string;
+                address1?: string;
+                address2?: string;
+                city?: string;
+                state?: string;
+                postal?: string;
+                country?: string;
+            };
+            billTo?: {
+                name?: string;
+                address1?: string;
+                address2?: string;
+                city?: string;
+                state?: string;
+                postal?: string;
+                country?: string;
+            };
+            lines?: components["schemas"]["PurchaseOrderLine"][];
+        };
+        PurchaseOrderReceiveRequest: {
+            /** @deprecated */
+            idempotencyKey?: string;
+            lines: {
+                lineId: string;
+                deltaQty: number;
+                locationId?: string;
+                lot?: string;
+            }[];
         };
         Registration: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
@@ -1662,12 +2138,23 @@ export interface components {
              */
             status: "pending" | "confirmed" | "checked_in" | "checked_out" | "cancelled";
             notes?: string | null;
+            partyId?: string;
+            /** @enum {string} */
+            partyKind?: "person" | "organization" | "animal";
+            lines?: components["schemas"]["RegistrationLine"][];
+        };
+        RegistrationLine: {
+            id?: string;
+            classId: string;
+            /** @default 1 */
+            qty: number;
+            note?: string | null;
         };
         Reservation: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
             type: "reservation";
             resourceId: string;
-            resourceName?: string;
+            resourceName?: string | null;
             eventId?: string | null;
             clientId: string;
             clientName?: string | null;
@@ -1691,175 +2178,67 @@ export interface components {
              */
             status: "pending" | "confirmed" | "in_use" | "checked_in" | "completed" | "cancelled";
             notes?: string | null;
-        };
-        Vendor: components["schemas"]["ObjectBase"] & {
+            partyId?: string;
             /** @enum {string} */
-            type: "vendor";
-            name: string;
-            displayName?: string;
-            /** Format: email */
-            email?: string;
-            phone?: string;
-            notes?: string;
-            /**
-             * @default active
-             * @enum {string}
-             */
-            status: "active" | "inactive" | "archived";
+            partyKind?: "person" | "organization" | "animal";
+            rate?: number | null;
+            price?: number | null;
+            conflictKey?: string | null;
         };
-        Employee: components["schemas"]["ObjectBase"] & {
+        Resource: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
-            type: "employee";
+            type: "resource";
             name: string;
-            displayName?: string;
-            /** Format: email */
-            email?: string;
-            phone?: string;
-            role?: string;
-            /**
-             * @default active
-             * @enum {string}
-             */
-            status: "active" | "inactive" | "terminated";
+            code?: string | null;
+            /** Format: uri */
+            url?: string | null;
             /** Format: date-time */
-            hiredAt?: string;
+            expiresAt?: string | null;
             /**
-             * Format: date-time
-             * @description Alias of hiredAt for UI consistency
-             */
-            startDate?: string;
-            /** Format: date-time */
-            terminatedAt?: string;
-            notes?: string;
-        };
-        Organization: components["schemas"]["ObjectBase"] & {
-            /**
-             * @example organization
+             * @default other
              * @enum {string}
              */
-            type: "organization";
-            /** @example National Dressage Foundation */
-            name: string;
+            resourceType: "stall" | "rv" | "arena" | "equipment" | "other";
             /**
-             * @example federation
+             * @default available
              * @enum {string}
              */
-            kind?: "club" | "federation" | "venueOp" | "sponsor";
-            /**
-             * @default active
-             * @enum {string}
-             */
-            status: "active" | "inactive" | "archived";
+            status: "available" | "unavailable" | "maintenance";
+            capacity?: number | null;
+            location?: string | null;
+            tags?: string[];
             notes?: string | null;
-            metadata?: {
-                [key: string]: unknown;
-            } | null;
         };
-        MoneyTotals: {
-            subtotal?: number;
-            tax?: number;
-            shipping?: number;
-            discount?: number;
-            total?: number;
-        };
-        PurchaseOrderLine: {
-            id?: string;
-            /** @description InventoryItem.id */
-            itemId: string;
-            productId?: string | null;
-            description?: string | null;
-            uom: string;
-            /** @description Ordered quantity */
-            qty: number;
-            /** @default 0 */
-            qtyReceived: number;
-            unitPrice?: number | null;
-            taxRate?: number | null;
-            lineTotal?: number | null;
+        SalesFulfillmentLine: {
+            lineId: string;
+            deltaQty: number;
             locationId?: string | null;
             lot?: string | null;
-            /** Format: date-time */
-            expectedDate?: string | null;
         };
-        PurchaseOrder: {
-            id?: string;
-            tenantId?: string;
+        SalesFulfillment: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
-            type: "purchaseOrder";
+            type: "salesFulfillment";
+            soId: string;
+            userId?: string | null;
             /** Format: date-time */
-            createdAt?: string;
-            /** Format: date-time */
-            updatedAt?: string;
-            metadata?: {
-                [key: string]: unknown;
-            };
-        } & {
-            orderNumber?: string;
-            vendorId?: string;
-            vendorName?: string;
-            /** @enum {string} */
-            status?: "draft" | "submitted" | "approved" | "partially_received" | "received" | "cancelled";
-            /** @default USD */
-            currency: string;
-            notes?: string;
-            totals?: components["schemas"]["MoneyTotals"];
-            shipTo?: {
-                name?: string;
-                address1?: string;
-                address2?: string;
-                city?: string;
-                state?: string;
-                postal?: string;
-                country?: string;
-            };
-            billTo?: {
-                name?: string;
-                address1?: string;
-                address2?: string;
-                city?: string;
-                state?: string;
-                postal?: string;
-                country?: string;
-            };
-            lines?: components["schemas"]["PurchaseOrderLine"][];
+            ts: string;
+            lines: components["schemas"]["SalesFulfillmentLine"][];
+            carrier?: string | null;
+            tracking?: string | null;
+            notes?: string | null;
+            attachments?: string[];
         };
-        SalesOrderLine: {
-            id?: string;
-            /** @description InventoryItem.id being sold */
-            itemId: string;
-            productId?: string | null;
-            description?: string | null;
-            uom: string;
-            /** @description Ordered quantity */
-            qty: number;
-            /** @default 0 */
-            qtyFulfilled: number;
-            unitPrice?: number | null;
-            taxRate?: number | null;
-            lineTotal?: number | null;
-            locationId?: string | null;
-            lot?: string | null;
-            /** Format: date-time */
-            expectedDate?: string | null;
-        };
-        SalesOrder: {
-            id?: string;
-            tenantId?: string;
+        SalesOrder: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
             type: "salesOrder";
-            /** Format: date-time */
-            createdAt?: string;
-            /** Format: date-time */
-            updatedAt?: string;
-            metadata?: {
-                [key: string]: unknown;
-            };
-        } & {
-            orderNumber?: string;
+            partyId: string;
             customerId?: string;
+            /** @enum {string} */
+            partyKind?: "person" | "organization" | "animal";
+            orderNumber?: string;
             customerName?: string;
             /** @enum {string} */
-            status?: "draft" | "submitted" | "committed" | "partially_fulfilled" | "fulfilled" | "cancelled" | "closed";
+            status: "draft" | "submitted" | "committed" | "partially_fulfilled" | "fulfilled" | "cancelled" | "closed";
             /** @default USD */
             currency: string;
             notes?: string;
@@ -1883,119 +2262,31 @@ export interface components {
                 country?: string;
             };
             lines?: components["schemas"]["SalesOrderLine"][];
+            /** @description Present when non-strict commit recorded shortages */
+            backorders?: {
+                lineId?: string;
+                itemId?: string;
+                backordered?: number;
+            }[];
         };
-        GoodsReceiptLine: {
-            lineId: string;
-            deltaQty: number;
-            locationId?: string | null;
-            lot?: string | null;
-        };
-        GoodsReceipt: {
-            id?: string;
-            /** @enum {string} */
-            type: "goodsReceipt";
-            tenantId?: string;
-            poId: string;
-            userId?: string | null;
-            /** Format: date-time */
-            ts: string;
-            lines: components["schemas"]["GoodsReceiptLine"][];
-            notes?: string | null;
-            attachments?: string[];
-        };
-        SalesFulfillmentLine: {
-            lineId: string;
-            deltaQty: number;
-            locationId?: string | null;
-            lot?: string | null;
-        };
-        SalesFulfillment: {
-            id?: string;
-            /** @enum {string} */
-            type: "salesFulfillment";
-            tenantId?: string;
-            soId: string;
-            userId?: string | null;
-            /** Format: date-time */
-            ts: string;
-            lines: components["schemas"]["SalesFulfillmentLine"][];
-            carrier?: string | null;
-            tracking?: string | null;
-            notes?: string | null;
-            attachments?: string[];
-        };
-        Integration: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "integration";
-            /** @enum {string} */
-            provider: "shopify" | "quickbooks" | "rfid" | "webhook" | "streaming";
-            /** @enum {string} */
-            status: "disabled" | "enabled";
-            config?: {
-                [key: string]: unknown;
-            };
-        };
-        IntegrationRun: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "integrationRun";
-            integrationId: string;
-            /** Format: date-time */
-            startedAt: string;
-            /** Format: date-time */
-            finishedAt?: string | null;
-            /** @enum {string} */
-            status: "queued" | "running" | "success" | "error";
-            stats?: {
-                [key: string]: unknown;
-            };
-            error?: string | null;
-        };
-        EPCMap: {
-            /** @description Use EPC string as id */
+        SalesOrderLine: {
             id: string;
-            /**
-             * @default epcMap
-             * @enum {string}
-             */
-            type: "epcMap";
-            epc: string;
             itemId: string;
-            lotId?: string | null;
+            productId?: string | null;
+            description?: string | null;
+            uom: string;
+            qty: number;
+            /** @default 0 */
+            qtyCommitted: number;
+            /** @default 0 */
+            qtyFulfilled: number;
+            unitPrice?: number | null;
+            taxRate?: number | null;
+            lineTotal?: number | null;
             locationId?: string | null;
-            /**
-             * @default active
-             * @enum {string}
-             */
-            status: "active" | "retired";
-            /** Format: date-time */
-            createdAt?: string;
-            /** Format: date-time */
-            updatedAt?: string;
-        };
-        EpcBinding: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "epcBinding";
-            epc: string;
-            itemId: string;
-            locationId?: string;
             lot?: string | null;
-            /**
-             * @default active
-             * @enum {string}
-             */
-            state: "active" | "retired";
-        };
-        ScannerSession: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "scannerSession";
-            userId: string;
-            workspaceId?: string;
-            /** @enum {string} */
-            status: "active" | "stopped";
             /** Format: date-time */
-            startedAt: string;
-            /** Format: date-time */
-            stoppedAt?: string | null;
+            expectedDate?: string | null;
         };
         ScannerAction: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
@@ -2015,6 +2306,209 @@ export interface components {
             /** @default 1 */
             qty: number;
             notes?: string;
+        };
+        ScannerSession: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "scannerSession";
+            userId: string;
+            workspaceId?: string;
+            /** @enum {string} */
+            status: "active" | "stopped";
+            /** Format: date-time */
+            startedAt: string;
+            /** Format: date-time */
+            stoppedAt?: string | null;
+        };
+        SalesOrderReserveRequest: {
+            lines: {
+                lineId: string;
+                deltaQty: number;
+            }[];
+        };
+        SalesOrderReleaseRequest: {
+            lines: {
+                lineId: string;
+                deltaQty: number;
+                reason?: string;
+            }[];
+        };
+        SalesCommitRequest: {
+            /** @description Same as ?strict=1 */
+            strict?: boolean;
+        };
+        SalesCommitResponse: components["schemas"]["SalesOrder"] & {
+            /** @description Present when strict=false and availability is partial */
+            shortages?: {
+                lineId?: string;
+                itemId?: string;
+                backordered?: number;
+            }[];
+        };
+        Scorecard: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "scorecard";
+            eventId: string;
+            classId: string;
+            template?: {
+                [key: string]: unknown;
+            };
+            entries?: Record<string, never>[] | null;
+            /**
+             * @default draft
+             * @enum {string}
+             */
+            status: "draft" | "published" | "archived";
+            notes?: string | null;
+        };
+        VendorAccount: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type?: "vendorAccount";
+            partyId: string;
+            termsId?: string | null;
+            remitToAddressId?: string | null;
+            /** @default false */
+            is1099: boolean;
+            defaultExpenseAccount?: string | null;
+            defaultCOGSAccount?: string | null;
+        };
+        Venue: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "venue";
+            name: string;
+            address?: string | null;
+            timezone?: string | null;
+            geo?: {
+                lat?: number;
+                lon?: number;
+            } | null;
+            notes?: string | null;
+        };
+        View: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "view";
+            /** @description e.g., products, inventory, events */
+            moduleKey: string;
+            name: string;
+            queryJSON: {
+                [key: string]: unknown;
+            };
+            ownerId?: string | null;
+            shared?: boolean;
+            isDefault?: boolean;
+        };
+        ViewList: {
+            items?: components["schemas"]["View"][];
+            next?: string | null;
+        };
+        Workspace: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "workspace";
+            name: string;
+            tiles: components["schemas"]["WorkspaceTile"][];
+            ownerId?: string | null;
+            shared?: boolean;
+        };
+        WorkspaceList: {
+            items?: components["schemas"]["Workspace"][];
+            next?: string | null;
+        };
+        WorkspaceTile: {
+            moduleKey: string;
+            viewId?: string | null;
+            inlineQuery?: {
+                [key: string]: unknown;
+            } | null;
+            layout?: {
+                [key: string]: unknown;
+            };
+        };
+        InventoryCounters: {
+            itemId: string;
+            onHand: number;
+            reserved: number;
+            available: number;
+            /** Format: date-time */
+            asOf?: string;
+        };
+        LocationNode: {
+            id: string;
+            name: string;
+            /** @enum {string} */
+            kind: "facility" | "hub" | "address" | "geo";
+            coords?: {
+                lat?: number;
+                lng?: number;
+            };
+            attributes?: {
+                [key: string]: unknown;
+            };
+            /** @default true */
+            active: boolean;
+        };
+        PathEdge: {
+            id: string;
+            fromNodeId: string;
+            toNodeId: string;
+            distanceKm: number;
+            durationMin?: number;
+            cost?: number;
+            /** @default false */
+            isClosed: boolean;
+            attributes?: {
+                [key: string]: unknown;
+            };
+        };
+        Carrier: {
+            id: string;
+            name: string;
+            modes?: ("ground" | "air" | "horse" | "internal")[];
+            contactPartyId?: string;
+            attributes?: {
+                [key: string]: unknown;
+            };
+        };
+        DeliveryTask: {
+            id: string;
+            /** @description SO/PO/Reservation id or composite */
+            orderRef?: string;
+            partyId: string;
+            fromNodeId: string;
+            toNodeId: string;
+            window?: {
+                /** Format: date-time */
+                start?: string;
+                /** Format: date-time */
+                end?: string;
+            };
+            /** @enum {string} */
+            status?: "draft" | "planned" | "enroute" | "delivered" | "failed" | "cancelled";
+            attributes?: {
+                [key: string]: unknown;
+            };
+        };
+        RoutePlan: {
+            id: string;
+            /** @enum {string} */
+            objective: "shortest" | "fastest" | "cheapest" | "balanced";
+            constraints?: {
+                closures?: string[];
+                forbiddenNodes?: string[];
+                maxHoursPerDriver?: number;
+            };
+            carrierId?: string;
+            tasks: {
+                id?: string;
+            }[];
+            summary?: {
+                distanceKm?: number;
+                totalDurationMin?: number;
+                totalCost?: number;
+            };
+            /**
+             * @default draft
+             * @enum {string}
+             */
+            status: "draft" | "planned" | "executed" | "archived";
         };
     };
     responses: {
@@ -2713,6 +3207,87 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    upsertRoutingGraph: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    nodes?: components["schemas"]["LocationNode"][];
+                    edges?: components["schemas"]["PathEdge"][];
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    createRoutePlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    objective?: "shortest" | "fastest" | "cheapest" | "balanced";
+                    constraints?: components["schemas"]["RoutePlan"]["constraints"];
+                    carrierId?: string;
+                    tasks?: components["schemas"]["DeliveryTask"][];
+                    graph?: {
+                        nodes?: components["schemas"]["LocationNode"][];
+                        edges?: components["schemas"]["PathEdge"][];
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description Created plan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoutePlan"];
+                };
+            };
+        };
+    };
+    getRoutePlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Route plan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoutePlan"];
+                };
+            };
         };
     };
     listAudit: {

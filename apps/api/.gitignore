@@ -2,3 +2,4 @@
 # API build output
 apps/api/dist/
 apps/api/.gitignore: .env
+apps/api/artifacts/

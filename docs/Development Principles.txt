@@ -1,0 +1,37 @@
+Development Principles:
+
+1.  We do everything possible to make the program the most optimized and future proof. This means coding correctly versus applying patches just to make something work in the short term. Non legacy stuff, no deprecation.
+
+2.  No need to return more than one direction forward.  If option A or B are truly the same then fine but if one adheres to principle 1 more than the other choose that one.  
+
+3. If you don't know the structure ask me to upload relevant files before recommending code adjustments.  
+
+4. when Providing code changes please specify whether the changeis a patch or complete replacement and what file to apply it to.
+
+5. Please review our docs completely before beginning a sprint.  docs/*
+	- MBapp-RoadmapMaster-v10.0 
+	- MBapp-Relationships
+	- MBapp-FrontEnd-Guide
+	- MBapp-Backend-Guide
+	- MBapp-Development-Playbook
+	- MBapp-Working  (the current sprint doc)
+6. File locations
+	BACKEND
+	- Router  apps/api/src/index.ts
+	- Auth  apps/api/src/auth  dev-login, policy, middleware
+	- Object handlers  apps/api/src/objects/ repo get, create, list, update, search, delete ...
+	- module helpers apps/api/src/<module>/*   ie. apps/api/src/inventory/counters.ts, idempotency.ts statusGuards.ts
+	- shared backend apps/api/src/shared/*  ie. apps/api/src/shared/ctx.ts 
+	- openapi types apps/api/src/generates/openapi-types.ts
+
+	FRONTEND
+	- Client  apps/mobile/src/api/client.ts  returns createObject ... as well as apiClient (low-level passthrough)
+	- OpenApi Types apps/mobile/src/api/generated-types.ts
+	- Shared Features apps/mobile/src/features/_shared/*  modals, formscreen useRefetchOnFocus ...
+	- Screens apps/mobile/src/screens<Module>ListScreen apps/mobile/src/screens<Module>DetailScreen 
+	- Screens Module features apps/mobile/src/features/<module>/* api.ts, types.ts   for inventory we also have special things like stock cards 			helpers 
+	- Navigation apps/mobile/src/navigation/RootStack.tsx  apps/mobile/src/types.ts apps/mobile/src/features/_shared/modules.ts
+		apps/mobile/src/screens/ModuleHubScreen.tsx  
+
+	SPEC
+	- Source of Truth for Types  MBapp-Modules.yaml  spec/

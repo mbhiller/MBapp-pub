@@ -1,48 +1,104 @@
 import React from "react";
-import {
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  View,
-  ScrollViewProps,
-} from "react-native";
+import { View, Text, ScrollView, Pressable, ScrollViewProps } from "react-native";
 import { useColors } from "./useColors";
 
-type Props = ScrollViewProps & {
-  children: React.ReactNode;
-  /** Convenience padding shorthand; merges into contentContainerStyle */
+export type FormScreenProps = ScrollViewProps & {
+  /** Optional title rendered as a simple header row */
+  title?: string;
+  /** Optional save handler; if provided, a Save button appears in the header */
+  onSave?: () => void | Promise<void>;
+  /** Optional back handler; if provided, a Back button appears in the header */
+  onBack?: () => void | Promise<void>;
+  /** Padding applied inside the ScrollView */
   contentPadding?: number;
+  /** Optional custom right-side actions; overrides default Save button */
+  actionsRight?: React.ReactNode;
+  /** Optional custom left-side actions; overrides default Back button */
+  actionsLeft?: React.ReactNode;
+  children: React.ReactNode;
 };
 
 export default function FormScreen({
-  children,
-  contentPadding = 16,
+  title,
+  onSave,
+  onBack,
+  actionsRight,
+  actionsLeft,
   contentContainerStyle,
-  keyboardShouldPersistTaps,
-  keyboardDismissMode,
-  ...rest
-}: Props) {
+  contentPadding = 12,
+  children,
+  ...scrollProps
+}: FormScreenProps) {
   const t = useColors();
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: t.colors.background }}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 64 : 0}
-    >
+    <View style={{ flex: 1, backgroundColor: t.colors.background }}>
+      {(title || onSave || onBack || actionsLeft || actionsRight) && (
+        <View
+          style={{
+            paddingHorizontal: 12,
+            paddingVertical: 10,
+            borderBottomWidth: 1,
+            borderBottomColor: t.colors.border,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            {actionsLeft ??
+              (onBack && (
+                <Pressable
+                  onPress={() => onBack?.()}
+                  style={{
+                    paddingVertical: 6,
+                    paddingHorizontal: 10,
+                    borderWidth: 1,
+                    borderColor: t.colors.border,
+                    borderRadius: 8,
+                  }}
+                >
+                  <Text style={{ color: t.colors.text }}>Back</Text>
+                </Pressable>
+              ))}
+            {title ? (
+              <Text style={{ color: t.colors.text, fontSize: 18, fontWeight: "700" }}>
+                {title}
+              </Text>
+            ) : null}
+          </View>
+
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            {actionsRight ??
+              (onSave && (
+                <Pressable
+                  onPress={() => onSave?.()}
+                  style={{
+                    paddingVertical: 6,
+                    paddingHorizontal: 12,
+                    backgroundColor: t.colors.primary,
+                    borderRadius: 8,
+                  }}
+                >
+                  <Text style={{ color: t.colors.buttonText, fontWeight: "700" }}>
+                    Save
+                  </Text>
+                </Pressable>
+              ))}
+          </View>
+        </View>
+      )}
+
       <ScrollView
-        // sensible defaults, allow override via props
-        keyboardShouldPersistTaps={keyboardShouldPersistTaps ?? "handled"}
-        keyboardDismissMode={keyboardDismissMode ?? (Platform.OS === "ios" ? "interactive" : "on-drag")}
-        alwaysBounceVertical={false}
+        {...scrollProps}
         contentContainerStyle={[
-          { padding: contentPadding }, // default padding
-          contentContainerStyle,       // caller overrides/extends
+          { padding: contentPadding, gap: 10 },
+          contentContainerStyle,
         ]}
-        {...rest} // allow refreshControl, etc.
+        keyboardShouldPersistTaps="handled"
       >
-        <View style={{ flex: 1 }}>{children}</View>
+        {children}
       </ScrollView>
-    </KeyboardAvoidingView>
+    </View>
   );
 }

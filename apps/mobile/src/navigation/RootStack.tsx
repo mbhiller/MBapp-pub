@@ -20,9 +20,8 @@ import ProductDetailScreen from "../screens/ProductDetailScreen";
 import ObjectsListScreen from "../screens/ObjectsListScreen";
 import ObjectDetailScreen from "../screens/ObjectDetailScreen";
 
-// Clients
-import ClientsListScreen from "../screens/ClientsListScreen";
-import ClientDetailScreen from "../screens/ClientDetailScreen";
+import PartyListScreen from "../screens/PartyListScreen";
+import PartyDetailScreen from "../screens/PartyDetailScreen";
 
 // Accounts
 import AccountsListScreen from "../screens/AccountsListScreen";
@@ -42,9 +41,6 @@ import RegistrationDetailScreen from "../screens/RegistrationDetailScreen";
 import ReservationsListScreen from "../screens/ReservationsListScreen";
 import ReservationDetailScreen from "../screens/ReservationDetailScreen";
 
-// Vendors / Employees
-import VendorsListScreen from "../screens/VendorsListScreen";
-import VendorDetailScreen from "../screens/VendorDetailScreen";
 
 import EmployeesListScreen from "../screens/EmployeesListScreen";
 import EmployeeDetailScreen from "../screens/EmployeeDetailScreen";
@@ -68,11 +64,16 @@ import IntegrationDetailScreen from "../screens/IntegrationDetailScreen";
 import OrganizationsListScreen from "../screens/OrganizationsListScreen";
 import OrganizationDetailScreen from "../screens/OrganizationDetailScreen";
 
-import GoodsReceiptsListScreen from "../screens/GoodsReceiptsListScreen";
-import GoodsReceiptDetailScreen from "../screens/GoodsReceiptDetailScreen";
 
-import SalesFulfillmentsListScreen from "../screens/SalesFulfillmentsListScreen";
+import GoodsReceiptDetailScreen from "../screens/GoodsReceiptDetailScreen";
+import GoodsReceiptsListScreen from "../screens/GoodsReceiptsListScreen";
+
+
 import SalesFulfillmentDetailScreen from "../screens/SalesFulfillmentDetailScreen";
+import SalesFulfillmentsListScreen from "../screens/SalesFulfillmentsListScreen";
+
+import RoutePlanListScreen from "../screens/RoutePlanListScreen";
+import RoutePlanDetailScreen from "../screens/RoutePlanDetailScreen";
 
 import DevDiagnosticsScreen from "../features/dev/DevDiagnosticsScreen";
 // optional runs
@@ -108,7 +109,16 @@ export default function RootStack() {
 
       <Stack.Screen name="Hub" component={ModuleHubScreen} options={{ title: "Hub" }} />
       <Stack.Screen name="DevDiagnostics" component={DevDiagnosticsScreen} options={{ title: "Dev Diagnostics" }} />
-
+      <Stack.Screen
+        name="PartyList"
+        component={PartyListScreen}
+        options={{ title: "Parties" }}
+      />
+      <Stack.Screen
+        name="PartyDetail"
+        component={PartyDetailScreen}
+        options={{ title: "Party" }}
+      />
       {/* Products */}
       <Stack.Screen name="ProductsList" component={ProductsListScreen} options={{ title: "Products" }} />
       <Stack.Screen name="ProductDetail" component={ProductDetailScreen} options={{ title: "Product" }} />
@@ -120,9 +130,6 @@ export default function RootStack() {
       {/* Tenants */}
       <Stack.Screen name="Tenants" component={TenantsScreen} options={{ title: "Tenants" }} />
 
-      {/* Clients */}
-      <Stack.Screen name="ClientsList" component={ClientsListScreen} options={{ title: "Clients" }} />
-      <Stack.Screen name="ClientDetail" component={ClientDetailScreen} options={{ title: "Client" }} />
 
       {/* Accounts */}
       <Stack.Screen name="AccountsList" component={AccountsListScreen} options={{ title: "Accounts" }} />
@@ -143,9 +150,6 @@ export default function RootStack() {
       <Stack.Screen name="ReservationsList" component={ReservationsListScreen} options={{ title: "Reservations" }} />
       <Stack.Screen name="ReservationDetail" component={ReservationDetailScreen} options={{ title: "Reservation" }} />
 
-      {/* Vendors / Employees */}
-      <Stack.Screen name="VendorsList" component={VendorsListScreen} options={{ title: "Vendors" }} />
-      <Stack.Screen name="VendorDetail" component={VendorDetailScreen} options={{ title: "Vendor" }} />
       
       <Stack.Screen name="EmployeesList" component={EmployeesListScreen} options={{ title: "Employees" }} />
       <Stack.Screen name="EmployeeDetail" component={EmployeeDetailScreen} options={{ title: "Employee" }} />
@@ -161,18 +165,22 @@ export default function RootStack() {
       <Stack.Screen name="SalesOrdersList" component={SalesOrdersListScreen} options={{ title: "Sales" }} />
       <Stack.Screen name="SalesOrderDetail" component={SalesOrderDetailScreen} options={{ title: "Sales Order" }} />
 
-      <Stack.Screen name="GoodsReceiptsList" component={GoodsReceiptsListScreen} options={{ title: "Goods Receipts" }} />
+
       <Stack.Screen name="GoodsReceiptDetail" component={GoodsReceiptDetailScreen} options={{ title: "Goods Receipt" }} />
+      <Stack.Screen name="GoodsReceiptsList" component={GoodsReceiptsListScreen} options={{ title: "Goods Receipt" }} />
       
-      <Stack.Screen name="SalesFulfillmentsList" component={SalesFulfillmentsListScreen} options={{ title: "Sales Fulfillments" }} />
+
       <Stack.Screen name="SalesFulfillmentDetail" component={SalesFulfillmentDetailScreen} options={{ title: "Sales Fulfillment" }} />
+      <Stack.Screen name="SalesFulfillmentsList" component={SalesFulfillmentsListScreen} options={{ title: "Sales Fulfillment" }} />
 
       <Stack.Screen name="IntegrationsList" component={IntegrationsListScreen} options={{ title: "Integrations" }} />
       <Stack.Screen name="IntegrationDetail" component={IntegrationDetailScreen} options={{ title: "Integration" }} />
       
       <Stack.Screen name="OrganizationsList" component={OrganizationsListScreen} options={{ title: "Organizations" }}/>
-      <Stack.Screen name="OrganizationDetail" component={OrganizationDetailScreen} options={{ title: "Organization" }}
-/>
+      <Stack.Screen name="OrganizationDetail" component={OrganizationDetailScreen} options={{ title: "Organization" }}/>
+
+      <Stack.Screen name="RoutePlanList" component={RoutePlanListScreen} />
+      <Stack.Screen name="RoutePlanDetail" component={RoutePlanDetailScreen} />
     {/* <Stack.Screen name="IntegrationRunsList" component={IntegrationRunsListScreen} options={{ title: "Runs" }} /> */}
     </Stack.Navigator>
   );
