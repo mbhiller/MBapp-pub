@@ -906,38 +906,43 @@ paths:
                 $ref: '#/components/schemas/SuggestPoResponse'
   /purchasing/po:create-from-suggestion:
     post:
-      tags:
-        - Purchasing
-      summary: Persist a PurchaseOrder draft returned by suggest-po
+      summary: Persist purchase order draft(s) created from suggestion
+      operationId: createPoFromSuggestion
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              description: Accepts a single draft (legacy) or multiple drafts.
-              properties:
-                draft:
-                  type: object
-                  allOf:
-                    - $ref: '#/components/schemas/PurchaseOrder'
-                  nullable: true
-                drafts:
-                  type: array
-                  items:
-                    $ref: '#/components/schemas/PurchaseOrder'
-              anyOf:
-                - required:
+              oneOf:
+                - type: object
+                  required:
                     - draft
-                - required:
+                  properties:
+                    draft:
+                      $ref: '#/components/schemas/PurchaseOrder'
+                - type: object
+                  required:
                     - drafts
+                  properties:
+                    drafts:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/PurchaseOrder'
       responses:
         '200':
-          description: Created draft
+          description: Created id(s)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PurchaseOrder'
+                type: object
+                properties:
+                  id:
+                    type: string
+                    description: Convenience when exactly one was created
+                  ids:
+                    type: array
+                    items:
+                      type: string
   /objects/backorderRequest/{id}:ignore:
     post:
       tags:
@@ -2851,21 +2856,22 @@ components:
               items:
                 $ref: '#/components/schemas/PurchaseOrderLine'
     SuggestPoResponse:
-      type: object
-      description: |
-        Result of /purchasing/suggest-po. When multiple vendors apply, returns { drafts: [...] }. For backward compatibility, servers MAY also include a single-draft alias in `draft`.
-      properties:
-        drafts:
-          type: array
-          items:
-            $ref: '#/components/schemas/PurchaseOrder'
-        draft:
-          type: object
-          allOf:
-            - $ref: '#/components/schemas/PurchaseOrder'
-          nullable: true
-      required:
-        - drafts
+      description: Single vendor returns `draft`; multi-vendor returns `drafts`.
+      oneOf:
+        - type: object
+          required:
+            - draft
+          properties:
+            draft:
+              $ref: '#/components/schemas/PurchaseOrder'
+        - type: object
+          required:
+            - drafts
+          properties:
+            drafts:
+              type: array
+              items:
+                $ref: '#/components/schemas/PurchaseOrder'
     PurchaseOrderReceiveRequest:
       type: object
       required:

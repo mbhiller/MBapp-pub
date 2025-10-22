@@ -545,7 +545,43 @@ const tests = {
     const pass = !!body.draft || count === 1;
     return { test:"backorders-bulk", result: pass ? "PASS" : "FAIL", body };
   },
+  "smoke:po:save-from-suggest": async ()=>{
+    await ensureBearer();
+    // Try to get a suggestion first; if not available, build a minimal draft
+    let draft;
+    try {
+      const sugg = await post(`/purchasing/suggest-po`, { requests: [{ productId: "prod-demo", qty: 1 }] }, { "Idempotency-Key": idem() });
+      draft = sugg.body?.draft ?? sugg.body?.drafts?.[0];
+    } catch {}
+    if (!draft) {
+      // SMF fallback draft (requires a vendorId that exists in your env)
+      draft = { vendorId: "vendor_demo", status: "draft", lines: [{ itemId: "ITEM_SMOKE", qty: 1 }] };
+    }
+    const r = await post(`/purchasing/po:create-from-suggestion`, { draft }, { "Idempotency-Key": idem() });
+    const id = r.body?.id ?? r.body?.ids?.[0];
+    const got = id ? await get(`/objects/purchaseOrder/${encodeURIComponent(id)}`) : { ok:false, status:0, body:{} };
+    const pass = r.ok && !!id && got.ok && got.body?.status === "draft";
+    return { test:"po:save-from-suggest", result:pass?"PASS":"FAIL", create:r, get:got };
+  },
 
+  "smoke:po:quick-receive": async ()=>{
+    await ensureBearer();
+    // Create a simple draft, then approve to allow receive, or reuse your env’s flow
+    const { vendorId } = await seedVendor(api);
+    const create = await post(`/objects/purchaseOrder`, {
+      type:"purchaseOrder", status:"draft", vendorId,
+      lines:[{ id:"P1", itemId:"ITEM_QR", uom:"ea", qty:2 }]
+    });
+    const id = create.body?.id;
+    await post(`/purchasing/po/${encodeURIComponent(id)}:submit`, {}, { "Idempotency-Key": idem() });
+    await post(`/purchasing/po/${encodeURIComponent(id)}:approve`, {}, { "Idempotency-Key": idem() });
+    // Receive-all via existing endpoint
+    const po = await get(`/objects/purchaseOrder/${encodeURIComponent(id)}`);
+    const lines = (po.body?.lines ?? []).map((ln)=>({ lineId:String(ln.id ?? ln.lineId), deltaQty:Math.max(0,(ln.qty||0)-(ln.receivedQty||0))})).filter(l=>l.deltaQty>0);
+    const rec = await post(`/purchasing/po/${encodeURIComponent(id)}:receive`, { lines }, { "Idempotency-Key": idem() });
+    const pass = create.ok && rec.ok;
+    return { test:"po:quick-receive", result: pass?"PASS":"FAIL", create, rec };
+  },
   "smoke:epc:resolve": async ()=>{
     await ensureBearer();
     // minimal assertion: unknown EPC returns 404 (happy-path added when EPC seeds exist)

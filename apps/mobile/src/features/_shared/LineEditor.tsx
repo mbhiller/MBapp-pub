@@ -1,6 +1,6 @@
 import React from "react";
 import { View, Text, Pressable, TextInput } from "react-native";
-import { useColors } from "./../useColors";
+import { useColors } from "./useColors";
 
 export type LineId = string;
 export type Line = {

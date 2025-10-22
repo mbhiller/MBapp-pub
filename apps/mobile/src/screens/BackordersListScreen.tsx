@@ -2,9 +2,9 @@
 import * as React from "react";
 import { View, Text, Pressable, FlatList, ActivityIndicator, TextInput, Alert } from "react-native";
 import { useNavigation } from "@react-navigation/native";
-import { useObjectsList } from "../features/_shared/useObjectsList";
+import { useObjects } from "../features/_shared/useObjects";
 import { apiClient } from "../api/client";
-import DraftChooserModal, { PurchaseOrderDraft as Draft } from "../features/purchaseOrders/DraftChooserModal";
+import DraftChooserModal, { PurchaseOrderDraft as Draft } from "../features/purchasing/DraftChooserModal";
 
 type Row = { id: string; itemId: string; qty: number; status: string; preferredVendorId?: string | null };
 
@@ -14,8 +14,8 @@ export default function BackordersListScreen() {
   const [selected, setSelected] = React.useState<Record<string, boolean>>({});
   const [chooserOpen, setChooserOpen] = React.useState(false);
   const [chooserDrafts, setChooserDrafts] = React.useState<Draft[]>([]);
-  const query = useObjectsList<Row>({ type: "backorderRequest", q: "open" });
-  const items = (query.data?.pages ?? []).flatMap((p: any) => p.items ?? []) as Row[];
+  const query = useObjects<Row>({ type: "backorderRequest", q: "open" });
+  const items: Row[] = query.data?.items ?? [];
 
   const filtered = vendorFilter.trim()
     ? items.filter((r) => (r as any)?.preferredVendorId === vendorFilter.trim())
@@ -31,7 +31,7 @@ export default function BackordersListScreen() {
     for (const id of picks) {
       await apiClient.post(`/objects/backorderRequest/${encodeURIComponent(id)}:${action}`, {});
     }
-    await query.refetchStable();
+    await query.refetch();
 
     // If converting and vendor filter is set, offer suggest-po and drill to drafts.
     if (action === "convert") {
@@ -102,7 +102,9 @@ export default function BackordersListScreen() {
             }}
           >
             <Text style={{ fontWeight: "600" }}>{item.itemId}</Text>
-            <Text>Qty: {item.qty} • Status: {item.status}</Text>
+            <Text>
+              Qty: {item.qty} • Status: {item.status}
+            </Text>
             {"preferredVendorId" in item && item.preferredVendorId ? (
               <Text>Preferred Vendor: {String((item as any).preferredVendorId)}</Text>
             ) : null}

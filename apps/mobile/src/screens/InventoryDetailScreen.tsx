@@ -1,12 +1,12 @@
 import * as React from "react";
 import { View, Text, ActivityIndicator } from "react-native";
 import { useRoute } from "@react-navigation/native";
-import { useObject } from "../features/_shared/useObject";
+import { useObjects } from "../features/_shared/useObjects";
 
 export default function InventoryDetailScreen() {
   const route = useRoute<any>();
   const id = route.params?.id as string | undefined;
-  const { data, isLoading } = useObject<any>("inventory", id);
+  const { data, isLoading } = useObjects<any>({ type: "inventory", id });
 
   if (isLoading) return <ActivityIndicator />;
   return (

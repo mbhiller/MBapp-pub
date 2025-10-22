@@ -102,6 +102,8 @@ jobs:
           # Sprint F additions
           - "smoke:po:suggest-multivendor"
           - "smoke:backorders:bulk"
+          - "smoke:po:save-from-suggest"
+          - "smoke:po:quick-receive"
     env:
       MBAPP_API_BASE: ${{ secrets.MBAPP_API_BASE }}
       MBAPP_TENANT_ID: ${{ secrets.MBAPP_TENANT_ID }}

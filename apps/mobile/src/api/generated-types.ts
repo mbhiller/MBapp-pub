@@ -712,34 +712,8 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Persist a PurchaseOrder draft returned by suggest-po */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        draft?: components["schemas"]["PurchaseOrder"] | null;
-                        drafts?: components["schemas"]["PurchaseOrder"][];
-                    } | unknown | unknown;
-                };
-            };
-            responses: {
-                /** @description Created draft */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["PurchaseOrder"];
-                    };
-                };
-            };
-        };
+        /** Persist purchase order draft(s) created from suggestion */
+        post: operations["createPoFromSuggestion"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2288,11 +2262,11 @@ export interface components {
             };
             lines?: components["schemas"]["PurchaseOrderLine"][];
         };
-        /** @description Result of /purchasing/suggest-po. When multiple vendors apply, returns { drafts: [...] }. For backward compatibility, servers MAY also include a single-draft alias in `draft`.
-         *      */
+        /** @description Single vendor returns `draft`; multi-vendor returns `drafts`. */
         SuggestPoResponse: {
+            draft: components["schemas"]["PurchaseOrder"];
+        } | {
             drafts: components["schemas"]["PurchaseOrder"][];
-            draft?: components["schemas"]["PurchaseOrder"] | null;
         };
         PurchaseOrderReceiveRequest: {
             /** @deprecated */
@@ -3403,6 +3377,38 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    createPoFromSuggestion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    draft: components["schemas"]["PurchaseOrder"];
+                } | {
+                    drafts: components["schemas"]["PurchaseOrder"][];
+                };
+            };
+        };
+        responses: {
+            /** @description Created id(s) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Convenience when exactly one was created */
+                        id?: string;
+                        ids?: string[];
+                    };
+                };
+            };
         };
     };
     upsertRoutingGraph: {

@@ -1,19 +1,24 @@
 import * as React from "react";
 import { View, Text, TextInput, FlatList, Pressable, ActivityIndicator } from "react-native";
 import { useNavigation } from "@react-navigation/native";
-import { useObjectsList } from "../features/_shared/useObjectsList";
+import { useObjects } from "../features/_shared/useObjects";
 
 export default function InventoryListScreen() {
   const nav = useNavigation<any>();
   const [q, setQ] = React.useState("");
-  const { data, isLoading, refetch } = useObjectsList<any>({ type: "inventory", q });
+  const { data, isLoading, refetch } = useObjects<any>({ type: "inventory", q });
+
   React.useEffect(() => { refetch(); }, [q]);
-  const items = data?.pages?.flatMap((p: any) => p.items) ?? [];
+  const items = data?.items ?? [];
 
   return (
     <View style={{ flex: 1, padding: 12 }}>
-      <TextInput placeholder="Search inventory" value={q} onChangeText={setQ}
-        style={{ borderWidth: 1, borderRadius: 8, padding: 8, marginBottom: 8 }} />
+      <TextInput
+        placeholder="Search inventory"
+        value={q}
+        onChangeText={setQ}
+        style={{ borderWidth: 1, borderRadius: 8, padding: 8, marginBottom: 8 }}
+      />
       {isLoading ? <ActivityIndicator /> : (
         <FlatList
           data={items}

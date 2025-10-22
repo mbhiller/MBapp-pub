@@ -1,14 +1,14 @@
 import * as React from "react";
 import { View, Text, TextInput, FlatList, Pressable, ActivityIndicator } from "react-native";
 import { useNavigation } from "@react-navigation/native";
-import { useObjectsList } from "../features/_shared/useObjectsList";
+import { useObjects } from "../features/_shared/useObjects";
 
 export default function SalesOrdersListScreen() {
   const nav = useNavigation<any>();
   const [q, setQ] = React.useState("");
-  const { data, isLoading, refetch } = useObjectsList<any>({ type: "salesOrder", q });
+  const { data, isLoading, refetch } = useObjects<any>({ type: "salesOrder", q });
 
-  const items = data?.pages?.flatMap((p: any) => p.items) ?? [];
+  const items = data?.items ?? [];
   React.useEffect(() => { refetch(); }, [q]);
 
   return (

@@ -1,13 +1,13 @@
 import * as React from "react";
 import { View, Text, ActivityIndicator, FlatList } from "react-native";
 import { useRoute } from "@react-navigation/native";
-import { useObject } from "../features/_shared/useObject";
+import { useObjects } from "../features/_shared/useObjects";
 import { BackorderHeaderBadge, BackorderLineBadge } from "../features/backorders/BackorderBadges";
 
 export default function SalesOrderDetailScreen() {
   const route = useRoute<any>();
   const id = route.params?.id as string | undefined;
-  const { data, isLoading } = useObject<any>("salesOrder", id);
+  const { data, isLoading } = useObjects<any>({ type: "salesOrder", id });
 
   const so = data;
   const lines = (so?.lines ?? []) as any[];
