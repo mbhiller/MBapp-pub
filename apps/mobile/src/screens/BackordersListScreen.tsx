@@ -4,6 +4,7 @@ import { View, Text, Pressable, FlatList, ActivityIndicator, TextInput, Alert } 
 import { useNavigation } from "@react-navigation/native";
 import { useObjectsList } from "../features/_shared/useObjectsList";
 import { apiClient } from "../api/client";
+import DraftChooserModal, { PurchaseOrderDraft as Draft } from "../features/purchaseOrders/DraftChooserModal";
 
 type Row = { id: string; itemId: string; qty: number; status: string; preferredVendorId?: string | null };
 
@@ -11,6 +12,8 @@ export default function BackordersListScreen() {
   const nav = useNavigation<any>();
   const [vendorFilter, setVendorFilter] = React.useState<string>("");
   const [selected, setSelected] = React.useState<Record<string, boolean>>({});
+  const [chooserOpen, setChooserOpen] = React.useState(false);
+  const [chooserDrafts, setChooserDrafts] = React.useState<Draft[]>([]);
   const query = useObjectsList<Row>({ type: "backorderRequest", q: "open" });
   const items = (query.data?.pages ?? []).flatMap((p: any) => p.items ?? []) as Row[];
 
@@ -34,15 +37,17 @@ export default function BackordersListScreen() {
     if (action === "convert") {
       try {
         const reqs = picks.map((id) => ({ backorderRequestId: id }));
-        const res = await apiClient.post(`/purchasing/suggest-po`, {
+        const res = (await apiClient.post(`/purchasing/suggest-po`, {
           requests: reqs,
           vendorId: vendorFilter || null,
-        });
-        const j = await res.json();
-        const drafts = j?.drafts ?? (j?.draft ? [j.draft] : []);
-        if (drafts?.length) {
-          // Navigate to the first draft PO detail; caller can add a "Save" CTA to persist
+        })) as unknown as Response;
+        const j: any = await (res as any).json();
+        const drafts: Draft[] = Array.isArray(j?.drafts) ? j.drafts : (j?.draft ? [j.draft] : []);
+        if (drafts.length === 1) {
           nav.navigate("PurchaseOrderDetail", { id: drafts[0].id, mode: "draft" });
+        } else if (drafts.length > 1) {
+          setChooserDrafts(drafts);
+          setChooserOpen(true);
         }
       } catch (e) {
         Alert.alert("Draft creation", "Converted backorders; failed to open draft(s).");
@@ -55,6 +60,15 @@ export default function BackordersListScreen() {
 
   return (
     <View style={{ flex: 1, padding: 12 }}>
+      <DraftChooserModal
+        visible={chooserOpen}
+        drafts={chooserDrafts}
+        onPick={(d) => {
+          setChooserOpen(false);
+          nav.navigate("PurchaseOrderDetail", { id: d.id, mode: "draft" });
+        }}
+        onClose={() => setChooserOpen(false)}
+      />
       <Text style={{ fontWeight: "700", marginBottom: 8 }}>Backorders</Text>
 
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 }}>
