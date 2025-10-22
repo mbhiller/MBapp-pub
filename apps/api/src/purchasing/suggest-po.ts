@@ -4,97 +4,236 @@ import { GetCommand } from "@aws-sdk/lib-dynamodb";
 import { ddb, tableObjects } from "../common/ddb";
 import { getObjectById } from "../objects/repo";
 
-type Req = { requests: { backorderRequestId: string }[]; vendorId?: string | null };
+/**
+ * Request body shape
+ */
+type SuggestPoReq = {
+  requests: { backorderRequestId: string }[];
+  /** If provided, force all drafted lines to this vendor (Party.id with vendor role). */
+  vendorId?: string | null;
+};
 
-const json = (s: number, b: unknown): APIGatewayProxyResultV2 => ({
-  statusCode: s,
+/**
+ * Outbound PO line (draft)
+ */
+type PurchaseOrderLine = {
+  itemId: string;
+  qty: number;
+  uom?: string;
+  /** Annotation for UI when MOQ bumps the quantity */
+  minOrderQtyApplied?: number;
+  adjustedFrom?: number;
+};
+
+/**
+ * Outbound PO (draft, not persisted)
+ */
+type PurchaseOrderDraft = {
+  id: string;
+  type: "purchaseOrder";
+  status: "draft";
+  /** This is Party.id with PartyRole=vendor */
+  vendorId: string;
+  currency: string;
+  lines: PurchaseOrderLine[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+const json = (statusCode: number, body: unknown): APIGatewayProxyResultV2 => ({
+  statusCode,
   headers: { "content-type": "application/json" },
-  body: JSON.stringify(b),
+  body: JSON.stringify(body),
 });
 
-// Key helpers
 const PK = process.env.MBAPP_TABLE_PK || "pk";
 const SK = process.env.MBAPP_TABLE_SK || "sk";
+
+/** Simple id generator for transient drafts */
 const poDraftId = () => "po_" + Math.random().toString(36).slice(2, 10);
+
+/**
+ * Load a BackorderRequest by id
+ */
+async function loadBackorder(tenantId: string, boId: string): Promise<any | null> {
+  const res = await ddb.send(
+    new GetCommand({
+      TableName: tableObjects,
+      Key: { [PK]: tenantId, [SK]: `backorderRequest#${boId}` },
+    })
+  );
+  return (res.Item as any) ?? null;
+}
+
+/**
+ * Load an inventory item to extract productId (works with either "inventory" or "inventoryItem" type)
+ */
+async function loadInventoryForProductId(tenantId: string, itemId: string): Promise<string | null> {
+  const invRes = await ddb.send(
+    new GetCommand({
+      TableName: tableObjects,
+      Key: { [PK]: tenantId, [SK]: `inventory#${itemId}` },
+    })
+  );
+  const inv = invRes.Item as any;
+  if (inv && (inv.type === "inventory" || inv.type === "inventoryItem")) {
+    return inv.productId ? String(inv.productId) : null;
+  }
+  return null;
+}
+
+/**
+ * Load product vendor preference and MOQ.
+ * Treats any of preferredVendorId/vendorId/defaultVendorId as a Party.id (vendor role).
+ */
+async function loadProductVendorAndMoq(
+  tenantId: string,
+  productId: string
+): Promise<{ vendorId: string | null; moq: number | null }> {
+  const prod = (await getObjectById({
+    tenantId,
+    type: "product",
+    id: String(productId),
+    fields: ["preferredVendorId", "vendorId", "defaultVendorId", "minOrderQty", "moq"],
+  }).catch(() => null)) as
+    | null
+    | {
+        preferredVendorId?: string | null;
+        vendorId?: string | null;
+        defaultVendorId?: string | null;
+        minOrderQty?: number | null;
+        moq?: number | null;
+      };
+
+  const vendorId =
+    (prod?.preferredVendorId ??
+      prod?.vendorId ??
+      prod?.defaultVendorId ??
+      null) || null;
+
+  const moq =
+    typeof prod?.minOrderQty === "number"
+      ? prod!.minOrderQty
+      : typeof prod?.moq === "number"
+      ? (prod as any).moq
+      : null;
+
+  return { vendorId, moq };
+}
 
 export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   const auth: any = (event as any).requestContext?.authorizer?.mbapp || {};
   const tenantId: string = auth.tenantId;
+  const body: SuggestPoReq = event.body ? JSON.parse(event.body) : { requests: [] };
 
-  const body: Req = event.body ? JSON.parse(event.body) : { requests: [] };
-  const ids = (body.requests || []).map(r => r.backorderRequestId).filter(Boolean);
-  if (ids.length === 0) return json(400, { message: "requests[] required" });
-
-  // Load BackorderRequests
-  const bos = await Promise.all(ids.map(id => getObjectById({ tenantId, type: "backorderRequest", id }).catch(() => null)));
-  const open = bos.filter(Boolean).filter((r: any) => r.status === "open") as any[];
-
-  if (open.length === 0) return json(400, { message: "No open backorder requests" });
-
-  // Resolve vendor per item via Product.preferredVendorId; fallback to input vendorId
-  const groups = new Map<string, any[]>(); // vendorId -> items
-  for (const r of open) {
-    const inv = await getObjectById({ tenantId, type: "inventory", id: r.itemId }).catch(() => null);
-    const productId = (inv as any)?.productId;
-    let vendor = null as string | null;
-    if (productId) {
-      const product = await getObjectById({ tenantId, type: "product", id: productId }).catch(() => null);
-      vendor = (product as any)?.preferredVendorId || null;
-      // Skip do-not-reorder
-      if ((product as any)?.reorderEnabled === false) continue;
-    }
-    vendor = vendor ?? (body.vendorId ?? null);
-    if (!vendor) return json(400, { message: `vendorId required for item ${r.itemId}` });
-
-    const list = groups.get(vendor) || [];
-    list.push({ ...r });
-    groups.set(vendor, list);
+  if (!Array.isArray(body.requests) || body.requests.length === 0) {
+    return json(400, { message: "requests[] required" });
   }
 
-  // For this endpoint, return a single PO draft if a single vendor was determined,
-  // else error (multi-vendor split UX deferred per plan).
-  if (groups.size !== 1) {
-    return json(400, { message: "Multiple vendors in selection; call per vendor or provide vendorId" });
-  }
-  const [vendorId, rows] = Array.from(groups.entries())[0];
+  // Gather BO items with derived vendor + MOQ
+  const gathered: {
+    boId: string;
+    itemId: string;
+    qty: number;
+    preferredVendorId: string | null;
+    minOrderQty: number | null;
+  }[] = [];
 
-  // Roll-up by itemId and round up to minOrderQty when applicable
-  const roll = new Map<string, { itemId: string; qty: number; minOrderQty?: number | null }>();
-  for (const r of rows) {
-    const key = r.itemId;
-    const cur = roll.get(key) || { itemId: key, qty: 0 };
-    cur.qty += Number(r.qty || 0);
-    roll.set(key, cur);
-  }
+  for (const r of body.requests) {
+    const bo = await loadBackorder(tenantId, r.backorderRequestId);
+    if (!bo || bo.type !== "backorderRequest") continue;
 
-  const lines = [] as any[];
-  for (const { itemId, qty } of roll.values()) {
-    let finalQty = qty;
-    // Pull Product.minOrderQty if available
-    const inv = await getObjectById({ tenantId, type: "inventory", id: itemId }).catch(() => null);
-    const productId = (inv as any)?.productId;
+    // Accept "open" or "converted" (bulk flow converts then suggests). Skip only explicit ignores.
+    if (bo.status === "ignored") continue;
+
+    let preferredVendorId: string | null = bo?.preferredVendorId ?? null;
     let minOrderQty: number | null = null;
-    if (productId) {
-      const product = await getObjectById({ tenantId, type: "product", id: productId }).catch(() => null);
-      minOrderQty = (product as any)?.minOrderQty ?? null;
+
+    // Derive vendor & MOQ if not present on BO
+    if (!preferredVendorId) {
+      const itemId = bo.itemId ? String(bo.itemId) : null;
+      let productId: string | null = bo.productId ?? null;
+
+      if (!productId && itemId) {
+        productId = await loadInventoryForProductId(tenantId, itemId);
+      }
+
+      if (productId) {
+        const { vendorId, moq } = await loadProductVendorAndMoq(tenantId, productId);
+        preferredVendorId = vendorId;
+        minOrderQty = moq;
+      }
     }
-    if (typeof minOrderQty === "number" && minOrderQty > 0 && finalQty < minOrderQty) {
-      finalQty = minOrderQty;
-    }
-    lines.push({ id: "ln_" + Math.random().toString(36).slice(2, 8), itemId, qty: finalQty, uom: "ea" });
+
+    gathered.push({
+      boId: bo.id,
+      itemId: String(bo.itemId ?? bo.productId ?? ""),
+      qty: Number(bo.qty ?? 0),
+      preferredVendorId,
+      minOrderQty,
+    });
   }
 
-  const draft = {
-    id: poDraftId(),
-    type: "purchaseOrder",
-    vendorId,
-    status: "draft",
-    currency: "USD",
-    lines,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    // optional annotations for the UI could be added later
-  };
+  if (gathered.length === 0) {
+    return json(200, { drafts: [] });
+  }
 
-  return json(200, draft);
+  // Group lines by vendor. If request.vendorId is provided, force single-vendor grouping.
+  const V_UNKNOWN = "__unknown__";
+  const groupKey = (v?: string | null) => (v && v.trim() ? v : V_UNKNOWN);
+
+  const groups = new Map<string, PurchaseOrderLine[]>();
+
+  for (const it of gathered) {
+    const forcedVendor = body.vendorId ?? null;
+    const key = groupKey(forcedVendor ?? it.preferredVendorId);
+
+    const baseQty = Math.max(0, Number(it.qty || 0));
+    const bumpedQty =
+      it.minOrderQty && baseQty > 0 && baseQty < it.minOrderQty ? it.minOrderQty : baseQty;
+
+    const line: PurchaseOrderLine = {
+      itemId: it.itemId,
+      qty: bumpedQty,
+    };
+    if (it.minOrderQty && baseQty < it.minOrderQty) {
+      line.minOrderQtyApplied = it.minOrderQty;
+      line.adjustedFrom = baseQty;
+    }
+
+    const arr = groups.get(key) ?? [];
+    const existing = arr.find((l) => l.itemId === line.itemId);
+    if (existing) {
+      existing.qty += line.qty;
+    } else {
+      arr.push(line);
+    }
+    groups.set(key, arr);
+  }
+
+  // Emit drafts
+  const now = new Date().toISOString();
+  const drafts: PurchaseOrderDraft[] = [];
+
+  for (const [key, lines] of groups.entries()) {
+    const vendorId =
+      key === V_UNKNOWN ? (body.vendorId ?? "") : key; // empty string if unknown and no forced vendor
+
+    drafts.push({
+      id: poDraftId(),
+      type: "purchaseOrder",
+      status: "draft",
+      vendorId,
+      currency: "USD",
+      lines,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  // If exactly one draft, return both the array and a single-draft alias for backward compatibility.
+  if (drafts.length === 1) {
+    return json(200, { draft: drafts[0], drafts });
+  }
+  return json(200, { drafts });
 }

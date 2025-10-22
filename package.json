@@ -30,7 +30,9 @@
     "smoke:backorders:worklist":"node ops/smoke/smoke.mjs smoke:backorders:worklist",
     "smoke:backorders:ignore-convert":"node ops/smoke/smoke.mjs smoke:backorders:ignore-convert",
     "smoke:po:suggest-draft":"node ops/smoke/smoke.mjs smoke:po:suggest-draft",
-    "smoke:epc:resolve":"node ops/smoke/smoke.mjs smoke:epc:resolve"
+    "smoke:epc:resolve":"node ops/smoke/smoke.mjs smoke:epc:resolve",
+    "smoke:po:suggest-multivendor":"node ops/smoke/smoke.mjs smoke:po:suggest-multivendor",
+    "smoke:backorders:bulk":"node ops/smoke/smoke.mjs smoke:backorders:bulk"
   },
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "^3.882.0",

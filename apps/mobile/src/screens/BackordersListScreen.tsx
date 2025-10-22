@@ -1,40 +1,101 @@
-// List "open" BackorderRequest rows with Ignore/Convert actions.
+// List "open" BackorderRequest rows with bulk Ignore/Convert, vendor filter, and drill to created POs.
 import * as React from "react";
-import { View, Text, Pressable, FlatList, ActivityIndicator } from "react-native";
+import { View, Text, Pressable, FlatList, ActivityIndicator, TextInput, Alert } from "react-native";
+import { useNavigation } from "@react-navigation/native";
 import { useObjectsList } from "../features/_shared/useObjectsList";
 import { apiClient } from "../api/client";
 
-export default function BackordersListScreen() {
-  const { data, isLoading, refetch } = useObjectsList<any>({ type: "backorderRequest", q: "open" });
-  const items = data?.pages?.flatMap((p: any) => p.items) ?? [];
+type Row = { id: string; itemId: string; qty: number; status: string; preferredVendorId?: string | null };
 
-  async function act(id: string, action: "ignore" | "convert") {
-    await apiClient.post(`/objects/backorderRequest/${encodeURIComponent(id)}:${action}`, {});
-    await refetch();
+export default function BackordersListScreen() {
+  const nav = useNavigation<any>();
+  const [vendorFilter, setVendorFilter] = React.useState<string>("");
+  const [selected, setSelected] = React.useState<Record<string, boolean>>({});
+  const query = useObjectsList<Row>({ type: "backorderRequest", q: "open" });
+  const items = (query.data?.pages ?? []).flatMap((p: any) => p.items ?? []) as Row[];
+
+  const filtered = vendorFilter.trim()
+    ? items.filter((r) => (r as any)?.preferredVendorId === vendorFilter.trim())
+    : items;
+
+  function toggle(id: string) {
+    setSelected((s) => ({ ...s, [id]: !s[id] }));
   }
 
-  if (isLoading) return <ActivityIndicator />;
+  async function bulk(action: "ignore" | "convert") {
+    const picks = Object.keys(selected).filter((k) => selected[k]);
+    if (picks.length === 0) return;
+    for (const id of picks) {
+      await apiClient.post(`/objects/backorderRequest/${encodeURIComponent(id)}:${action}`, {});
+    }
+    await query.refetchStable();
+
+    // If converting and vendor filter is set, offer suggest-po and drill to drafts.
+    if (action === "convert") {
+      try {
+        const reqs = picks.map((id) => ({ backorderRequestId: id }));
+        const res = await apiClient.post(`/purchasing/suggest-po`, {
+          requests: reqs,
+          vendorId: vendorFilter || null,
+        });
+        const j = await res.json();
+        const drafts = j?.drafts ?? (j?.draft ? [j.draft] : []);
+        if (drafts?.length) {
+          // Navigate to the first draft PO detail; caller can add a "Save" CTA to persist
+          nav.navigate("PurchaseOrderDetail", { id: drafts[0].id, mode: "draft" });
+        }
+      } catch (e) {
+        Alert.alert("Draft creation", "Converted backorders; failed to open draft(s).");
+      }
+    }
+    setSelected({});
+  }
+
+  if (query.isLoading) return <ActivityIndicator />;
 
   return (
-    <FlatList
-      data={items}
-      keyExtractor={(it) => it.id}
-      contentContainerStyle={{ padding: 12 }}
-      renderItem={({ item }) => (
-        <View style={{ padding: 10, borderWidth: 1, borderRadius: 8, marginBottom: 10 }}>
-          <Text style={{ fontWeight: "600" }}>{item.itemId}</Text>
-          <Text>SO: {item.soId} • Line: {item.soLineId}</Text>
-          <Text>Qty: {item.qty} • Status: {item.status}</Text>
-          <View style={{ flexDirection: "row", gap: 10, marginTop: 8 }}>
-            <Pressable onPress={() => act(item.id, "ignore")} style={{ padding: 6 }}>
-              <Text>Ignore</Text>
-            </Pressable>
-            <Pressable onPress={() => act(item.id, "convert")} style={{ padding: 6 }}>
-              <Text>Convert</Text>
-            </Pressable>
-          </View>
-        </View>
-      )}
-    />
+    <View style={{ flex: 1, padding: 12 }}>
+      <Text style={{ fontWeight: "700", marginBottom: 8 }}>Backorders</Text>
+
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <Text>Vendor:</Text>
+        <TextInput
+          value={vendorFilter}
+          onChangeText={setVendorFilter}
+          placeholder="vendorId (optional)"
+          style={{ flex: 1, borderWidth: 1, borderRadius: 6, padding: 8 }}
+        />
+        <Pressable onPress={() => bulk("ignore")} style={{ padding: 8, borderWidth: 1, borderRadius: 6 }}>
+          <Text>Ignore Selected</Text>
+        </Pressable>
+        <Pressable onPress={() => bulk("convert")} style={{ padding: 8, borderWidth: 1, borderRadius: 6 }}>
+          <Text>Convert Selected</Text>
+        </Pressable>
+      </View>
+
+      <FlatList
+        data={filtered}
+        keyExtractor={(r) => r.id}
+        renderItem={({ item }) => (
+          <Pressable
+            onPress={() => toggle(item.id)}
+            style={{
+              padding: 12,
+              borderWidth: 1,
+              borderRadius: 8,
+              marginBottom: 8,
+              backgroundColor: selected[item.id] ? "#00000010" : "transparent",
+            }}
+          >
+            <Text style={{ fontWeight: "600" }}>{item.itemId}</Text>
+            <Text>Qty: {item.qty} • Status: {item.status}</Text>
+            {"preferredVendorId" in item && item.preferredVendorId ? (
+              <Text>Preferred Vendor: {String((item as any).preferredVendorId)}</Text>
+            ) : null}
+            <Text>Tap to {selected[item.id] ? "unselect" : "select"}</Text>
+          </Pressable>
+        )}
+      />
+    </View>
   );
 }

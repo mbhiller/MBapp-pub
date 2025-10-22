@@ -53,7 +53,8 @@ export default function ItemSelectorModal({
   const [busy, setBusy] = useState(false);
   const [rows, setRows] = useState<ResultItem[]>([]);
   const [open, setOpen] = useState(true);
-  const mounted = useRef(true);
+  const mounted = useRef(false);
+  const stopOnSelect = useRef(false); // prevents re-open after pick
 
   const typeKey = mode === "item" ? "inventoryItems" : "products";
   const hint = placeholder ?? (mode === "item" ? "Search items (sku, code, name)..." : "Search products...");
@@ -64,6 +65,7 @@ export default function ItemSelectorModal({
   }, []);
 
   async function runSearch(query: string) {
+    if (stopOnSelect.current) return; // suppress searches after selection
     setBusy(true);
     try {
       const body: Obj = { q: query, ...filters };
@@ -104,11 +106,11 @@ export default function ItemSelectorModal({
             <Pressable
               key={`${ri.type}:${ri.id}`}
               onPress={() => {
-                onSelect(ri);
-                // Immediately close & freeze; parent will close modal
-                setOpen(false);
+                stopOnSelect.current = true;
                 Keyboard.dismiss();
-                onClose();
+                setOpen(false);         // collapse the list immediately
+                onSelect(ri);           // <-- use the actual prop name from this component
+                onClose?.();            // close the modal right away
               }}
               style={{ padding: 12, borderBottomWidth: 1, borderBottomColor: t.colors.border, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
             >

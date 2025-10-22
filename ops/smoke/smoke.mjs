@@ -493,6 +493,59 @@ const tests = {
     return { test:"po-suggest-draft", result: pass?"PASS":"FAIL", vendorId:draft.vendorId, lines:draft.lines, expectations:{ okItemQty:10, excludeDNR:true } };
   },
 
+  /* ===================== Sprint F: Multi-vendor Suggest + Backorders Bulk ===================== */
+  "smoke:po:suggest-multivendor": async ()=>{
+    await ensureBearer();
+    // Seed two vendors and two products/items tied to different vendors
+    const { vendorId: vA } = await seedVendor(api);
+    const { vendorId: vB } = await seedVendor(api);
+
+    const prodA = await post(`/objects/product`, { type:"product", name:"MV-A", preferredVendorId: vA });
+    const prodB = await post(`/objects/product`, { type:"product", name:"MV-B", preferredVendorId: vB });
+    if (!prodA.ok || !prodB.ok) return { test:"po-suggest-multivendor", result:"FAIL", prodA, prodB };
+
+    const invA = await post(`/objects/inventory`, { type:"inventory", name:"Item-A", productId: prodA.body.id, uom:"ea" });
+    const invB = await post(`/objects/inventory`, { type:"inventory", name:"Item-B", productId: prodB.body.id, uom:"ea" });
+    if (!invA.ok || !invB.ok) return { test:"po-suggest-multivendor", result:"FAIL", invA, invB };
+
+    // Create open backorders that point to each product/item
+    const boA = await post(`/objects/backorderRequest`, { type:"backorderRequest", soId:"so_mv", soLineId:"lnA", itemId: invA.body.id, qty: 2, status:"open", preferredVendorId: vA });
+    const boB = await post(`/objects/backorderRequest`, { type:"backorderRequest", soId:"so_mv", soLineId:"lnB", itemId: invB.body.id, qty: 3, status:"open", preferredVendorId: vB });
+    if (!boA.ok || !boB.ok) return { test:"po-suggest-multivendor", result:"FAIL", boA, boB };
+
+    const sugg = await post(`/purchasing/suggest-po`, { requests: [{ backorderRequestId: boA.body.id }, { backorderRequestId: boB.body.id }] });
+    if (!sugg.ok) return { test:"po-suggest-multivendor", result:"FAIL", status:sugg.status, body:sugg.body };
+    const drafts = Array.isArray(sugg.body?.drafts) ? sugg.body.drafts : (sugg.body?.draft ? [sugg.body.draft] : []);
+    const pass = drafts.length >= 2;
+    return { test:"po-suggest-multivendor", result: pass ? "PASS" : "FAIL", draftCount: drafts.length, body: sugg.body };
+  },
+
+  "smoke:backorders:bulk": async ()=>{
+    await ensureBearer();
+    const { vendorId } = await seedVendor(api);
+    const prod = await post(`/objects/product`, { type:"product", name:"Bulk-BO", preferredVendorId: vendorId });
+    if (!prod.ok) return { test:"backorders-bulk", result:"FAIL", prod };
+    const item = await post(`/objects/inventory`, { type:"inventory", name:"Bulk-Item", productId: prod.body.id, uom:"ea" });
+    if (!item.ok) return { test:"backorders-bulk", result:"FAIL", item };
+
+    const ids = [];
+    for (let i = 0; i < 4; i++) {
+      const bo = await post(`/objects/backorderRequest`, { type:"backorderRequest", soId:"so_bulk", soLineId:`ln${i}`, itemId: item.body.id, qty: 1+i, status:"open", preferredVendorId: vendorId });
+      if (!bo.ok) return { test:"backorders-bulk", result:"FAIL", index:i, bo };
+      ids.push(bo.body.id);
+    }
+    for (const id of ids) {
+      const conv = await post(`/objects/backorderRequest/${encodeURIComponent(id)}:convert`, {});
+      if (!conv.ok) return { test:"backorders-bulk", result:"FAIL", at:id, convert:conv };
+    }
+    const sugg = await post(`/purchasing/suggest-po`, { requests: ids.map(id => ({ backorderRequestId:id })), vendorId });
+    if (!sugg.ok) return { test:"backorders-bulk", result:"FAIL", status:sugg.status, body:sugg.body };
+    const body = sugg.body || {};
+    const count = body.draft ? 1 : (Array.isArray(body.drafts) ? body.drafts.length : 0);
+    const pass = !!body.draft || count === 1;
+    return { test:"backorders-bulk", result: pass ? "PASS" : "FAIL", body };
+  },
+
   "smoke:epc:resolve": async ()=>{
     await ensureBearer();
     // minimal assertion: unknown EPC returns 404 (happy-path added when EPC seeds exist)

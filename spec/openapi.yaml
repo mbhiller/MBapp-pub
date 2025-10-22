@@ -899,11 +899,11 @@ paths:
                   nullable: true
       responses:
         '200':
-          description: Draft PO (not persisted)
+          description: One or more purchase order drafts (not persisted)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PurchaseOrder'
+                $ref: '#/components/schemas/SuggestPoResponse'
   /purchasing/po:create-from-suggestion:
     post:
       tags:
@@ -915,11 +915,22 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                - draft
+              description: Accepts a single draft (legacy) or multiple drafts.
               properties:
                 draft:
-                  $ref: '#/components/schemas/PurchaseOrder'
+                  type: object
+                  allOf:
+                    - $ref: '#/components/schemas/PurchaseOrder'
+                  nullable: true
+                drafts:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/PurchaseOrder'
+              anyOf:
+                - required:
+                    - draft
+                - required:
+                    - drafts
       responses:
         '200':
           description: Created draft
@@ -1743,6 +1754,10 @@ components:
           type: string
           enum:
             - backorderRequest
+        preferredVendorId:
+          type: string
+          nullable: true
+          description: Optional denormalized vendor preference for UI filtering
         soId:
           type: string
         soLineId:
@@ -2835,6 +2850,22 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/PurchaseOrderLine'
+    SuggestPoResponse:
+      type: object
+      description: |
+        Result of /purchasing/suggest-po. When multiple vendors apply, returns { drafts: [...] }. For backward compatibility, servers MAY also include a single-draft alias in `draft`.
+      properties:
+        drafts:
+          type: array
+          items:
+            $ref: '#/components/schemas/PurchaseOrder'
+        draft:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/PurchaseOrder'
+          nullable: true
+      required:
+        - drafts
     PurchaseOrderReceiveRequest:
       type: object
       required:

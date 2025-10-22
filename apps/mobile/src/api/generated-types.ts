@@ -686,13 +686,13 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description Draft PO (not persisted) */
+                /** @description One or more purchase order drafts (not persisted) */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["PurchaseOrder"];
+                        "application/json": components["schemas"]["SuggestPoResponse"];
                     };
                 };
             };
@@ -723,8 +723,9 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
-                        draft: components["schemas"]["PurchaseOrder"];
-                    };
+                        draft?: components["schemas"]["PurchaseOrder"] | null;
+                        drafts?: components["schemas"]["PurchaseOrder"][];
+                    } | unknown | unknown;
                 };
             };
             responses: {
@@ -1802,6 +1803,8 @@ export interface components {
             id: string;
             /** @enum {string} */
             type: "backorderRequest";
+            /** @description Optional denormalized vendor preference for UI filtering */
+            preferredVendorId?: string | null;
             soId: string;
             soLineId: string;
             itemId: string;
@@ -2284,6 +2287,12 @@ export interface components {
                 country?: string;
             };
             lines?: components["schemas"]["PurchaseOrderLine"][];
+        };
+        /** @description Result of /purchasing/suggest-po. When multiple vendors apply, returns { drafts: [...] }. For backward compatibility, servers MAY also include a single-draft alias in `draft`.
+         *      */
+        SuggestPoResponse: {
+            drafts: components["schemas"]["PurchaseOrder"][];
+            draft?: components["schemas"]["PurchaseOrder"] | null;
         };
         PurchaseOrderReceiveRequest: {
             /** @deprecated */
