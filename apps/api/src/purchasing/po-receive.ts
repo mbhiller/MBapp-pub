@@ -1,6 +1,11 @@
+// apps/api/src/purchasing/po-receive.ts
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
 import { ddb, tableObjects } from "../common/ddb";
 import { GetCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
+import { getObjectById } from "../objects/repo";
+import { getPurchaseOrder, updatePurchaseOrder } from "../shared/db";
+import { featureVendorGuardEnabled, featureEventsSimulate } from "../flags";
+import { maybeDispatch } from "../events/dispatcher";
 
 /** Utilities */
 const json = (statusCode: number, body: any): APIGatewayProxyResultV2 => ({
@@ -11,8 +16,11 @@ const json = (statusCode: number, body: any): APIGatewayProxyResultV2 => ({
 const parse = <T = any>(e: APIGatewayProxyEventV2): T => { try { return JSON.parse(e.body || "{}"); } catch { return {} as any; } };
 function rid(prefix = "mv") { return `${prefix}_${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36).slice(-4)}`; }
 function tid(e: APIGatewayProxyEventV2): string | null {
-  const t = (e.requestContext as any)?.authorizer?.jwt?.claims?.["custom:tenantId"]
-    || e.headers?.["x-tenant-id"] || e.headers?.["X-Tenant-Id"];
+  const mb = (e as any)?.requestContext?.authorizer?.mbapp?.tenantId;
+  if (mb) return String(mb);
+  const claim = (e as any)?.requestContext?.authorizer?.jwt?.claims?.["custom:tenantId"];
+  const hdr = e.headers?.["x-tenant-id"] || e.headers?.["X-Tenant-Id"];
+  const t = mb || claim || hdr;
   return t ? String(t) : null;
 }
 
@@ -41,7 +49,12 @@ function canonicalizeLines(lines: LineReq[]) {
     lot: l.lot ?? undefined,
     locationId: (l as any).location ?? l.locationId ?? undefined,
   }));
-  norm.sort((a, b) => a.lineId.localeCompare(b.lineId) || a.deltaQty - b.deltaQty || String(a.lot ?? "").localeCompare(String(b.lot ?? "")) || String(a.locationId ?? "").localeCompare(String(b.locationId ?? "")));
+  norm.sort((a, b) =>
+    a.lineId.localeCompare(b.lineId) ||
+    a.deltaQty - b.deltaQty ||
+    String(a.lot ?? "").localeCompare(String(b.lot ?? "")) ||
+    String(a.locationId ?? "").localeCompare(String(b.locationId ?? ""))
+  );
   return JSON.stringify(norm);
 }
 function hashStr(s: string) {
@@ -63,13 +76,9 @@ async function markAppliedSig(tenantId: string, poId: string, sig: string) {
   }));
 }
 
-/** Load PO and received totals */
+/** Load PO via shared DB (keeps status in the same store as submit/approve) */
 async function loadPO(tenantId: string, poId: string) {
-  const got = await ddb.send(new GetCommand({
-    TableName: tableObjects,
-    Key: { pk: tenantId, sk: `purchaseOrder#${poId}` } as any,
-  }));
-  return (got.Item as any) ?? null;
+  return await getPurchaseOrder(tenantId, poId);
 }
 
 async function receivedSoFar(tenantId: string, poId: string): Promise<Record<string, number>> {
@@ -123,6 +132,23 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
       return json(200, fresh ?? po);
     }
 
+    // --- Vendor guard (friendly 400s) ----------------------------------------
+    if (featureVendorGuardEnabled(event)) {
+      if (!po.vendorId) {
+        return json(400, { message: "Vendor required", code: "VENDOR_REQUIRED" });
+      }
+      try {
+        const party = await getObjectById({ tenantId, type: "party", id: String(po.vendorId) });
+        const hasVendorRole = Array.isArray((party as any)?.roles) && (party as any).roles.includes("vendor");
+        if (!hasVendorRole) {
+          return json(400, { message: "Selected party is not a vendor", code: "VENDOR_ROLE_MISSING" });
+        }
+      } catch {
+        return json(400, { message: "Vendor required", code: "VENDOR_REQUIRED" });
+      }
+    }
+    // -------------------------------------------------------------------------
+
     const linesById = new Map<string, any>((po.lines ?? []).map((ln: any) => [String(ln.id ?? ln.lineId), ln]));
 
     // Over-receive guard
@@ -171,14 +197,41 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     }
     const nextStatus = allFull ? "fulfilled" : "partially_fulfilled";
 
-    const updated = { ...po, status: nextStatus, updatedAt: now };
-    await ddb.send(new PutCommand({ TableName: tableObjects, Item: updated as any }));
+    // Persist PO status using the same helper as submit/approve
+    const updated = await updatePurchaseOrder(id, tenantId, { status: nextStatus } as any);
 
     // Mark idempotency AFTER successful write (both key and payload signature)
     if (idk) await markAppliedKey(tenantId, po.id, idk);
     await markAppliedSig(tenantId, po.id, sig);
 
-    return json(200, updated);
+    // Emit system events (no-op dispatcher; safe even without a bus)
+    const simulateEmit = featureEventsSimulate(event);
+    try {
+      const nowIso = now;
+      await maybeDispatch(event, { type: "po.received", payload: { poId: String(po.id), actorId: null, at: nowIso } });
+      for (const r of reqLines) {
+        const qty = Number(r.deltaQty ?? 0);
+        if (qty > 0) {
+          await maybeDispatch(event, {
+            type: "po.line.received",
+            payload: {
+              poId: String(po.id),
+              lineId: String(r.lineId),
+              qty,
+              lot: r.lot,
+              locationId: (r as any).location ?? r.locationId ?? undefined,
+              actorId: null,
+              at: nowIso,
+            },
+          });
+        }
+      }
+    } catch (e) {
+      console.warn("dispatchEvent failed", e);
+    }
+
+    const out = simulateEmit ? { ...updated, _dev: { emitted: true } } : updated;
+    return json(200, out);
   } catch (err: any) {
     console.error(err);
     return json(500, { message: err?.message ?? "Internal Server Error" });

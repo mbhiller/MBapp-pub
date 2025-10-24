@@ -1,30 +1,37 @@
-// apps/src/api/flags.ts
-// Minimal feature flags with header overrides. No envs needed.
-// Defaults:
-// - Vendor guard: ON
-// - Event dispatch: OFF
-// - Event simulate: OFF
-
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 
-function h(e: APIGatewayProxyEventV2, name: string): string | undefined {
-  const v = e.headers?.[name] ?? e.headers?.[name.toLowerCase()];
-  return typeof v === "string" ? v : undefined;
+const APP_ENV = (process.env.APP_ENV ?? process.env.NODE_ENV ?? "dev").toLowerCase();
+export const IS_PROD = APP_ENV === "prod" || APP_ENV === "production";
+
+function hdr(e: APIGatewayProxyEventV2, name: string) {
+  return e.headers?.[name] ?? e.headers?.[name.toLowerCase()];
 }
-function asBool(v: string | undefined, dflt: boolean): boolean {
-  if (!v) return dflt;
-  const s = v.toLowerCase();
-  if (["1", "true", "yes", "on"].includes(s)) return true;
-  if (["0", "false", "no", "off"].includes(s)) return false;
+function asBool(v: any, dflt: boolean) {
+  if (v == null) return dflt;
+  const s = String(v).toLowerCase();
+  if (["1","true","yes","on"].includes(s)) return true;
+  if (["0","false","no","off"].includes(s)) return false;
   return dflt;
 }
+function fromEnv(name: string, dflt: boolean) {
+  return asBool(process.env[name], dflt);
+}
 
-export function vendorGuardEnabled(event: APIGatewayProxyEventV2, dflt = true): boolean {
-  return asBool(h(event, "X-Feature-Enforce-Vendor"), dflt);
+// In PROD: ignore headers (env-only). In DEV/CI: header overrides env.
+function withFlag(envName: string, headerName: string, dflt: boolean) {
+  return (event: APIGatewayProxyEventV2) => {
+    const base = fromEnv(envName, dflt);
+    if (IS_PROD) return base;
+    return asBool(hdr(event, headerName), base);
+  };
 }
-export function eventDispatchEnabled(event: APIGatewayProxyEventV2, dflt = false): boolean {
-  return asBool(h(event, "X-Feature-Events-Enabled"), dflt);
-}
-export function eventSimulateEnabled(event: APIGatewayProxyEventV2, dflt = false): boolean {
-  return asBool(h(event, "X-Feature-Events-Simulate"), dflt);
-}
+
+export const featureVendorGuardEnabled = withFlag(
+  "FEATURE_ENFORCE_VENDOR_ROLE", "X-Feature-Enforce-Vendor", true
+);
+export const featureEventsEnabled = withFlag(
+  "FEATURE_EVENT_DISPATCH_ENABLED", "X-Feature-Events-Enabled", false
+);
+export const featureEventsSimulate = withFlag(
+  "FEATURE_EVENT_DISPATCH_SIMULATE", "X-Feature-Events-Simulate", false
+);

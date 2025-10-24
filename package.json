@@ -44,6 +44,10 @@
     "smoke:po:receive-line-idem-different-key":"node ops/smoke/smoke.mjs smoke:po:receive-line-idem-different-key",
     "smoke:objects:list-pagination":"node ops/smoke/smoke.mjs smoke:objects:list-pagination",
     "smoke:movements:filter-by-poLine":"node ops/smoke/smoke.mjs smoke:movements:filter-by-poLine",
+    "smoke:po:vendor-guard:on":"node ops/smoke/smoke.mjs smoke:po:vendor-guard:on",
+    "smoke:po:vendor-guard:off":"node ops/smoke/smoke.mjs smoke:po:vendor-guard:off",
+    "smoke:po:emit-events":"node ops/smoke/smoke.mjs smoke:po:emit-events",
+    "smoke:objects:pageInfo-present":"node ops/smoke/smoke.mjs smoke:objects:pageInfo-present",
     "smoke:epc:resolve":"node ops/smoke/smoke.mjs smoke:epc:resolve"
   },
   "devDependencies": {

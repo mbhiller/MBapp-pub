@@ -108,6 +108,10 @@ jobs:
           - "smoke:po:receive-line-idem-different-key"
           - "smoke:objects:list-pagination"
           - "smoke:movements:filter-by-poLine"
+          - "smoke:po:vendor-guard:on"
+          - "smoke:po:vendor-guard:off"
+          - "smoke:po:emit-events"
+          - "smoke:objects:pageInfo-present"
     env:
       MBAPP_API_BASE: ${{ secrets.MBAPP_API_BASE }}
       MBAPP_TENANT_ID: ${{ secrets.MBAPP_TENANT_ID }}

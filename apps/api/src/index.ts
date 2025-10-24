@@ -105,7 +105,8 @@ const corsOk = (): APIGatewayProxyResultV2 => ({
   headers: {
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "OPTIONS,GET,POST,PUT,DELETE",
-    "access-control-allow-headers": "Authorization,Content-Type,Idempotency-Key,X-Tenant-Id,Accept",
+    "access-control-allow-headers": "Authorization,Content-Type,Idempotency-Key,X-Tenant-Id,Accept,X-Feature-Enforce-Vendor,X-Feature-Events-Enabled,X-Feature-Events-Simulate",
+    
   },
 });
 

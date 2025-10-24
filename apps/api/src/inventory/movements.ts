@@ -24,6 +24,8 @@ export type InventoryMovement = {
   actorId?: string;
   refId?: string;
   poLineId?: string;
+  lot?: string;          // NEW: surface lot
+  locationId?: string;   // NEW: surface location
   docType?: "inventoryMovement";
   createdAt?: string;    // storage field (used only for sorting fallback)
 };
@@ -33,7 +35,7 @@ export type ListMovementsPage = {
   itemId: string;
   items: InventoryMovement[];
   next: string | null;
-  // NEW (optional): richer pagination metadata; clients may ignore
+  // Optional richer pagination metadata; clients may ignore
   pageInfo?: { hasNext?: boolean; nextCursor?: string | null; pageSize?: number };
 };
 
@@ -43,6 +45,10 @@ function respond(status: number, body: unknown) {
 }
 
 function getTenantId(event: any): string {
+  // Prefer authorizer if present, then headers, finally default
+  const auth = event?.requestContext?.authorizer?.mbapp?.tenantId
+           ||  event?.requestContext?.authorizer?.jwt?.claims?.["custom:tenantId"];
+  if (auth) return String(auth);
   const h = event?.headers || {};
   return h["X-Tenant-Id"] || h["x-tenant-id"] || h["X-tenant-id"] || h["x-Tenant-Id"] || "DemoTenant";
 }
@@ -68,52 +74,62 @@ async function repoListMovementsByItem(
   itemId: string,
   opts: ListOptions
 ): Promise<RepoOut> {
-  const limit = Math.max(1, Math.min(1000, opts.limit ?? 50));
+  const pageTarget = Math.max(1, Math.min(1000, opts.limit ?? 50));
   const skPrefix = "inventoryMovement#";
 
-  const cmd = new QueryCommand({
-    TableName: TABLE,
-    KeyConditionExpression: "pk = :pk AND begins_with(sk, :sk)",
-    ExpressionAttributeValues: { ":pk": tenantId, ":sk": skPrefix },
-    ExclusiveStartKey: decodeCursor(opts.next || undefined),
-    Limit: limit,
-    ScanIndexForward: (opts.sort ?? "desc") === "asc",
-  });
+  let items: InventoryMovement[] = [];
+  let lastKey = decodeCursor(opts.next || undefined);
+  // Safety cap so we don’t scan forever if a tenant has tons of data
+  const MAX_PAGES = 8;
 
-  const out = await ddb.send(cmd);
-  const raw = (out.Items ?? []) as any[];
+  for (let i = 0; i < MAX_PAGES && items.length < pageTarget; i++) {
+    const out = await ddb.send(new QueryCommand({
+      TableName: TABLE,
+      KeyConditionExpression: "pk = :pk AND begins_with(sk, :sk)",
+      ExpressionAttributeValues: { ":pk": tenantId, ":sk": skPrefix },
+      ExclusiveStartKey: lastKey,
+      // This is still lexicographic on sk; we’ll re-sort by timestamps in memory below
+      ScanIndexForward: (opts.sort ?? "desc") === "asc",
+      // We purposely fetch a fatter page because we local-filter by itemId
+      Limit: Math.min(pageTarget * 3, 300),
+    }));
 
-  // Filter to requested item + coerce to canonical shape
-  const items: InventoryMovement[] = raw
-    .filter((m) => m?.itemId === itemId)
-    .map((m) => {
-      // Accept verb from multiple legacy fields if needed
-      const action =
-        asAction(m?.action) ??
-        asAction(m?.movement) ??
-        asAction(m?.act) ??
-        asAction(m?.verb) ??
-        asAction(m?.type);
-      // Skip any rows that don't have a valid canonical action
-      if (!action) return undefined;
-      const out: InventoryMovement = {
-        id: String(m.id),
-        itemId: String(m.itemId),
-        action,                      // <- union type ensured
-        qty: Number(m.qty ?? 0),
-        at: m.at || m.createdAt,
-        note: m.note,
-        actorId: m.actorId,
-        refId: m.refId,
-        poLineId: m.poLineId,
-        docType: "inventoryMovement",
-        createdAt: m.createdAt,
-      };
-      return out;
-    })
-    .filter(Boolean) as InventoryMovement[];
+    const raw = (out.Items ?? []) as any[];
 
-  // Secondary in-memory sort (by at/createdAt) for stability
+    const pageItems: InventoryMovement[] = raw
+      .filter((m) => m?.itemId === itemId)
+      .map((m) => {
+        const action =
+          asAction(m?.action) ??
+          asAction(m?.movement) ??
+          asAction(m?.act) ??
+          asAction(m?.verb) ??
+          asAction(m?.type);
+        if (!action) return undefined;
+        return {
+          id: String(m.id),
+          itemId: String(m.itemId),
+          action,
+          qty: Number(m.qty ?? 0),
+          at: m.at || m.createdAt,
+          note: m.note,
+          actorId: m.actorId,
+          refId: m.refId,
+          poLineId: m.poLineId,
+          lot: m.lot,
+          locationId: m.locationId,
+          docType: "inventoryMovement",
+          createdAt: m.createdAt,
+        } as InventoryMovement;
+      })
+      .filter(Boolean) as InventoryMovement[];
+
+    items.push(...pageItems);
+    lastKey = out.LastEvaluatedKey;
+    if (!lastKey) break; // no more data
+  }
+
+  // In-memory stable sort by at/createdAt
   const dir = (opts.sort ?? "desc") === "asc" ? 1 : -1;
   items.sort((a, b) => {
     const ta = Date.parse(a.at ?? a.createdAt ?? "0");
@@ -122,9 +138,15 @@ async function repoListMovementsByItem(
     return ta < tb ? -1 * dir : 1 * dir;
   });
 
-  const next = encodeCursor(out.LastEvaluatedKey);
+  // Trim to the requested page size
+  items = items.slice(0, pageTarget);
+
+  // If we didn’t hit pageTarget but still have a LastEvaluatedKey, that means
+  // there may be more matches further; keep passing a cursor so clients can continue.
+  const next = encodeCursor(lastKey);
   return { items, next };
 }
+
 
 // ===== Reusable API for other modules =====
 export async function listMovementsByItem(
@@ -134,7 +156,7 @@ export async function listMovementsByItem(
 ): Promise<ListMovementsPage> {
   const { items, next } = await repoListMovementsByItem(tenantId, itemId, opts);
 
-  // Clean pass-through (already canonical), but keep a final cast so TS knows it's exact:
+  // Pass-through, but include poLineId + lot + locationId so clients/smokes can assert them.
   const clean: InventoryMovement[] = items.map((m) => ({
     id: m.id,
     itemId: m.itemId,
@@ -144,6 +166,9 @@ export async function listMovementsByItem(
     note: m.note,
     actorId: m.actorId,
     refId: m.refId,
+    poLineId: m.poLineId,        // keep
+    lot: m.lot,                  // keep
+    locationId: m.locationId,    // keep
     docType: "inventoryMovement",
   }));
 
@@ -160,10 +185,10 @@ export async function handle(event: any) {
   const qs = event?.queryStringParameters ?? {};
   const limit = Number.isFinite(+qs.limit) ? Math.max(1, Math.min(1000, +qs.limit)) : 50;
   const sort: SortDir = String(qs.sort ?? "desc").toLowerCase() === "asc" ? "asc" : "desc";
-  const next: string | undefined = qs.next || undefined;
+  const next: string | undefined = (qs.next || qs.cursor || qs.pageToken) || undefined; // accept aliases
   const refId: string | undefined = qs.refId || undefined;
   const poLineId: string | undefined = qs.poLineId || undefined;
-  
+
   const page = await listMovementsByItem(tenantId, id, { limit, sort, next });
   // Additive in-memory filters
   const items = page.items.filter(m => {

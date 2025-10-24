@@ -141,8 +141,12 @@ export function useObjects<T = any>(args: UseObjectsArgs): BaseState<any> {
   const reqToken = React.useRef(0);
 
   const computeHasNext = React.useCallback(
-    (pi?: PageInfo, legacy?: string | null) =>
-      !!(pi && (pi as any).nextCursor) || !!legacy,
+    (pi?: PageInfo, legacy?: string | null) => {
+      // Prefer explicit hasNext when present; otherwise fall back to cursors.
+      const explicit = (pi as any)?.hasNext;
+      if (typeof explicit === "boolean") return explicit;
+      return !!((pi as any)?.nextCursor) || !!legacy;
+    },
     []
   );
 
@@ -200,7 +204,7 @@ export function useObjects<T = any>(args: UseObjectsArgs): BaseState<any> {
         setNextLegacy(legacyNext);
       }
     } catch (e) {
-      if (reqToken.current !== reqToken.current) return;
+      if (reqToken.current !== myReq) return;
       setError(e);
     } finally {
       if (reqToken.current !== myReq) return;
