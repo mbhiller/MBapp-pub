@@ -1,98 +1,61 @@
-# Sprint Kickoff Template
-
-Use this template to start **every new sprint**. Copy, fill in placeholders, and paste into a fresh chat. It guides the assistant to confirm scope, request missing files, and only provide code **after** you approve the plan.
-
----
-
-
-## Full Kickoff Brief (Zero Ambiguity)
-```text
-Sprint <N> — Theme: <concise headline>
+Sprint III — Theme: Views & Workspaces v1 + Event plumbing options
 
 Context
-- Treat previous conversations/files as stale. Use ONLY what I attach here.
+- Treat previous chats as stale. Use ONLY attached files for this sprint.
 - Repo: C:\Users\bryan\MBapp-pub
-- Target branch: feat/tier1-sprint-<N>
+- Target branch: feat/tier1-sprint-III
 - Smoke runner: ops/smoke/smoke.mjs (seeds in ops/smoke/seed/*)
 - Mobile app: Expo React Native
 - API app: apps/api/src
 
 Scope (no code yet)
 - Goals:
-  - <Goal 1>
-  - <Goal 2>
-  - <Goal 3>
+  - V1 “Views”: API + minimal UI to save/search/update/delete list views (entity type, filters, sort, columns).
+  - “Workspaces” landing UI to browse/launch saved views.
+  - Event dispatcher options (feature-flagged): keep noop default; optionally emit to EventBridge/SNS.
 - Out of scope:
-  - <Anything we should avoid this sprint>
+  - Data migrations (we will not create GSI in this sprint).
+  - Complex query builders; we’ll support key/value filters first.
 
 Deliverables I expect (sequence)
-1) Terminology & scope confirmation (plain English).
-2) File request list (EXACT paths). If a file doesn’t exist, ask for it.
-3) Per-file change plan (surgical, minimal, drop-in; no guessing).
-4) Smoke plan:
-   - Flow names (e.g., smoke:po:vendor-guard, smoke:objects:pageInfo-present, …)
-   - Assertions each flow will make (inputs/expected outputs)
-5) After I approve: provide code as drop-in replacements or tiny patches that reference exact lines.
+1) Terminology & scope confirmation.
+2) File request list (EXACT paths) for:
+   - API: `apps/api/src/views/*` (new), any shared repos you intend to reuse, events dispatcher hook point.
+   - Frontend: hooks/components/screens to host Views & Workspaces UX; routing entry points.
+   - Smokes: updates to `ops/smoke/smoke.mjs`.
+3) Per-file change plan (surgical, minimal).
+4) Smoke plan: flow names + assertions.
+5) After I approve: drop-in code PRs.
 
-Guardrails (very important)
-- Do NOT propose code until I confirm you have the current files.
-- If you can’t fully read a file, STOP and ask me to paste it.
-- Prefer feature flags for new validations/behaviors; confirm defaults before coding.
-- Mirror our existing patterns (naming, exports, paths). No shims unless approved.
+Guardrails
+- Use feature flags:
+  - `FEATURE_VIEWS_ENABLED` (default: false)
+  - `FEATURE_EVENT_DISPATCH_ENABLED` (default: false)
+  - `FEATURE_EVENT_DISPATCH_SIMULATE` (default: false)
+- Mirror existing patterns: `/objects/*` style for storage; `flags.ts` header overrides in dev only.
+- Do not change purchase order flows in this sprint.
 
 Environment & Flags (confirm before coding)
-- FEATURE_ENFORCE_VENDOR_ROLE=<default?> (CI default true)
-- FEATURE_EVENT_DISPATCH_ENABLED=<default?>
-- FEATURE_EVENT_DISPATCH_SIMULATE=<default?>
-- Any other flags you intend to read/write: list them and propose defaults.
+- FEATURE_VIEWS_ENABLED=<default false>
+- FEATURE_EVENT_DISPATCH_ENABLED=<default false>
+- FEATURE_EVENT_DISPATCH_SIMULATE=<default false>
+- MBAPP_USE_GSI1=<default false> (design stub only this sprint)
 
 Smokes & Commands
-- Add flows under ops/smoke (match current style: returns { test, result, … }).
-- Example commands I’ll run:
-  - node ops/smoke/smoke.mjs smoke:flows:<name>
-- Tell me any required seeds you’ll use in ops/smoke/seed/*.
+- New flows:
+  - `smoke:views:crud` — create a view, list/search views, update name/filters, delete view.
+  - `smoke:workspaces:list` — list views for the workspace hub (expects at least 1).
+  - `smoke:events:enabled-noop` — ensure dispatcher toggles on w/ simulate path, no external.
+- I’ll run with:
+  - `node ops/smoke/smoke.mjs smoke:views:crud`
+  - `node ops/smoke/smoke.mjs smoke:workspaces:list`
+  - `node ops/smoke/smoke.mjs smoke:events:enabled-noop`
 
 Files attached now
-- <List the exact files you’re attaching to this sprint>
+- (You will attach after kickoff approval): current `flags.ts`, `events/dispatcher.ts`, `ops/smoke/smoke.mjs`, any frontend routing files.
 
 Before coding, respond with:
 - (A) Scope confirmation
 - (B) File gaps (exact paths you still need)
 - (C) Per-file change plan
 - (D) Smoke plan (flows + assertions)
-```
-
----
-
----
-
-## Example — Fill‑In Sprint Shell
-```text
-Sprint II — Theme: Events + Guardrails + Pagination polish
-
-Scope (no code yet)
-- Goals:
-  - Optional system events on PO receive (no‑op by default, simulatable in CI)
-  - Vendor guardrails (flag‑controlled server checks; mirror mobile banner)
-  - Pagination polish on views/workspaces lists + mobile pull‑to‑refresh reset
-- Out of scope:
-  - Domain Events (horse shows) module changes
-
-Deliverables expected first (no code):
-1) Confirm “system events” ≠ “Events (shows)”.
-2) Request exact files:
-   - API: po‑receive.ts, po‑submit.ts, po‑approve.ts, parties repo util, router index for views/workspaces
-   - Mobile: useObjects.ts, PO/Inventory list screens, ReceiveHistorySheet.tsx, PO detail (Receive All)
-   - Smokes: ops/smoke/smoke.mjs + any seeds used
-   - Spec/docs: MBapp‑Modules.yaml, MBapp‑Working.md, MBapp‑Tree.md
-3) Per‑file change plan (surgical, drop‑in).
-4) Smoke plan: names + assertions.
-```
-
----
-
-## Tips
-- Keep this kickoff at the top of every sprint chat.
-- Attach the files immediately after the kickoff.
-- If the assistant suggests code before confirming files, remind it: “No code until I approve the plan.”
-

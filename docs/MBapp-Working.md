@@ -107,6 +107,90 @@ Sprint E is wrapped: backorder signals now drive purchasing via a worklist and P
 
 ---
 
+
+## Sprint I — Pagination UX + Vendor Guard + Receive History (Completed 2025-10-24)
+
+**Goals achieved**
+- Pagination UX: Added optional cursor pagination surfaced via `pageInfo` while preserving legacy `{ items, total?, next? }`.
+- Vendor Guard UX: Banner on PO Detail with “Change vendor” and “Open Vendor” actions.
+- Per-line Receive History: PO line chip opens a sheet showing recent receives (lot/location/qty/at), pagination-aware.
+
+**API**
+- `/inventory/{id}/movements` now supports additive filters: `refId?` (PO id) and `poLineId?` (PO line id).
+- Responses include optional `pageInfo { hasNext, nextCursor, pageSize }` in addition to legacy `next` when available.
+- Objects list/search endpoints return `pageInfo` alongside existing `{ items, next? }`.
+
+**Mobile**
+- Purchase Orders List: infinite scroll + “Load more” fallback via `useObjects` (`hasNext`, `fetchNext`).
+- Inventory List: same pagination UX as above.
+- Purchase Order Detail:
+  - **Vendor Guard** banner (missing/invalid vendor) with modal selector wired to set `vendorId`.
+  - **Receive History** sheet per line (filters by `refId` + `poLineId`; paginated).
+
+**Smokes & CI**
+- Added: `smoke:objects:list-pagination`
+- Added: `smoke:movements:filter-by-poLine`
+- CI workflow updated to run both new smokes.
+
+**Definition of Done**
+- [x] Lists can fetch next pages via `pageInfo.nextCursor` (first page shape unchanged).
+- [x] Movements list filters correctly when `refId` / `poLineId` are provided.
+- [x] PO line shows accurate recent receive history; no double-apply issues observed in smoke.
+- [x] Vendor errors render banner + actionable guidance (change/open vendor).
+- [x] All new smokes green; CI includes new tests.
+
+**Risks & Mitigation**
+- Pagination regressions → additive only + smoke coverage.
+- Movement filter perf → simple in-memory filter after query; revisit indexing if needed.
+- Dynamic nav edge cases → history chip/sheet scoped to PO detail only.
+
+**Artifacts**
+- Spec: `spec/MBapp-Modules.yaml` (additive query params on movements; optional `pageInfo` notes).
+- API: `apps/api/src/inventory/movements.ts`, `apps/api/src/objects/list.ts`, `apps/api/src/objects/search.ts`.
+- Mobile: `apps/mobile/src/features/purchasing/ReceiveHistorySheet.tsx`, `apps/mobile/src/features/_shared/VendorGuardBanner.tsx`, `apps/mobile/src/features/parties/PartySelectorModal.tsx`, list screens (PO/Inventory) pagination, PO Detail wiring.
+- Smokes: `ops/smoke/smoke.mjs` + CI matrix updates.
+
+---
+
+## ✅ Sprint II — Results (2025-10-24)
+
+**Theme:** Vendor guardrails, receive idempotency, movement filters, and event stubs — with smoke coverage and DX flags.
+
+**Backend**
+- **Vendor guard (submit/approve/receive):** enforced via `featureVendorGuardEnabled` (env in prod, header override in dev/CI). Validates `purchaseOrder.vendorId` points to a **Party** with role `vendor` using `getObjectById({ tenantId, type:"party", id })`.
+- **Receive handler hardening:** `/purchasing/po/{id}:receive`
+  - Uses shared `getPurchaseOrder` / `updatePurchaseOrder` so status transitions match submit/approve.
+  - **Idempotency:** (1) key ledger `Idempotency-Key`; (2) payload-signature hash of canonical `lines[]` to prevent double-apply across different keys.
+  - **Guards:** only `approved | partially_fulfilled`; 409 on over-receive per line.
+  - **Movements shape:** writes `docType:"inventoryMovement"`, `action:"receive"`, `refId` (po id), `poLineId`, optional `lot`/`locationId`, `at`, `createdAt`/`updatedAt`.
+  - **Events:** integrated `maybeDispatch` with **simulate** header (`X-Feature-Events-Simulate`) returning `_dev.emitted: true` in responses when exercised by smokes.
+- **Movements list:** `GET /inventory/{id}/movements` now supports additive query filters `refId` and `poLineId` (filtered after the pk/sk query), returns optional `pageInfo` alongside legacy `next`.
+
+**Mobile**
+- **PO list/detail** wired to unified `useObjects` hook; fixed `reset()` optionality on list search.
+- **Receive History** sheet hooked to movements endpoint filters.
+- **VendorGuardBanner** shown on PO detail when vendor role missing/invalid (mirrors server messages).
+
+**Smokes (green)**
+- `smoke:po:quick-receive`
+- `smoke:po:receive-line`
+- `smoke:po:receive-line-batch`
+- `smoke:po:receive-line-idem-different-key`
+- `smoke:movements:filter-by-poLine`
+- `smoke:po:vendor-guard:on`
+- `smoke:po:vendor-guard:off`
+- `smoke:po:emit-events`
+- `smoke:objects:pageInfo-present`
+
+**Flags (DX)**
+- `FEATURE_ENFORCE_VENDOR_ROLE` / header `X-Feature-Enforce-Vendor` (dev/CI only override).
+- `FEATURE_EVENT_DISPATCH_SIMULATE` / header `X-Feature-Events-Simulate` for smoke visibility.
+
+**Notes / Deferred optimization**
+- 📌 **Future:** *Inventory movements: add GSI1 (partition key `ITEM#<itemId>`, time-ordered sort) and toggle read path behind `MBAPP_USE_GSI1`.* We’ll pick this up in the optimization sprint.
+
+---
+
 ## Templates & Conventions (carry-forward)
 - Module Dev Template: Contract-first → Backend → Smokes → UI stubs → Docs → PR.
 - Routes: /objects/<type>[/<id>|/search], actions /module/<noun>/{id}:<verb>, purchasing /purchasing/... .
@@ -186,45 +270,45 @@ Legend: ✅ done • 🟨 stub/partial • ⬜ planned
 
 ---
 # NEXT SPRINT
-## Sprint I — Pagination UX + Vendor Guard + Receive History (Plan & DoD)
+## Sprint III — Plan (Events plumbing, UX polish, and query perf)
 
 **Goals**
-1) Pagination UX: add infinite scroll / "Load more" using optional `pageInfo`, no breaking changes.
-2) Vendor Guard UX: friendly banner with actions when vendor role is missing/invalid on PO create/update.
-3) Per-line Receive History: show recent receive movements per PO line (qty, lot, location, timestamp).
+1) **Events plumbing (stub → pluggable):** introduce a thin dispatcher contract with provider adapters; keep simulate path.
+2) **Receive UX polish:** richer line history (group by lot/location), better empty/edge states, and consistent toasts.
+3) **Query perf groundwork:** optional `MBAPP_USE_GSI1` for `/inventory/{id}/movements` (no migration by default), plus internal metrics for query size.
+4) **CI & smokes:** extend events and movements coverage; keep vendor guard tests.
 
 **API Scope**
-- Ensure list endpoints include optional `pageInfo` where supported.
-- `GET /inventory/{id}/movements`: support query params `refId?`, `poLineId?` (filter-only; additive).
-- Leave commented `emitEvent('po.received' | 'po.line.received')` stubs.
+- `events/dispatcher`: provider interface + default no-op; wire `MBAPP_EVENTS_PROVIDER` (`noop|log|eventbridge`), still safe when unset.
+- `GET /inventory/{id}/movements`: behind `MBAPP_USE_GSI1`, try GSI1 path; otherwise current pk/prefix+filter.
+- Keep `/purchasing/po/{id}:receive` semantics; add `_meta.applied: true` in `_dev` when idempotency short-circuit returns early (dev only).
 
 **Mobile Scope**
-- Hook pagination on: Purchase Orders list, Inventory list (infinite scroll + Load more fallback).
-- PO Detail: add "Receive History" chip per line; sheet displays last N receives (lot/location/qty/at).
-- Vendor guard: inline banner + actions; consistent toasts/disabled states.
+- PO detail: “Receive history” chip shows grouped lines (lot/location buckets, total qty).
+- Vendor banner CTA: quick-link to Party picker.
+- Lists: maintain infinite scroll; show “No results / End of list” consistently.
 
 **Smokes & CI**
-- New smokes: 
-  - `smoke:objects:list-pagination` (pageInfo / nextCursor behavior)
-  - `smoke:movements:filter-by-poLine` (correct filtering by refId+poLineId)
-- CI: add both tests to matrix.
+- New/updated:
+  - `smoke:events:simulate` (assert `_dev.emitted:true` on receive)
+  - `smoke:movements:gsi1-parity` (optional; PASS if either path returns same rows)
+- Matrix runs vendor guard on/off, idempotent retries, and filter by `poLineId`.
 
 **Acceptance (DoD)**
-- Lists can fetch next pages using `pageInfo.nextCursor`; first page behavior unchanged.
-- Movement filter returns correct subset with `refId`/`poLineId`.
-- PO line shows accurate recent receive history; no double-apply on idempotent retries.
-- Vendor errors display banner with actionable guidance.
-- All smokes green; CI updated.
+- All existing smokes remain green; new smokes pass locally and in CI.
+- Events path is configurable and harmless when provider unset.
+- Movements endpoint returns identical results with/without GSI flag in small datasets.
 
 **Risks / Mitigations**
-- Pagination regressions → additive changes only; smoke test added.
-- Movement filter perf → simple filter after query; revisit indexing later if needed.
+- Divergence between pk-scan and GSI results → parity smoke + feature flag default OFF.
+- Event provider misconfig → default noop, explicit logs when provider missing.
 
-**File Needs**
-- spec/MBapp-Modules.yaml (latest), generated mobile types
-- API: movements list route, objects list/search helpers, ddb/responses utils
-- Mobile: PO list screen, Inventory list screen, toast/banner components, Party detail route id
-- CI: .github/workflows/ci.yml, ops/smoke/smoke.mjs (latest)
+**Files to touch**
+- `apps/api/src/events/dispatcher.ts` (provider interface, maybe adapters)
+- `apps/api/src/purchasing/po-receive.ts` (uses dispatcher; `_dev` meta tweak in dev)
+- `apps/api/src/inventory/movements.ts` (optional GSI path)
+- `ops/smoke/smoke.mjs` (new smokes)
+- Mobile PO detail & ReceiveHistorySheet (grouping/UI polish)
 
 
 
@@ -238,7 +322,8 @@ Legend: ✅ done • 🟨 stub/partial • ⬜ planned
 **Client tip**  
 Use a stable key for a given (poId, lineId, qty, lot, location), e.g.:
 
-
+**Notes / Deferred optimization**
+- 📌 **Future:** *Inventory movements: add GSI1 (partition key `ITEM#<itemId>`, time-ordered sort) and toggle read path behind `MBAPP_USE_GSI1`.* We’ll pick this up in the optimization sprint.
 
 ### Future Epic — Config-Driven Business Processes (Deferred)
 We will add light orchestration for cross-object flows (e.g., Registration → communications → Reservation → Sales Order).
