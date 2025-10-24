@@ -23,12 +23,19 @@ export type InventoryMovement = {
   note?: string;
   actorId?: string;
   refId?: string;
+  poLineId?: string;
   docType?: "inventoryMovement";
   createdAt?: string;    // storage field (used only for sorting fallback)
 };
 
 export type ListOptions = { next?: string | null; limit?: number; sort?: SortDir };
-export type ListMovementsPage = { itemId: string; items: InventoryMovement[]; next: string | null };
+export type ListMovementsPage = {
+  itemId: string;
+  items: InventoryMovement[];
+  next: string | null;
+  // NEW (optional): richer pagination metadata; clients may ignore
+  pageInfo?: { hasNext?: boolean; nextCursor?: string | null; pageSize?: number };
+};
 
 // ===== local helpers (no external json util) =====
 function respond(status: number, body: unknown) {
@@ -80,10 +87,16 @@ async function repoListMovementsByItem(
   const items: InventoryMovement[] = raw
     .filter((m) => m?.itemId === itemId)
     .map((m) => {
-      const action = asAction(m?.action);
+      // Accept verb from multiple legacy fields if needed
+      const action =
+        asAction(m?.action) ??
+        asAction(m?.movement) ??
+        asAction(m?.act) ??
+        asAction(m?.verb) ??
+        asAction(m?.type);
       // Skip any rows that don't have a valid canonical action
       if (!action) return undefined;
-      return {
+      const out: InventoryMovement = {
         id: String(m.id),
         itemId: String(m.itemId),
         action,                      // <- union type ensured
@@ -92,9 +105,11 @@ async function repoListMovementsByItem(
         note: m.note,
         actorId: m.actorId,
         refId: m.refId,
+        poLineId: m.poLineId,
         docType: "inventoryMovement",
         createdAt: m.createdAt,
-      } as InventoryMovement;
+      };
+      return out;
     })
     .filter(Boolean) as InventoryMovement[];
 
@@ -132,7 +147,8 @@ export async function listMovementsByItem(
     docType: "inventoryMovement",
   }));
 
-  return { itemId, items: clean as InventoryMovement[], next: next ?? null };
+  const pageInfo = next ? { hasNext: true as const, nextCursor: next, pageSize: opts.limit } : undefined;
+  return { itemId, items: clean as InventoryMovement[], next: next ?? null, pageInfo };
 }
 
 // ===== HTTP handler for GET /inventory/{id}/movements =====
@@ -145,9 +161,18 @@ export async function handle(event: any) {
   const limit = Number.isFinite(+qs.limit) ? Math.max(1, Math.min(1000, +qs.limit)) : 50;
   const sort: SortDir = String(qs.sort ?? "desc").toLowerCase() === "asc" ? "asc" : "desc";
   const next: string | undefined = qs.next || undefined;
-
+  const refId: string | undefined = qs.refId || undefined;
+  const poLineId: string | undefined = qs.poLineId || undefined;
+  
   const page = await listMovementsByItem(tenantId, id, { limit, sort, next });
-  return respond(200, page);
+  // Additive in-memory filters
+  const items = page.items.filter(m => {
+    if (refId && m.refId !== refId) return false;
+    if (poLineId && m.poLineId !== poLineId) return false;
+    return true;
+  });
+  const out = { ...page, items };
+  return respond(200, out);
 }
 
 export default { handle, listMovementsByItem };

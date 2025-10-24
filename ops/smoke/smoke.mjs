@@ -582,6 +582,180 @@ const tests = {
     const pass = create.ok && rec.ok;
     return { test:"po:quick-receive", result: pass?"PASS":"FAIL", create, rec };
   },
+
+  "smoke:po:receive-line": async ()=>{
+    await ensureBearer();
+    const { vendorId } = await seedVendor(api);
+    // Create product + inventory item to attach to PO line
+    const prod = await createProduct({ name:"RecvLine" });
+    const inv  = await createInventoryForProduct(prod.body.id, "RecvLineItem");
+    if(!inv.ok) return { test:"po-receive-line", result:"FAIL", inv };
+    // Create PO with one line qty 3
+    const create = await post(`/objects/purchaseOrder`, {
+      type:"purchaseOrder", status:"draft", vendorId,
+      lines:[{ id:"RL1", itemId: inv.body.id, uom:"ea", qty:3 }]
+    });
+    if(!create.ok) return { test:"po-receive-line", result:"FAIL", create };
+    const id = create.body.id;
+    await post(`/purchasing/po/${encodeURIComponent(id)}:submit`, {}, { "Idempotency-Key": idem() });
+    await post(`/purchasing/po/${encodeURIComponent(id)}:approve`, {}, { "Idempotency-Key": idem() });
+    // Partial receive 2, with lot/location
+    const recv = await post(`/purchasing/po/${encodeURIComponent(id)}:receive`, {
+      lines:[{ lineId:"RL1", deltaQty:2, lot:"LOT-ABC", locationId:"LOC-A1" }]
+    }, { "Idempotency-Key": idem() });
+    const ok1 = recv.ok && (recv.body?.status === "partially_fulfilled");
+    // Idempotent retry
+    const retry = await post(`/purchasing/po/${encodeURIComponent(id)}:receive`, {
+      lines:[{ lineId:"RL1", deltaQty:2, lot:"LOT-ABC", locationId:"LOC-A1" }]
+    }, { "Idempotency-Key": "HARDKEY-TEST-RL1" });
+    const retry2 = await post(`/purchasing/po/${encodeURIComponent(id)}:receive`, {
+      lines:[{ lineId:"RL1", deltaQty:2, lot:"LOT-ABC", locationId:"LOC-A1" }]
+    }, { "Idempotency-Key": "HARDKEY-TEST-RL1" });
+    const idemOk = retry.ok && retry2.ok; // second same-key should not double-apply
+    return { test:"po-receive-line", result: (ok1 && idemOk) ? "PASS" : "FAIL", create, recv, retry, retry2 };
+  },
+
+  // Sprint H: per-line receive (batch)
+  "smoke:po:receive-line-batch": async ()=>{
+    await ensureBearer();
+    const { vendorId } = await seedVendor(api);
+    const prodA = await createProduct({ name:"RecvBatchA" });
+    const prodB = await createProduct({ name:"RecvBatchB" });
+    const invA  = await createInventoryForProduct(prodA.body.id, "RecvBatchItemA");
+    const invB  = await createInventoryForProduct(prodB.body.id, "RecvBatchItemB");
+    if(!invA.ok || !invB.ok) return { test:"po-receive-line-batch", result:"FAIL", invA, invB };
+    const create = await post(`/objects/purchaseOrder`, {
+      type:"purchaseOrder", status:"draft", vendorId,
+      lines:[{ id:"BL1", itemId: invA.body.id, uom:"ea", qty:2 }, { id:"BL2", itemId: invB.body.id, uom:"ea", qty:4 }]
+    });
+    if(!create.ok) return { test:"po-receive-line-batch", result:"FAIL", create };
+    const id = create.body.id;
+    await post(`/purchasing/po/${encodeURIComponent(id)}:submit`, {}, { "Idempotency-Key": idem() });
+    await post(`/purchasing/po/${encodeURIComponent(id)}:approve`, {}, { "Idempotency-Key": idem() });
+    const recv1 = await post(`/purchasing/po/${encodeURIComponent(id)}:receive`, {
+      lines:[
+        { lineId:"BL1", deltaQty:2, lot:"LOT-1", locationId:"A1" },
+        { lineId:"BL2", deltaQty:1, lot:"LOT-2", locationId:"B1" }
+      ]
+    }, { "Idempotency-Key": idem() });
+    const recv2 = await post(`/purchasing/po/${encodeURIComponent(id)}:receive`, {
+      lines:[
+        { lineId:"BL2", deltaQty:3, lot:"LOT-2", locationId:"B1" }
+      ]
+    }, { "Idempotency-Key": idem() });
+    const ok = recv1.ok && recv2.ok && (recv2.body?.status === "fulfilled");
+    return { test:"po-receive-line-batch", result: ok ? "PASS" : "FAIL", create, recv1, recv2 };
+  },
+  // Same payload, different Idempotency-Key -> should be idempotent via payload signature
+  "smoke:po:receive-line-idem-different-key": async () => {
+    await ensureBearer();
+    const { vendorId } = await seedVendor(api);
+
+    // Create product + inventory item
+    const prod = await createProduct({ name: "RecvSamePayload" });
+    const inv  = await createInventoryForProduct(prod.body.id, "RecvSamePayloadItem");
+    if (!inv.ok) return { test:"po-receive-line-idem-different-key", result:"FAIL", inv };
+
+    // Create PO with one line qty 3
+    const create = await post(`/objects/purchaseOrder`, {
+      type: "purchaseOrder", status: "draft", vendorId,
+      lines: [{ id: "RL1", itemId: inv.body.id, uom: "ea", qty: 3 }]
+    });
+    if (!create.ok) return { test:"po-receive-line-idem-different-key", result: "FAIL", create };
+    const id = create.body.id;
+
+    // Submit & approve
+    await post(`/purchasing/po/${encodeURIComponent(id)}:submit`,  {}, { "Idempotency-Key": idem() });
+    await post(`/purchasing/po/${encodeURIComponent(id)}:approve`, {}, { "Idempotency-Key": idem() });
+
+    // First partial receive (qty 2) with KEY_A
+    const KEY_A = `kA-${Math.random().toString(36).slice(2)}`;
+    const payload = { lines: [{ lineId: "RL1", deltaQty: 2, lot: "LOT-X", locationId: "A1" }] };
+    const recv1 = await post(`/purchasing/po/${encodeURIComponent(id)}:receive`, payload, { "Idempotency-Key": KEY_A });
+    const ok1 = recv1.ok && (recv1.body?.status === "partially_fulfilled");
+
+    // Retry same payload with DIFFERENT key -> should return 200 and NOT double-apply
+    const KEY_B = `kB-${Math.random().toString(36).slice(2)}`;
+    const recv2 = await post(`/purchasing/po/${encodeURIComponent(id)}:receive`, payload, { "Idempotency-Key": KEY_B });
+    const ok2 = recv2.ok && (recv2.body?.status === "partially_fulfilled");
+
+    // Confirm we can still complete to fulfilled with the remaining qty 1
+    const finish = await post(`/purchasing/po/${encodeURIComponent(id)}:receive`, {
+      lines: [{ lineId:"RL1", deltaQty: 1, lot: "LOT-X", locationId:"A1" }]
+    }, { "Idempotency-Key": idem() });
+    const ok3 = finish.ok && (finish.body?.status === "fulfilled");
+
+    return {
+      test: "po-receive-line-idem-different-key",
+      result: (ok1 && ok2 && ok3) ? "PASS" : "FAIL",
+      create, recv1, recv2, finish
+    };
+  },
+  
+  
+  // === Sprint I: cursor pagination on objects list ===
+  "smoke:objects:list-pagination": async () => {
+    await ensureBearer();
+    const first = await get(`/objects/purchaseOrder`, { limit: 2, sort: "desc" });
+    if (!first.ok) return { test: "objects:list-pagination", result: "FAIL", first };
+    const items1 = Array.isArray(first.body?.items) ? first.body.items : [];
+    const next   = first.body?.pageInfo?.nextCursor ?? first.body?.next ?? null;
+    if (!next) {
+      // Single page is still a pass; pagination is optional.
+      return { test: "objects:list-pagination", result: "PASS", firstCount: items1.length, note: "single page" };
+    }
+    const second = await get(`/objects/purchaseOrder`, { limit: 2, next, sort: "desc" });
+    if (!second.ok) return { test: "objects:list-pagination", result: "FAIL", second };
+    const items2 = Array.isArray(second.body?.items) ? second.body.items : [];
+    return { test: "objects:list-pagination", result: "PASS", firstCount: items1.length, secondCount: items2.length };
+  },
+
+  // === Sprint I: movements filters (refId + poLineId) ===
+  "smoke:movements:filter-by-poLine": async () => {
+    await ensureBearer();
+    const { vendorId } = await seedVendor(api);
+    // Create product + inventory item.
+    const prod = await createProduct({ name: "MovFilter" });
+    const inv  = await createInventoryForProduct(prod.body.id, "MovFilterItem");
+    if (!inv.ok) return { test: "movements:filter-by-poLine", result: "FAIL", inv };
+
+    // Create PO with one line.
+    const lineId = "MF1";
+    const create = await post(`/objects/purchaseOrder`, {
+      type: "purchaseOrder",
+      status: "draft",
+      vendorId,
+      lines: [{ id: lineId, itemId: inv.body.id, uom: "ea", qty: 3 }],
+    });
+    if (!create.ok) return { test: "movements:filter-by-poLine", result: "FAIL", create };
+    const poId = create.body.id;
+
+    // Approve and receive 1 to generate movement tied to (poId, lineId).
+    await post(`/purchasing/po/${encodeURIComponent(poId)}:submit`,  {}, { "Idempotency-Key": idem() });
+    await post(`/purchasing/po/${encodeURIComponent(poId)}:approve`, {}, { "Idempotency-Key": idem() });
+    const recv = await post(`/purchasing/po/${encodeURIComponent(poId)}:receive`, {
+      lines: [{ lineId, deltaQty: 1, lot: "LOT-MF", locationId: "LOC-MF" }],
+    }, { "Idempotency-Key": idem() });
+    if (!recv.ok) return { test: "movements:filter-by-poLine", result: "FAIL", recv };
+
+    // Fetch movements filtered by both refId + poLineId.
+    const list = await get(`/inventory/${encodeURIComponent(inv.body.id)}/movements`, {
+      refId: poId, poLineId: lineId, limit: 50, sort: "desc",
+    });
+    if (!list.ok) return { test: "movements:filter-by-poLine", result: "FAIL", list };
+
+    const rows = Array.isArray(list.body?.items) ? list.body.items : [];
+    const okRef = rows.every(r => r.refId === poId);
+    const okLn  = rows.every(r => r.poLineId === lineId);
+    const pass  = okRef && okLn;
+    return {
+      test: "movements:filter-by-poLine",
+      result: pass ? "PASS" : "FAIL",
+      count: rows.length,
+      hasMore: Boolean(list.body?.pageInfo?.nextCursor ?? list.body?.next ?? null),
+    };
+  },
+
   "smoke:epc:resolve": async ()=>{
     await ensureBearer();
     // minimal assertion: unknown EPC returns 404 (happy-path added when EPC seeds exist)

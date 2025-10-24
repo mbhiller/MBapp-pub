@@ -6,7 +6,7 @@ import { useObjects } from "../features/_shared/useObjects";
 export default function InventoryListScreen() {
   const nav = useNavigation<any>();
   const [q, setQ] = React.useState("");
-  const { data, isLoading, refetch } = useObjects<any>({ type: "inventory", q });
+  const { data, isLoading, refetch, hasNext, fetchNext } = useObjects<any>({ type: "inventory", q });
 
   React.useEffect(() => { refetch(); }, [q]);
   const items = data?.items ?? [];
@@ -19,7 +19,7 @@ export default function InventoryListScreen() {
         onChangeText={setQ}
         style={{ borderWidth: 1, borderRadius: 8, padding: 8, marginBottom: 8 }}
       />
-      {isLoading ? <ActivityIndicator /> : (
+      {isLoading && items.length === 0 ? <ActivityIndicator /> : (
         <FlatList
           data={items}
           keyExtractor={(it) => it.id}
@@ -31,6 +31,22 @@ export default function InventoryListScreen() {
               </View>
             </Pressable>
           )}
+          onEndReachedThreshold={0.6}
+          onEndReached={() => { if (hasNext) fetchNext?.(); }}
+          ListFooterComponent={
+            hasNext
+              ? (
+                <Pressable
+                  onPress={() => fetchNext?.()}
+                  style={{ paddingVertical: 12, alignItems: "center" }}
+                >
+                  {isLoading
+                    ? <ActivityIndicator />
+                    : <Text style={{ textAlign: "center" }}>Load more</Text>}
+                </Pressable>
+              )
+              : null
+          }
         />
       )}
     </View>

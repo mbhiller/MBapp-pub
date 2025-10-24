@@ -6,16 +6,10 @@ import { buildCtx, attachCtxToEvent } from "./shared/ctx";
 /* Routes */
 // Views
 import * as ViewsList   from "./views/list";
-import * as ViewsGet    from "./views/get";
-import * as ViewsCreate from "./views/create";
-import * as ViewsUpdate from "./views/update";
-import * as ViewsDelete from "./views/delete";
+
 // Workspaces
 import * as WsList   from "./workspaces/list";
-import * as WsGet    from "./workspaces/get";
-import * as WsCreate from "./workspaces/create";
-import * as WsUpdate from "./workspaces/update";
-import * as WsDelete from "./workspaces/delete";
+
 // Objects
 import * as ObjList   from "./objects/list";
 import * as ObjGet    from "./objects/get";
@@ -53,12 +47,7 @@ import * as InvSearch from "./inventory/search";
 import * as InvMovements from "./inventory/movements";
 
 // Registrations & Reservations actions
-import * as RegCancel  from "./events/registration-cancel";
-import * as RegCheckin from "./events/registration-checkin";
-import * as RegCheckout from "./events/registration-checkout";
-import * as ResCancel  from "./resources/reservation-cancel";
-import * as ResStart   from "./resources/reservation-start";
-import * as ResEnd     from "./resources/reservation-end";
+
 
 // Tools
 import * as GcList   from "./tools/gc-list-type";
@@ -188,36 +177,18 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
     // Views
     if (path === "/views") {
       if (method === "GET")  { requirePerm(auth, "view:read");  return ViewsList.handle(event); }
-      if (method === "POST") { requirePerm(auth, "view:write"); return ViewsCreate.handle(event); }
+
       return methodNotAllowed();
     }
-    {
-      const m = match(/^\/views\/([^/]+)$/i, path);
-      if (m) {
-        const [id] = m;
-        if (method === "GET")    { requirePerm(auth, "view:read");  return ViewsGet.handle(withId(event, id)); }
-        if (method === "PUT")    { requirePerm(auth, "view:write"); return ViewsUpdate.handle(withId(event, id)); }
-        if (method === "DELETE") { requirePerm(auth, "view:write"); return ViewsDelete.handle(withId(event, id)); }
-        return methodNotAllowed();
-      }
-    }
+   
 
     // Workspaces
     if (path === "/workspaces") {
       if (method === "GET")  { requirePerm(auth, "workspace:read");  return WsList.handle(event); }
-      if (method === "POST") { requirePerm(auth, "workspace:write"); return WsCreate.handle(event); }
+
       return methodNotAllowed();
     }
-    {
-      const m = match(/^\/workspaces\/([^/]+)$/i, path);
-      if (m) {
-        const [id] = m;
-        if (method === "GET")    { requirePerm(auth, "workspace:read");  return WsGet.handle(withId(event, id)); }
-        if (method === "PUT")    { requirePerm(auth, "workspace:write"); return WsUpdate.handle(withId(event, id)); }
-        if (method === "DELETE") { requirePerm(auth, "workspace:write"); return WsDelete.handle(withId(event, id)); }
-        return methodNotAllowed();
-      }
-    }
+    
 
     /* ========= Actions ========= */
     // Purchasing PO actions

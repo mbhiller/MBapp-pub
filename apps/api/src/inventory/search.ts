@@ -1,3 +1,4 @@
+//apps/api/src/inventory/search.ts
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { ok, error } from "../common/responses";
 import { getAuth, requirePerm } from "../auth/middleware";

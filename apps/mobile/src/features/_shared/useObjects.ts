@@ -1,8 +1,10 @@
-// apps/mobile/src/features/_shared/useObjects.ts
 // Canonical hook for both single-object and list fetching.
-// List mode ALWAYS returns { items: T[]; total?: number }.
-// Single mode returns object T.
+// List mode ALWAYS returns { items: T[]; total?: number } in `data`.
+// Single mode returns object T in `data`.
 // State shape is { data, isLoading, error, refetch } for both modes.
+// (Sprint H) Adds optional `pageInfo` when API provides it.
+// (Sprint I) Adds non-breaking pagination helpers for list mode: hasNext/fetchNext/reset.
+//            Understands either `pageInfo.nextCursor` or legacy `next` and merges pages.
 
 import * as React from "react";
 import { apiClient } from "../../api/client";
@@ -27,11 +29,26 @@ export type ListArgs = {
 export type UseObjectsArgs = SingleArgs | ListArgs;
 export type ListResult<T> = { items: T[]; total?: number };
 
+// Optional pagination metadata surfaced by API (non-breaking for callers)
+export type PageInfo =
+  | {
+      hasNext: boolean;
+      nextCursor: string | null;
+      pageSize?: number;
+    }
+  | undefined;
+
 type BaseState<T> = {
   data: T | undefined;
   isLoading: boolean;
   error: any;
   refetch: () => Promise<void>;
+  // Optional pagination metadata when API includes it
+  pageInfo?: PageInfo;
+  // New (optional) helpers for list mode (safe to ignore by existing callers)
+  hasNext?: boolean;
+  fetchNext?: () => Promise<void>;
+  reset?: () => void;
 };
 
 function buildQS(
@@ -57,9 +74,20 @@ function buildQS(
 }
 
 async function fetchSingle(type: string, id: string) {
-  const res = await apiClient.get(`/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}`);
+  const res = await apiClient.get(
+    `/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}`
+  );
   return (res as any).body ?? res;
 }
+
+type RawPage<T = any> = {
+  items?: T[];
+  total?: number;
+  pageInfo?: PageInfo | { nextCursor?: string | null; hasNext?: boolean };
+  next?: string | null; // legacy cursor some endpoints return
+  data?: T[]; // alternate shape
+  pages?: Array<{ items?: T[] }>; // alternate shape
+};
 
 async function fetchList(
   type: string,
@@ -67,72 +95,224 @@ async function fetchList(
   filter?: Record<string, any>,
   query?: Record<string, any>,
   params?: Record<string, any>
-): Promise<ListResult<any>> {
+): Promise<RawPage> {
   const qs = buildQS(q, filter, query, params);
   const res = await apiClient.get(`/objects/${encodeURIComponent(type)}${qs}`);
-  const raw = (res as any).body ?? res;
-
-  // Normalize common server shapes -> { items, total? }
-  if (Array.isArray(raw?.items)) return { items: raw.items, total: (raw as any).total };
-  if (Array.isArray(raw)) return { items: raw };
-  if (Array.isArray(raw?.data)) return { items: raw.data, total: (raw as any).total };
-  if (raw?.pages) {
-    const items = (raw.pages as any[])?.flatMap((p: any) => p?.items ?? []) ?? [];
-    return { items, total: (raw as any).total };
-  }
-  return { items: raw ? [raw] : [] };
+  return ((res as any).body ?? res) as RawPage;
 }
 
 // Overloads so TS infers the right data shape at call sites
 export function useObjects<T = any>(args: SingleArgs): BaseState<T>;
 export function useObjects<T = any>(args: ListArgs): BaseState<ListResult<T>>;
 // Fallback for cases where id is possibly undefined from routing
-export function useObjects<T = any>(args: { type: string; id?: string } & Partial<SingleArgs>): BaseState<any>;
+export function useObjects<T = any>(
+  args: { type: string; id?: string } & Partial<SingleArgs>
+): BaseState<any>;
 export function useObjects<T = any>(args: UseObjectsArgs): BaseState<any> {
   const isSingle =
     "id" in args && typeof (args as any).id === "string" && (args as any).id.length > 0;
 
-  const [data, setData] = React.useState<any>(undefined);
   const enabled = (args as any).enabled ?? true;
-  const [isLoading, setLoading] = React.useState<boolean>(!!enabled);
-  const [error, setError] = React.useState<any>(null);
-
   const select = (args as any).select as ((x: any) => any) | undefined;
 
   // explicit deps keep it predictable
-  const depType   = (args as any).type;
-  const depId     = isSingle ? (args as SingleArgs).id : undefined;
-  const depQ      = !isSingle ? (args as ListArgs).q : undefined;
+  const depType = (args as any).type;
+  const depId = isSingle ? (args as SingleArgs).id : undefined;
+  const depQ = !isSingle ? (args as ListArgs).q : undefined;
   const depFilter = !isSingle ? (args as ListArgs).filter : undefined;
-  const depQuery  = !isSingle ? (args as ListArgs).query : undefined;
+  const depQuery = !isSingle ? (args as ListArgs).query : undefined;
   const depParams = !isSingle ? (args as ListArgs).params : undefined;
 
+  // unified state
+  const [data, setData] = React.useState<any>(undefined);
+  const [pageInfo, setPageInfo] = React.useState<PageInfo>(undefined);
+  const [nextLegacy, setNextLegacy] = React.useState<string | null>(null); // for endpoints that return `next`
+  const [isLoading, setLoading] = React.useState<boolean>(!!enabled);
+  const [error, setError] = React.useState<any>(null);
+
+  // for list merging across pages
+  const isList = !isSingle;
+  const baseParamsJSON = JSON.stringify(depParams ?? {});
+  const baseQueryJSON = JSON.stringify(depQuery ?? {});
+  const baseFilterJSON = JSON.stringify(depFilter ?? {});
+  const baseQ = depQ ?? "";
+
+  // Guard to prevent state updates after unmount or parameter change
+  const reqToken = React.useRef(0);
+
+  const computeHasNext = React.useCallback(
+    (pi?: PageInfo, legacy?: string | null) =>
+      !!(pi && (pi as any).nextCursor) || !!legacy,
+    []
+  );
+
   const doFetch = React.useCallback(async () => {
-    if (!enabled) { setLoading(false); return; }
+    if (!enabled) {
+      setLoading(false);
+      return;
+    }
+    const myReq = ++reqToken.current;
     setLoading(true);
     setError(null);
-    let active = true;
+
     try {
-      const raw = isSingle
-        ? await fetchSingle(depType, depId as string)
-        : await fetchList(depType, depQ, depFilter, depQuery, depParams);
-      if (!active) return;
-      setData(select ? (select as any)(raw) : raw);
+      if (isSingle) {
+        const raw = await fetchSingle(depType, depId as string);
+        if (reqToken.current !== myReq) return;
+        const final = select ? (select as any)(raw) : raw;
+        setData(final);
+        setPageInfo(undefined);
+        setNextLegacy(null);
+      } else {
+        // first page fetch (no `next`)
+        const raw = await fetchList(
+          depType,
+          baseQ,
+          depFilter as any,
+          depQuery as any,
+          JSON.parse(baseParamsJSON)
+        );
+        if (reqToken.current !== myReq) return;
+
+        // normalize common server shapes -> { items, total? }
+        let items: any[] =
+          Array.isArray(raw?.items)
+            ? raw.items!
+            : Array.isArray(raw?.data)
+            ? raw.data!
+            : raw?.pages
+            ? raw.pages.flatMap((p: any) => p?.items ?? [])
+            : Array.isArray(raw)
+            ? (raw as any[])
+            : raw
+            ? [raw as any]
+            : [];
+
+        const total = (raw as any)?.total as number | undefined;
+        const pi = (raw as any)?.pageInfo as PageInfo | undefined;
+        const legacyNext = (raw as any)?.next ?? null;
+
+        const normalized = { items, ...(total !== undefined ? { total } : {}) };
+        const final = select ? (select as any)(normalized) : normalized;
+
+        setData(final); // first page
+        setPageInfo(pi);
+        setNextLegacy(legacyNext);
+      }
     } catch (e) {
-      if (!active) return;
+      if (reqToken.current !== reqToken.current) return;
       setError(e);
     } finally {
-      if (!active) return;
+      if (reqToken.current !== myReq) return;
       setLoading(false);
     }
-  }, [enabled, select, isSingle, depType, depId, depQ, depFilter, depQuery, depParams]);
+  }, [
+    enabled,
+    isSingle,
+    depType,
+    depId,
+    baseQ,
+    baseFilterJSON,
+    baseQueryJSON,
+    baseParamsJSON,
+    select,
+  ]);
+
+  // Refetch on deps change
+  React.useEffect(() => {
+    return () => {
+      // invalidate pending
+      reqToken.current++;
+    };
+  }, [depType, depId, baseQ, baseFilterJSON, baseQueryJSON, baseParamsJSON, enabled, isSingle, select]);
 
   React.useEffect(() => {
     let cancelled = false;
-    const run = async () => { if (!cancelled) await doFetch(); };
-    run();
-    return () => { cancelled = true; };
+    (async () => {
+      if (!cancelled) await doFetch();
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [doFetch]);
 
-  return { data, isLoading, error, refetch: doFetch };
+  // fetchNext for list mode (non-breaking addition)
+  const fetchNext = React.useCallback(async () => {
+    if (!isList) return;
+    const cursor = (pageInfo as any)?.nextCursor ?? nextLegacy ?? null;
+    if (!cursor) return;
+
+    const myReq = ++reqToken.current;
+    setLoading(true);
+
+    try {
+      const mergedParams = {
+        ...(JSON.parse(baseParamsJSON) as Record<string, any>),
+        // Prefer `next` for compatibility; server may also accept `cursor`.
+        next: cursor,
+      };
+      const raw = await fetchList(
+        depType,
+        baseQ,
+        depFilter as any,
+        depQuery as any,
+        mergedParams
+      );
+      if (reqToken.current !== myReq) return;
+
+      let more: any[] =
+        Array.isArray(raw?.items)
+          ? raw.items!
+          : Array.isArray(raw?.data)
+          ? raw.data!
+          : raw?.pages
+          ? raw.pages.flatMap((p: any) => p?.items ?? [])
+          : Array.isArray(raw)
+          ? (raw as any[])
+          : raw
+          ? [raw as any]
+          : [];
+
+      const total = (raw as any)?.total as number | undefined;
+      const pi = (raw as any)?.pageInfo as PageInfo | undefined;
+      const legacyNext = (raw as any)?.next ?? null;
+
+      setData((prev: any) => {
+        const prevItems = Array.isArray(prev?.items) ? prev.items : [];
+        const merged = { items: [...prevItems, ...more] } as any;
+        if (prev?.total !== undefined || total !== undefined) {
+          merged.total = total ?? prev?.total;
+        }
+        return merged;
+      });
+      setPageInfo(pi);
+      setNextLegacy(legacyNext);
+    } finally {
+      if (reqToken.current !== myReq) return;
+      setLoading(false);
+    }
+  }, [isList, pageInfo, nextLegacy, depType, baseQ, baseFilterJSON, baseQueryJSON, baseParamsJSON, depFilter, depQuery]);
+
+  // reset list accumulation (useful when external code changes filters and wants a manual clear)
+  const reset = React.useCallback(() => {
+    if (!isList) return;
+    setData(undefined);
+    setPageInfo(undefined);
+    setNextLegacy(null);
+    // trigger a fresh fetch
+    void doFetch();
+  }, [isList, doFetch]);
+
+  const hasNext = isList ? computeHasNext(pageInfo, nextLegacy) : undefined;
+
+  return {
+    data,
+    isLoading,
+    error,
+    refetch: doFetch,
+    pageInfo,
+    hasNext,
+    fetchNext,
+    reset,
+  };
 }

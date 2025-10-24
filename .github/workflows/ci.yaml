@@ -99,11 +99,15 @@ jobs:
           - "smoke:backorders:ignore-convert"
           - "smoke:po:suggest-draft"
           - "smoke:epc:resolve"
-          # Sprint F additions
           - "smoke:po:suggest-multivendor"
           - "smoke:backorders:bulk"
           - "smoke:po:save-from-suggest"
           - "smoke:po:quick-receive"
+          - "smoke:po:receive-line"
+          - "smoke:po:receive-line-batch"
+          - "smoke:po:receive-line-idem-different-key"
+          - "smoke:objects:list-pagination"
+          - "smoke:movements:filter-by-poLine"
     env:
       MBAPP_API_BASE: ${{ secrets.MBAPP_API_BASE }}
       MBAPP_TENANT_ID: ${{ secrets.MBAPP_TENANT_ID }}

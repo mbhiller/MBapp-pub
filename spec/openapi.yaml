@@ -677,13 +677,28 @@ paths:
               - asc
               - desc
             default: desc
+        - in: query
+          name: refId
+          required: false
+          schema:
+            type: string
+          description: Optional source document id (e.g., purchaseOrder id) to filter movements.
+        - in: query
+          name: poLineId
+          required: false
+          schema:
+            type: string
+          description: Optional purchase order line id to filter movements created by that line.
       responses:
         '200':
           description: Paged list of inventory movements (array)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ListPageInventoryMovement'
+                allOf:
+                  - $ref: '#/components/schemas/ListPageInventoryMovement'
+                  - type: object
+                    description: Backward-compatible; includes legacy `next` and optional `pageInfo`.
   /inventory/{id}/adjust:
     post:
       summary: Adjust on-hand (creates movement)
@@ -756,7 +771,7 @@ paths:
   /purchasing/po/{id}:receive:
     post:
       summary: Receive against purchase order lines
-      description: Allowed from **approved** or **partially_fulfilled**. Over-receive returns 409.
+      description: Allowed from **approved** or **partially_fulfilled**. Over-receive returns 409. \ **Idempotency:** provide an `Idempotency-Key` header to safely retry the same receive request; \ duplicates with the same key will return the current PO state without double-applying movements.
       parameters:
         - in: path
           name: id
@@ -2309,10 +2324,27 @@ components:
           format: date-time
         note:
           type: string
+          nullable: true
         actorId:
           type: string
+          nullable: true
         refId:
           type: string
+          description: Source document id (e.g., purchaseOrder id)
+          nullable: true
+        poLineId:
+          type: string
+          description: Optional purchase order line id (when action is from a PO)
+          nullable: true
+        uom:
+          type: string
+          nullable: true
+        lot:
+          type: string
+          nullable: true
+        locationId:
+          type: string
+          nullable: true
         docType:
           type: string
           readOnly: true
@@ -2354,6 +2386,17 @@ components:
           type: string
           nullable: true
           description: Opaque cursor for next page (if any)
+        pageInfo:
+          description: Optional pagination metadata (clients may ignore).
+          type: object
+          properties:
+            hasNext:
+              type: boolean
+            nextCursor:
+              type: string
+              nullable: true
+            pageSize:
+              type: integer
     Message:
       allOf:
         - $ref: '#/components/schemas/ObjectBase'

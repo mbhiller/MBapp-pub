@@ -1,12 +1,12 @@
 import * as React from "react";
 import { View, Text, TextInput, FlatList, Pressable, ActivityIndicator } from "react-native";
 import { useNavigation } from "@react-navigation/native";
-import { useObjects } from "../features/_shared/useObjects";
+import { useObjects } from "../features/_shared/useObjects"
 
 export default function PurchaseOrdersListScreen() {
   const nav = useNavigation<any>();
   const [q, setQ] = React.useState("");
-  const { data, isLoading, refetch } = useObjects<any>({ type: "purchaseOrder", q });
+  const { data, isLoading, refetch, hasNext, fetchNext } = useObjects<any>({ type: "purchaseOrder", q });
   React.useEffect(() => { refetch(); }, [q]);
   const items = data?.items ?? [];
 
@@ -18,7 +18,7 @@ export default function PurchaseOrdersListScreen() {
         onChangeText={setQ}
         style={{ borderWidth: 1, borderRadius: 8, padding: 8, marginBottom: 8 }}
       />
-      {isLoading ? <ActivityIndicator /> : (
+      {isLoading && items.length === 0 ? <ActivityIndicator /> : (
         <FlatList
           data={items}
           keyExtractor={(it) => it.id}
@@ -30,6 +30,22 @@ export default function PurchaseOrdersListScreen() {
               </View>
             </Pressable>
           )}
+          onEndReachedThreshold={0.6}
+          onEndReached={() => { if (hasNext) fetchNext?.(); }}
+          ListFooterComponent={
+            hasNext
+              ? (
+                <Pressable
+                  onPress={() => fetchNext?.()}
+                  style={{ paddingVertical: 12, alignItems: "center" }}
+                >
+                  {isLoading
+                    ? <ActivityIndicator />
+                    : <Text style={{ textAlign: "center" }}>Load more</Text>}
+                </Pressable>
+              )
+              : null
+          }
         />
       )}
     </View>

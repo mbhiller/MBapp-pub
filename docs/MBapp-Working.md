@@ -1,4 +1,4 @@
-# MBapp-Working — A→E History & Sprint F Plan
+# MBapp-Working — A→G History & Sprint H Plan
 _Last updated: 2025-10-22_
 
 ---
@@ -45,33 +45,65 @@ Sprint E is wrapped: backorder signals now drive purchasing via a worklist and P
 
 ---
 
-## Sprint F — Plan (Multi-Vendor Suggestions & Scanner QoL)
-**Theme:** Finish procurement ergonomics and polish SO wizard/scanner.
+## Sprint F — Results (2025-10-22)
 
-**Objectives**
-1) Multi-vendor PO suggestions
-   - Evolve POST /purchasing/suggest-po to return grouped drafts by vendor.
-   - When multiple vendors are present, respond with: { drafts: PurchaseOrder[] } (single-vendor may still return a single draft).
-   - Optional per-line annotation: minOrderQtyApplied or adjustedFrom.
-2) Backorders Worklist v2 (UI)
-   - Multi-select Convert/Ignore; vendor filter; link to created draft POs.
-3) SO Wizard / Scanner QoL
-   - Confirm stop-on-select behavior for item/customer autocomplete.
-   - (Optional) EPC seed-and-resolve happy-path for wizard smoke.
-4) Hooks consolidation (mobile)
-   - Standardize useObjectsList/useObject to a single options-object signature across modules.
+- **Multi-vendor suggestions**: `POST /purchasing/suggest-po` now groups by vendor (Party with role `vendor`) and returns `{ drafts:[...] }`. When only one vendor is present, a backward-compatible `draft` alias is also returned.
+- **Backorders ergonomics**: Backorders list now supports **bulk Ignore/Convert**, a **vendor filter**, and (when multiple drafts are returned) a **Draft Chooser** modal before opening PO detail.
+- **Wizard/Scanner QoL**: Autocomplete now **stops on select** (Item & Party pickers) and closes immediately, preventing re-open debounce loops.
+- **Hooks consolidation**: Introduced canonical `useObject({ type, id, ... })` signature (positional still supported). Project-wide alignment in progress.
+- **Smokes**: Added `smoke:po:suggest-multivendor` and `smoke:backorders:bulk` — both **PASS** in CI-local runs.
+- **Spec**: `MBapp-Modules.yaml` updated with `SuggestPoResponse` and request saver schema accepting single or multiple drafts (optional).
 
-**Deliverables**
-- Spec: multi-vendor suggest-po response in MBapp-Modules.yaml.
-- Backend: suggest-po returns { drafts: [...] } when multiple vendors.
-- Mobile: Backorders bulk actions + vendor filter + drill to draft PO; wizard polish; unified hooks.
-- Smokes: po:suggest-multivendor, backorders:bulk, epc:seed-and-resolve (optional).
+### Notes
+- `PurchaseOrder.vendorId` is a **Party.id** with role `vendor` (per Relationships). Any convenience wrappers should reference the same Party identity.
+- `BackorderRequest.preferredVendorId` may be present for UI filtering; otherwise vendor is derived via `item → inventory → product` fields.
 
-**Definition of Done (Sprint F)**
-- Multi-vendor suggestions shipped and smoke PASS.
-- Backorders list supports bulk actions + vendor filter with links to draft POs.
-- Scanner/wizard QoL verified (stop-on-select).
-- Hooks standardized with no regressions (screens compile; basic flows intact).
+---
+
+
+## ✅ Sprint G — Results (Persist Drafts + Quick Receive + Hook Unification)
+**Theme:** Persist PO drafts; Quick Receive ergonomics; finish hooks alignment.
+
+**What we implemented**
+1) **Saver endpoint**: `POST /purchasing/po:create-from-suggestion` accepts `draft` or `drafts`, persists `purchaseOrder#<id>`, idempotent via `Idempotency-Key`; returns `{ id?, ids }`.
+2) **PO Detail CTA**: “Save Draft” posts to saver and navigates to the persisted id (replaces ephemeral draft id).
+3) **Quick Receive (flag)**: Feature-flagged “Receive All” action on PO detail; posts line deltas to `/purchasing/po/{id}:receive`; idempotent-safe.
+4) **Hooks consolidation (mobile)**: Introduced single canonical `useObjects` hook. **List** mode returns `{ items, total? }`; **single** returns the object. Updated PO/SO/Inventory/List+Detail and Backorders screens.
+5) **Smokes**: `smoke:po:save-from-suggest` and `smoke:po:quick-receive` added and passing.
+6) **CI**: Workflow runs spec bundle/types, API build, Mobile typecheck, and the two new smokes in matrix.
+
+**Spec**
+- Added `/purchasing/po:create-from-suggestion` to **MBapp-Modules.yaml** (request: `draft|drafts`; response: `{ id?, ids[] }`).
+- Tightened `SuggestPoResponse` to `oneOf` (either `draft` or `drafts[]`).
+
+**Definition of Done (met)**
+- Saver returns created id(s); mobile CTA persists + navigates ✅
+- Receive-All creates movements and refetches; idempotent ✅
+- Unified `useObjects` across touched screens ✅
+- New smokes pass locally & in CI ✅
+
+---
+
+
+## Sprint H — Per-Line Receive + Pagination + UX Polish (Delivered)
+
+**Highlights**
+- Per-line `POST /purchasing/po/{id}:receive` now supports `{ lineId, deltaQty, lot?, locationId? }`.
+- Idempotency: both **Idempotency-Key** and **payload-signature**. Same payload (lines, qty, lot, location) returns current PO even if a different key is used.
+- Inventory movement writes normalized (`type/docType`, `action`, `at`, `refId`, `poLineId`, optional `lot/locationId`).
+- Inventory create hardening: verb coercion and **reserve guard** (409 if qty > available).
+- List APIs include optional `pageInfo`; mobile hook surfaces it without breaking `{ items, total? }`.
+- Mobile PO detail screen: per-line Receive modal wired via centralized `poActions.receiveLine()`; toasts + disabled states aligned to shared pattern.
+
+**Smokes (green)**
+- `smoke:inventory:onhand`, `smoke:inventory:guards`, `smoke:inventory:onhand-batch`, `smoke:inventory:list-movements`
+- `smoke:po:receive-line`, `smoke:po:receive-line-batch`
+- `smoke:po:receive-line-idem-different-key` (new)
+
+**Notes**
+- `PurchaseOrder.vendorId` remains the party with vendor role (guard enforced on create/update).
+- Movement rows are forward-compatible: read paths accept legacy verb fields if any historical data exists.
+
 
 ---
 
@@ -82,6 +114,8 @@ Sprint E is wrapped: backorder signals now drive purchasing via a worklist and P
 - UI Stubs: list with q filter; detail with read-only badges; minimal actions only.
 
 ---
+
+**EXAMPLE PR TEMPLATE**
 
 ## PR Description Template (paste into PR)
 # PR title
@@ -151,46 +185,71 @@ Legend: ✅ done • 🟨 stub/partial • ⬜ planned
 | Settings/Config     | ⬜   | ⬜      | ⬜     | ⬜       | Global flags, tenants |
 
 ---
+# NEXT SPRINT
+## Sprint I — Pagination UX + Vendor Guard + Receive History (Plan & DoD)
 
-## Sprint F Kickoff — Copy/Paste for New Chat
-**Title:** QR RFID App — Sprint F Kickoff (Multi-Vendor Suggestions & Scanner QoL)
+**Goals**
+1) Pagination UX: add infinite scroll / "Load more" using optional `pageInfo`, no breaking changes.
+2) Vendor Guard UX: friendly banner with actions when vendor role is missing/invalid on PO create/update.
+3) Per-line Receive History: show recent receive movements per PO line (qty, lot, location, timestamp).
 
-**Message:**
-I’ve attached **MBapp-Working.md**, the spec, and project files (API router, purchasing handlers, backorders actions, smoke.mjs). For Sprint F, let’s: (1) evolve `suggest-po` to return **grouped drafts per vendor**; (2) add **bulk Convert/Ignore** and a **vendor filter** to Backorders; (3) implement **stop-on-select** in the SO wizard; and (4) standardize hooks (`useObjectsList/useObject`) across modules. Provide compact spec diffs, exact router patches, handler updates, smoke additions (`po:suggest-multivendor`, `backorders:bulk`, optional `epc:seed-and-resolve`), and minimal UI patches to support these flows.
+**API Scope**
+- Ensure list endpoints include optional `pageInfo` where supported.
+- `GET /inventory/{id}/movements`: support query params `refId?`, `poLineId?` (filter-only; additive).
+- Leave commented `emitEvent('po.received' | 'po.line.received')` stubs.
 
-## Sprint F — Results (2025-10-22)
+**Mobile Scope**
+- Hook pagination on: Purchase Orders list, Inventory list (infinite scroll + Load more fallback).
+- PO Detail: add "Receive History" chip per line; sheet displays last N receives (lot/location/qty/at).
+- Vendor guard: inline banner + actions; consistent toasts/disabled states.
 
-- **Multi-vendor suggestions**: `POST /purchasing/suggest-po` now groups by vendor (Party with role `vendor`) and returns `{ drafts:[...] }`. When only one vendor is present, a backward-compatible `draft` alias is also returned.
-- **Backorders ergonomics**: Backorders list now supports **bulk Ignore/Convert**, a **vendor filter**, and (when multiple drafts are returned) a **Draft Chooser** modal before opening PO detail.
-- **Wizard/Scanner QoL**: Autocomplete now **stops on select** (Item & Party pickers) and closes immediately, preventing re-open debounce loops.
-- **Hooks consolidation**: Introduced canonical `useObject({ type, id, ... })` signature (positional still supported). Project-wide alignment in progress.
-- **Smokes**: Added `smoke:po:suggest-multivendor` and `smoke:backorders:bulk` — both **PASS** in CI-local runs.
-- **Spec**: `MBapp-Modules.yaml` updated with `SuggestPoResponse` and request saver schema accepting single or multiple drafts (optional).
+**Smokes & CI**
+- New smokes: 
+  - `smoke:objects:list-pagination` (pageInfo / nextCursor behavior)
+  - `smoke:movements:filter-by-poLine` (correct filtering by refId+poLineId)
+- CI: add both tests to matrix.
 
-### Notes
-- `PurchaseOrder.vendorId` is a **Party.id** with role `vendor` (per Relationships). Any convenience wrappers should reference the same Party identity.
-- `BackorderRequest.preferredVendorId` may be present for UI filtering; otherwise vendor is derived via `item → inventory → product` fields.
+**Acceptance (DoD)**
+- Lists can fetch next pages using `pageInfo.nextCursor`; first page behavior unchanged.
+- Movement filter returns correct subset with `refId`/`poLineId`.
+- PO line shows accurate recent receive history; no double-apply on idempotent retries.
+- Vendor errors display banner with actionable guidance.
+- All smokes green; CI updated.
 
----
+**Risks / Mitigations**
+- Pagination regressions → additive changes only; smoke test added.
+- Movement filter perf → simple filter after query; revisit indexing later if needed.
 
-## Sprint G — Proposal (Next)
+**File Needs**
+- spec/MBapp-Modules.yaml (latest), generated mobile types
+- API: movements list route, objects list/search helpers, ddb/responses utils
+- Mobile: PO list screen, Inventory list screen, toast/banner components, Party detail route id
+- CI: .github/workflows/ci.yml, ops/smoke/smoke.mjs (latest)
 
-**Theme:** Persist PO drafts + receiving ergonomics, finish hooks alignment
 
-**Objectives**
-1. **Persist drafts**: Implement `/purchasing/po:create-from-suggestion` to accept `draft` or `drafts`, persist `purchaseOrder#*` objects, and return created id(s).
-2. **PO Detail CTA**: Add a “Save Draft” action to persist and navigate to the saved PO (replace draft id with real id).
-3. **Quick Receive (flagged)**: Add a minimal “Receive All” that emits `inventoryMovement(receive)` for each PO line (feature-flag guarded).
-4. **Hooks finish**: Convert remaining `useObject(type,id)` call sites to `useObject({ type, id })` across modules.
-5. **Smokes**: Add `smoke:po:save-from-suggest` and `smoke:po:quick-receive`.
 
-**Definition of Done**
-- Saver endpoint working and used by mobile CTA.
-- Quick Receive creates movements and updates on-hand (idempotent).
-- All new smokes PASS locally and in CI (manual smoke job).
 
-**Kickoff Checklist**
-- Regenerate types from `MBapp-Modules.yaml`.
-- Add API handler `apps/api/src/purchasing/po-create-from-suggestion.ts`.
-- Wire PO Detail “Save Draft” button.
-- Add new smoke tests to `ops/smoke/smoke.mjs`.
+## Receive Idempotency (Details)
+
+- **Key-based**: Provide `Idempotency-Key` to retry safely; same key = same outcome.
+- **Payload-signature**: We also hash the canonical `lines[]` payload (sorted `lineId`, `deltaQty`, plus `lot/locationId`).  
+  If the same payload arrives with a different key (common in mobile retry storms), we return **200** with current PO and do not double-apply.
+
+**Client tip**  
+Use a stable key for a given (poId, lineId, qty, lot, location), e.g.:
+
+
+
+### Future Epic — Config-Driven Business Processes (Deferred)
+We will add light orchestration for cross-object flows (e.g., Registration → communications → Reservation → Sales Order).
+Entrance criteria:
+- ≥3 recurring flows; stable object lifecycles; measurable manual overhead.
+
+Non-negotiables:
+- Idempotent steps; config-first “recipes” (YAML/JSON) for steps like createObject, sendEmail, prompt/awaitSignal.
+- Observability: store a short timeline (steps, startedAt, lastError).
+
+No-regret prep (ongoing):
+- Keep Idempotency-Key and X-Request-Id plumbing.
+- Maintain createdAt/updatedAt on objects.
+- Add (disabled) `emitEvent` stubs at key actions for painless activation later.

@@ -269,6 +269,10 @@ export interface paths {
                     next?: string | null;
                     limit?: number;
                     sort?: "asc" | "desc";
+                    /** @description Optional source document id (e.g., purchaseOrder id) to filter movements. */
+                    refId?: string;
+                    /** @description Optional purchase order line id to filter movements created by that line. */
+                    poLineId?: string;
                 };
                 header?: never;
                 path: {
@@ -284,7 +288,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ListPageInventoryMovement"];
+                        "application/json": components["schemas"]["ListPageInventoryMovement"] & Record<string, never>;
                     };
                 };
             };
@@ -453,7 +457,7 @@ export interface paths {
         put?: never;
         /**
          * Receive against purchase order lines
-         * @description Allowed from **approved** or **partially_fulfilled**. Over-receive returns 409.
+         * @description Allowed from **approved** or **partially_fulfilled**. Over-receive returns 409. \ **Idempotency:** provide an `Idempotency-Key` header to safely retry the same receive request; \ duplicates with the same key will return the current PO state without double-applying movements.
          */
         post: {
             parameters: {
@@ -2020,9 +2024,15 @@ export interface components {
             qty: number;
             /** Format: date-time */
             at?: string;
-            note?: string;
-            actorId?: string;
-            refId?: string;
+            note?: string | null;
+            actorId?: string | null;
+            /** @description Source document id (e.g., purchaseOrder id) */
+            refId?: string | null;
+            /** @description Optional purchase order line id (when action is from a PO) */
+            poLineId?: string | null;
+            uom?: string | null;
+            lot?: string | null;
+            locationId?: string | null;
             /** @enum {string} */
             readonly docType?: "inventoryMovement";
         };
@@ -2042,6 +2052,12 @@ export interface components {
             items: components["schemas"]["InventoryMovement"][];
             /** @description Opaque cursor for next page (if any) */
             next?: string | null;
+            /** @description Optional pagination metadata (clients may ignore). */
+            pageInfo?: {
+                hasNext?: boolean;
+                nextCursor?: string | null;
+                pageSize?: number;
+            };
         };
         Message: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */

@@ -15,3 +15,30 @@ export async function receiveAll(poSnap: any) {
   if (!poSnap?.id || lines.length === 0) return { ok: true, noop: true };
   return apiClient.post(`/purchasing/po/${encodeURIComponent(poSnap.id)}:receive`, { lines });
 }
+
+// --- Sprint H helpers (centralized receive mutations) ---
+export type ReceiveLine = {
+  lineId: string;
+  deltaQty: number;
+  lot?: string;
+  locationId?: string;
+};
+
+export async function receiveLines(
+  poId: string,
+  lines: ReceiveLine[],
+  opts?: { idempotencyKey?: string }
+) {
+  if (!poId) throw new Error("poId required");
+  if (!Array.isArray(lines) || lines.length === 0) throw new Error("lines[] required");
+  const headers = opts?.idempotencyKey ? { "Idempotency-Key": opts.idempotencyKey } : undefined;
+  return apiClient.post(`/purchasing/po/${encodeURIComponent(poId)}:receive`, { lines }, headers);
+}
+
+export async function receiveLine(
+  poId: string,
+  line: ReceiveLine,
+  opts?: { idempotencyKey?: string }
+) {
+  return receiveLines(poId, [line], opts);
+}

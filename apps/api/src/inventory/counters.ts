@@ -5,7 +5,9 @@ type Action = typeof ACTIONS extends Set<infer T> ? T : never;
 export function deriveCounters(movs: Array<{ action?: string; qty?: number }>) {
   let onHand = 0, reserved = 0;
   for (const mv of movs) {
-    const a = String(mv?.action ?? "").toLowerCase() as Action;
+    const a = String(
+      (mv as any)?.action ?? (mv as any)?.movement ?? (mv as any)?.act ?? (mv as any)?.verb ?? (mv as any)?.type ?? ""
+    ).toLowerCase() as Action;
     const q = Number(mv?.qty ?? 0) || 0;
     if (!ACTIONS.has(a as Action) || !q) continue;
 

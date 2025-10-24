@@ -8,6 +8,7 @@ import { markPartyRole } from "../common/party";
 import { getAuth, requirePerm } from "../auth/middleware";
 import { ensurePartyRole } from "../common/validators";
 
+const MOVEMENT_ACTIONS = new Set(["receive","reserve","commit","fulfill","adjust","release"]);
 const TABLE = process.env.MBAPP_OBJECTS_TABLE || process.env.MBAPP_TABLE || "mbapp_objects";
 const PK    = process.env.MBAPP_TABLE_PK || "pk";
 const SK    = process.env.MBAPP_TABLE_SK || "sk";
@@ -77,8 +78,21 @@ export async function handle(event: APIGatewayProxyEventV2) {
     }
 
     // 3) Apply update
+    // If updating an inventory movement, validate action (when provided) and keep canonical markers.
+    if (String(type).toLowerCase() === "inventorymovement") {
+      if (Object.prototype.hasOwnProperty.call(patch, "action")) {
+        const a = String(patch?.action ?? "").toLowerCase();
+        if (!MOVEMENT_ACTIONS.has(a)) {
+          return bad("invalid action");
+        }
+        patch.action = a;
+      }
+      patch.type = "inventoryMovement";
+      patch.docType = "inventoryMovement";
+    }
+    
     const updated = await updateObject({ tenantId: auth.tenantId, type, id, body: patch });
-
+    
     // 4) If we updated a partyRole, keep Party.roleFlags in sync
     if (String(type).toLowerCase() === "partyrole") {
       const partyId: string | undefined =
