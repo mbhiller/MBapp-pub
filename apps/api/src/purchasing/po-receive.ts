@@ -205,14 +205,15 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     await markAppliedSig(tenantId, po.id, sig);
 
     // Emit system events (no-op dispatcher; safe even without a bus)
-    const simulateEmit = featureEventsSimulate(event);
+    let devMeta: { emitted?: boolean; provider?: string } | undefined;
     try {
       const nowIso = now;
-      await maybeDispatch(event, { type: "po.received", payload: { poId: String(po.id), actorId: null, at: nowIso } });
+      const metaRoot = await maybeDispatch(event, { type: "po.received", payload: { poId: String(po.id), actorId: null, at: nowIso } });
+      if (metaRoot?.emitted) devMeta = { ...(devMeta || {}), ...metaRoot };
       for (const r of reqLines) {
         const qty = Number(r.deltaQty ?? 0);
         if (qty > 0) {
-          await maybeDispatch(event, {
+          const metaLine = await maybeDispatch(event, {
             type: "po.line.received",
             payload: {
               poId: String(po.id),
@@ -224,13 +225,14 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
               at: nowIso,
             },
           });
+          if (metaLine?.emitted) devMeta = { ...(devMeta || {}), ...metaLine };
         }
       }
     } catch (e) {
       console.warn("dispatchEvent failed", e);
     }
 
-    const out = simulateEmit ? { ...updated, _dev: { emitted: true } } : updated;
+    const out = devMeta ? { ...updated, _dev: { ...((updated as any)._dev || {}), ...devMeta } } : updated;
     return json(200, out);
   } catch (err: any) {
     console.error(err);

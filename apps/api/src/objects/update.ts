@@ -2,7 +2,7 @@ import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { DynamoDBDocumentClient, PutCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 
-import { ok, bad, notfound, error } from "../common/responses";
+import { ok, bad, notFound, error } from "../common/responses";
 import { getObjectById, updateObject, buildSkuLock } from "./repo";
 import { markPartyRole } from "../common/party";
 import { getAuth, requirePerm } from "../auth/middleware";
@@ -26,7 +26,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
 
     const patch = event.body ? JSON.parse(event.body) : {};
     const existing = await getObjectById({ tenantId: auth.tenantId, type, id });
-    if (!existing) return notfound("Not Found");
+    if (!existing) return notFound("Not Found");
 
     // 1) Product SKU change → acquire new lock and delete old constant-SK lock
     if (String(type).toLowerCase() === "product") {

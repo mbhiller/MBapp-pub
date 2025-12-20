@@ -6,9 +6,17 @@ import { buildCtx, attachCtxToEvent } from "./shared/ctx";
 /* Routes */
 // Views
 import * as ViewsList   from "./views/list";
+import * as ViewsGet    from "./views/get";
+import * as ViewsCreate from "./views/create";
+import * as ViewsUpdate from "./views/update";
+import * as ViewsDelete from "./views/delete";
 
 // Workspaces
 import * as WsList   from "./workspaces/list";
+import * as WsGet    from "./workspaces/get";
+import * as WsCreate from "./workspaces/create";
+import * as WsUpdate from "./workspaces/update";
+import * as WsDelete from "./workspaces/delete";
 
 // Objects
 import * as ObjList   from "./objects/list";
@@ -105,7 +113,7 @@ const corsOk = (): APIGatewayProxyResultV2 => ({
   headers: {
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "OPTIONS,GET,POST,PUT,DELETE",
-    "access-control-allow-headers": "Authorization,Content-Type,Idempotency-Key,X-Tenant-Id,Accept,X-Feature-Enforce-Vendor,X-Feature-Events-Enabled,X-Feature-Events-Simulate",
+    "access-control-allow-headers": "Authorization,Content-Type,Idempotency-Key,X-Tenant-Id,Accept,X-Feature-Enforce-Vendor,X-Feature-Views-Enabled,X-Feature-Events-Enabled,X-Feature-Events-Simulate",
     
   },
 });
@@ -175,19 +183,32 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
       return json(200, policyFromAuth(auth));
     }
 
-    // Views
-    if (path === "/views") {
-      if (method === "GET")  { requirePerm(auth, "view:read");  return ViewsList.handle(event); }
-
-      return methodNotAllowed();
+    // Views (Sprint III)
+    {
+      const m = path.match(/^\/views(?:\/([^/]+))?$/i);
+      if (m) {
+        const [, id] = m;
+        if (method === "GET" && !id)    { requirePerm(auth, "view:read");  return ViewsList.handle(event); }
+        if (method === "GET" && id)     { requirePerm(auth, "view:read");  return ViewsGet.handle(withId(event, id)); }
+        if (method === "POST" && !id)   { requirePerm(auth, "view:write"); return ViewsCreate.handle(event); }
+        if (method === "PUT" && id)     { requirePerm(auth, "view:write"); return ViewsUpdate.handle(withId(event, id)); }
+        if (method === "DELETE" && id)  { requirePerm(auth, "view:write"); return ViewsDelete.handle(withId(event, id)); }
+        return methodNotAllowed();
+      }
     }
-   
 
-    // Workspaces
-    if (path === "/workspaces") {
-      if (method === "GET")  { requirePerm(auth, "workspace:read");  return WsList.handle(event); }
-
-      return methodNotAllowed();
+    // Workspaces (Sprint III v1: list only)
+    {
+      const m = path.match(/^\/workspaces(?:\/([^/]+))?$/i);
+      if (m) {
+        const [, id] = m;
+        if (method === "GET" && !id)    { requirePerm(auth, "workspace:read");  return WsList.handle(event); }
+        if (method === "GET" && id)     { requirePerm(auth, "workspace:read");  return WsGet.handle(withId(event, id)); }
+        if (method === "POST" && !id)   { requirePerm(auth, "workspace:write"); return WsCreate.handle(event); }
+        if (method === "PUT" && id)     { requirePerm(auth, "workspace:write"); return WsUpdate.handle(withId(event, id)); }
+        if (method === "DELETE" && id)  { requirePerm(auth, "workspace:write"); return WsDelete.handle(withId(event, id)); }
+        return methodNotAllowed();
+      }
     }
     
 

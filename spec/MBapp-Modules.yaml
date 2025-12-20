@@ -1772,31 +1772,111 @@ components:
       allOf:
       - $ref: '#/components/schemas/ObjectBase'
       - type: object
+        description: Saved per-module user view with filters, sort, and column configuration. Sprint III v1 supports filters and sort; columns are reserved for future.
         properties:
           type:
             type: string
             enum:
             - view
-          moduleKey:
-            type: string
-            description: e.g., products, inventory, events
           name:
             type: string
-          queryJSON:
-            type: object
-            additionalProperties: true
+            minLength: 1
+            maxLength: 120
+            description: Display name for the view
+          entityType:
+            type: string
+            description: Object type this view applies to (e.g., purchaseOrder, salesOrder, inventoryItem, party)
+            enum:
+            - purchaseOrder
+            - salesOrder
+            - inventoryItem
+            - party
+            - account
+            - event
+            - employee
+            - organization
+            - product
+            - class
+            - division
+          filters:
+            type: array
+            description: Filter expressions (Sprint III v1)
+            items:
+              $ref: '#/components/schemas/ViewFilter'
+          sort:
+            $ref: '#/components/schemas/ViewSort'
+            description: Optional sort configuration
+            nullable: true
+          columns:
+            type: array
+            description: Field names to display (reserved for Sprint IV+)
+            items:
+              type: string
+            nullable: true
+          description:
+            type: string
+            description: Optional notes about the view
+            nullable: true
           ownerId:
             type: string
+            description: User/party who owns this view (for sharing/permission future work)
             nullable: true
           shared:
             type: boolean
-          isDefault:
-            type: boolean
+            default: false
+            description: Whether view is shared with tenant users
         required:
         - type
-        - moduleKey
         - name
-        - queryJSON
+        - entityType
+    ViewFilter:
+      type: object
+      description: Filter expression for View (Sprint III v1). Operator support depends on field type.
+      properties:
+        field:
+          type: string
+          description: Object field name (e.g., status, createdAt, vendorId)
+        op:
+          type: string
+          description: Comparison operator
+          enum:
+          - eq
+          - ne
+          - lt
+          - le
+          - gt
+          - ge
+          - in
+          - nin
+          - contains
+          - startsWith
+          - regex
+        value:
+          description: Filter value (type depends on field and operator)
+          oneOf:
+          - type: string
+          - type: number
+          - type: boolean
+          - type: array
+      required:
+      - field
+      - op
+      - value
+    ViewSort:
+      type: object
+      description: Sort order for View results
+      properties:
+        field:
+          type: string
+          description: Field name to sort by
+        dir:
+          type: string
+          enum:
+          - asc
+          - desc
+          default: asc
+      required:
+      - field
     ViewList:
       type: object
       properties:
@@ -1807,10 +1887,23 @@ components:
         next:
           type: string
           nullable: true
+          description: Opaque cursor for next page (if any)
+        pageInfo:
+          description: Optional pagination metadata (clients may ignore).
+          type: object
+          properties:
+            hasNext:
+              type: boolean
+            nextCursor:
+              type: string
+              nullable: true
+            pageSize:
+              type: integer
     Workspace:
       allOf:
       - $ref: '#/components/schemas/ObjectBase'
       - type: object
+        description: Minimal workspace definition (Sprint III v1 is "list my views" only). In v1, a Workspace is a response wrapper for Views. Full multi-tile composition deferred to v2.
         properties:
           type:
             type: string
@@ -1818,19 +1911,30 @@ components:
             - workspace
           name:
             type: string
-          tiles:
+            minLength: 1
+            maxLength: 200
+            description: Workspace name
+          description:
+            type: string
+            description: Optional description
+            nullable: true
+          views:
             type: array
+            description: List of View IDs included in this workspace (Sprint III v1 may be empty; views listed via GET /views)
             items:
-              $ref: '#/components/schemas/WorkspaceTile'
+              type: string
+            default: []
           ownerId:
             type: string
+            description: User/party who owns this workspace
             nullable: true
           shared:
             type: boolean
+            default: false
+            description: Whether workspace is shared with tenant users
         required:
         - type
         - name
-        - tiles
     WorkspaceList:
       type: object
       properties:
@@ -1841,6 +1945,18 @@ components:
         next:
           type: string
           nullable: true
+          description: Opaque cursor for next page (if any)
+        pageInfo:
+          description: Optional pagination metadata (clients may ignore).
+          type: object
+          properties:
+            hasNext:
+              type: boolean
+            nextCursor:
+              type: string
+              nullable: true
+            pageSize:
+              type: integer
     WorkspaceTile:
       type: object
       properties:
@@ -2256,22 +2372,16 @@ paths:
       - bearerAuth: []
       parameters:
       - $ref: '#/components/parameters/TenantHeader'
-      - name: moduleKey
+      - name: entityType
         in: query
         schema:
           type: string
-      - name: ownerId
+        description: Filter by object type (e.g., purchaseOrder, salesOrder)
+      - name: q
         in: query
         schema:
           type: string
-      - name: shared
-        in: query
-        schema:
-          type: boolean
-      - name: isDefault
-        in: query
-        schema:
-          type: boolean
+        description: Search views by name
       - $ref: '#/components/parameters/Limit'
       - $ref: '#/components/parameters/Next'
       responses:
@@ -2287,7 +2397,7 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '400':
           description: Bad request
-      summary: List Views (role-aware)
+      summary: List Views (Sprint III: basic filtering + pagination)
     post:
       tags:
       - Views
@@ -2303,7 +2413,7 @@ paths:
             schema:
               $ref: '#/components/schemas/View'
       responses:
-        '200':
+        '201':
           description: Created
           content:
             application/json:
@@ -2475,7 +2585,7 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '400':
           description: Bad request
-      summary: List Workspaces (role-aware)
+      summary: List Workspaces (Sprint III v1: lists user/tenant workspaces; full multi-tile composition in v2)
     post:
       tags:
       - Workspaces
@@ -2491,7 +2601,7 @@ paths:
             schema:
               $ref: '#/components/schemas/Workspace'
       responses:
-        '200':
+        '201':
           description: Created
           content:
             application/json:

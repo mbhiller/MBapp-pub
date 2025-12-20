@@ -707,6 +707,226 @@ const tests = {
     const r = await get(`/epc/resolve`, { epc:`EPC-NOT-FOUND-${Date.now()}` });
     const pass = r.status === 404;
     return { test:"epc-resolve", result: pass?"PASS":"FAIL", status:r.status, body:r.body };
+  },
+
+  /* ===================== Sprint III: Views, Workspaces, Events ===================== */
+  
+  "smoke:views:crud": async ()=>{
+    await ensureBearer();
+    
+    // 1) CREATE view
+    const create = await post(`/views`, {
+      name: "Approved POs",
+      entityType: "purchaseOrder",
+      filters: [{ field: "status", op: "eq", value: "approved" }],
+      columns: ["id", "vendorId", "total"]
+    });
+    if (!create.ok || !create.body?.id) {
+      return { test:"views:crud", result:"FAIL", reason:"create-failed", create };
+    }
+    const viewId = create.body.id;
+
+    // 2) LIST views -> assert created view exists
+    const list = await get(`/views`, { limit: 50 });
+    if (!list.ok || !Array.isArray(list.body?.items)) {
+      return { test:"views:crud", result:"FAIL", reason:"list-failed", list };
+    }
+    const found = list.body.items.find(v => v.id === viewId);
+    if (!found) {
+      return { test:"views:crud", result:"FAIL", reason:"view-not-in-list", list };
+    }
+
+    // 3) GET single view
+    const get1 = await get(`/views/${encodeURIComponent(viewId)}`);
+    if (!get1.ok || get1.body?.id !== viewId) {
+      return { test:"views:crud", result:"FAIL", reason:"get-failed", get:get1 };
+    }
+
+    // 4) PUT (update) view
+    const update = await put(`/views/${encodeURIComponent(viewId)}`, {
+      name: "Approved POs v2",
+      entityType: "purchaseOrder",
+      filters: [
+        { field: "status", op: "eq", value: "approved" },
+        { field: "createdAt", op: "ge", value: "2025-01-01T00:00:00Z" }
+      ],
+      columns: ["id", "vendorId", "total", "createdAt"]
+    });
+    if (!update.ok || update.body?.name !== "Approved POs v2") {
+      return { test:"views:crud", result:"FAIL", reason:"update-failed", update };
+    }
+
+    // 5) DELETE view
+    const del = await fetch(`${API}/views/${encodeURIComponent(viewId)}`, {
+      method: "DELETE",
+      headers: baseHeaders()
+    });
+    if (!del.ok) {
+      return { test:"views:crud", result:"FAIL", reason:"delete-failed", delStatus:del.status };
+    }
+
+    // 6) Verify deleted (should not be in list anymore)
+    const listAfter = await get(`/views`, { limit: 50 });
+    const stillThere = listAfter.ok && listAfter.body?.items?.find(v => v.id === viewId);
+    if (stillThere) {
+      return { test:"views:crud", result:"FAIL", reason:"view-still-in-list-after-delete" };
+    }
+
+    const pass = create.ok && list.ok && get1.ok && update.ok && del.ok && !stillThere;
+    return {
+      test: "views:crud",
+      result: pass ? "PASS" : "FAIL",
+      artifacts: { create, list, get: get1, update, delete: del, listAfter }
+    };
+  },
+
+  "smoke:workspaces:list": async ()=>{
+    await ensureBearer();
+    
+    // Sprint III v1: Workspaces list should return empty or views-based list
+    // Enable feature flag if needed (dev header ok in non-prod)
+    const wsListHeaders = { "X-Feature-Views-Enabled": "true" };
+    
+    // 1) GET /workspaces (may be empty initially)
+    const listHdr = { ...baseHeaders(), ...wsListHeaders };
+    const list = await fetch(`${API}/workspaces?limit=50`, {
+      headers: listHdr
+    });
+    const listBody = await list.json().catch(() => ({}));
+    
+    if (!list.ok) {
+      return { test:"workspaces:list", result:"FAIL", reason:"list-failed", status:list.status };
+    }
+    
+    const items = Array.isArray(listBody?.items) ? listBody.items : [];
+    
+    // 2) If empty, create a temp workspace to verify list shows it
+    let createdWsId = null;
+    if (items.length === 0) {
+      const create = await post(`/workspaces`, {
+        name: "Smoke Test Workspace",
+        description: "Temporary workspace for smoke test",
+        views: []
+      });
+      
+      if (!create.ok || !create.body?.id) {
+        return { test:"workspaces:list", result:"FAIL", reason:"workspace-create-failed", create };
+      }
+      createdWsId = create.body.id;
+      
+      // Re-list to verify it appears
+      const list2 = await fetch(`${API}/workspaces?limit=50`, { headers: listHdr });
+      const listBody2 = await list2.json().catch(() => ({}));
+      if (!list2.ok) {
+        return { test:"workspaces:list", result:"FAIL", reason:"list-after-create-failed" };
+      }
+      const items2 = Array.isArray(listBody2?.items) ? listBody2.items : [];
+      const found = items2.find(ws => ws.id === createdWsId);
+      if (!found) {
+        return { test:"workspaces:list", result:"FAIL", reason:"created-workspace-not-found" };
+      }
+    }
+    
+    // 3) Verify shape: id, name, description?, views?, timestamps
+    const hasValidShape = items.length > 0 ? 
+      items[0].id && items[0].name && items[0].createdAt && items[0].updatedAt
+      : true;
+    
+    const pass = list.ok && hasValidShape;
+    return {
+      test: "workspaces:list",
+      result: pass ? "PASS" : "FAIL",
+      itemCount: items.length,
+      createdWsId,
+      sampleWorkspace: items[0] || null,
+      listBody
+    };
+  },
+
+  "smoke:events:enabled-noop": async ()=>{
+    await ensureBearer();
+    
+    // Sprint III: Event dispatcher is noop by default; test flag gating
+    // Enable both FEATURE_EVENT_DISPATCH_ENABLED and FEATURE_EVENT_DISPATCH_SIMULATE
+    const eventHeaders = {
+      "X-Feature-Events-Enabled": "true",
+      "X-Feature-Events-Simulate": "true"
+    };
+    
+    // Use an endpoint that touches events: POST /purchasing/po/{id}:receive
+    // (already tested in smoke:po:emit-events, so we just verify simulation signal)
+    // OR test via GET /views (simpler, doesn't require PO setup)
+    
+    // Simple test: GET /views with simulate flag and verify response structure
+    const listReq = await fetch(`${API}/views?limit=10`, {
+      headers: { ...baseHeaders(), ...eventHeaders }
+    });
+    
+    if (!listReq.ok) {
+      return { test:"events:enabled-noop", result:"FAIL", reason:"views-request-failed", status:listReq.status };
+    }
+    
+    const listBody = await listReq.json().catch(() => ({}));
+    
+    // The /views endpoint itself doesn't emit events, but the dispatcher integration
+    // in a real scenario would. For Sprint III v1, verify the simulation flag was accepted
+    // and the feature flag headers were processed without error.
+    
+    // Alternative: Test via PO receive (the real emitter)
+    // Create minimal PO -> receive -> check for _dev.emitted signal
+    const { vendorId } = await seedVendor({ post, get, put });
+    
+    const poDraft = await post(`/objects/purchaseOrder`, {
+      type: "purchaseOrder",
+      status: "draft",
+      vendorId,
+      lines: [{ id: "L1", itemId: "ITEM_EVT_TEST", uom: "ea", qty: 1 }]
+    });
+    
+    if (!poDraft.ok || !poDraft.body?.id) {
+      return { test:"events:enabled-noop", result:"FAIL", reason:"po-draft-failed", poDraft };
+    }
+    
+    const poId = poDraft.body.id;
+    
+    // Submit & approve PO
+    await post(`/purchasing/po/${encodeURIComponent(poId)}:submit`, {}, { "Idempotency-Key": idem() });
+    await post(`/purchasing/po/${encodeURIComponent(poId)}:approve`, {}, { "Idempotency-Key": idem() });
+    
+    // Wait for approval
+    const approved = await waitForStatus("purchaseOrder", poId, ["approved"]);
+    if (!approved.ok) {
+      return { test:"events:enabled-noop", result:"FAIL", reason:"po-not-approved", approved };
+    }
+    
+    // Now receive with event simulation headers
+    const po = await get(`/objects/purchaseOrder/${encodeURIComponent(poId)}`);
+    const lines = (po.body?.lines ?? [])
+      .map(ln => ({ lineId: String(ln.id ?? ln.lineId), deltaQty: Math.max(0, (ln.qty || 0) - (ln.receivedQty || 0)) }))
+      .filter(l => l.deltaQty > 0);
+    
+    const recv = await fetch(`${API}/purchasing/po/${encodeURIComponent(poId)}:receive`, {
+      method: "POST",
+      headers: { ...baseHeaders(), ...eventHeaders, "Idempotency-Key": idem() },
+      body: JSON.stringify({ lines })
+    });
+    
+    const recvBody = await recv.json().catch(() => ({}));
+    
+    // Check for _dev.emitted signal (only present when simulate=true)
+    const hasEmitSignal = recvBody?._dev?.emitted === true;
+    const hasProvider = recvBody?._dev?.provider === "noop";
+    
+    const pass = recv.ok && hasEmitSignal && hasProvider;
+    return {
+      test: "events:enabled-noop",
+      result: pass ? "PASS" : "FAIL",
+      status: recv.status,
+      hasEmitSignal,
+      hasProvider,
+      devMeta: recvBody?._dev || null,
+      recvBody
+    };
   }
 };
 

@@ -29,6 +29,9 @@ function withFlag(envName: string, headerName: string, dflt: boolean) {
 export const featureVendorGuardEnabled = withFlag(
   "FEATURE_ENFORCE_VENDOR_ROLE", "X-Feature-Enforce-Vendor", true
 );
+export const featureViewsEnabled = withFlag(
+  "FEATURE_VIEWS_ENABLED", "X-Feature-Views-Enabled", false
+);
 export const featureEventsEnabled = withFlag(
   "FEATURE_EVENT_DISPATCH_ENABLED", "X-Feature-Events-Enabled", false
 );
