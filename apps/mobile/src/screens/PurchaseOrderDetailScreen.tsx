@@ -199,3 +199,30 @@ export default function PurchaseOrderDetailScreen() {
     </View>
   );
 }
+function Pill({ label, bg, fg }: { label: string; bg: string; fg: string }) {
+  return (
+    <View style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, backgroundColor: bg, marginRight: 6 }}>
+      <Text style={{ color: fg, fontSize: 12 }}>{label}</Text>
+    </View>
+  );
+}
+function Btn({ onPress, label, disabled }: { onPress: () => void; label: string; disabled?: boolean }) {
+  const t = useColors();
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={!!disabled}
+      style={{
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: t.colors.border,
+        backgroundColor: disabled ? t.colors.border : t.colors.card,
+        opacity: disabled ? 0.7 : 1,
+      }}
+    >
+      <Text style={{ color: t.colors.text, fontWeight: "bold" as any }}>{label}</Text>
+    </Pressable>
+  );
+}

@@ -1,3 +1,4 @@
+// apps/mobile/src/screens/PurchaseOrdersListScreen.tsx
 import * as React from "react";
 import { View, Text, TextInput, FlatList, Pressable, ActivityIndicator, RefreshControl } from "react-native";
 import { useNavigation } from "@react-navigation/native";
@@ -10,6 +11,10 @@ export default function PurchaseOrdersListScreen() {
   // On query change, restart pagination instead of just refetching
    React.useEffect(() => { reset?.(); }, [q]);
   const items = data?.items ?? [];
+
+  const onNew = React.useCallback(() => {
+    navigation.navigate("PurchaseOrderDetail", { mode: "new" });
+  }, [navigation]);
 
   return (
     <View style={{ flex: 1, padding: 12 }}>

@@ -2304,7 +2304,7 @@ components:
         - action
         - qty
       properties:
-        id:
+        reason:
           type: string
         itemId:
           type: string

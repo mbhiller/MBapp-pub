@@ -1,3 +1,4 @@
+// apps/mobile/src/screens/SalesOrderDetailScreen.tsx
 import * as React from "react";
 import { View, Text, ActivityIndicator, FlatList } from "react-native";
 import { useRoute } from "@react-navigation/native";
