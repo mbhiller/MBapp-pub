@@ -1,3 +1,4 @@
+//apps/api/src/inventory/actions.ts
 export const ACTIONS = new Set(["receive","reserve","commit","fulfill","adjust","release"] as const);
 export type Action = typeof ACTIONS extends Set<infer T> ? T : never;
 

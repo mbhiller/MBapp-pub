@@ -21,12 +21,21 @@ This playbook turns the Roadmap v10.0, Relationships, Backend Guide, Frontend Gu
   - `ui/PartyPicker`, `ui/StatusBadge`, `ui/LineEditor`, `useRefetchOnFocus`, Money helpers.
   - Workspaces scaffold: list filters, saved views, column sets, RBAC visibility.
 
+### SPRINT TEMPLATE
+## DoD — Housekeeping (No-Regret Prep for Future Automation)
+- Keep **Idempotency-Key** / **X-Request-Id** flowing end-to-end (client → API → logs → response).
+- Ensure **createdAt / updatedAt** are set on every persisted object we touch.
+- Prefer **verb endpoints** for actions (e.g., `/po/{id}:receive`, `/so/{id}:commit`) so steps remain composable.
+- Leave **disabled `emitEvent(...)` stubs** at key lifecycle points (create/submit/approve/receive) for painless orchestration later.
+- Maintain **stable status enums** across PO/SO/Reservations (append new values; avoid renames).
+
+
 ## Tier Execution Model (repeat per epic)
 For each epic **E**:
 1. **Spec**: Update schemas + paths + enums in `MBapp-Modules.yaml` (status guards, idempotency fields). Commit.
 2. **Types**: Regenerate backend & mobile types.
 3. **Backend**: Implement repo + handlers + guards + idempotency + events.
-4. **Seeds/Smokes**: Add `tools/seed` and `ops/smoke.mjs smoke:<E>:*` covering happy path + guardrails.
+4. **Seeds/Smokes**: Add `ops/smoke/seed` and `ops/smoke/smoke.mjs smoke:<E>:*` covering happy path + guardrails.
 5. **Frontend**: 
    - Lists with filters + role pickers
    - Detail screen with shared line editor & status actions
@@ -48,35 +57,11 @@ For each epic **E**:
 7. **Scanning & EPC** (if in Tier 1/2 scope): stock counts, pick/pack/receive flows.
 8. **Leasing/Labor** (as per Roadmap): Party roles (lessor/lessee, employee/contractor); timesheets or contract terms.
 
-## SO/PO Redesign Notes (from docs)
-- Make orders **Party‑native**: replace customer/vendor strings with Party IDs + role checks.
-- Normalize addresses/contacts via PartyAddress/PartyContact; denormalize snapshot on create for audit.
-- Status gates: draft → submitted → approved → committed/received → closed/cancelled; enforce via one guard utility.
-- Idempotency: header + per‑action keys (reserve, commit, receive, fulfill).
-- Inventory counters: single source from movements; forbid over‑commit/over‑fulfill; partials tracked.
-
 ## CI & Smokes
 - Each slice contributes:
   - `tools/seed/<slice>.ts`
   - `ops/smoke.mjs smoke:<slice>:happy|guards|idempotency`
 - GitHub Actions jobs: `spec`, `api`, `mobile`, with smoke matrix per slice.
-
-## Concrete Next 2 Sprints
-**Sprint A (Parties Foundation, 1 week)**
-- Spec parties + roles + links + addresses + contacts.
-- Backend CRUD + search + role assignment + link ops.
-- Seeds/smokes: create/search/assign/link.
-- Frontend: Party list/detail; role‑filtered PartyPicker shipped.
-- CI: add parties smokes.
-
-**Sprint B (Products & Inventory Core, 1–1.5 weeks)**
-- Spec products/items/movements/counters.
-- Backend: counters API + movement guards.
-- Seeds/smokes: over‑commit/over‑fulfill guardrails (already green → keep).
-- Frontend: Product list/detail, Inventory Stock Card.
-- CI: inventory smokes.
-
-**Then**: SO/PO redesign (2 weeks total), Events/Regs (1 week), Resources/Reservations (1 week).
 
 ## Definition of Done (per slice)
 - Spec updated + tagged
@@ -88,8 +73,8 @@ For each epic **E**:
 - Docs updated (Roadmap, Working)
 
 ## Branching & Checkpoints
-- Create `feat/sprint-100825`.
-- Merge per-slice via PRs: `feat/slice-parties`, `feat/slice-inventory`, `feat/slice-orders`, … into `feat/sprint-100825`.
+- Create `feat/sprint<LETTER>-MBAPP`.
+- Merge per-slice via PRs:
 - Tag after each slice: `v10.0-slice-parties`, etc.
 
 ---

@@ -1,6 +1,32 @@
-export async function seedInventory(api) {
-  const prod = await api.post('/products', { sku:'SEED-1', name:'Seed Product' });
-  const item = await api.post('/inventory/items', { productId: prod.id });
-  await api.post('/inventory/movements', { itemId: item.id, type:'receive', qty: 10 });
-  return { productId: prod.id, itemId: item.id };
+// ops/smoke/seed/inventory.ts
+// Seeds a product + inventory item + a small receive movement.
+export async function seedInventory(api: { post: Function }) {
+  const prod = await api.post(`/objects/product`, {
+    type: "product",
+    name: "Seed Product",
+    sku: `SEED-${Math.random().toString(36).slice(2, 7)}`,
+  });
+  if (!prod.ok) return { ok: false, step: "product", res: prod };
+
+  const productId = prod.body?.id;
+
+  const item = await api.post(`/objects/inventory`, {
+    type: "inventory",
+    name: "Seed Item",
+    productId,
+    uom: "ea",
+  });
+  if (!item.ok) return { ok: false, step: "inventory", res: item };
+
+  const itemId = item.body?.id;
+
+  const mv = await api.post(`/objects/inventoryMovement`, {
+    type: "inventoryMovement",
+    itemId,
+    action: "receive",
+    qty: 10,
+  });
+  if (!mv.ok) return { ok: false, step: "movement", res: mv };
+
+  return { ok: true, productId, itemId };
 }

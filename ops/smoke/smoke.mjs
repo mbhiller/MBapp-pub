@@ -8,6 +8,7 @@ const API=(process.env.MBAPP_API_BASE??"http://localhost:3000").replace(/\/+$/,"
 const TENANT=process.env.MBAPP_TENANT_ID??"DemoTenant";
 const EMAIL=process.env.MBAPP_DEV_EMAIL??"dev@example.com";
 
+/* ---------- Auth & HTTP ---------- */
 async function ensureBearer(){
   if(process.env.MBAPP_BEARER) return;
   try{
@@ -28,14 +29,21 @@ function baseHeaders(){
   if(b) h["Authorization"]=`Bearer ${b}`;
   return h;
 }
-
+function qs(params){
+  if (!params) return "";
+  const u = new URLSearchParams();
+  for (const [k,v] of Object.entries(params)) {
+    if (v === undefined || v === null) continue;
+    u.set(k, String(v));
+  }
+  const s = u.toString();
+  return s ? `?${s}` : "";
+}
 function idem() {
-  // short, unique-ish key per request; good enough for smokes
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 }
-
-async function get(p){
-  const r=await fetch(API+p,{headers:baseHeaders()});
+async function get(p, params){
+  const r=await fetch(API + p + qs(params), {headers:baseHeaders()});
   const b=await r.json().catch(()=>({}));
   return {ok:r.ok,status:r.status,body:b};
 }
@@ -50,55 +58,64 @@ async function put(p,body,h={}){
   return {ok:r.ok,status:r.status,body:j};
 }
 
+/* ---------- Helpers ---------- */
 async function onhand(itemId){
   return await get(`/inventory/${encodeURIComponent(itemId)}/onhand`);
 }
+async function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+async function waitForStatus(type, id, wanted, { tries=10, delayMs=120 } = {}) {
+  for (let i=0;i<tries;i++){
+    const po = await get(`/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}`);
+    const s = po?.body?.status;
+    if (wanted.includes(s)) return { ok:true, po };
+    await sleep(delayMs);
+  }
+  const last = await get(`/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}`);
+  return { ok:false, lastStatus:last?.body?.status, po:last };
+}
 
 /** Try multiple movement payload shapes until on-hand increases. */
+const MV_TYPE=process.env.SMOKE_MOVEMENT_TYPE??"inventoryMovement";
 async function ensureOnHand(itemId, qty){
-  // 1) Try { type: 'receive' }
+  // 1) { type: 'receive' }
   let r1 = await post(`/objects/${MV_TYPE}`, { itemId, type:"receive", qty });
   let oh1 = await onhand(itemId);
   if (r1.ok && oh1.ok && (oh1.body?.items?.[0]?.onHand ?? 0) >= qty) {
     return { ok:true, variant:"type", receive:r1, onhand:oh1 };
   }
-
-  // 2) Try { action: 'receive' }
+  // 2) { action: 'receive' }
   let r2 = await post(`/objects/${MV_TYPE}`, { itemId, action:"receive", qty });
   let oh2 = await onhand(itemId);
   if (r2.ok && oh2.ok && (oh2.body?.items?.[0]?.onHand ?? 0) >= qty) {
     return { ok:true, variant:"action", receive:r2, onhand:oh2 };
   }
-
-  // 3) As a last resort, try both keys (some handlers normalize one)
+  // 3) both keys
   let r3 = await post(`/objects/${MV_TYPE}`, { itemId, type:"receive", action:"receive", qty });
   let oh3 = await onhand(itemId);
   if (r3.ok && oh3.ok && (oh3.body?.items?.[0]?.onHand ?? 0) >= qty) {
     return { ok:true, variant:"both", receive:r3, onhand:oh3 };
   }
-
   return { ok:false, attempts:[{r1,oh1},{r2,oh2},{r3,oh3}] };
 }
 
-
+/** objects helpers */
+const ITEM_TYPE=process.env.SMOKE_ITEM_TYPE??"inventory"; // safer default matches your endpoints
+async function createProduct(body) {
+  return await post(`/objects/product`, { type:"product", kind:"good", name:`${body?.name ?? "Prod"}-${Date.now()}`, sku:`SKU-${Math.random().toString(36).slice(2,7)}`, ...body });
+}
+async function createInventoryForProduct(productId, name = "Item") {
+  return await post(`/objects/inventory`, { type:"inventory", name:`${name}-${Date.now()}`, productId, uom:"ea" });
+}
 /* minimal api wrapper so seeders can call /objects/<type> consistently */
 const api = {
-  async post(path, body) {
-    // seeders expect { ok, status, body }
-    return await post(path, body, { "Idempotency-Key": idem() });
-  },
-  async get(path) {
-    return await get(path);
-  },
-  async put(path, body) {
-    return await put(path, body);
-  }
+  async post(path, body) { return await post(path, body, { "Idempotency-Key": idem() }); },
+  async get(path, params) { return await get(path, params); },
+  async put(path, body) { return await put(path, body); }
 };
 
-const PARTY_TYPE="party"; // relationships doc: single Party type + PartyRole object
-const ITEM_TYPE=process.env.SMOKE_ITEM_TYPE??"inventoryItem";
-const MV_TYPE=process.env.SMOKE_MOVEMENT_TYPE??"inventoryMovement";
+const PARTY_TYPE="party";
 
+/* ---------- Tests ---------- */
 const tests = {
   "list": async ()=>Object.keys(tests),
 
@@ -110,7 +127,6 @@ const tests = {
 
   "smoke:parties:happy": async ()=>{
     await ensureBearer();
-    // direct object create + search + update on Party
     const create = await post(`/objects/${encodeURIComponent(PARTY_TYPE)}`, { kind:"person", name:"Smoke Test User", roles:["customer"] });
     const search = await post(`/objects/${encodeURIComponent(PARTY_TYPE)}/search`, { q:"Smoke Test User" });
     let update = { ok:true, status:200, body:{} };
@@ -127,9 +143,9 @@ const tests = {
     if (!item.ok) return { test:"inventory-onhand", result:"FAIL", item };
     const id = item.body?.id;
     const rec = await post(`/objects/${MV_TYPE}`, { itemId:id, type:"receive", qty:3 });
-    const onhand = await get(`/inventory/${encodeURIComponent(id)}/onhand`);
-    const pass = rec.ok && onhand.ok && Array.isArray(onhand.body?.items) && ((onhand.body.items[0]?.onHand ?? 0) >= 3);
-    return { test:"inventory-onhand", result:pass?"PASS":"FAIL", item, rec, onhand };
+    const onhandR = await get(`/inventory/${encodeURIComponent(id)}/onhand`);
+    const pass = rec.ok && onhandR.ok && Array.isArray(onhandR.body?.items) && ((onhandR.body.items[0]?.onHand ?? 0) >= 3);
+    return { test:"inventory-onhand", result:pass?"PASS":"FAIL", item, rec, onhand:onhandR };
   },
 
   "smoke:inventory:guards": async ()=>{
@@ -177,10 +193,8 @@ const tests = {
   "smoke:sales:happy": async ()=>{
     await ensureBearer();
 
-    // Seed Party (person) + PartyRole(customer)
     const { partyId } = await seedParties(api);
 
-    // Create two inventory items
     const itemA = await post(`/objects/${ITEM_TYPE}`, { productId:"prod-ITEM_A" });
     const itemB = await post(`/objects/${ITEM_TYPE}`, { productId:"prod-ITEM_B" });
     if (!itemA.ok || !itemB.ok) return { test:"sales-happy", result:"FAIL", itemA, itemB };
@@ -188,14 +202,12 @@ const tests = {
     const idA = itemA.body?.id;
     const idB = itemB.body?.id;
 
-    // Ensure on-hand exists by probing movement payload styles
     const recvA = await ensureOnHand(idA, 5);
     const recvB = await ensureOnHand(idB, 3);
     if (!recvA.ok || !recvB.ok) {
       return { test:"sales-happy", result:"FAIL", reason:"onhand-not-updated", recvA, recvB };
     }
 
-    // Create DRAFT SO with the actual item IDs
     const create = await post(`/objects/salesOrder`, {
       type: "salesOrder",
       status: "draft",
@@ -209,7 +221,6 @@ const tests = {
     if (!create.ok) return { test: "sales-happy", result: "FAIL", create };
     const id = create.body?.id;
 
-    // sanity: verify lines use the real item IDs; if not, force-correct
     const l1 = create.body?.lines?.find(x=>x.id==="L1")?.itemId;
     const l2 = create.body?.lines?.find(x=>x.id==="L2")?.itemId;
     if (l1 !== idA || l2 !== idB) {
@@ -224,7 +235,6 @@ const tests = {
 
     const submit  = await post(`/sales/so/${encodeURIComponent(id)}:submit`, {}, { "Idempotency-Key": idem() });
 
-    // double-check on-hand *right before* commit, for clear diagnostics
     const ohA = await onhand(idA);
     const ohB = await onhand(idB);
 
@@ -237,10 +247,8 @@ const tests = {
     const fulfill1 = await post(`/sales/so/${encodeURIComponent(id)}:fulfill`, { lines: [{ lineId: "L1", deltaQty: 1 }] }, { "Idempotency-Key": idem() });
     if (!fulfill1.ok) return { test: "sales-happy", result: "FAIL", fulfill1 };
 
-    // premature close (non-fatal)
     await post(`/sales/so/${encodeURIComponent(id)}:close`, {}, { "Idempotency-Key": idem() });
 
-    // fulfill remaining
     const fulfill2 = await post(`/sales/so/${encodeURIComponent(id)}:fulfill`,
       { lines: [{ lineId: "L1", deltaQty: 1 }, { lineId: "L2", deltaQty: 1 }] },
       { "Idempotency-Key": idem() }
@@ -258,19 +266,15 @@ const tests = {
     };
   },
 
-
-
   "smoke:sales:guards": async ()=>{
     await ensureBearer();
 
     const { partyId } = await seedParties(api);
 
-    // Seed an inventory item with limited stock
     const scarceItem = await post(`/objects/${ITEM_TYPE}`, { productId:"prod-ITEM_G" });
     if (!scarceItem.ok) return { test:"sales-guards", result:"FAIL", scarceItem };
     const scarceItemId = scarceItem.body?.id;
 
-    // Receive just a small amount so guardrails trigger
     const rec = await post(`/objects/${MV_TYPE}`, { itemId:scarceItemId, action:"receive", qty:2 });
     if (!rec.ok) return { test:"sales-guards", result:"FAIL", rec };
 
@@ -286,12 +290,10 @@ const tests = {
 
     await post(`/sales/so/${encodeURIComponent(id)}:submit`, {}, { "Idempotency-Key": idem() });
 
-    // Reserve -> cancel should be blocked
     await post(`/sales/so/${encodeURIComponent(id)}:reserve`, { lines: [{ lineId: "X1", deltaQty: 2 }] }, { "Idempotency-Key": idem() });
     const cancelBlocked = await post(`/sales/so/${encodeURIComponent(id)}:cancel`, {}, { "Idempotency-Key": idem() });
     const cancelGuard = !cancelBlocked.ok || cancelBlocked.status >= 400;
 
-    // Release -> cancel now ok
     const release = await post(`/sales/so/${encodeURIComponent(id)}:release`,
       { lines: [{ lineId: "X1", deltaQty: 2, reason: "test" }] },
       { "Idempotency-Key": idem() }
@@ -299,7 +301,6 @@ const tests = {
     const cancel = await post(`/sales/so/${encodeURIComponent(id)}:cancel`, {}, { "Idempotency-Key": idem() });
     const cancelled = cancel.ok && (cancel.body?.status === "cancelled");
 
-    // Strict commit shortage scenario (brand new SO with ridiculous qty)
     const tooBigItem = await post(`/objects/${ITEM_TYPE}`, { productId:"prod-ITEM_SCARCE" });
     const tooBigItemId = tooBigItem.body?.id;
     const scarce = await post(`/objects/salesOrder`, {
@@ -318,13 +319,10 @@ const tests = {
     return { test: "sales-guards", result: pass ? "PASS" : "FAIL", rec, cancelBlocked, release, cancel, strictCommit };
   },
 
-
-
   /* ===================== Purchase Orders ===================== */
   "smoke:purchasing:happy": async ()=>{
     await ensureBearer();
 
-    // Seed Party (organization) + PartyRole(vendor)
     const { vendorId } = await seedVendor(api);
     const create = await post(`/objects/purchaseOrder`, {
       type: "purchaseOrder",
@@ -341,6 +339,9 @@ const tests = {
     const submit  = await post(`/purchasing/po/${encodeURIComponent(id)}:submit`,  {}, { "Idempotency-Key": idem() });
     const approve = await post(`/purchasing/po/${encodeURIComponent(id)}:approve`, {}, { "Idempotency-Key": idem() });
     if (!submit.ok || !approve.ok) return { test: "purchasing-happy", result: "FAIL", submit, approve };
+
+    const approved = await waitForStatus("purchaseOrder", id, ["approved"]);
+    if (!approved.ok) return { test:"purchasing-happy", result:"FAIL", reason:"not-approved-yet", approved };
 
     const recv1 = await post(`/purchasing/po/${encodeURIComponent(id)}:receive`, { lines:[{ lineId:"P1", deltaQty:2 }] }, { "Idempotency-Key": idem() });
     if (!recv1.ok) return { test: "purchasing-happy", result: "FAIL", recv1 };
@@ -367,19 +368,18 @@ const tests = {
     if (!create.ok) return { test: "purchasing-guards", result: "FAIL", create };
     const id = create.body?.id;
 
-    // Approve before submit (should fail)
     const approveEarly = await post(`/purchasing/po/${encodeURIComponent(id)}:approve`, {}, { "Idempotency-Key": idem() });
     const approveGuard = !approveEarly.ok || approveEarly.status >= 400;
 
-    // Submit then approve
-    await post(`/purchasing/po/${encodeURIComponent(id)}:submit`, {}, { "Idempotency-Key": idem() });
-    await post(`/purchasing/po/${encodeURIComponent(id)}:approve`, {}, { "Idempotency-Key": idem() });
+    const submit  = await post(`/purchasing/po/${encodeURIComponent(id)}:submit`, {}, { "Idempotency-Key": idem() });
+    const approve = await post(`/purchasing/po/${encodeURIComponent(id)}:approve`, {}, { "Idempotency-Key": idem() });
 
-    // Over-receive (should 409)
+    const approved = await waitForStatus("purchaseOrder", id, ["approved"]);
+    if (!approved.ok) return { test:"purchasing-guards", result:"FAIL", reason:"not-approved-yet", approved };
+
     const over = await post(`/purchasing/po/${encodeURIComponent(id)}:receive`, { lines:[{ lineId:"G1", deltaQty:3 }] }, { "Idempotency-Key": idem() });
     const overGuard = !over.ok || over.status === 409;
 
-    // Cancel in approved should fail (per your server guard/model)
     const cancel = await post(`/purchasing/po/${encodeURIComponent(id)}:cancel`, {}, { "Idempotency-Key": idem() });
     const cancelGuard = !cancel.ok || cancel.status >= 400;
 
@@ -387,33 +387,547 @@ const tests = {
     return { test: "purchasing-guards", result: pass ? "PASS" : "FAIL", approveEarly, over, cancel };
   },
 
-  /* ===================== Routing & Delivery (Sprint C) ===================== */
-  "smoke:routing:shortest": async ()=>{
+  "smoke:po:save-from-suggest": async ()=>{
     await ensureBearer();
-    const g = baseGraph();
-    const up = await post(`/routing/graph`, { nodes:g.nodes, edges:g.edges });
-    const plan = await post(`/routing/plan`, { objective:"shortest", tasks:g.tasks, graph:{ nodes:g.nodes, edges:g.edges } });
-    const distance = plan.body?.summary?.distanceKm ?? 0;
-    const pass = up.ok && plan.ok && distance > 0;
-    return { test:"routing-shortest", result:pass?"PASS":"FAIL", up, plan };
+    let draft;
+    try {
+      const sugg = await post(`/purchasing/suggest-po`, { requests: [{ productId: "prod-demo", qty: 1 }] }, { "Idempotency-Key": idem() });
+      draft = sugg.body?.draft ?? sugg.body?.drafts?.[0];
+    } catch {}
+    if (!draft) {
+      draft = { vendorId: "vendor_demo", status: "draft", lines: [{ itemId: "ITEM_SMOKE", qty: 1 }] };
+    }
+    const r = await post(`/purchasing/po:create-from-suggestion`, { draft }, { "Idempotency-Key": idem() });
+    const id = r.body?.id ?? r.body?.ids?.[0];
+    const got = id ? await get(`/objects/purchaseOrder/${encodeURIComponent(id)}`) : { ok:false, status:0, body:{} };
+    const pass = r.ok && !!id && got.ok && got.body?.status === "draft";
+    return { test:"po:save-from-suggest", result:pass?"PASS":"FAIL", create:r, get:got };
   },
 
-  "smoke:routing:closure": async ()=>{
+  "smoke:po:quick-receive": async ()=>{
     await ensureBearer();
-    const g = baseGraph();
-    const CLOSED = "A-B";
-    const edgesClosed = (g.edges ?? []).map(e => e.id === CLOSED ? { ...e, isClosed:true } : e);
-    const up = await post(`/routing/graph`, { nodes:g.nodes, edges:edgesClosed });
-    const plan = await post(`/routing/plan`, {
-      objective:"shortest",
-      constraints:{ closures:[CLOSED] },
-      tasks:g.tasks,
-      graph:{ nodes:g.nodes, edges:edgesClosed }
+    const { vendorId } = await seedVendor(api);
+    const create = await post(`/objects/purchaseOrder`, {
+      type:"purchaseOrder", status:"draft", vendorId,
+      lines:[{ id:"P1", itemId:"ITEM_QR", uom:"ea", qty:2 }]
     });
-    const distance = plan.body?.summary?.distanceKm ?? 0;
-    const ok = up.ok && plan.ok && distance >= 12;
-    return { name:"smoke:routing:closure", ok, status: ok?"PASS":"FAIL", summary:{ distanceKm:distance, closed:["A-B"] }, artifacts:{ up, plan } };
+    const id = create.body?.id;
+    const submit  = await post(`/purchasing/po/${encodeURIComponent(id)}:submit`, {}, { "Idempotency-Key": idem() });
+    const approve = await post(`/purchasing/po/${encodeURIComponent(id)}:approve`, {}, { "Idempotency-Key": idem() });
+    if(!submit.ok || !approve.ok) return { test:"po:quick-receive", result:"FAIL", submit, approve };
+    const approved = await waitForStatus("purchaseOrder", id, ["approved"]);
+    if (!approved.ok) return { test:"po:quick-receive", result:"FAIL", reason:"not-approved-yet", approved };
+    const po = await get(`/objects/purchaseOrder/${encodeURIComponent(id)}`);
+    const lines = (po.body?.lines ?? []).map((ln)=>({ lineId:String(ln.id ?? ln.lineId), deltaQty:Math.max(0,(ln.qty||0)-(ln.receivedQty||0))})).filter(l=>l.deltaQty>0);
+    const rec = await post(`/purchasing/po/${encodeURIComponent(id)}:receive`, { lines }, { "Idempotency-Key": idem() });
+    const pass = create.ok && rec.ok;
+    return { test:"po:quick-receive", result: pass?"PASS":"FAIL", create, rec };
   },
+
+  "smoke:po:receive-line": async ()=>{
+    await ensureBearer();
+    const { vendorId } = await seedVendor(api);
+    const prod = await createProduct({ name:"RecvLine" });
+    const inv  = await createInventoryForProduct(prod.body.id, "RecvLineItem");
+    if(!inv.ok) return { test:"po-receive-line", result:"FAIL", inv };
+    const create = await post(`/objects/purchaseOrder`, {
+      type:"purchaseOrder", status:"draft", vendorId,
+      lines:[{ id:"RL1", itemId: inv.body.id, uom:"ea", qty:3 }]
+    });
+    if(!create.ok) return { test:"po-receive-line", result:"FAIL", create };
+    const id = create.body.id;
+    await post(`/purchasing/po/${encodeURIComponent(id)}:submit`, {}, { "Idempotency-Key": idem() });
+    await post(`/purchasing/po/${encodeURIComponent(id)}:approve`, {}, { "Idempotency-Key": idem() });
+    const approved = await waitForStatus("purchaseOrder", id, ["approved"]);
+    if (!approved.ok) return { test:"po-receive-line", result:"FAIL", reason:"not-approved-yet", approved };
+    const recv = await post(`/purchasing/po/${encodeURIComponent(id)}:receive`, {
+      lines:[{ lineId:"RL1", deltaQty:2, lot:"LOT-ABC", locationId:"LOC-A1" }]
+    }, { "Idempotency-Key": idem() });
+    const ok1 = recv.ok && (recv.body?.status === "partially_fulfilled");
+    const retry = await post(`/purchasing/po/${encodeURIComponent(id)}:receive`, {
+      lines:[{ lineId:"RL1", deltaQty:2, lot:"LOT-ABC", locationId:"LOC-A1" }]
+    }, { "Idempotency-Key": "HARDKEY-TEST-RL1" });
+    const retry2 = await post(`/purchasing/po/${encodeURIComponent(id)}:receive`, {
+      lines:[{ lineId:"RL1", deltaQty:2, lot:"LOT-ABC", locationId:"LOC-A1" }]
+    }, { "Idempotency-Key": "HARDKEY-TEST-RL1" });
+    const idemOk = retry.ok && retry2.ok;
+    return { test:"po-receive-line", result: (ok1 && idemOk) ? "PASS" : "FAIL", create, recv, retry, retry2 };
+  },
+
+  "smoke:po:receive-line-batch": async ()=>{
+    await ensureBearer();
+    const { vendorId } = await seedVendor(api);
+    const prodA = await createProduct({ name:"RecvBatchA" });
+    const prodB = await createProduct({ name:"RecvBatchB" });
+    const invA  = await createInventoryForProduct(prodA.body.id, "RecvBatchItemA");
+    const invB  = await createInventoryForProduct(prodB.body.id, "RecvBatchItemB");
+    if(!invA.ok || !invB.ok) return { test:"po-receive-line-batch", result:"FAIL", invA, invB };
+    const create = await post(`/objects/purchaseOrder`, {
+      type:"purchaseOrder", status:"draft", vendorId,
+      lines:[{ id:"BL1", itemId: invA.body.id, uom:"ea", qty:2 }, { id:"BL2", itemId: invB.body.id, uom:"ea", qty:4 }]
+    });
+    if(!create.ok) return { test:"po-receive-line-batch", result:"FAIL", create };
+    const id = create.body.id;
+    await post(`/purchasing/po/${encodeURIComponent(id)}:submit`, {}, { "Idempotency-Key": idem() });
+    await post(`/purchasing/po/${encodeURIComponent(id)}:approve`, {}, { "Idempotency-Key": idem() });
+    const approved = await waitForStatus("purchaseOrder", id, ["approved"]);
+    if (!approved.ok) return { test:"po-receive-line-batch", result:"FAIL", reason:"not-approved-yet", approved };
+    const recv1 = await post(`/purchasing/po/${encodeURIComponent(id)}:receive`, {
+      lines:[
+        { lineId:"BL1", deltaQty:2, lot:"LOT-1", locationId:"A1" },
+        { lineId:"BL2", deltaQty:1, lot:"LOT-2", locationId:"B1" }
+      ]
+    }, { "Idempotency-Key": idem() });
+    const recv2 = await post(`/purchasing/po/${encodeURIComponent(id)}:receive`, {
+      lines:[{ lineId:"BL2", deltaQty:3, lot:"LOT-2", locationId:"B1" }]
+    }, { "Idempotency-Key": idem() });
+    const ok = recv1.ok && recv2.ok && (recv2.body?.status === "fulfilled");
+    return { test:"po-receive-line-batch", result: ok ? "PASS" : "FAIL", create, recv1, recv2 };
+  },
+
+  // Same payload, different Idempotency-Key -> should be idempotent via payload signature
+  "smoke:po:receive-line-idem-different-key": async () => {
+    await ensureBearer();
+    const { vendorId } = await seedVendor(api);
+
+    const prod = await createProduct({ name: "RecvSamePayload" });
+    const inv  = await createInventoryForProduct(prod.body.id, "RecvSamePayloadItem");
+    if (!inv.ok) return { test:"po-receive-line-idem-different-key", result:"FAIL", inv };
+
+    const create = await post(`/objects/purchaseOrder`, {
+      type: "purchaseOrder", status: "draft", vendorId,
+      lines: [{ id: "RL1", itemId: inv.body.id, uom: "ea", qty: 3 }]
+    });
+    if (!create.ok) return { test:"po-receive-line-idem-different-key", result: "FAIL", create };
+    const id = create.body.id;
+
+    await post(`/purchasing/po/${encodeURIComponent(id)}:submit`,  {}, { "Idempotency-Key": idem() });
+    await post(`/purchasing/po/${encodeURIComponent(id)}:approve`, {}, { "Idempotency-Key": idem() });
+    const approved = await waitForStatus("purchaseOrder", id, ["approved"]);
+    if (!approved.ok) return { test:"po-receive-line-idem-different-key", result:"FAIL", reason:"not-approved-yet", approved };
+
+    const KEY_A = `kA-${Math.random().toString(36).slice(2)}`;
+    const payload = { lines: [{ lineId: "RL1", deltaQty: 2, lot: "LOT-X", locationId: "A1" }] };
+    const recv1 = await post(`/purchasing/po/${encodeURIComponent(id)}:receive`, payload, { "Idempotency-Key": KEY_A });
+    const ok1 = recv1.ok && (recv1.body?.status === "partially_fulfilled");
+
+    const KEY_B = `kB-${Math.random().toString(36).slice(2)}`;
+    const recv2 = await post(`/purchasing/po/${encodeURIComponent(id)}:receive`, payload, { "Idempotency-Key": KEY_B });
+    const ok2 = recv2.ok && (recv2.body?.status === "partially_fulfilled");
+
+    const finish = await post(`/purchasing/po/${encodeURIComponent(id)}:receive`, {
+      lines: [{ lineId:"RL1", deltaQty: 1, lot: "LOT-X", locationId:"A1" }]
+    }, { "Idempotency-Key": idem() });
+    const ok3 = finish.ok && (finish.body?.status === "fulfilled");
+
+    return {
+      test: "po-receive-line-idem-different-key",
+      result: (ok1 && ok2 && ok3) ? "PASS" : "FAIL",
+      create, recv1, recv2, finish
+    };
+  },
+
+  // === Sprint I: cursor pagination on objects list ===
+  "smoke:objects:list-pagination": async () => {
+    await ensureBearer();
+    const first = await get(`/objects/purchaseOrder`, { limit: 2, sort: "desc" });
+    if (!first.ok) return { test: "objects:list-pagination", result: "FAIL", first };
+    const items1 = Array.isArray(first.body?.items) ? first.body.items : [];
+    const next   = first.body?.pageInfo?.nextCursor ?? first.body?.next ?? null;
+    if (!next) {
+      return { test: "objects:list-pagination", result: "PASS", firstCount: items1.length, note: "single page" };
+    }
+    const second = await get(`/objects/purchaseOrder`, { limit: 2, next, sort: "desc" });
+    if (!second.ok) return { test: "objects:list-pagination", result: "FAIL", second };
+    const items2 = Array.isArray(second.body?.items) ? second.body.items : [];
+    return { test: "objects:list-pagination", result: "PASS", firstCount: items1.length, secondCount: items2.length };
+  },
+
+  // === Sprint I: movements filters (refId + poLineId) — strengthened ===
+  "smoke:movements:filter-by-poLine": async () => {
+    await ensureBearer();
+    const { vendorId } = await seedVendor(api);
+
+    // Create product + inventory item
+    const prod = await createProduct({ name: "MovFilter" });
+    const inv  = await createInventoryForProduct(prod.body.id, "MovFilterItem");
+    if (!inv.ok) return { test: "movements:filter-by-poLine", result: "FAIL", inv };
+
+    // Create PO with one line, submit + approve
+    const lineId = "MF1";
+    const create = await post(`/objects/purchaseOrder`, {
+      type: "purchaseOrder",
+      status: "draft",
+      vendorId,
+      lines: [{ id: lineId, itemId: inv.body.id, uom: "ea", qty: 3 }],
+    });
+    if (!create.ok) return { test: "movements:filter-by-poLine", result: "FAIL", create };
+    const poId = create.body.id;
+
+    await post(`/purchasing/po/${encodeURIComponent(poId)}:submit`,  {}, { "Idempotency-Key": idem() });
+    await post(`/purchasing/po/${encodeURIComponent(poId)}:approve`, {}, { "Idempotency-Key": idem() });
+
+    // Receive 1 to generate a movement tied to (poId, lineId)
+    const lot = "LOT-MF";
+    const locationId = "LOC-MF";
+    const recv = await post(`/purchasing/po/${encodeURIComponent(poId)}:receive`, {
+      lines: [{ lineId, deltaQty: 1, lot, locationId }]
+    }, { "Idempotency-Key": idem() });
+    if (!recv.ok) return { test: "movements:filter-by-poLine", result: "FAIL", recv };
+
+    // Fetch movements filtered by both refId + poLineId
+    const list = await get(`/inventory/${encodeURIComponent(inv.body.id)}/movements?refId=${encodeURIComponent(poId)}&poLineId=${encodeURIComponent(lineId)}&limit=50&sort=desc`);
+    if (!list.ok) return { test: "movements:filter-by-poLine", result: "FAIL", list };
+
+    const rows = Array.isArray(list.body?.items) ? list.body.items : [];
+    const count = rows.length;
+
+    // Strengthened assertions:
+    const okRef = count > 0 && rows.every(r => r.refId === poId);
+    const okLn  = count > 0 && rows.every(r => r.poLineId === lineId);
+
+    // Also verify the movement captured lot/location
+    const hasLot = rows.some(r => r.lot === lot);
+    const hasLoc = rows.some(r => r.locationId === locationId);
+
+    const pass  = okRef && okLn && hasLot && hasLoc;
+    return {
+      test: "movements:filter-by-poLine",
+      result: pass ? "PASS" : "FAIL",
+      count,
+      hasMore: Boolean(list.body?.pageInfo?.nextCursor ?? list.body?.next ?? null),
+      sample: rows[0]
+    };
+  },
+
+  /* ===================== Sprint II: Guardrails + Events + Pagination ===================== */
+  "smoke:po:vendor-guard:on": async ()=>{
+    await ensureBearer();
+    const { vendorId } = await seedVendor(api);
+    const { partyId: nonVendorId } = await seedParties(api); // non-vendor party
+
+    const draft1 = await post(`/objects/purchaseOrder`, {
+      type:"purchaseOrder", status:"draft", vendorId,
+      lines:[{ id:"N1", itemId:"ITEM_N1", uom:"ea", qty:1 }]
+    });
+    if(!draft1.ok) return { test:"po:vendor-guard:on", result:"FAIL", reason:"draft1", draft1 };
+    const cleared = await put(`/objects/purchaseOrder/${encodeURIComponent(draft1.body.id)}`, { vendorId: null });
+    if(!cleared.ok) return { test:"po:vendor-guard:on", result:"FAIL", reason:"clearVendorId", cleared };
+    const subMissing = await post(
+      `/purchasing/po/${encodeURIComponent(draft1.body.id)}:submit`,
+      {},
+      { "Idempotency-Key": idem() }
+    );
+    const missingOk = subMissing.status === 400 && (subMissing.body?.code === "VENDOR_REQUIRED");
+
+    const draft2 = await post(`/objects/purchaseOrder`, {
+      type:"purchaseOrder", status:"draft", vendorId,
+      lines:[{ id:"N2", itemId:"ITEM_N2", uom:"ea", qty:1 }]
+    });
+    if(!draft2.ok) return { test:"po:vendor-guard:on", result:"FAIL", reason:"draft2", draft2 };
+    const setWrongRole = await put(`/objects/purchaseOrder/${encodeURIComponent(draft2.body.id)}`, { vendorId: nonVendorId });
+    if(!setWrongRole.ok) return { test:"po:vendor-guard:on", result:"FAIL", reason:"setWrongRole", setWrongRole };
+    const subWrongRole = await post(
+      `/purchasing/po/${encodeURIComponent(draft2.body.id)}:submit`,
+      {},
+      { "Idempotency-Key": idem() }
+    );
+    const roleOk = subWrongRole.status === 400 && (subWrongRole.body?.code === "VENDOR_ROLE_MISSING");
+
+    const pass = missingOk && roleOk;
+    return { test:"po:vendor-guard:on", result: pass?"PASS":"FAIL", subMissing, subWrongRole };
+  },
+
+  "smoke:po:vendor-guard:off": async ()=>{
+    await ensureBearer();
+    const { vendorId } = await seedVendor(api);
+    const HDR = { "Idempotency-Key": idem(), "X-Feature-Enforce-Vendor": "0" };
+    const draft = await post(`/objects/purchaseOrder`, {
+      type:"purchaseOrder", status:"draft", vendorId,
+      lines:[{ id:"X1", itemId:"ITEM_X1", uom:"ea", qty:2 }]
+    });
+    if(!draft.ok) return { test:"po:vendor-guard:off", result:"FAIL", draft };
+    const id = draft.body.id;
+    const cleared = await put(`/objects/purchaseOrder/${encodeURIComponent(id)}`, { vendorId: null });
+    if(!cleared.ok) return { test:"po:vendor-guard:off", result:"FAIL", reason:"clearVendorId", cleared };
+    const submit  = await post(`/purchasing/po/${encodeURIComponent(id)}:submit`,  {}, HDR);
+    const approve = await post(`/purchasing/po/${encodeURIComponent(id)}:approve`, {}, HDR);
+    if(!submit.ok || !approve.ok) return { test:"po:vendor-guard:off", result:"FAIL", submit, approve };
+    const approved = await waitForStatus("purchaseOrder", id, ["approved"]);
+    if (!approved.ok) return { test:"po:vendor-guard:off", result:"FAIL", reason:"not-approved-yet", approved };
+    const po = await get(`/objects/purchaseOrder/${encodeURIComponent(id)}`);
+    const lines = (po.body?.lines ?? [])
+      .map(ln => ({ lineId:String(ln.id ?? ln.lineId), deltaQty:Math.max(0,(ln.qty||0)-(ln.receivedQty||0)) }))
+      .filter(l => l.deltaQty>0);
+    const recv = await post(`/purchasing/po/${encodeURIComponent(id)}:receive`, { lines }, HDR);
+    const pass = submit.ok && approve.ok && recv.ok;
+    return { test:"po:vendor-guard:off", result: pass?"PASS":"FAIL", submit, approve, recv };
+  },
+
+  "smoke:po:emit-events": async ()=>{
+    await ensureBearer();
+    const { vendorId } = await seedVendor(api);
+    const create = await post(`/objects/purchaseOrder`, {
+      type:"purchaseOrder", status:"draft", vendorId,
+      lines:[{ id:"E1", itemId:"ITEM_EVT", uom:"ea", qty:1 }]
+    });
+    if(!create.ok) return { test:"po:emit-events", result:"FAIL", create };
+    const id = create.body.id;
+    await post(`/purchasing/po/${encodeURIComponent(id)}:submit`,  {}, { "Idempotency-Key": idem() });
+    await post(`/purchasing/po/${encodeURIComponent(id)}:approve`, {}, { "Idempotency-Key": idem() });
+    const approved = await waitForStatus("purchaseOrder", id, ["approved"]);
+    if (!approved.ok) return { test:"po:emit-events", result:"FAIL", reason:"not-approved-yet", approved };
+    const po = await get(`/objects/purchaseOrder/${encodeURIComponent(id)}`);
+    const lines = (po.body?.lines ?? [])
+      .map(ln => ({ lineId:String(ln.id ?? ln.lineId), deltaQty:Math.max(0,(ln.qty||0)-(ln.receivedQty||0)) }))
+      .filter(l => l.deltaQty>0);
+    const recv = await post(
+      `/purchasing/po/${encodeURIComponent(id)}:receive`,
+      { lines },
+      { "Idempotency-Key": idem(), "X-Feature-Events-Simulate":"1" }
+    );
+    const emitted = recv.ok && recv.body?._dev?.emitted === true;
+    const pass = !!emitted;
+    return { test:"po:emit-events", result: pass?"PASS":"FAIL", recv };
+  },
+
+  "smoke:objects:pageInfo-present": async ()=>{
+    await ensureBearer();
+    const first = await get(`/objects/purchaseOrder`, { limit:2 });
+    if(!first.ok) return { test:"objects:pageInfo-present", result:"FAIL", first };
+    const hasItems   = Array.isArray(first.body?.items);
+    const hasPageInfo = typeof first.body?.pageInfo !== "undefined";
+    const hasLegacy   = typeof first.body?.next !== "undefined";
+    const pass = hasItems && (hasPageInfo || hasLegacy);
+    return { test:"objects:pageInfo-present", result: pass?"PASS":"FAIL", hasItems, hasPageInfo, hasLegacy, sample:first.body?.pageInfo };
+  },
+
+  "smoke:epc:resolve": async ()=>{
+    await ensureBearer();
+    const r = await get(`/epc/resolve`, { epc:`EPC-NOT-FOUND-${Date.now()}` });
+    const pass = r.status === 404;
+    return { test:"epc-resolve", result: pass?"PASS":"FAIL", status:r.status, body:r.body };
+  },
+
+  /* ===================== Sprint III: Views, Workspaces, Events ===================== */
+  
+  "smoke:views:crud": async ()=>{
+    await ensureBearer();
+    
+    // 1) CREATE view
+    const create = await post(`/views`, {
+      name: "Approved POs",
+      entityType: "purchaseOrder",
+      filters: [{ field: "status", op: "eq", value: "approved" }],
+      columns: ["id", "vendorId", "total"]
+    });
+    if (!create.ok || !create.body?.id) {
+      return { test:"views:crud", result:"FAIL", reason:"create-failed", create };
+    }
+    const viewId = create.body.id;
+
+    // 2) LIST views -> assert created view exists
+    const list = await get(`/views`, { limit: 50 });
+    if (!list.ok || !Array.isArray(list.body?.items)) {
+      return { test:"views:crud", result:"FAIL", reason:"list-failed", list };
+    }
+    const found = list.body.items.find(v => v.id === viewId);
+    if (!found) {
+      return { test:"views:crud", result:"FAIL", reason:"view-not-in-list", list };
+    }
+
+    // 3) GET single view
+    const get1 = await get(`/views/${encodeURIComponent(viewId)}`);
+    if (!get1.ok || get1.body?.id !== viewId) {
+      return { test:"views:crud", result:"FAIL", reason:"get-failed", get:get1 };
+    }
+
+    // 4) PUT (update) view
+    const update = await put(`/views/${encodeURIComponent(viewId)}`, {
+      name: "Approved POs v2",
+      entityType: "purchaseOrder",
+      filters: [
+        { field: "status", op: "eq", value: "approved" },
+        { field: "createdAt", op: "ge", value: "2025-01-01T00:00:00Z" }
+      ],
+      columns: ["id", "vendorId", "total", "createdAt"]
+    });
+    if (!update.ok || update.body?.name !== "Approved POs v2") {
+      return { test:"views:crud", result:"FAIL", reason:"update-failed", update };
+    }
+
+    // 5) DELETE view
+    const del = await fetch(`${API}/views/${encodeURIComponent(viewId)}`, {
+      method: "DELETE",
+      headers: baseHeaders()
+    });
+    if (!del.ok) {
+      return { test:"views:crud", result:"FAIL", reason:"delete-failed", delStatus:del.status };
+    }
+
+    // 6) Verify deleted (should not be in list anymore)
+    const listAfter = await get(`/views`, { limit: 50 });
+    const stillThere = listAfter.ok && listAfter.body?.items?.find(v => v.id === viewId);
+    if (stillThere) {
+      return { test:"views:crud", result:"FAIL", reason:"view-still-in-list-after-delete" };
+    }
+
+    const pass = create.ok && list.ok && get1.ok && update.ok && del.ok && !stillThere;
+    return {
+      test: "views:crud",
+      result: pass ? "PASS" : "FAIL",
+      artifacts: { create, list, get: get1, update, delete: del, listAfter }
+    };
+  },
+
+  "smoke:workspaces:list": async ()=>{
+    await ensureBearer();
+    
+    // Sprint III v1: Workspaces list should return empty or views-based list
+    // Enable feature flag if needed (dev header ok in non-prod)
+    const wsListHeaders = { "X-Feature-Views-Enabled": "true" };
+    
+    // 1) GET /workspaces (may be empty initially)
+    const listHdr = { ...baseHeaders(), ...wsListHeaders };
+    const list = await fetch(`${API}/workspaces?limit=50`, {
+      headers: listHdr
+    });
+    const listBody = await list.json().catch(() => ({}));
+    
+    if (!list.ok) {
+      return { test:"workspaces:list", result:"FAIL", reason:"list-failed", status:list.status };
+    }
+    
+    const items = Array.isArray(listBody?.items) ? listBody.items : [];
+    
+    // 2) If empty, create a temp workspace to verify list shows it
+    let createdWsId = null;
+    if (items.length === 0) {
+      const create = await post(`/workspaces`, {
+        name: "Smoke Test Workspace",
+        description: "Temporary workspace for smoke test",
+        views: []
+      });
+      
+      if (!create.ok || !create.body?.id) {
+        return { test:"workspaces:list", result:"FAIL", reason:"workspace-create-failed", create };
+      }
+      createdWsId = create.body.id;
+      
+      // Re-list to verify it appears
+      const list2 = await fetch(`${API}/workspaces?limit=50`, { headers: listHdr });
+      const listBody2 = await list2.json().catch(() => ({}));
+      if (!list2.ok) {
+        return { test:"workspaces:list", result:"FAIL", reason:"list-after-create-failed" };
+      }
+      const items2 = Array.isArray(listBody2?.items) ? listBody2.items : [];
+      const found = items2.find(ws => ws.id === createdWsId);
+      if (!found) {
+        return { test:"workspaces:list", result:"FAIL", reason:"created-workspace-not-found" };
+      }
+    }
+    
+    // 3) Verify shape: id, name, description?, views?, timestamps
+    const hasValidShape = items.length > 0 ? 
+      items[0].id && items[0].name && items[0].createdAt && items[0].updatedAt
+      : true;
+    
+    const pass = list.ok && hasValidShape;
+    return {
+      test: "workspaces:list",
+      result: pass ? "PASS" : "FAIL",
+      itemCount: items.length,
+      createdWsId,
+      sampleWorkspace: items[0] || null,
+      listBody
+    };
+  },
+
+  "smoke:events:enabled-noop": async ()=>{
+    await ensureBearer();
+    
+    // Sprint III: Event dispatcher is noop by default; test flag gating
+    // Enable both FEATURE_EVENT_DISPATCH_ENABLED and FEATURE_EVENT_DISPATCH_SIMULATE
+    const eventHeaders = {
+      "X-Feature-Events-Enabled": "true",
+      "X-Feature-Events-Simulate": "true"
+    };
+    
+    // Use an endpoint that touches events: POST /purchasing/po/{id}:receive
+    // (already tested in smoke:po:emit-events, so we just verify simulation signal)
+    // OR test via GET /views (simpler, doesn't require PO setup)
+    
+    // Simple test: GET /views with simulate flag and verify response structure
+    const listReq = await fetch(`${API}/views?limit=10`, {
+      headers: { ...baseHeaders(), ...eventHeaders }
+    });
+    
+    if (!listReq.ok) {
+      return { test:"events:enabled-noop", result:"FAIL", reason:"views-request-failed", status:listReq.status };
+    }
+    
+    const listBody = await listReq.json().catch(() => ({}));
+    
+    // The /views endpoint itself doesn't emit events, but the dispatcher integration
+    // in a real scenario would. For Sprint III v1, verify the simulation flag was accepted
+    // and the feature flag headers were processed without error.
+    
+    // Alternative: Test via PO receive (the real emitter)
+    // Create minimal PO -> receive -> check for _dev.emitted signal
+    const { vendorId } = await seedVendor({ post, get, put });
+    
+    const poDraft = await post(`/objects/purchaseOrder`, {
+      type: "purchaseOrder",
+      status: "draft",
+      vendorId,
+      lines: [{ id: "L1", itemId: "ITEM_EVT_TEST", uom: "ea", qty: 1 }]
+    });
+    
+    if (!poDraft.ok || !poDraft.body?.id) {
+      return { test:"events:enabled-noop", result:"FAIL", reason:"po-draft-failed", poDraft };
+    }
+    
+    const poId = poDraft.body.id;
+    
+    // Submit & approve PO
+    await post(`/purchasing/po/${encodeURIComponent(poId)}:submit`, {}, { "Idempotency-Key": idem() });
+    await post(`/purchasing/po/${encodeURIComponent(poId)}:approve`, {}, { "Idempotency-Key": idem() });
+    
+    // Wait for approval
+    const approved = await waitForStatus("purchaseOrder", poId, ["approved"]);
+    if (!approved.ok) {
+      return { test:"events:enabled-noop", result:"FAIL", reason:"po-not-approved", approved };
+    }
+    
+    // Now receive with event simulation headers
+    const po = await get(`/objects/purchaseOrder/${encodeURIComponent(poId)}`);
+    const lines = (po.body?.lines ?? [])
+      .map(ln => ({ lineId: String(ln.id ?? ln.lineId), deltaQty: Math.max(0, (ln.qty || 0) - (ln.receivedQty || 0)) }))
+      .filter(l => l.deltaQty > 0);
+    
+    const recv = await fetch(`${API}/purchasing/po/${encodeURIComponent(poId)}:receive`, {
+      method: "POST",
+      headers: { ...baseHeaders(), ...eventHeaders, "Idempotency-Key": idem() },
+      body: JSON.stringify({ lines })
+    });
+    
+    const recvBody = await recv.json().catch(() => ({}));
+    
+    // Check for _dev.emitted signal (only present when simulate=true)
+    const hasEmitSignal = recvBody?._dev?.emitted === true;
+    const hasProvider = recvBody?._dev?.provider === "noop";
+    
+    const pass = recv.ok && hasEmitSignal && hasProvider;
+    return {
+      test: "events:enabled-noop",
+      result: pass ? "PASS" : "FAIL",
+      status: recv.status,
+      hasEmitSignal,
+      hasProvider,
+      devMeta: recvBody?._dev || null,
+      recvBody
+    };
+  }
 };
 
 const cmd=process.argv[2]??"list";

@@ -269,6 +269,10 @@ export interface paths {
                     next?: string | null;
                     limit?: number;
                     sort?: "asc" | "desc";
+                    /** @description Optional source document id (e.g., purchaseOrder id) to filter movements. */
+                    refId?: string;
+                    /** @description Optional purchase order line id to filter movements created by that line. */
+                    poLineId?: string;
                 };
                 header?: never;
                 path: {
@@ -284,7 +288,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ListPageInventoryMovement"];
+                        "application/json": components["schemas"]["ListPageInventoryMovement"] & Record<string, never>;
                     };
                 };
             };
@@ -453,7 +457,7 @@ export interface paths {
         put?: never;
         /**
          * Receive against purchase order lines
-         * @description Allowed from **approved** or **partially_fulfilled**. Over-receive returns 409.
+         * @description Allowed from **approved** or **partially_fulfilled**. Over-receive returns 409. \ **Idempotency:** provide an `Idempotency-Key` header to safely retry the same receive request; \ duplicates with the same key will return the current PO state without double-applying movements.
          */
         post: {
             parameters: {
@@ -648,6 +652,144 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["PurchaseOrder"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/purchasing/suggest-po": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Build a PO draft from backorder requests */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        requests?: {
+                            backorderRequestId: string;
+                        }[];
+                        vendorId?: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description One or more purchase order drafts (not persisted) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SuggestPoResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/purchasing/po:create-from-suggestion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Persist purchase order draft(s) created from suggestion */
+        post: operations["createPoFromSuggestion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/objects/backorderRequest/{id}:ignore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark a BackorderRequest as ignored */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Updated BackorderRequest */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BackorderRequest"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/objects/backorderRequest/{id}:convert": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark a BackorderRequest as converted (attached to a PO) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Updated BackorderRequest */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BackorderRequest"];
                     };
                 };
             };
@@ -1635,6 +1777,24 @@ export interface components {
         AnyObject: {
             [key: string]: unknown;
         };
+        BackorderRequest: {
+            id: string;
+            /** @enum {string} */
+            type: "backorderRequest";
+            /** @description Optional denormalized vendor preference for UI filtering */
+            preferredVendorId?: string | null;
+            soId: string;
+            soLineId: string;
+            itemId: string;
+            qty: number;
+            /** Format: date-time */
+            createdAt: string;
+            /**
+             * @default open
+             * @enum {string}
+             */
+            status: "open" | "ignored" | "converted";
+        };
         Class: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
             type: "class";
@@ -1864,9 +2024,15 @@ export interface components {
             qty: number;
             /** Format: date-time */
             at?: string;
-            note?: string;
-            actorId?: string;
-            refId?: string;
+            note?: string | null;
+            actorId?: string | null;
+            /** @description Source document id (e.g., purchaseOrder id) */
+            refId?: string | null;
+            /** @description Optional purchase order line id (when action is from a PO) */
+            poLineId?: string | null;
+            uom?: string | null;
+            lot?: string | null;
+            locationId?: string | null;
             /** @enum {string} */
             readonly docType?: "inventoryMovement";
         };
@@ -1886,6 +2052,12 @@ export interface components {
             items: components["schemas"]["InventoryMovement"][];
             /** @description Opaque cursor for next page (if any) */
             next?: string | null;
+            /** @description Optional pagination metadata (clients may ignore). */
+            pageInfo?: {
+                hasNext?: boolean;
+                nextCursor?: string | null;
+                pageSize?: number;
+            };
         };
         Message: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
@@ -2033,6 +2205,14 @@ export interface components {
             kind: "good" | "service";
             sku?: string;
             price?: number | null;
+            /**
+             * @description If false, never auto-suggest PO for shortages.
+             * @default true
+             */
+            reorderEnabled: boolean;
+            preferredVendorId?: string | null;
+            minOrderQty?: number | null;
+            leadTimeDays?: number | null;
             taxCode?: string | null;
             /**
              * @default active
@@ -2097,6 +2277,12 @@ export interface components {
                 country?: string;
             };
             lines?: components["schemas"]["PurchaseOrderLine"][];
+        };
+        /** @description Single vendor returns `draft`; multi-vendor returns `drafts`. */
+        SuggestPoResponse: {
+            draft: components["schemas"]["PurchaseOrder"];
+        } | {
+            drafts: components["schemas"]["PurchaseOrder"][];
         };
         PurchaseOrderReceiveRequest: {
             /** @deprecated */
@@ -3207,6 +3393,38 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    createPoFromSuggestion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    draft: components["schemas"]["PurchaseOrder"];
+                } | {
+                    drafts: components["schemas"]["PurchaseOrder"][];
+                };
+            };
+        };
+        responses: {
+            /** @description Created id(s) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Convenience when exactly one was created */
+                        id?: string;
+                        ids?: string[];
+                    };
+                };
+            };
         };
     };
     upsertRoutingGraph: {

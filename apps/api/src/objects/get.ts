@@ -1,5 +1,5 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
-import { ok, bad, notfound, error } from "../common/responses";
+import { ok, bad, notFound, error } from "../common/responses";
 import { getObjectById } from "./repo";
 import { getAuth, requirePerm } from "../auth/middleware";
 
@@ -13,7 +13,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
     requirePerm(auth, `${type}:read`);
 
     const obj = await getObjectById({ tenantId: auth.tenantId, type, id });
-    if (!obj) return notfound("Not Found");
+    if (!obj) return notFound("Not Found");
 
     return ok(obj);
   } catch (e: any) {

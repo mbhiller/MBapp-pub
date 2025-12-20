@@ -1,3 +1,4 @@
+//apps/api/src/objects/list.ts
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { ok, bad, error } from "../common/responses";
 import { listObjects } from "./repo";
@@ -18,7 +19,15 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const fields = qsp.fields ? String(qsp.fields).split(",").map(s => s.trim()).filter(Boolean) : undefined;
 
     const page = await listObjects({ tenantId: auth.tenantId, type, q, next, limit, fields });
-    return ok(page);
+    // Backward-compatible: keep { items, next } but also include pageInfo if available
+    return ok({
+      ...page,
+      pageInfo: {
+        hasNext: Boolean(page?.next),
+        nextCursor: page?.next ?? null,
+        pageSize: limit,
+      },
+    });
   } catch (e: any) {
     return error(e);
   }

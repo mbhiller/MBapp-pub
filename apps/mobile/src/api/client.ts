@@ -29,22 +29,26 @@ export function _debugConfig() {
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 type RequestOpts = { idempotencyKey?: string; headers?: Record<string, string> };
 
-export type ListPage<T> = { items: T[]; next?: string };
+export type ListPage<T> = { items: T[]; next?: string; pageInfo?: { hasNext?: boolean; nextCursor?: string | null; pageSize?: number } };
 
-function normalizePage<T>(res: any): { items: T[]; next?: string } {
-  if (Array.isArray(res)) return { items: res };
+function normalizePage<T>(res: any): { items: T[]; next?: string; pageInfo?: { hasNext?: boolean; nextCursor?: string | null; pageSize?: number } } {
+  if (Array.isArray(res)) return { items: res, pageInfo: undefined };
   if (res && typeof res === "object" && "items" in res) {
     const raw = (res as any).items;
     const items = Array.isArray(raw) ? raw : raw && typeof raw === "object" ? Object.values(raw) : [];
-    return { items: items as T[], next: (res as any).next };
+    const next = (res as any).next;
+    const pageInfo = (res as any).pageInfo ?? (next ? { hasNext: true, nextCursor: next } : undefined);
+    return { items: items as T[], next, pageInfo };
   }
   if (res && typeof res === "object" && "data" in res) {
     const raw = (res as any).data;
     const items = Array.isArray(raw) ? raw : raw && typeof raw === "object" ? Object.values(raw) : [];
-    return { items: items as T[], next: (res as any).next };
+    const next = (res as any).next;
+    const pageInfo = (res as any).pageInfo ?? (next ? { hasNext: true, nextCursor: next } : undefined);
+    return { items: items as T[], next, pageInfo };
   }
-  if (res && typeof res === "object") return { items: Object.values(res) as T[] };
-  return { items: [] };
+  if (res && typeof res === "object") return { items: Object.values(res) as T[], pageInfo: undefined };
+  return { items: [], pageInfo: undefined };
 }
 
 function qs(params?: Record<string, any>) {
@@ -178,6 +182,9 @@ export async function deleteObject(
 // Low-level pass-through
 export const apiClient = {
   get:  <T>(p: string, headers?: Record<string, string>) => request<T>(p, "GET", undefined, { headers }),
+  // NEW: GET with query params. Usage: apiClient.getQ('/inventory/abc/movements', { refId, poLineId, next, limit:50 })
+  getQ: <T>(p: string, query?: Record<string, any>, headers?: Record<string, string>) =>
+  request<T>(`${p}${qs(query)}`, "GET", undefined, { headers }),
   post: <T>(p: string, b: any, headers?: Record<string, string>) => request<T>(p, "POST", b, { headers }),
   put:  <T>(p: string, b: any, headers?: Record<string, string>) => request<T>(p, "PUT", b, { headers }),
   del:  <T>(p: string, headers?: Record<string, string>) => request<T>(p, "DELETE", undefined, { headers }),

@@ -14,8 +14,11 @@ const respond = (statusCode: number, body: any) => ({
 });
 
 export const ok = (data: Json, status = 200) => respond(status, data);
-export const bad = (message = "Bad Request") => respond(400, { error: "BadRequest", message });
-export const notfound = (message = "Not Found") => respond(404, { error: "NotFound", message });
+export const bad = (message: string | { message: string } = "Bad Request") => {
+  const msg = typeof message === "string" ? message : message.message;
+  return respond(400, { error: "BadRequest", message: msg });
+};
+export const notFound = (message = "Not Found") => respond(404, { error: "NotFound", message });
 export const conflict = (message = "Conflict") => respond(409, { error: "Conflict", message });
 export const notimpl = (route?: string) =>
   respond(501, { error: "NotImplemented", message: route ? `Unsupported route ${route}` : "Not implemented" });

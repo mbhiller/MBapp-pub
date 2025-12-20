@@ -82,6 +82,18 @@ Each Tier uses the same structure so we can later expand any Phase into a detail
 - 🕓 Sprints: 0.5–1.
 - 🏁 Outcome: end‑to‑end ops ready for finance posting.
 
+
+### 2.7 Business Processes (Config-Driven) v1
+- 🎯 Event-driven “recipes” to orchestrate cross-object flows without a heavy BPM engine (e.g., Registration → comms → Stall Reservation → SO).
+- 🧱 Schemas: **ProcessDefinition**, **ProcessInstance**, **Prompt** (await signal), **MessageLog** (reuse), **OutboxEvent** (if needed).
+- 🔄 Flows: trigger on domain events; idempotent steps (`createObject`, `sendMessage`, `prompt/awaitSignal`), simple `branch when:` conditions.
+- ⚙️ Guards: idempotency via step keys; per-process enable/disable; retry with back-off; audit trail.
+- 💻 UI/UX: minimal “Process timeline” on object detail; small “flow active” badge.
+- 🧪 Smokes: `process:registration-flow` (email→prompt→reservation→SO), `process:retry-idempotent`.
+- 🕓 Sprints: 1.
+- 🏁 Outcome: configurable cross-object automation foundation (can remain disabled until we flip it on).
+
+- 🏁 Outcome: ops automation foundation + handoff to Finance
 ---
 
 # 💰 Tier 3 — Finance & Accounting (Phases 3.0–3.2)

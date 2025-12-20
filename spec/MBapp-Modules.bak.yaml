@@ -713,16 +713,19 @@ components:
         reserved: { type: number }
         available: { type: number }
         asOf: { type: string, format: date-time }
+        
     ListPageInventoryMovement:
       type: object
+      required: [itemId, items]
       properties:
+        itemId: { type: string }
         items:
           type: array
-          items:
-            $ref: '#/components/schemas/InventoryMovement'
+          items: { $ref: '#/components/schemas/InventoryMovement' }
         next:
           type: string
           nullable: true
+          description: Opaque cursor for next page (if any)
     Message:
       allOf:
       - $ref: '#/components/schemas/ObjectBase'
@@ -2493,16 +2496,15 @@ paths:
       summary: Delete a Workspace
   /inventory/{id}/onhand:
     get:
-      summary: Get computed on-hand for an inventory item
+      summary: Get computed counters for an inventory item
       parameters:
       - in: path
         name: id
         required: true
-        schema:
-          type: string
+        schema: { type: string }
       responses:
         '200':
-          description: On-hand computed for the inventory item
+          description: Computed counters for the inventory item
           content:
             application/json:
               schema:
@@ -2511,12 +2513,12 @@ paths:
                   items:
                     type: array
                     items:
-                      $ref: '#/components/schemas/InventoryOnHand'
+                      $ref: '#/components/schemas/InventoryCounters'
+
   /inventory/onhand:batch:
     post:
-      tags:
-      - Inventory
-      summary: Batch on-hand query
+      tags: [Inventory]
+      summary: Batch counters query
       parameters:
       - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -2528,8 +2530,7 @@ paths:
               properties:
                 ids:
                   type: array
-                  items:
-                    type: string
+                  items: { type: string }
       responses:
         '200':
           description: OK
@@ -2541,7 +2542,8 @@ paths:
                   items:
                     type: array
                     items:
-                      $ref: '#/components/schemas/InventoryOnHand'
+                      $ref: '#/components/schemas/InventoryCounters'
+
   /inventory/{id}/movements:
     get:
       summary: List movements for an inventory item
@@ -2549,25 +2551,18 @@ paths:
       - in: path
         name: id
         required: true
-        schema:
-          type: string
+        schema: { type: string }
       - in: query
         name: next
-        schema:
-          type: string
-          nullable: true
+        schema: { type: string, nullable: true }
       - in: query
         name: limit
-        schema:
-          type: integer
-          default: 50
+        schema: { type: integer, default: 50 }
       - in: query
         name: sort
         schema:
           type: string
-          enum:
-          - asc
-          - desc
+          enum: [asc, desc]
           default: desc
       responses:
         '200':
@@ -2576,6 +2571,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListPageInventoryMovement'
+
   /inventory/{id}/adjust:
     post:
       summary: Adjust on-hand (creates movement)
@@ -2583,8 +2579,7 @@ paths:
       - in: path
         name: id
         required: true
-        schema:
-          type: string
+        schema: { type: string }
       - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true

@@ -2,12 +2,13 @@ import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { DynamoDBDocumentClient, PutCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 
-import { ok, bad, notfound, error } from "../common/responses";
+import { ok, bad, notFound, error } from "../common/responses";
 import { getObjectById, updateObject, buildSkuLock } from "./repo";
 import { markPartyRole } from "../common/party";
 import { getAuth, requirePerm } from "../auth/middleware";
 import { ensurePartyRole } from "../common/validators";
 
+const MOVEMENT_ACTIONS = new Set(["receive","reserve","commit","fulfill","adjust","release"]);
 const TABLE = process.env.MBAPP_OBJECTS_TABLE || process.env.MBAPP_TABLE || "mbapp_objects";
 const PK    = process.env.MBAPP_TABLE_PK || "pk";
 const SK    = process.env.MBAPP_TABLE_SK || "sk";
@@ -25,7 +26,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
 
     const patch = event.body ? JSON.parse(event.body) : {};
     const existing = await getObjectById({ tenantId: auth.tenantId, type, id });
-    if (!existing) return notfound("Not Found");
+    if (!existing) return notFound("Not Found");
 
     // 1) Product SKU change → acquire new lock and delete old constant-SK lock
     if (String(type).toLowerCase() === "product") {
@@ -77,8 +78,21 @@ export async function handle(event: APIGatewayProxyEventV2) {
     }
 
     // 3) Apply update
+    // If updating an inventory movement, validate action (when provided) and keep canonical markers.
+    if (String(type).toLowerCase() === "inventorymovement") {
+      if (Object.prototype.hasOwnProperty.call(patch, "action")) {
+        const a = String(patch?.action ?? "").toLowerCase();
+        if (!MOVEMENT_ACTIONS.has(a)) {
+          return bad("invalid action");
+        }
+        patch.action = a;
+      }
+      patch.type = "inventoryMovement";
+      patch.docType = "inventoryMovement";
+    }
+    
     const updated = await updateObject({ tenantId: auth.tenantId, type, id, body: patch });
-
+    
     // 4) If we updated a partyRole, keep Party.roleFlags in sync
     if (String(type).toLowerCase() === "partyrole") {
       const partyId: string | undefined =

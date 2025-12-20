@@ -1,3 +1,4 @@
+//apps/mobile/src/screens/PatyListScreen.tsx
 import React, { useEffect, useState } from "react";
 import { View, Text, TextInput, ScrollView, Pressable } from "react-native";
 import { useColors } from "../features/_shared/useColors";

@@ -10,12 +10,14 @@ import * as ViewsGet    from "./views/get";
 import * as ViewsCreate from "./views/create";
 import * as ViewsUpdate from "./views/update";
 import * as ViewsDelete from "./views/delete";
+
 // Workspaces
 import * as WsList   from "./workspaces/list";
 import * as WsGet    from "./workspaces/get";
 import * as WsCreate from "./workspaces/create";
 import * as WsUpdate from "./workspaces/update";
 import * as WsDelete from "./workspaces/delete";
+
 // Objects
 import * as ObjList   from "./objects/list";
 import * as ObjGet    from "./objects/get";
@@ -53,12 +55,7 @@ import * as InvSearch from "./inventory/search";
 import * as InvMovements from "./inventory/movements";
 
 // Registrations & Reservations actions
-import * as RegCancel  from "./events/registration-cancel";
-import * as RegCheckin from "./events/registration-checkin";
-import * as RegCheckout from "./events/registration-checkout";
-import * as ResCancel  from "./resources/reservation-cancel";
-import * as ResStart   from "./resources/reservation-start";
-import * as ResEnd     from "./resources/reservation-end";
+
 
 // Tools
 import * as GcList   from "./tools/gc-list-type";
@@ -76,6 +73,14 @@ import * as EpcResolve from "./epc/resolve";
 import * as ScannerSessions from "./scanner/sessions";
 import * as ScannerActions from "./scanner/actions";
 import * as ScannerSim from "./scanner/simulate";
+
+// Purchasing suggestions
+import * as PoSuggest from "./purchasing/suggest-po";
+import * as PoCreateFromSuggestion from "./purchasing/po-create-from-suggestion";
+
+// Backorders
+import * as BoIgnore  from "./backorders/request-ignore";
+import * as BoConvert from "./backorders/request-convert";
 
 /* Helpers */
 const json = (statusCode: number, body: unknown): APIGatewayProxyResultV2 => ({
@@ -108,7 +113,8 @@ const corsOk = (): APIGatewayProxyResultV2 => ({
   headers: {
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "OPTIONS,GET,POST,PUT,DELETE",
-    "access-control-allow-headers": "Authorization,Content-Type,Idempotency-Key,X-Tenant-Id,Accept",
+    "access-control-allow-headers": "Authorization,Content-Type,Idempotency-Key,X-Tenant-Id,Accept,X-Feature-Enforce-Vendor,X-Feature-Views-Enabled,X-Feature-Events-Enabled,X-Feature-Events-Simulate",
+    
   },
 });
 
@@ -177,39 +183,34 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
       return json(200, policyFromAuth(auth));
     }
 
-    // Views
-    if (path === "/views") {
-      if (method === "GET")  { requirePerm(auth, "view:read");  return ViewsList.handle(event); }
-      if (method === "POST") { requirePerm(auth, "view:write"); return ViewsCreate.handle(event); }
-      return methodNotAllowed();
-    }
+    // Views (Sprint III)
     {
-      const m = match(/^\/views\/([^/]+)$/i, path);
+      const m = path.match(/^\/views(?:\/([^/]+))?$/i);
       if (m) {
-        const [id] = m;
-        if (method === "GET")    { requirePerm(auth, "view:read");  return ViewsGet.handle(withId(event, id)); }
-        if (method === "PUT")    { requirePerm(auth, "view:write"); return ViewsUpdate.handle(withId(event, id)); }
-        if (method === "DELETE") { requirePerm(auth, "view:write"); return ViewsDelete.handle(withId(event, id)); }
+        const [, id] = m;
+        if (method === "GET" && !id)    { requirePerm(auth, "view:read");  return ViewsList.handle(event); }
+        if (method === "GET" && id)     { requirePerm(auth, "view:read");  return ViewsGet.handle(withId(event, id)); }
+        if (method === "POST" && !id)   { requirePerm(auth, "view:write"); return ViewsCreate.handle(event); }
+        if (method === "PUT" && id)     { requirePerm(auth, "view:write"); return ViewsUpdate.handle(withId(event, id)); }
+        if (method === "DELETE" && id)  { requirePerm(auth, "view:write"); return ViewsDelete.handle(withId(event, id)); }
         return methodNotAllowed();
       }
     }
 
-    // Workspaces
-    if (path === "/workspaces") {
-      if (method === "GET")  { requirePerm(auth, "workspace:read");  return WsList.handle(event); }
-      if (method === "POST") { requirePerm(auth, "workspace:write"); return WsCreate.handle(event); }
-      return methodNotAllowed();
-    }
+    // Workspaces (Sprint III v1: list only)
     {
-      const m = match(/^\/workspaces\/([^/]+)$/i, path);
+      const m = path.match(/^\/workspaces(?:\/([^/]+))?$/i);
       if (m) {
-        const [id] = m;
-        if (method === "GET")    { requirePerm(auth, "workspace:read");  return WsGet.handle(withId(event, id)); }
-        if (method === "PUT")    { requirePerm(auth, "workspace:write"); return WsUpdate.handle(withId(event, id)); }
-        if (method === "DELETE") { requirePerm(auth, "workspace:write"); return WsDelete.handle(withId(event, id)); }
+        const [, id] = m;
+        if (method === "GET" && !id)    { requirePerm(auth, "workspace:read");  return WsList.handle(event); }
+        if (method === "GET" && id)     { requirePerm(auth, "workspace:read");  return WsGet.handle(withId(event, id)); }
+        if (method === "POST" && !id)   { requirePerm(auth, "workspace:write"); return WsCreate.handle(event); }
+        if (method === "PUT" && id)     { requirePerm(auth, "workspace:write"); return WsUpdate.handle(withId(event, id)); }
+        if (method === "DELETE" && id)  { requirePerm(auth, "workspace:write"); return WsDelete.handle(withId(event, id)); }
         return methodNotAllowed();
       }
     }
+    
 
     /* ========= Actions ========= */
     // Purchasing PO actions
@@ -305,6 +306,27 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
       requirePerm(auth, "inventory:read");
       // Handler reads ?epc=... from event.queryStringParameters
       return EpcResolve.handle(event);
+    }
+
+    // Purchasing suggestion endpoints
+    if (method === "POST" && path === "/purchasing/suggest-po") {
+      requirePerm(auth, "purchase:write");
+      return PoSuggest.handle(event);
+    }
+    if (method === "POST" && path === "/purchasing/po:create-from-suggestion") {
+      requirePerm(auth, "purchase:write");
+      return PoCreateFromSuggestion.handle(event);
+    }
+
+    // Backorder request actions
+    {
+      const m = match(/^\/objects\/backorderRequest\/([^/]+):(ignore|convert)$/i, path);
+      if (m) {
+        const [id, action] = m;
+        if (action === "ignore")  { requirePerm(auth, "objects:write"); return BoIgnore.handle(withId(event, id)); }
+        if (action === "convert") { requirePerm(auth, "objects:write"); return BoConvert.handle(withId(event, id)); }
+        return methodNotAllowed();
+      }
     }
 
     // Scanner sessions: start/stop

@@ -1,0 +1,537 @@
+# Spec ↔ Implementation Delta Report
+
+**Scope:** Compare [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) endpoints and schemas vs. [apps/api/src/](../apps/api/src/) implementation.  
+**As of:** December 20, 2025 (Sprint II end)  
+**Status:** READ-ONLY analysis; no changes recommended here.
+
+---
+
+## 1. Endpoints in SPEC but Missing in CODE
+
+### Views CRUD (Full lifecycle missing)
+| Endpoint | Method | Expected | Status |
+|:---------|:-------|:---------|:-------|
+| `/views/{id}` | GET | getView | ⚠️ **NOT IMPLEMENTED** |
+| `/views/{id}` | PUT | replaceView | ⚠️ **NOT IMPLEMENTED** |
+| `/views/{id}` | PATCH | updateView | ⚠️ **NOT IMPLEMENTED** |
+| `/views/{id}` | DELETE | deleteView | ⚠️ **NOT IMPLEMENTED** |
+| `/views` | POST | createView | ⚠️ **NOT IMPLEMENTED** |
+
+**Evidence:**  
+- Spec defines 5 endpoints for `/views` at lines 2250–2447  
+- [apps/api/src/index.ts](../apps/api/src/index.ts) only routes `GET /views` → `ViewsList.handle()`
+- Missing handlers: `views/get.ts`, `views/create.ts`, `views/update.ts`, `views/patch.ts`, `views/delete.ts`
+- Sprint III scope includes these; currently listed as "OUT OF SCOPE" stubs
+
+### Workspaces CRUD (Full lifecycle missing)
+| Endpoint | Method | Expected | Status |
+|:---------|:-------|:---------|:-------|
+| `/workspaces/{id}` | GET | getWorkspace | ⚠️ **NOT IMPLEMENTED** |
+| `/workspaces/{id}` | PUT | replaceWorkspace | ⚠️ **NOT IMPLEMENTED** |
+| `/workspaces/{id}` | PATCH | updateWorkspace | ⚠️ **NOT IMPLEMENTED** |
+| `/workspaces/{id}` | DELETE | deleteWorkspace | ⚠️ **NOT IMPLEMENTED** |
+| `/workspaces` | POST | createWorkspace | ⚠️ **NOT IMPLEMENTED** |
+
+**Evidence:**  
+- Spec defines 5 endpoints at lines 2446–2634  
+- [apps/api/src/index.ts](../apps/api/src/index.ts) only routes `GET /workspaces` → `WsList.handle()`
+- Missing handlers analogous to Views  
+- Sprint III scope
+
+### Inventory Adjustment
+| Endpoint | Method | Expected | Status |
+|:---------|:-------|:---------|:-------|
+| `/inventory/{id}/adjust` | POST | Create inventory adjustment (movement) | ⚠️ **NOT IMPLEMENTED** |
+
+**Evidence:**  
+- Spec defines at line 2735: POST /inventory/{id}/adjust; create movement via InventoryAdjustmentRequest  
+- No handler in [apps/api/src/inventory/](../apps/api/src/inventory/)  
+- **Note:** Movements are created indirectly (e.g., SO fulfill → movements). Direct adjust endpoint missing.
+
+### Deprecated Endpoints (in spec, not routed)
+- `/purchase-orders/{id}/receive-line` (POST) — marked deprecated in spec; no route in code  
+- `/sales-orders/{id}/fulfill-line` (POST) — marked deprecated in spec; no route in code  
+- **Status:** Both are OK to ignore (deprecated); multi-line receive/fulfill is preferred
+
+### Events & Resources Actions (Not in scope yet, Tier 2)
+| Endpoint | Method | Tier |
+|:---------|:-------|:-----|
+| `/events/registration/{id}:cancel` | POST | Tier 2.0 |
+| `/events/registration/{id}:checkin` | POST | Tier 2.0 |
+| `/events/registration/{id}:checkout` | POST | Tier 2.0 |
+| `/resources/reservation/{id}:cancel` | POST | Tier 2.0 |
+| `/resources/reservation/{id}:start` | POST | Tier 2.0 |
+| `/resources/reservation/{id}:end` | POST | Tier 2.0 |
+
+**Status:** Out of scope (Sprint III). Not yet implemented.
+
+### Admin Audit
+| Endpoint | Method | Expected | Status |
+|:---------|:-------|:---------|:-------|
+| `/admin/audit` | GET | Retrieve audit log | ❌ **NOT IMPLEMENTED** |
+
+**Evidence:** Spec line 3479 defines endpoint but no handler exists.
+
+---
+
+## 2. Endpoints in CODE but Missing/Underspecified in SPEC
+
+### Generic Objects Sub-endpoints (Spec vs. Route mismatch)
+**Spec defines:**
+- `/objects/{type}/list` (GET) — line 2110
+- `/objects/{type}/search` (GET) — line 2134
+
+**Code implements:**
+- `/objects/:type` (GET) — routes to list  
+- `/objects/:type/search` (POST) — routes to search
+
+**Gap:**  
+- Spec shows `/objects/{type}/list` as separate GET endpoint  
+- Code merges list into `/objects/{type}` GET  
+- Spec shows `/objects/{type}/search` as GET; code uses POST  
+- **Evidence:** [apps/api/src/index.ts](../apps/api/src/index.ts) lines 377–390
+
+### PO & SO Suggest/Create endpoints underspecified
+| Endpoint | Spec Detail | Code Implementation | Gap |
+|:---------|:-----------|:-------------------|:----|
+| `/purchasing/po:create-from-suggestion` | POST; accepts draft\|drafts | [po-create-from-suggestion.ts](../apps/api/src/purchasing/po-create-from-suggestion.ts) | Spec uses `oneOf` (draft XOR drafts); code accepts both seamlessly + returns `{ id?, ids[] }` ✓ |
+
+**Status:** Implementation matches spec intent; spec could clarify response structure clarity.
+
+---
+
+## 3. Schema & Field Mismatches
+
+### A. InventoryMovement (misaligned canonical action field)
+
+**Spec schema** (line 704):
+```yaml
+properties:
+  action:
+    type: string
+    enum: [receive, reserve, commit, fulfill, adjust, release]
+```
+
+**Code type** ([inventory/movements.ts](../apps/api/src/inventory/movements.ts) line 32):
+```typescript
+const ACTIONS = ["receive","reserve","commit","fulfill","adjust","release"] as const;
+type Action = typeof ACTIONS[number];
+```
+
+**Issue:**  
+- Spec & code agree on actions ✓  
+- However, creation uses inconsistent payloads: some use `{ type: "receive", qty: 3 }` others use `{ action: "receive", qty: 3 }`  
+- Smoke test [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) lines 155–161 tries both variants with fallback logic  
+- **Evidence:** `ensureOnHand()` tries 3 different payload shapes; movement creation is brittle
+
+**Impact:** Minor; both paths work, but API contract ambiguous.
+
+### B. PurchaseOrder & SalesOrder line key naming
+**Spec schema:**
+```yaml
+PurchaseOrderLine:
+  properties:
+    id:   { type: string }           # primary identifier
+    lineId: N/A                      # not in spec
+SalesOrderLine:
+  properties:
+    id:   { type: string }           # primary identifier
+    lineId: N/A                      # not in spec
+```
+
+**Code reality** ([shared/db.ts](../apps/api/src/shared/db.ts)):
+```typescript
+export type OrderLine = {
+  id: string;        // stored key
+  itemId: string;
+  ...
+};
+```
+
+**Handlers use both:**
+- Reserve/fulfill requests expect `{ lineId: "...", deltaQty: ... }`  
+- But actual line objects store `id`  
+- **Evidence:** [sales/so-reserve.ts](../apps/api/src/sales/so-reserve.ts), [purchasing/po-receive.ts](../apps/api/src/purchasing/po-receive.ts)
+
+**Impact:** Clients must map `id` ↔ `lineId` in request payloads; inconsistent naming in spec + code.
+
+### C. View schema fields (Spec vs. unimplemented code)
+**Spec schema** (line 1771):
+```yaml
+View:
+  properties:
+    id: { type: string }
+    type: { enum: [view] }
+    moduleKey: { type: string }       # e.g., "products", "inventory"
+    filters: { type: array }          # filter objects (structure undefined)
+    sort: { type: object }            # sort config
+    columns: { type: array }          # column names to display
+    ownerId: { type: string }
+    shared: { type: boolean }
+    isDefault: { type: boolean }
+```
+
+**Code:**  
+- Only [views/list.ts](../apps/api/src/views/list.ts) exists (reads only)  
+- No handler to validate or store View fields  
+- **Impact:** Spec is aspirational; no runtime enforcement yet
+
+### D. Workspace schema fields (incomplete in code)
+**Spec schema** (line 1810):
+```yaml
+Workspace:
+  properties:
+    id: { type: string }
+    type: { enum: [workspace] }
+    name: { type: string }
+    ownerId: { type: string }
+    tiles: { type: array, items: { $ref: '#/components/schemas/WorkspaceTile' } }
+    shared: { type: boolean }
+    isDefault: { type: boolean }
+```
+
+**Code:** Only list implemented; no CRUD.
+
+### E. BackorderRequest schema mismatch
+**Spec** (line 191):
+```yaml
+BackorderRequest:
+  properties:
+    preferredVendorId:  { type: string, nullable: true }  # denormalized UI hint
+```
+
+**Code:** [smoke.mjs](../ops/smoke/smoke.mjs) does not populate or test this field.  
+**Impact:** Field exists in spec but not exercised in smokes.
+
+### F. Error schema (inconsistent shape)
+**Spec** (line 410):
+```yaml
+Error:
+  properties:
+    message: { type: string }
+    code: { type: string, description: "stable error code" }
+    details: { type: array }
+```
+
+**Code** ([common/responses.ts](../apps/api/src/common/responses.ts)):
+Returns `{ message, code?, details? }` — matches spec when code is present, but many handlers return only `{ message }` without `code`.
+
+**Evidence:**  
+- Vendor guard error: returns `{ statusCode: 400, body: { code: "VENDOR_REQUIRED", message: "..." } }` ✓  
+- Generic guard errors: return only `{ message }` ✗
+
+**Impact:** Clients cannot reliably match error types by code; some endpoints missing error codes.
+
+---
+
+## 4. Behavior Gaps
+
+### A. Pagination (spec vs. code)
+
+**Spec expectations** (multiple endpoints):
+- Legacy `next` cursor: opaque string
+- New `pageInfo` object (optional): `{ hasNext, nextCursor, pageSize }`
+- Parameters: `limit` (1–200, default 50), `next` (cursor)
+
+**Code implementation** ([objects/list.ts](../apps/api/src/objects/list.ts), [views/list.ts](../apps/api/src/views/list.ts)):
+- Returns both `next` (legacy) AND `pageInfo` (new)  
+- ✓ Backward-compatible  
+- ✓ Matches spec intent
+
+**Gap in `/inventory/{id}/movements`:**
+- Spec (line 2687) says optional `pageInfo` + legacy `next`  
+- [inventory/movements.ts](../apps/api/src/inventory/movements.ts) implements cursor pagination but response shape could clarify `pageInfo` vs `next` precedence  
+- **Minor:** Implementation is correct; documentation could be clearer
+
+### B. Query parameters (spec vs. code)
+
+**Views List** — Spec (line 2254) expects query params:
+```yaml
+- moduleKey
+- ownerId
+- shared (boolean)
+- isDefault (boolean)
+- limit, next
+```
+
+**Code** ([views/list.ts](../apps/api/src/views/list.ts)):
+- Accepts all params via generic `listObjects()` repo  
+- ✓ Filtering happens in repo layer
+- ✓ Matches spec
+
+**Inventory Movements** — Spec (line 2707) expects:
+```yaml
+- refId (optional; filter by source PO/SO)
+- poLineId (optional; filter by PO line)
+- limit, sort
+```
+
+**Code** ([inventory/movements.ts](../apps/api/src/inventory/movements.ts)):
+- ✓ Supports refId & poLineId filters (lines 2707–2724)  
+- ✓ Supports sort (asc/desc)
+
+**Status:** Implementation matches spec.
+
+### C. Auth & permissions (spec vs. code)
+
+**Spec:**
+- All endpoints require `bearerAuth`; `X-Tenant-Id` header required  
+- Permissions: `view:read`, `workspace:read`, `{type}:read`/`write`, etc.
+
+**Code** ([auth/middleware.ts](../apps/api/src/auth/middleware.ts)):
+- Dev login returns hardcoded roles: `["admin"]` (TODO: parse from JWT)  
+- Permission checks: `requirePerm(auth, "view:read")` etc.  
+- ✓ Matches spec intent  
+- **Gap:** Roles always ["admin"] in dev; real JWT parsing not implemented ([auth/policy.ts](../apps/api/src/auth/policy.ts) line 9)
+
+### D. Idempotency (spec vs. code)
+
+**Spec expectations:**
+- Header: `Idempotency-Key` (optional)
+- Duplicate requests with same key should return same response without side-effects
+
+**Code:**
+- PO receive: [purchasing/po-receive.ts](../apps/api/src/purchasing/po-receive.ts) implements via payload signature + stored state  
+- SO actions: Some use Idempotency-Key; implementation varies  
+- **Gap:** No centralized idempotency store; each endpoint rolls its own or relies on Idempotency-Key header  
+- **Evidence:** Smoke test `smoke:po:receive-line-idem-different-key` verifies this behavior ([ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) line 489)
+
+**Status:** Works but inconsistent; could benefit from middleware.
+
+### E. Feature flags (spec vs. code)
+
+**Spec:**
+- Endpoints may be gated by feature flags  
+- X-Feature-* headers in dev mode  
+- No spec of actual gates per endpoint
+
+**Code** ([flags.ts](../apps/api/src/flags.ts)):
+- `featureVendorGuardEnabled` (env: FEATURE_ENFORCE_VENDOR_ROLE, header: X-Feature-Enforce-Vendor, default: true)  
+  - Gates vendor validation on PO submit ([purchasing/po-submit.ts](../apps/api/src/purchasing/po-submit.ts))
+- `featureEventsEnabled` (env: FEATURE_EVENT_DISPATCH_ENABLED, header: X-Feature-Events-Enabled, default: false)  
+  - Event dispatcher plumbing (Sprint III)
+- `featureEventsSimulate` (env: FEATURE_EVENT_DISPATCH_SIMULATE, header: X-Feature-Events-Simulate, default: false)  
+  - Simulate mode (noop publish)
+
+**Status:** Implementation OK; spec could document which endpoints are feature-gated.
+
+### F. CORS & OPTIONS (spec vs. code)
+
+**Spec:**
+- No explicit OPTIONS method documented
+
+**Code** ([index.ts](../apps/api/src/index.ts) line 202):
+- Handles OPTIONS preflight; returns CORS headers  
+- ✓ Not required by spec, but good practice
+
+---
+
+## 5. Request/Response Shape Issues
+
+### A. SO/PO Line updates in actions
+
+**Spec for `/sales/so/{id}:fulfill`** (line 3090):
+```yaml
+requestBody:
+  properties:
+    lines:
+      items:
+        properties:
+          lineId: { type: string }
+          deltaQty: { type: number }
+          locationId: { type: string }
+          lot: { type: string }
+```
+
+**Code** ([sales/so-fulfill.ts](../apps/api/src/sales/so-fulfill.ts)):
+- Accepts same shape ✓
+
+**Issue:** Spec shows `locationId` and `lot` as optional but doesn't say if they're required. Code treats them as optional; seems right.
+
+### B. SuggestPoResponse ambiguity
+
+**Spec** (line 1213):
+```yaml
+SuggestPoResponse:
+  oneOf:
+    - type: object
+      required: [draft]
+      properties:
+        draft: { $ref: '#/components/schemas/PurchaseOrder' }
+    - type: object
+      required: [drafts]
+      properties:
+        drafts: { type: array }
+```
+
+**Code** ([purchasing/suggest-po.ts](../apps/api/src/purchasing/suggest-po.ts)):
+- Single vendor → returns `{ draft }` ✓  
+- Multi-vendor → returns `{ drafts }` ✓  
+- **Status:** Matches spec intent
+
+### C. SalesCommitResponse (shortages format)
+
+**Spec** (line 1671):
+```yaml
+SalesCommitResponse:
+  allOf:
+    - $ref: '#/components/schemas/SalesOrder'
+    - type: object
+      properties:
+        shortages:
+          type: array
+          items:
+            properties:
+              lineId: { type: string }
+              itemId: { type: string }
+              backordered: { type: number }
+```
+
+**Code** ([sales/so-commit.ts](../apps/api/src/sales/so-commit.ts)):
+- Returns SalesOrder + optional shortages array ✓
+
+---
+
+## 6. Minor Field Documentation Gaps
+
+| Field | Spec | Code | Gap |
+|:------|:-----|:-----|:----|
+| `InventoryMovement.docType` | readOnly, enum: [inventoryMovement] | stored as "inventoryMovement" | ✓ match |
+| `InventoryMovement.uom` | nullable | stored, used | ✓ match |
+| `InventoryMovement.lot` | nullable, string | stored | ✓ match; new in Sprint I |
+| `InventoryMovement.locationId` | nullable, string | stored | ✓ match; new in Sprint I |
+| `InventoryMovement.refId` | source doc id | stored | ✓ match |
+| `InventoryMovement.poLineId` | PO line id | stored | ✓ match; new in Sprint I |
+| `Party.roleFlags` | denormalized booleans for fast gates | not surfaced in list/get | ⚠️ Code stores but doesn't return |
+| `Party.roles` | array for UI | not populated in code | ⚠️ Optional; code uses roleFlags instead |
+
+---
+
+## 7. Prioritized Fix Plan
+
+### Priority: MUST FIX (blocks Sprint III)
+
+#### 1. **Views CRUD Implementation** (Medium effort)
+- **What:** Implement POST, GET, PUT, PATCH, DELETE `/views/{id}`  
+- **Files:** Add `views/get.ts`, `views/create.ts`, `views/update.ts`, `views/patch.ts`, `views/delete.ts`  
+- **Evidence:** Spec lines 2319–2447; Sprint III DoD includes `smoke:views:crud`  
+- **Acceptance:** All 5 smoke steps pass (create → list → update → delete)
+
+#### 2. **Workspaces CRUD Implementation** (Medium effort)
+- **What:** Implement POST, GET, PUT, PATCH, DELETE `/workspaces/{id}`  
+- **Files:** Add `workspaces/get.ts`, `workspaces/create.ts`, `workspaces/update.ts`, `workspaces/patch.ts`, `workspaces/delete.ts`  
+- **Evidence:** Spec lines 2507–2634; Sprint III DoD includes `smoke:workspaces:list`  
+- **Acceptance:** List/get workspace with role-aware filtering; tiles hydration
+
+#### 3. **InventoryMovement field clarity (Small effort)**
+- **What:** Standardize movement creation payload (action vs. type field)  
+- **Files:** [inventory/actions.ts](../apps/api/src/inventory/actions.ts), [smoke.mjs](../ops/smoke/smoke.mjs)  
+- **Gap:** Spec uses `action`; code fallback accepts both  
+- **Fix:** Enforce `action` field only; update smokes  
+- **Acceptance:** Single payload shape in smoke tests
+
+#### 4. **Error code consistency (Small effort)**
+- **What:** Add error `code` field to all 4xx/5xx responses  
+- **Evidence:** Spec line 410; currently missing from many handlers  
+- **Files:** [common/responses.ts](../apps/api/src/common/responses.ts), all action handlers  
+- **Acceptance:** All error responses include `code` field
+
+---
+
+### Priority: SHOULD FIX (improve usability)
+
+#### 5. **Event dispatcher plumbing (Medium effort)**
+- **What:** Implement event emission (feature-flagged noop/simulate)  
+- **Files:** [events/dispatcher.ts](../apps/api/src/events/dispatcher.ts) (stub exists)  
+- **Evidence:** Spec section on event types; Sprint III DoD includes `smoke:events:enabled-noop`  
+- **Acceptance:** `smoke:po:emit-events` passes with `FEATURE_EVENT_DISPATCH_SIMULATE=true`
+
+#### 6. **Inventory adjustment endpoint (Small effort)**
+- **What:** Implement POST `/inventory/{id}/adjust` (creates movement via InventoryAdjustmentRequest)  
+- **Files:** Add `inventory/adjust.ts`  
+- **Evidence:** Spec line 2735  
+- **Acceptance:** Smoke test creates movement via adjust endpoint
+
+#### 7. **Line key naming (Medium effort — risky)**
+- **What:** Standardize SO/PO line references (`id` vs. `lineId`)  
+- **Issue:** Risky breaking change; clients expect `lineId` in action requests  
+- **Recommendation:** Document in API client; leave as-is for now; revisit in v2  
+- **Alternative:** Alias support (accept both)
+
+#### 8. **Party.roleFlags exposure (Small effort)**
+- **What:** Surface `roleFlags` in GET /objects/party/{id}  
+- **Reason:** Spec documents it; code stores it; clients need it for fast permission checks  
+- **Files:** [parties/repo.ts](../apps/api/src/parties/repo.ts) (if separate), or [objects/get.ts](../apps/api/src/objects/get.ts)  
+- **Acceptance:** GET /objects/party/{id} returns roleFlags
+
+---
+
+### Priority: NICE TO HAVE (documentation & polish)
+
+#### 9. **Centralized idempotency middleware (Large effort)**
+- **What:** Move idempotency logic to shared middleware  
+- **Current:** Each endpoint implements its own (PO receive, SO actions)  
+- **Benefit:** Consistency, simpler handlers  
+- **Risk:** Regression if state store schema changes  
+- **Recommendation:** Post-Sprint III; low priority
+
+#### 10. **JWT role parsing (Medium effort)**
+- **What:** Parse roles from JWT claims instead of hardcoding ["admin"]  
+- **File:** [auth/middleware.ts](../apps/api/src/auth/middleware.ts)  
+- **Evidence:** TODO comment at [auth/policy.ts](../apps/api/src/auth/policy.ts):9  
+- **Status:** Requires token format spec (out of scope)
+
+#### 11. **Search endpoint method (GET vs. POST)**
+- **What:** Align spec with code (GET /objects/{type}/search vs. POST)  
+- **Current:** Code uses POST; spec shows GET  
+- **Recommendation:** Leave as POST (supports complex query bodies); update spec as informational note
+
+#### 12. **Audit endpoint (Low priority, Tier 2+)**
+- **What:** Implement GET `/admin/audit`  
+- **Evidence:** Spec line 3479  
+- **Recommendation:** Out of scope for Sprint III; Tier 2 feature
+
+---
+
+## Summary Table
+
+| Category | Count | Status |
+|:---------|:------|:-------|
+| Endpoints in spec, not implemented | 16 | 10 Sprint III, 6 Tier 2+ |
+| Endpoints in code, underspecified | 2 | Minor (POST vs GET search) |
+| Schema mismatches | 6 | 3 major (Views, Workspaces, line keys), 3 minor |
+| Behavior gaps | 6 | 4 acceptable, 2 to fix |
+| Fix plan items | 12 | 4 must-fix, 4 should-fix, 4 nice-to-have |
+
+---
+
+## Recommendation for Sprint III
+
+**Focus order:**
+1. ✅ Views CRUD (2–3d)
+2. ✅ Workspaces CRUD (2–3d)
+3. ✅ Error code consistency (1d)
+4. ✅ Event dispatcher (1–2d)
+5. 🔄 Inventory adjustment (0.5d)
+6. ⏳ Line key standardization (defer; risky)
+7. ⏳ Party.roleFlags (optional polish)
+
+**Out of scope for Sprint III:**
+- Line naming refactor (breaking change)
+- Centralized idempotency (post-III polish)
+- Tier 2 endpoints (Events, Resources actions; Audit)
+- JWT role parsing (auth overhaul)
+
+---
+
+## File References for Review
+
+| File | Line(s) | Purpose |
+|:-----|:--------|:--------|
+| [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) | 2250–2634 | Views & Workspaces spec (not implemented) |
+| [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) | 2735 | Inventory adjust endpoint spec |
+| [apps/api/src/index.ts](../apps/api/src/index.ts) | 165–380 | Route dispatch; shows what's wired |
+| [apps/api/src/views/list.ts](../apps/api/src/views/list.ts) | 1–23 | Views list only; no CRUD |
+| [apps/api/src/auth/policy.ts](../apps/api/src/auth/policy.ts) | 9 | TODO: JWT role parsing |
+| [apps/api/src/common/responses.ts](../apps/api/src/common/responses.ts) | (implicit) | Error shape; missing `code` consistency |
+| [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) | 410 | Error schema with code field |

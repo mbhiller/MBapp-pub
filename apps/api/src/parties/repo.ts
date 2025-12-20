@@ -1,3 +1,4 @@
+//apps/api/src/parties/repo.ts
 // A thin repo abstraction. Replace internals with DynamoDB.
 // For now, a simple in-memory map so handlers compile and your smokes can hit something predictable.
 

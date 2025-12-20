@@ -13,6 +13,7 @@ param(
   [ValidateSet("nonprod","prod")] [string]$Env = "nonprod",
   [string]$RepoRoot = "C:\Users\bryan\MBapp-pub",
   [string]$Region   = "us-east-1",
+  [string]$APP_ENV   = "dev",
 
   # API + tenancy
   [string]$ApiBase  = "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com",
@@ -51,6 +52,9 @@ function Set-MBEnv {
   $env:AWS_REGION         = $Region
   $env:AWS_PROFILE        = $AwsProfile
 
+  #APP Environment
+  $env:APP_ENV            =$APP_ENV
+
   # MBapp core
   $env:MBAPP_ENV            = $Env
   $env:MBAPP_REPO_ROOT      = $RepoRoot
@@ -84,6 +88,7 @@ function Set-MBEnv {
 
 function Show-MBEnv {
   Write-Info ("AWS_PROFILE : {0}" -f ($env:AWS_PROFILE ?? "<unset>"))
+  Write-Info ("APP_ENV     : {0}" -f ($env:APP_ENV ?? "<unset>"))
   Write-Info ("REGION      : {0}" -f ($env:AWS_REGION ?? "<unset>"))
   Write-Info ("ENV         : {0}" -f ($env:MBAPP_ENV ?? "<unset>"))
   Write-Info ("API_BASE    : {0}" -f ($env:MBAPP_API_BASE ?? "<unset>"))
