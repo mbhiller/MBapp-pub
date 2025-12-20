@@ -338,3 +338,22 @@ No-regret prep (ongoing):
 - Keep Idempotency-Key and X-Request-Id plumbing.
 - Maintain createdAt/updatedAt on objects.
 - Add (disabled) `emitEvent` stubs at key actions for painless activation later.
+
+## Sprint III — Results
+
+- **Summary:** Views/Workspaces v1 delivered behind feature flags; event dispatcher simulate path implemented (noop provider in dev/simulate).
+
+- **Smokes:**
+  - `smoke:views:crud` — PASS (create → list → update → delete stored config)
+  - `smoke:workspaces:list` — PASS (v1 list semantics; empty result is valid for v1)
+  - `smoke:events:enabled-noop` — PASS (response includes `_dev` metadata; `_dev.provider == "noop"`)
+
+- **Flags:** Defaults OFF; can be overridden in dev/CI via headers:
+  - `FEATURE_VIEWS_ENABLED` / `X-Feature-Views-Enabled`
+  - `FEATURE_EVENT_DISPATCH_ENABLED` / `X-Feature-Events-Enabled`
+  - `FEATURE_EVENT_DISPATCH_SIMULATE` / `X-Feature-Events-Simulate`
+
+- **Notes / Tech debt:**
+  - Workspaces v1 exposes minimal listing and view references; full tile composition and rich workspace UX deferred to v2.
+  - Dispatcher simulate path is noop and safe; plan to wire real provider (EventBridge/SNS) behind flags later.
+  - Consider mapping or migration utilities between legacy Views and future Workspace tile schema when evolving v2.

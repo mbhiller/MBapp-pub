@@ -25,9 +25,9 @@
 - **Tier 1.3 Guardrails** (partial)  
   Over-commit/over-fulfill guards in place; cancel/close rules enforced.
 
-### 📋 Sprint III (Next)
-- **Tier 1.3 Extensions**: Views v1 + Workspaces landing.
-- **Event dispatcher plumbing**: noop or simulate; EventBridge/SNS ready (feature-flagged).
+### ✅ Sprint III — Results
+- **Tier 1.3 Extensions (delivered v1, feature-flagged)**: Views v1 (CRUD) + Workspaces list (v1 behind flags).
+- **Event dispatcher plumbing**: noop/simulate path implemented (simulate returns `_dev` metadata; provider = "noop").
 
 ---
 
@@ -107,6 +107,8 @@ After Sprint III passes, we update:
 5. **[apps/api/src/views/list.ts](../apps/api/src/views/list.ts) & [workspaces/list.ts](../apps/api/src/workspaces/list.ts)**  
    - Ensure pagination & pageInfo consistency with inventory/objects API  
    - No breaking changes to existing list endpoints
+
+6. **Open PR and tag v0.3.0 when merged.**
 
 ---
 
