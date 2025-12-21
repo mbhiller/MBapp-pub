@@ -59,3 +59,65 @@ Before coding, respond with:
 - (B) File gaps (exact paths you still need)
 - (C) Per-file change plan
 - (D) Smoke plan (flows + assertions)
+
+---
+
+Sprint V — Theme: Resources/Reservations (Option 2 foundation)
+
+Context
+- Branch: `feat/tier1-sprint-V-option2-reservations`
+- Repo: C:\Users\bryan\MBapp-pub
+- Smoke runner: ops/smoke/smoke.mjs (new flows for reservations)
+- API app: apps/api/src (uses existing generic /objects/* CRUD)
+
+Scope
+- Goals:
+  - Add **Resource** and **Reservation** objects (both stored in generic objects table).
+  - Leverage existing generic `/objects/:type` CRUD routes for create/read/update/delete.
+  - Add TWO custom endpoints:
+    - `POST /reservations:check-conflicts` — validate time slot availability.
+    - `GET /resources/{id}/availability?from=ISO&to=ISO` — list busy periods.
+  - Enforce overlap detection on reservation create/update: return **409 Conflict** with code="conflict".
+  - Feature flag: `FEATURE_RESERVATIONS_ENABLED` (default: false, dev header override).
+  - RBAC: `resource:read|write`, `reservation:read|write` permissions.
+- Out of scope:
+  - Reservation actions (cancel, start, end) — foundation only.
+  - Mobile UI beyond read-only preview.
+  - Complex calendar/scheduling UI.
+
+Overlap Rule
+- Two time slots overlap if: `(aStart < bEnd) && (bStart < aEnd)`.
+- On overlap: throw 409 with `{ code: "conflict", message: string, details: { conflicts: [...] } }`.
+
+Feature Flag & RBAC
+- Flag: `FEATURE_RESERVATIONS_ENABLED` (env: `FEATURE_RESERVATIONS_ENABLED`, header: `X-Feature-Reservations-Enabled`).
+- Permissions:
+  - `resource:read` — list/get resources
+  - `resource:write` — create/update/delete resources
+  - `reservation:read` — list/get reservations
+  - `reservation:write` — create/update/delete reservations (checked for overlap on write)
+
+Deliverables (in order)
+1. Spec updates: add Resource/Reservation schemas, custom endpoints with 409 responses, flag annotations.
+2. API implementation:
+   - Flag definition in `apps/api/src/flags.ts`.
+   - Overlap validation hook in `apps/api/src/objects/create.ts` and `update.ts`.
+   - `apps/api/src/reservations/check-conflicts.ts` handler.
+   - `apps/api/src/resources/availability.ts` handler.
+   - Routing in `apps/api/src/index.ts`.
+3. Smoke tests: new flows in `ops/smoke/smoke.mjs`.
+4. Smokes passing: `smoke:reservations:crud`, `smoke:reservations:conflicts`, `smoke:resources:availability`.
+5. Mobile app: read-only preview (defer write UI to Sprint VI).
+
+Acceptance Criteria
+- ✅ Spec compiles (YAML valid, OpenAPI 3.0.3).
+- ✅ TypeScript types generated from spec.
+- ✅ Generic CRUD for resources & reservations via `/objects/:type` works.
+- ✅ `POST /reservations:check-conflicts` returns 200 (no conflict) or 409 (conflict).
+- ✅ `GET /resources/{id}/availability` returns busy periods in requested range.
+- ✅ Overlap detection prevents conflicting reservations on create/update (409).
+- ✅ Feature flag gates endpoints in PROD; dev header override in non-prod.
+- ✅ RBAC permissions enforced (`resource:*`, `reservation:*`).
+- ✅ All smoke flows passing (CRUD, conflicts, availability).
+- ✅ Mobile reads reservations, does not allow write (button disabled if flag off).
+

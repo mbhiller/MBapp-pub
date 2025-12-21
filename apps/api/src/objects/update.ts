@@ -1,5 +1,5 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
-import { DynamoDBDocumentClient, PutCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, PutCommand, DeleteCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 
 import { ok, bad, notFound, error } from "../common/responses";
@@ -7,6 +7,7 @@ import { getObjectById, updateObject, buildSkuLock } from "./repo";
 import { markPartyRole } from "../common/party";
 import { getAuth, requirePerm } from "../auth/middleware";
 import { ensurePartyRole } from "../common/validators";
+import { featureReservationsEnabled } from "../flags";
 
 const MOVEMENT_ACTIONS = new Set(["receive","reserve","commit","fulfill","adjust","release"]);
 const TABLE = process.env.MBAPP_OBJECTS_TABLE || process.env.MBAPP_TABLE || "mbapp_objects";
@@ -75,6 +76,64 @@ export async function handle(event: APIGatewayProxyEventV2) {
       const msg = e?.message || "role_validation_failed";
       const sc  = e?.statusCode || 400;
       return { statusCode: sc, headers: { "content-type":"application/json" }, body: JSON.stringify({ message: msg }) };
+    }
+
+    // 3) Reservation overlap check (on update, if time fields are being changed)
+    if (String(type).toLowerCase() === "reservation") {
+      if (!featureReservationsEnabled(event)) {
+        return { statusCode: 403, headers: { "content-type":"application/json" }, body: JSON.stringify({ message: "Feature not enabled" }) };
+      }
+      
+      // Use patch values if provided, otherwise fall back to existing
+      const resourceId = (patch?.resourceId ?? (existing as any)?.resourceId) as string | undefined;
+      const startsAt = (patch?.startsAt ?? (existing as any)?.startsAt) as string | undefined;
+      const endsAt = (patch?.endsAt ?? (existing as any)?.endsAt) as string | undefined;
+      
+      if (!resourceId) return bad("Missing resourceId");
+      if (!startsAt) return bad("Missing startsAt");
+      if (!endsAt) return bad("Missing endsAt");
+      
+      const startDate = new Date(startsAt);
+      const endDate = new Date(endsAt);
+      if (isNaN(startDate.getTime())) return bad("Invalid startsAt (expected ISO 8601)");
+      if (isNaN(endDate.getTime())) return bad("Invalid endsAt (expected ISO 8601)");
+      if (startDate >= endDate) return bad("startsAt must be before endsAt");
+      
+      // Query existing reservations for this resource, excluding current reservation
+      let cursor: any = undefined;
+      const conflicts: any[] = [];
+      do {
+        const res = await ddb.send(new QueryCommand({
+          TableName: TABLE,
+          KeyConditionExpression: "#pk = :pk AND begins_with(#sk, :sk)",
+          ExpressionAttributeNames: { "#pk": PK, "#sk": SK },
+          ExpressionAttributeValues: { ":pk": auth.tenantId, ":sk": "reservation#" },
+          ExclusiveStartKey: cursor,
+        } as any));
+        for (const item of (res.Items ?? []) as any[]) {
+          if (item.id === id) continue; // Exclude current reservation
+          if (item.resourceId !== resourceId || !["pending", "confirmed"].includes(item.status)) continue;
+          const resStart = new Date(item.startsAt);
+          const resEnd = new Date(item.endsAt);
+          if (isNaN(resStart.getTime()) || isNaN(resEnd.getTime())) continue;
+          if (startDate < resEnd && resStart < endDate) {
+            conflicts.push({ id: item.id, startsAt: item.startsAt, endsAt: item.endsAt });
+          }
+        }
+        cursor = (res as any).LastEvaluatedKey;
+      } while (cursor);
+      
+      if (conflicts.length > 0) {
+        return {
+          statusCode: 409,
+          headers: { "content-type":"application/json" },
+          body: JSON.stringify({
+            code: "conflict",
+            message: `Reservation conflicts with ${conflicts.length} existing booking(s)`,
+            details: { conflicts: conflicts.map(c => ({ id: c.id, startsAt: c.startsAt, endsAt: c.endsAt })) }
+          })
+        };
+      }
     }
 
     // 3) Apply update

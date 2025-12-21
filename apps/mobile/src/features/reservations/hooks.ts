@@ -1,6 +1,6 @@
 // apps/mobile/src/features/reservations/hooks.ts
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { listReservations, getReservation, upsertReservation } from "./api";
+import { useQuery } from "@tanstack/react-query";
+import { listReservations, getReservation } from "./api";
 import type { Reservation, Page } from "./types";
 
 const keys = {
@@ -18,15 +18,5 @@ export const Reservations = {
   },
   useGet(id?: string) {
     return useQuery({ enabled: !!id, queryKey: keys.byId(id), queryFn: () => getReservation(id!) });
-  },
-  useSave() {
-    const qc = useQueryClient();
-    return useMutation({
-      mutationFn: (b: Partial<Reservation>) => upsertReservation(b),
-      onSuccess: (saved) => {
-        qc.setQueryData(keys.byId(saved.id), saved);
-        qc.invalidateQueries({ queryKey: ["reservations"] });
-      },
-    });
   },
 };

@@ -6,6 +6,9 @@
     "smoke:common:pagination",
     "smoke:common:error-shapes",
     "smoke:registrations:crud",
-    "smoke:registrations:filters"
+    "smoke:registrations:filters",
+    "smoke:resources:crud",
+    "smoke:reservations:crud",
+    "smoke:reservations:conflicts"
   ]
 }

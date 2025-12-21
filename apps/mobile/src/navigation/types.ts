@@ -43,5 +43,9 @@ export type RootStackParamList = {
   
   // Registrations (Sprint IV)
   RegistrationsList: undefined;
+
+  // Reservations (Sprint V)
+  ReservationsList: undefined;
+  ReservationDetail: DetailParams;
   
 };

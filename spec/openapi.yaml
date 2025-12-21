@@ -933,6 +933,141 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /reservations:check-conflicts:
+    post:
+      tags:
+        - Reservations
+      operationId: checkReservationConflicts
+      summary: Check for reservation conflicts within a time range
+      description: |
+        Check if a time slot is available for a resource by checking for overlapping reservations.
+        Overlap rule: (aStart < bEnd) && (bStart < aEnd).
+        Requires FEATURE_RESERVATIONS_ENABLED flag.
+      security:
+        - bearerAuth: []
+      x-mb-flags:
+        FEATURE_RESERVATIONS_ENABLED: true
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReservationsCheckConflictsRequest'
+      responses:
+        '200':
+          description: Conflict check result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationsCheckConflictsResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflict detected - time slot is occupied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    enum:
+                      - conflict
+                  message:
+                    type: string
+                  details:
+                    type: object
+                    properties:
+                      conflicts:
+                        type: array
+                        items:
+                          type: string
+                        description: IDs of conflicting reservations
+  /resources/{id}/availability:
+    get:
+      tags:
+        - Resources
+      operationId: getResourceAvailability
+      summary: Get resource availability within a time range
+      description: |
+        Query busy time slots (reservations) for a resource within a specified date range.
+        Requires FEATURE_RESERVATIONS_ENABLED flag.
+      security:
+        - bearerAuth: []
+      x-mb-flags:
+        FEATURE_RESERVATIONS_ENABLED: true
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Resource ID
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          description: Start of time range (ISO 8601)
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          description: End of time range (ISO 8601)
+      responses:
+        '200':
+          description: Resource availability for the requested time range
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResourceAvailabilityResponse'
+        '400':
+          description: Validation error (missing/invalid from or to parameter)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /inventory/{id}/onhand:
     get:
       summary: Get computed counters for an inventory item
@@ -4434,3 +4569,45 @@ components:
             - executed
             - archived
           default: draft
+    ReservationsCheckConflictsRequest:
+      type: object
+      required:
+        - resourceId
+        - startsAt
+        - endsAt
+      properties:
+        resourceId:
+          type: string
+          description: Resource ID
+        startsAt:
+          type: string
+          format: date-time
+          description: Reservation start time (ISO 8601)
+        endsAt:
+          type: string
+          format: date-time
+          description: Reservation end time (ISO 8601)
+        excludeReservationId:
+          type: string
+          nullable: true
+          description: Optional reservation ID to exclude from conflict check (for updates)
+    ReservationsCheckConflictsResponse:
+      type: object
+      required:
+        - conflicts
+      properties:
+        conflicts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Reservation'
+          description: Array of overlapping reservations
+    ResourceAvailabilityResponse:
+      type: object
+      required:
+        - busy
+      properties:
+        busy:
+          type: array
+          items:
+            $ref: '#/components/schemas/Reservation'
+          description: List of reservations blocking availability in the requested time range

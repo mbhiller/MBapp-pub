@@ -205,6 +205,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/reservations:check-conflicts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check for reservation conflicts within a time range
+         * @description Check if a time slot is available for a resource by checking for overlapping reservations.
+         *     Overlap rule: (aStart < bEnd) && (bStart < aEnd).
+         *     Requires FEATURE_RESERVATIONS_ENABLED flag.
+         *
+         */
+        post: operations["checkReservationConflicts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/resources/{id}/availability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get resource availability within a time range
+         * @description Query busy time slots (reservations) for a resource within a specified date range.
+         *     Requires FEATURE_RESERVATIONS_ENABLED flag.
+         *
+         */
+        get: operations["getResourceAvailability"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/inventory/{id}/onhand": {
         parameters: {
             query?: never;
@@ -2851,6 +2896,30 @@ export interface components {
              */
             status: "draft" | "planned" | "executed" | "archived";
         };
+        ReservationsCheckConflictsRequest: {
+            /** @description Resource ID */
+            resourceId: string;
+            /**
+             * Format: date-time
+             * @description Reservation start time (ISO 8601)
+             */
+            startsAt: string;
+            /**
+             * Format: date-time
+             * @description Reservation end time (ISO 8601)
+             */
+            endsAt: string;
+            /** @description Optional reservation ID to exclude from conflict check (for updates) */
+            excludeReservationId?: string | null;
+        };
+        ReservationsCheckConflictsResponse: {
+            /** @description Array of overlapping reservations */
+            conflicts: components["schemas"]["Reservation"][];
+        };
+        ResourceAvailabilityResponse: {
+            /** @description List of reservations blocking availability in the requested time range */
+            busy: components["schemas"]["Reservation"][];
+        };
     };
     responses: {
         /** @description Error response */
@@ -4056,6 +4125,144 @@ export interface operations {
                 };
             };
             /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    checkReservationConflicts: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-tenant-id": components["parameters"]["TenantHeader"];
+                /** @description Optional idempotency key for safe retries. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReservationsCheckConflictsRequest"];
+            };
+        };
+        responses: {
+            /** @description Conflict check result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReservationsCheckConflictsResponse"];
+                };
+            };
+            /** @description Validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflict detected - time slot is occupied */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        code?: "conflict";
+                        message?: string;
+                        details?: {
+                            /** @description IDs of conflicting reservations */
+                            conflicts?: string[];
+                        };
+                    };
+                };
+            };
+        };
+    };
+    getResourceAvailability: {
+        parameters: {
+            query: {
+                /** @description Start of time range (ISO 8601) */
+                from: string;
+                /** @description End of time range (ISO 8601) */
+                to: string;
+            };
+            header: {
+                "x-tenant-id": components["parameters"]["TenantHeader"];
+            };
+            path: {
+                /** @description Resource ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resource availability for the requested time range */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResourceAvailabilityResponse"];
+                };
+            };
+            /** @description Validation error (missing/invalid from or to parameter) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Resource not found */
             404: {
                 headers: {
                     [name: string]: unknown;

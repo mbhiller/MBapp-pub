@@ -62,7 +62,9 @@ import * as InvSearch from "./inventory/search";
 // Inventory computed endpoints
 import * as InvMovements from "./inventory/movements";
 
-// Registrations & Reservations actions
+// Reservations & Resources
+import * as ReservationsCheckConflicts from "./reservations/check-conflicts";
+import * as ResourcesAvailability from "./resources/availability";
 
 
 // Tools
@@ -120,7 +122,7 @@ const corsOk = (): APIGatewayProxyResultV2 => ({
   headers: {
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "OPTIONS,GET,POST,PUT,DELETE",
-    "access-control-allow-headers": "Authorization,Content-Type,Idempotency-Key,X-Tenant-Id,Accept,X-Feature-Enforce-Vendor,X-Feature-Views-Enabled,X-Feature-Registrations-Enabled,X-Feature-Events-Enabled,X-Feature-Events-Simulate",
+    "access-control-allow-headers": "Authorization,Content-Type,Idempotency-Key,X-Tenant-Id,Accept,X-Feature-Enforce-Vendor,X-Feature-Views-Enabled,X-Feature-Registrations-Enabled,X-Feature-Events-Enabled,X-Feature-Events-Simulate,X-Feature-Reservations-Enabled",
     
   },
 });
@@ -346,6 +348,22 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
         if (action === "ignore")  { requirePerm(auth, "objects:write"); return BoIgnore.handle(withId(event, id)); }
         if (action === "convert") { requirePerm(auth, "objects:write"); return BoConvert.handle(withId(event, id)); }
         return methodNotAllowed();
+      }
+    }
+
+    // Reservations: check conflicts
+    if (method === "POST" && path === "/reservations:check-conflicts") {
+      requirePerm(auth, "reservation:read");
+      return ReservationsCheckConflicts.handle(event);
+    }
+
+    // Resources: availability query
+    {
+      const m = match(/^\/resources\/([^/]+)\/availability$/i, path);
+      if (m && method === "GET") {
+        const [id] = m;
+        requirePerm(auth, "resource:read");
+        return ResourcesAvailability.handle(withId(event, id));
       }
     }
 

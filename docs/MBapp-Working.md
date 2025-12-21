@@ -397,3 +397,52 @@ No-regret prep (ongoing):
   - All smokes passing (registrations:crud, registrations:filters incl. q filter)
   - No schema/migrations
 
+---
+
+## Sprint V — Resources/Reservations Foundation (In Progress)
+
+**Theme:** Add Resource and Reservation objects with overlap conflict detection; custom endpoints for availability checks.
+
+**Scope**
+- **Objects**: Resource and Reservation (both via generic `/objects/:type` CRUD).
+- **Custom endpoints**:
+  - `POST /reservations:check-conflicts` — validate time slot (returns conflicts array or 409).
+  - `GET /resources/{id}/availability?from=ISO&to=ISO` — list busy periods.
+- **Overlap rule**: (aStart < bEnd) && (bStart < aEnd).
+- **Conflict response**: 409 with `{ code: "conflict", message, details: { conflicts: [...] } }`.
+- **Feature flag**: `FEATURE_RESERVATIONS_ENABLED` (default false, dev header override).
+- **RBAC**: `resource:read|write`, `reservation:read|write` permissions.
+- **Mobile**: Read-only preview; write actions deferred to Sprint VI.
+
+**Acceptance Criteria (Sprint V foundation)**
+- ✅ Spec compiles (YAML valid, OpenAPI 3.0.3).
+- ✅ TypeScript types generated from spec (Resource, Reservation, request/response schemas).
+- ✅ Generic `/objects/:type` CRUD works for resources and reservations.
+- ✅ Overlap validation enforced on create/update; 409 on conflict.
+- ✅ `POST /reservations:check-conflicts` returns 200 (available) or 409 (conflict).
+- ✅ `GET /resources/{id}/availability` returns busy periods in requested time range.
+- ✅ Feature flag gates endpoints (PROD only env; non-prod allows dev header override).
+- ✅ RBAC permissions enforced (`resource:*`, `reservation:*`).
+- ✅ All smoke flows pass:
+  - `smoke:reservations:crud` — create, list, update, delete reservations.
+  - `smoke:reservations:conflicts` — check-conflicts returns 409 on overlap.
+  - `smoke:resources:availability` — availability query returns busy periods.
+- ✅ Mobile app: read-only preview (ResourcesList, ReservationsList screens); no write actions visible.
+
+**Deliverables**
+1. Spec: Added Resource, Reservation, ReservationsCheckConflictsRequest/Response, ResourceAvailabilityResponse schemas; endpoints with 409 error, flag annotations.
+2. API:
+   - Flag definition in `apps/api/src/flags.ts`.
+   - Overlap validation in `apps/api/src/objects/create.ts` and `update.ts`.
+   - `apps/api/src/reservations/check-conflicts.ts` handler.
+   - `apps/api/src/resources/availability.ts` handler.
+   - Routing wired in `apps/api/src/index.ts`.
+3. Smokes: Three new flows in `ops/smoke/smoke.mjs`.
+4. Mobile: Read-only preview screens (feature-flagged).
+
+**Notes / Next**
+- Actions (cancel, start, end) deferred to Sprint VI+.
+- Recurring reservations, availability patterns (e.g., "closed Sundays") out-of-scope v1.
+- Capacity/multi-resource reservations (e.g., "need both Arena & Stall") design only in v1.
+
+
