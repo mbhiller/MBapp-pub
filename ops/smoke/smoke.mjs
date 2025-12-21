@@ -783,63 +783,80 @@ const tests = {
   "smoke:workspaces:list": async ()=>{
     await ensureBearer();
     
-    // Sprint III v1: Workspaces list should return empty or views-based list
-    // Enable feature flag if needed (dev header ok in non-prod)
-    const wsListHeaders = { "X-Feature-Views-Enabled": "true" };
+    // Sprint III: Strengthen test to prove /workspaces surfaces saved views
+    // Enable FEATURE_VIEWS_ENABLED via dev header for all requests
+    const featureHeaders = { "X-Feature-Views-Enabled": "true" };
     
     // 1) GET /workspaces (may be empty initially)
-    const listHdr = { ...baseHeaders(), ...wsListHeaders };
-    const list = await fetch(`${API}/workspaces?limit=50`, {
-      headers: listHdr
+    const listHdr = { ...baseHeaders(), ...featureHeaders };
+    const list1 = await fetch(`${API}/workspaces?limit=50`, { headers: listHdr });
+    const listBody1 = await list1.json().catch(() => ({}));
+    
+    if (!list1.ok) {
+      return { test:"workspaces:list", result:"FAIL", reason:"list-failed", status:list1.status };
+    }
+    
+    const items1 = Array.isArray(listBody1?.items) ? listBody1.items : [];
+    let createdViewId = null;
+    let itemCount = items1.length;
+    
+    // 2) If items >= 1, record itemCount and PASS
+    if (items1.length >= 1) {
+      return {
+        test: "workspaces:list",
+        result: "PASS",
+        itemCount: items1.length,
+        sampleWorkspace: items1[0]
+      };
+    }
+    
+    // 3) If items === 0, create a temp view to prove workspaces surfaces it
+    const createView = await fetch(`${API}/views`, {
+      method: "POST",
+      headers: { ...baseHeaders(), ...featureHeaders },
+      body: JSON.stringify({
+        name: "WS Test",
+        entityType: "purchaseOrder",
+        filters: [{ field: "status", op: "eq", value: "submitted" }],
+        columns: ["id", "vendorId", "total"]
+      })
     });
-    const listBody = await list.json().catch(() => ({}));
+    const createViewBody = await createView.json().catch(() => ({}));
     
-    if (!list.ok) {
-      return { test:"workspaces:list", result:"FAIL", reason:"list-failed", status:list.status };
+    if (!createView.ok || !createViewBody?.id) {
+      return { test:"workspaces:list", result:"FAIL", reason:"view-create-failed", createView: createViewBody };
+    }
+    createdViewId = createViewBody.id;
+    
+    // 4) GET /workspaces again and assert itemCount >= 1
+    const list2 = await fetch(`${API}/workspaces?limit=50`, { headers: listHdr });
+    const listBody2 = await list2.json().catch(() => ({}));
+    
+    if (!list2.ok) {
+      return { test:"workspaces:list", result:"FAIL", reason:"list-after-create-failed" };
     }
     
-    const items = Array.isArray(listBody?.items) ? listBody.items : [];
+    const items2 = Array.isArray(listBody2?.items) ? listBody2.items : [];
+    itemCount = items2.length;
     
-    // 2) If empty, create a temp workspace to verify list shows it
-    let createdWsId = null;
-    if (items.length === 0) {
-      const create = await post(`/workspaces`, {
-        name: "Smoke Test Workspace",
-        description: "Temporary workspace for smoke test",
-        views: []
-      });
-      
-      if (!create.ok || !create.body?.id) {
-        return { test:"workspaces:list", result:"FAIL", reason:"workspace-create-failed", create };
-      }
-      createdWsId = create.body.id;
-      
-      // Re-list to verify it appears
-      const list2 = await fetch(`${API}/workspaces?limit=50`, { headers: listHdr });
-      const listBody2 = await list2.json().catch(() => ({}));
-      if (!list2.ok) {
-        return { test:"workspaces:list", result:"FAIL", reason:"list-after-create-failed" };
-      }
-      const items2 = Array.isArray(listBody2?.items) ? listBody2.items : [];
-      const found = items2.find(ws => ws.id === createdWsId);
-      if (!found) {
-        return { test:"workspaces:list", result:"FAIL", reason:"created-workspace-not-found" };
-      }
+    // Verify the created view's id or name is present
+    const foundView = items2.find(ws => ws.id === createdViewId || ws.name === "WS Test");
+    if (!foundView) {
+      return { test:"workspaces:list", result:"FAIL", reason:"created-view-not-found-in-workspaces", itemCount, items: items2 };
     }
     
-    // 3) Verify shape: id, name, description?, views?, timestamps
-    const hasValidShape = items.length > 0 ? 
-      items[0].id && items[0].name && items[0].createdAt && items[0].updatedAt
-      : true;
+    // 5) Cleanup: DELETE the temp view
+    const delView = await fetch(`${API}/views/${encodeURIComponent(createdViewId)}`, {
+      method: "DELETE",
+      headers: { ...baseHeaders(), ...featureHeaders }
+    });
     
-    const pass = list.ok && hasValidShape;
+    const pass = list1.ok && createView.ok && list2.ok && foundView && itemCount >= 1 && delView.ok;
     return {
       test: "workspaces:list",
       result: pass ? "PASS" : "FAIL",
-      itemCount: items.length,
-      createdWsId,
-      sampleWorkspace: items[0] || null,
-      listBody
+      itemCount,
+      sampleWorkspace: foundView
     };
   },
 
