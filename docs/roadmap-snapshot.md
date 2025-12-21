@@ -29,6 +29,14 @@
 - **Tier 1.3 Extensions (delivered v1, feature-flagged)**: Views v1 (CRUD) + Workspaces list (v1 behind flags).
 - **Event dispatcher plumbing**: noop/simulate path implemented (simulate returns `_dev` metadata; provider = "noop").
 
+### ✅ Sprint IV — Results
+- **Tier 1 Registrations v1 (delivered, feature-flagged)**: CRUD + filters (eventId, partyId, status); objects-repo pattern.
+- **API Polish**: 204 No Content on DELETE; `noContent()` response helper added.
+- **Smokes**: registrations:crud, registrations:filters (both PASS).
+
+### 🚧 In Progress
+- **Tier 1 Foundations**: Still completing guardrails and shared patterns; Registrations polish (search, mobile screen, actions) deferred to v2.
+
 ---
 
 ## This Sprint (Sprint III) Definition of Done
@@ -85,6 +93,19 @@
 ---
 
 ## Next Checkpoints
+
+After Sprint IV passes, we update:
+
+1. **Tag v0.4.0** — Sprint IV merge complete; Registrations v1 shipped.
+
+2. **Plan Sprint V or Registrations Polish**
+   - Option A: Registrations actions (:cancel, :checkin, :checkout)
+   - Option B: Mobile RegistrationHub screen + search (q filter)
+   - Option C: Tier 2 kickoff (Events detail schema, Resources/Reservations)
+
+3. **[spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml)**  
+   - Registrations endpoints stabilized (v1)
+   - Consider: Registration actions schema (future)
 
 After Sprint III passes, we update:
 
