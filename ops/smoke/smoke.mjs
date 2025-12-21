@@ -783,80 +783,99 @@ const tests = {
   "smoke:workspaces:list": async ()=>{
     await ensureBearer();
     
-    // Sprint III: Strengthen test to prove /workspaces surfaces saved views
+    // Sprint III: Test /workspaces filters (q, entityType)
     // Enable FEATURE_VIEWS_ENABLED via dev header for all requests
     const featureHeaders = { "X-Feature-Views-Enabled": "true" };
-    
-    // 1) GET /workspaces (may be empty initially)
     const listHdr = { ...baseHeaders(), ...featureHeaders };
-    const list1 = await fetch(`${API}/workspaces?limit=50`, { headers: listHdr });
-    const listBody1 = await list1.json().catch(() => ({}));
     
-    if (!list1.ok) {
-      return { test:"workspaces:list", result:"FAIL", reason:"list-failed", status:list1.status };
-    }
-    
-    const items1 = Array.isArray(listBody1?.items) ? listBody1.items : [];
-    let createdViewId = null;
-    let itemCount = items1.length;
-    
-    // 2) If items >= 1, record itemCount and PASS
-    if (items1.length >= 1) {
-      return {
-        test: "workspaces:list",
-        result: "PASS",
-        itemCount: items1.length,
-        sampleWorkspace: items1[0]
-      };
-    }
-    
-    // 3) If items === 0, create a temp view to prove workspaces surfaces it
-    const createView = await fetch(`${API}/views`, {
+    // 1) Create two temp views with different entityTypes
+    const createA = await fetch(`${API}/views`, {
       method: "POST",
-      headers: { ...baseHeaders(), ...featureHeaders },
+      headers: listHdr,
       body: JSON.stringify({
-        name: "WS Test",
+        name: "WS Test A",
         entityType: "purchaseOrder",
         filters: [{ field: "status", op: "eq", value: "submitted" }],
         columns: ["id", "vendorId", "total"]
       })
     });
-    const createViewBody = await createView.json().catch(() => ({}));
-    
-    if (!createView.ok || !createViewBody?.id) {
-      return { test:"workspaces:list", result:"FAIL", reason:"view-create-failed", createView: createViewBody };
+    const bodyA = await createA.json().catch(() => ({}));
+    if (!createA.ok || !bodyA?.id) {
+      return { test:"workspaces:list", result:"FAIL", reason:"create-view-a-failed" };
     }
-    createdViewId = createViewBody.id;
+    const viewIdA = bodyA.id;
     
-    // 4) GET /workspaces again and assert itemCount >= 1
-    const list2 = await fetch(`${API}/workspaces?limit=50`, { headers: listHdr });
-    const listBody2 = await list2.json().catch(() => ({}));
+    const createB = await fetch(`${API}/views`, {
+      method: "POST",
+      headers: listHdr,
+      body: JSON.stringify({
+        name: "WS Sample B",
+        entityType: "salesOrder",
+        filters: [{ field: "status", op: "eq", value: "committed" }],
+        columns: ["id", "customerId", "total"]
+      })
+    });
+    const bodyB = await createB.json().catch(() => ({}));
+    if (!createB.ok || !bodyB?.id) {
+      // Cleanup A before failing
+      await fetch(`${API}/views/${encodeURIComponent(viewIdA)}`, {
+        method: "DELETE",
+        headers: listHdr
+      });
+      return { test:"workspaces:list", result:"FAIL", reason:"create-view-b-failed" };
+    }
+    const viewIdB = bodyB.id;
     
-    if (!list2.ok) {
-      return { test:"workspaces:list", result:"FAIL", reason:"list-after-create-failed" };
+    // 2) GET /workspaces (all) - baseline
+    const listAll = await fetch(`${API}/workspaces?limit=50`, { headers: listHdr });
+    const allBody = await listAll.json().catch(() => ({}));
+    const allItems = Array.isArray(allBody?.items) ? allBody.items : [];
+    
+    // 3) GET /workspaces?q=Test -> assert at least one item with "Test" in name
+    const listQ = await fetch(`${API}/workspaces?q=Test&limit=50`, { headers: listHdr });
+    const qBody = await listQ.json().catch(() => ({}));
+    const qItems = Array.isArray(qBody?.items) ? qBody.items : [];
+    const hasTest = qItems.some(item => item.name && item.name.includes("Test"));
+    
+    if (!hasTest) {
+      // Cleanup before failing
+      await fetch(`${API}/views/${encodeURIComponent(viewIdA)}`, { method: "DELETE", headers: listHdr });
+      await fetch(`${API}/views/${encodeURIComponent(viewIdB)}`, { method: "DELETE", headers: listHdr });
+      return { test:"workspaces:list", result:"FAIL", reason:"q-filter-no-test-items", qItems };
     }
     
-    const items2 = Array.isArray(listBody2?.items) ? listBody2.items : [];
-    itemCount = items2.length;
+    // 4) GET /workspaces?entityType=purchaseOrder -> assert all items have entityType=purchaseOrder
+    const listEntity = await fetch(`${API}/workspaces?entityType=purchaseOrder&limit=50`, { headers: listHdr });
+    const entityBody = await listEntity.json().catch(() => ({}));
+    const entityItems = Array.isArray(entityBody?.items) ? entityBody.items : [];
+    const allPO = entityItems.every(item => item.entityType === "purchaseOrder");
     
-    // Verify the created view's id or name is present
-    const foundView = items2.find(ws => ws.id === createdViewId || ws.name === "WS Test");
-    if (!foundView) {
-      return { test:"workspaces:list", result:"FAIL", reason:"created-view-not-found-in-workspaces", itemCount, items: items2 };
+    if (!allPO) {
+      // Cleanup before failing
+      await fetch(`${API}/views/${encodeURIComponent(viewIdA)}`, { method: "DELETE", headers: listHdr });
+      await fetch(`${API}/views/${encodeURIComponent(viewIdB)}`, { method: "DELETE", headers: listHdr });
+      return { test:"workspaces:list", result:"FAIL", reason:"entityType-filter-mismatch", entityItems };
     }
     
-    // 5) Cleanup: DELETE the temp view
-    const delView = await fetch(`${API}/views/${encodeURIComponent(createdViewId)}`, {
+    // 5) Cleanup: delete both temp views
+    const delA = await fetch(`${API}/views/${encodeURIComponent(viewIdA)}`, {
       method: "DELETE",
-      headers: { ...baseHeaders(), ...featureHeaders }
+      headers: listHdr
+    });
+    const delB = await fetch(`${API}/views/${encodeURIComponent(viewIdB)}`, {
+      method: "DELETE",
+      headers: listHdr
     });
     
-    const pass = list1.ok && createView.ok && list2.ok && foundView && itemCount >= 1 && delView.ok;
+    const pass = createA.ok && createB.ok && listAll.ok && hasTest && allPO && delA.ok && delB.ok;
     return {
       test: "workspaces:list",
       result: pass ? "PASS" : "FAIL",
-      itemCount,
-      sampleWorkspace: foundView
+      counts: {
+        all: allItems.length,
+        q: qItems.length,
+        byEntity: entityItems.length
+      }
     };
   },
 

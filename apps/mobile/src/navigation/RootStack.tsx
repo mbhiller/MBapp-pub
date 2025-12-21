@@ -10,6 +10,9 @@ import { useTheme } from "../providers/ThemeProvider";
 // Hub / global
 import ModuleHubScreen from "../screens/ModuleHubScreen";
 
+// Workspaces
+import WorkspaceHubScreen from "../features/workspaces/WorkspaceHubScreen";
+
 // Inventory
 import PartyListScreen from "../screens/PartyListScreen";
 import PartyDetailScreen from "../screens/PartyDetailScreen";
@@ -55,6 +58,9 @@ export default function RootStack() {
   })}>
     
     <Stack.Screen name="Hub" component={ModuleHubScreen} options={{ title: "Hub" }} />
+    
+    {/* Workspaces (Sprint III) */}
+    <Stack.Screen name="WorkspaceHub" component={WorkspaceHubScreen} options={{ title: "Workspaces" }} />
     
     {/* Party List */}
     <Stack.Screen name="PartyList" component={PartyListScreen} options={{ title: "Parties" }}/>

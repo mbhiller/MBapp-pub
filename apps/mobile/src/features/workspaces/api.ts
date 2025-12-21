@@ -1,9 +1,28 @@
 // apps/mobile/src/features/workspaces/api.ts
-import { apiClient } from "../../api/client";
+import { apiClient, ListPage } from "../../api/client";
 
-export type Workspace = { id: string; name: string; /* ... */ };
+export type WorkspaceItem = {
+  id: string;
+  name: string;
+  entityType: string;
+  filters?: any[];
+  columns?: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type WorkspaceListParams = {
+  q?: string;
+  entityType?: string;
+  limit?: number;
+  next?: string;
+};
 
 export const workspacesApi = {
-  list: () => apiClient.get<Workspace[]>("/workspaces"),
-  get:  (id: string) => apiClient.get<Workspace>(`/workspaces/${encodeURIComponent(id)}`),
+  list: (params?: WorkspaceListParams): Promise<ListPage<WorkspaceItem>> => {
+    return apiClient.get<ListPage<WorkspaceItem>>("/workspaces", params);
+  },
+  get: (id: string): Promise<WorkspaceItem> => {
+    return apiClient.get<WorkspaceItem>(`/workspaces/${encodeURIComponent(id)}`);
+  },
 };

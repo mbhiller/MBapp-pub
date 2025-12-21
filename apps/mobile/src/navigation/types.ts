@@ -37,5 +37,8 @@ export type RootStackParamList = {
   // Routing and Delivery
   RoutePlanList: undefined;
   RoutePlanDetail: DetailParams;
+
+  // Workspaces (Sprint III)
+  WorkspaceHub: undefined;
   
 };
