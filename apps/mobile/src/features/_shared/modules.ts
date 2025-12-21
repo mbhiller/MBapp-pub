@@ -60,6 +60,9 @@ export const MODULES: readonly ModuleEntry[] = [
   // Operational docs
   { key: "routePlans", title: "Route Plans", screen: "RoutePlanList", icon: "truck", required: ["routing:read"] },
 
+  // Sprint III: Workspaces (guarded by workspace:read permission)
+  { key: "workspaces", title: "Workspaces", screen: "WorkspaceHub", icon: "folder", required: ["workspace:read"] },
+
 ] as const;
 
 export default MODULES;
