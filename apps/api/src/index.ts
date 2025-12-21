@@ -2,6 +2,7 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
 import { getAuth, requirePerm, policyFromAuth } from "./auth/middleware";
 import { buildCtx, attachCtxToEvent } from "./shared/ctx";
+import { featureRegistrationsEnabled } from "./flags";
 
 /* Routes */
 // Views
@@ -17,6 +18,13 @@ import * as WsGet    from "./workspaces/get";
 import * as WsCreate from "./workspaces/create";
 import * as WsUpdate from "./workspaces/update";
 import * as WsDelete from "./workspaces/delete";
+
+// Registrations
+import * as RegList   from "./registrations/list";
+import * as RegGet    from "./registrations/get";
+import * as RegCreate from "./registrations/create";
+import * as RegUpdate from "./registrations/update";
+import * as RegDelete from "./registrations/delete";
 
 // Objects
 import * as ObjList   from "./objects/list";
@@ -113,7 +121,7 @@ const corsOk = (): APIGatewayProxyResultV2 => ({
   headers: {
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "OPTIONS,GET,POST,PUT,DELETE",
-    "access-control-allow-headers": "Authorization,Content-Type,Idempotency-Key,X-Tenant-Id,Accept,X-Feature-Enforce-Vendor,X-Feature-Views-Enabled,X-Feature-Events-Enabled,X-Feature-Events-Simulate",
+    "access-control-allow-headers": "Authorization,Content-Type,Idempotency-Key,X-Tenant-Id,Accept,X-Feature-Enforce-Vendor,X-Feature-Views-Enabled,X-Feature-Registrations-Enabled,X-Feature-Events-Enabled,X-Feature-Events-Simulate",
     
   },
 });
@@ -210,7 +218,20 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
         return methodNotAllowed();
       }
     }
-    
+
+    // Registrations (Tier-1 foundation; feature-flagged)
+    if (featureRegistrationsEnabled(event)) {
+      const m = path.match(/^\/registrations(?:\/([^/]+))?$/i);
+      if (m) {
+        const [, id] = m;
+        if (method === "GET" && !id)    { return RegList.handle(event); }
+        if (method === "GET" && id)     { return RegGet.handle(withId(event, id)); }
+        if (method === "POST" && !id)   { return RegCreate.handle(event); }
+        if (method === "PUT" && id)     { return RegUpdate.handle(withId(event, id)); }
+        if (method === "DELETE" && id)  { return RegDelete.handle(withId(event, id)); }
+        return methodNotAllowed();
+      }
+    }
 
     /* ========= Actions ========= */
     // Purchasing PO actions

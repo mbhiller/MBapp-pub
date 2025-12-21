@@ -2397,7 +2397,7 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '400':
           description: Bad request
-      summary: List Views (Sprint III: basic filtering + pagination)
+      summary: List Views (Sprint III basic filtering + pagination)
     post:
       tags:
       - Views
@@ -2585,7 +2585,7 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '400':
           description: Bad request
-      summary: List Workspaces (Sprint III v1: lists user/tenant workspaces; full multi-tile composition in v2)
+      summary: List Workspaces (Sprint III v1 lists user/tenant workspaces; full multi-tile composition in v2)
     post:
       tags:
       - Workspaces

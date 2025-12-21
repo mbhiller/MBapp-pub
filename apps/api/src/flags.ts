@@ -32,6 +32,9 @@ export const featureVendorGuardEnabled = withFlag(
 export const featureViewsEnabled = withFlag(
   "FEATURE_VIEWS_ENABLED", "X-Feature-Views-Enabled", false
 );
+export const featureRegistrationsEnabled = withFlag(
+  "FEATURE_REGISTRATIONS_ENABLED", "X-Feature-Registrations-Enabled", false
+);
 export const featureEventsEnabled = withFlag(
   "FEATURE_EVENT_DISPATCH_ENABLED", "X-Feature-Events-Enabled", false
 );

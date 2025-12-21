@@ -1,29 +1,50 @@
 // apps/mobile/src/features/registrations/api.ts
-import { listObjects, getObject, createObject } from "../../api/client";
+import { apiClient } from "../../api/client";
 import type { Registration, Page } from "./types";
 
-const TYPE = "registration";
+export type RegistrationListParams = {
+  q?: string;
+  eventId?: string;
+  partyId?: string;
+  status?: "draft" | "submitted" | "confirmed" | "cancelled";
+  limit?: number;
+  next?: string;
+};
 
-export function listRegistrations(o?: {
-  limit?: number; next?: string | null; q?: string; eventId?: string;
-}): Promise<Page<Registration>> {
-  const base: Record<string, any> = {
-    by: "updatedAt",
-    sort: "desc",
-  };
-  if (o?.limit != null) base.limit = o.limit;
-  if (o?.next != null) base.next = o.next ?? "";
-  if (o?.q) base.q = o.q;
+export type CreateRegistrationInput = {
+  eventId: string;
+  partyId: string;
+  division?: string;
+  class?: string;
+  status?: "draft" | "submitted" | "confirmed" | "cancelled";
+  fees?: Array<{ code: string; amount: number; qty?: number }>;
+  notes?: string;
+};
 
-  if (o?.eventId) {
-    base.eventId = o.eventId;   // preferred
-    base.event = o.eventId;     // alt
-    base.event_id = o.eventId;  // alt
-  }
-  return listObjects<Registration>("registration", base) as unknown as Promise<Page<Registration>>;
+function toQuery(params?: RegistrationListParams): Record<string, string> {
+  if (!params) return {};
+  const result: Record<string, string> = {};
+  if (params.q !== undefined) result.q = params.q;
+  if (params.eventId !== undefined) result.eventId = params.eventId;
+  if (params.partyId !== undefined) result.partyId = params.partyId;
+  if (params.status !== undefined) result.status = params.status;
+  if (params.limit !== undefined) result.limit = String(params.limit);
+  if (params.next !== undefined) result.next = params.next;
+  return result;
 }
 
-export const getRegistration = (id: string) => getObject<Registration>(TYPE, id);
+export function listRegistrations(params?: RegistrationListParams): Promise<Page<Registration>> {
+  return apiClient.get<Page<Registration>>("/registrations", toQuery(params));
+}
 
-export const upsertRegistration = (body: Partial<Registration>) =>
-  createObject<Registration>(TYPE, { ...body, type: "registration" });
+export function createRegistration(input: CreateRegistrationInput): Promise<Registration> {
+  return apiClient.post<Registration>("/registrations", input, {
+    "X-Feature-Registrations-Enabled": "1"
+  });
+}
+
+export function getRegistration(id: string): Promise<Registration> {
+  return apiClient.get<Registration>(`/registrations/${encodeURIComponent(id)}`, {
+    "X-Feature-Registrations-Enabled": "1"
+  });
+}

@@ -63,6 +63,9 @@ export const MODULES: readonly ModuleEntry[] = [
   // Sprint III: Workspaces (guarded by workspace:read permission)
   { key: "workspaces", title: "Workspaces", screen: "WorkspaceHub", icon: "folder", required: ["workspace:read"] },
 
+  // Sprint IV: Registrations (guarded by registration:read permission + feature flag)
+  { key: "registrations", title: "Registrations", screen: "RegistrationsList", icon: "calendar", required: ["registration:read"] },
+
 ] as const;
 
 export default MODULES;

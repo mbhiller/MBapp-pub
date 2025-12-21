@@ -41,4 +41,7 @@ export type RootStackParamList = {
   // Workspaces (Sprint III)
   WorkspaceHub: undefined;
   
+  // Registrations (Sprint IV)
+  RegistrationsList: undefined;
+  
 };

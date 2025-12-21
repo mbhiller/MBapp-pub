@@ -99,7 +99,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Views (role-aware) */
+        /** List Views (Sprint III basic filtering + pagination) */
         get: operations["listViews"];
         put?: never;
         /** Create a View */
@@ -137,7 +137,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Workspaces (role-aware) */
+        /** List Workspaces (Sprint III v1 lists user/tenant workspaces; full multi-tile composition in v2) */
         get: operations["listWorkspaces"];
         put?: never;
         /** Create a Workspace */
@@ -2572,31 +2572,92 @@ export interface components {
         View: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
             type: "view";
-            /** @description e.g., products, inventory, events */
-            moduleKey: string;
+            /** @description Display name for the view */
             name: string;
-            queryJSON: {
-                [key: string]: unknown;
-            };
+            /**
+             * @description Object type this view applies to (e.g., purchaseOrder, salesOrder, inventoryItem, party)
+             * @enum {string}
+             */
+            entityType: "purchaseOrder" | "salesOrder" | "inventoryItem" | "party" | "account" | "event" | "employee" | "organization" | "product" | "class" | "division";
+            /** @description Filter expressions (Sprint III v1) */
+            filters?: components["schemas"]["ViewFilter"][];
+            /** @description Optional sort configuration */
+            sort?: components["schemas"]["ViewSort"];
+            /** @description Field names to display (reserved for Sprint IV+) */
+            columns?: string[] | null;
+            /** @description Optional notes about the view */
+            description?: string | null;
+            /** @description User/party who owns this view (for sharing/permission future work) */
             ownerId?: string | null;
-            shared?: boolean;
-            isDefault?: boolean;
+            /**
+             * @description Whether view is shared with tenant users
+             * @default false
+             */
+            shared: boolean;
+        };
+        /** @description Filter expression for View (Sprint III v1). Operator support depends on field type. */
+        ViewFilter: {
+            /** @description Object field name (e.g., status, createdAt, vendorId) */
+            field: string;
+            /**
+             * @description Comparison operator
+             * @enum {string}
+             */
+            op: "eq" | "ne" | "lt" | "le" | "gt" | "ge" | "in" | "nin" | "contains" | "startsWith" | "regex";
+            /** @description Filter value (type depends on field and operator) */
+            value: string | number | boolean | unknown[];
+        };
+        /** @description Sort order for View results */
+        ViewSort: {
+            /** @description Field name to sort by */
+            field: string;
+            /**
+             * @default asc
+             * @enum {string}
+             */
+            dir: "asc" | "desc";
         };
         ViewList: {
             items?: components["schemas"]["View"][];
+            /** @description Opaque cursor for next page (if any) */
             next?: string | null;
+            /** @description Optional pagination metadata (clients may ignore). */
+            pageInfo?: {
+                hasNext?: boolean;
+                nextCursor?: string | null;
+                pageSize?: number;
+            };
         };
         Workspace: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
             type: "workspace";
+            /** @description Workspace name */
             name: string;
-            tiles: components["schemas"]["WorkspaceTile"][];
+            /** @description Optional description */
+            description?: string | null;
+            /**
+             * @description List of View IDs included in this workspace (Sprint III v1 may be empty; views listed via GET /views)
+             * @default []
+             */
+            views: string[];
+            /** @description User/party who owns this workspace */
             ownerId?: string | null;
-            shared?: boolean;
+            /**
+             * @description Whether workspace is shared with tenant users
+             * @default false
+             */
+            shared: boolean;
         };
         WorkspaceList: {
             items?: components["schemas"]["Workspace"][];
+            /** @description Opaque cursor for next page (if any) */
             next?: string | null;
+            /** @description Optional pagination metadata (clients may ignore). */
+            pageInfo?: {
+                hasNext?: boolean;
+                nextCursor?: string | null;
+                pageSize?: number;
+            };
         };
         WorkspaceTile: {
             moduleKey: string;
@@ -2992,10 +3053,10 @@ export interface operations {
     listViews: {
         parameters: {
             query?: {
-                moduleKey?: string;
-                ownerId?: string;
-                shared?: boolean;
-                isDefault?: boolean;
+                /** @description Filter by object type (e.g., purchaseOrder, salesOrder) */
+                entityType?: string;
+                /** @description Search views by name */
+                q?: string;
                 limit?: components["parameters"]["Limit"];
                 next?: components["parameters"]["Next"];
             };
@@ -3045,7 +3106,7 @@ export interface operations {
         };
         responses: {
             /** @description Created */
-            200: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3246,7 +3307,7 @@ export interface operations {
         };
         responses: {
             /** @description Created */
-            200: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };

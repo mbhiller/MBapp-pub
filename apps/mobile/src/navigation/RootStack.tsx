@@ -13,6 +13,9 @@ import ModuleHubScreen from "../screens/ModuleHubScreen";
 // Workspaces
 import WorkspaceHubScreen from "../screens/WorkspaceHubScreen";
 
+// Registrations (Sprint IV)
+import RegistrationsListScreen from "../screens/RegistrationsListScreen";
+
 // Inventory
 import PartyListScreen from "../screens/PartyListScreen";
 import PartyDetailScreen from "../screens/PartyDetailScreen";
@@ -61,6 +64,9 @@ export default function RootStack() {
     
     {/* Workspaces (Sprint III) */}
     <Stack.Screen name="WorkspaceHub" component={WorkspaceHubScreen} options={{ title: "Workspaces" }} />
+    
+    {/* Registrations (Sprint IV) */}
+    <Stack.Screen name="RegistrationsList" component={RegistrationsListScreen} options={{ title: "Registrations" }} />
     
     {/* Party List */}
     <Stack.Screen name="PartyList" component={PartyListScreen} options={{ title: "Parties" }}/>

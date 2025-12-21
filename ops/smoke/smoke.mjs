@@ -963,6 +963,265 @@ const tests = {
       devMeta: recvBody?._dev || null,
       recvBody
     };
+  },
+
+  "smoke:registrations:crud": async ()=>{
+    await ensureBearer();
+
+    // Enable FEATURE_REGISTRATIONS_ENABLED via dev header
+    const regHeaders = { "X-Feature-Registrations-Enabled": "true" };
+
+    // 1) CREATE registration
+    const create = await fetch(`${API}/registrations`, {
+      method: "POST",
+      headers: { ...baseHeaders(), ...regHeaders, "Idempotency-Key": idem() },
+      body: JSON.stringify({
+        eventId: `evt_${Date.now()}`,
+        partyId: `party_${Math.random().toString(36).slice(2, 7)}`,
+        status: "draft",
+        division: "adult",
+        class: "professional",
+        fees: [
+          { code: "entry", amount: 50.00 },
+          { code: "parking", amount: 10.00, qty: 1 }
+        ],
+        notes: "Smoke test registration"
+      })
+    });
+    const createBody = await create.json().catch(() => ({}));
+    if (!create.ok || !createBody?.id) {
+      return { test:"registrations:crud", result:"FAIL", reason:"create-failed", create:createBody };
+    }
+    const regId = createBody.id;
+
+    // Validate created registration has required fields
+    if (!createBody.createdAt || !createBody.updatedAt) {
+      return { test:"registrations:crud", result:"FAIL", reason:"missing-timestamps", create:createBody };
+    }
+
+    // 2) GET single registration
+    const get1 = await fetch(`${API}/registrations/${encodeURIComponent(regId)}`, {
+      headers: { ...baseHeaders(), ...regHeaders }
+    });
+    const get1Body = await get1.json().catch(() => ({}));
+    if (!get1.ok || get1Body?.id !== regId) {
+      return { test:"registrations:crud", result:"FAIL", reason:"get-failed", get:get1Body };
+    }
+
+    // Validate fields match
+    if (get1Body.eventId !== createBody.eventId || get1Body.partyId !== createBody.partyId) {
+      return { test:"registrations:crud", result:"FAIL", reason:"field-mismatch", get:get1Body, create:createBody };
+    }
+
+    // 3) PUT (update) registration - change status to confirmed
+    const oldUpdatedAt = createBody.updatedAt;
+    const update = await fetch(`${API}/registrations/${encodeURIComponent(regId)}`, {
+      method: "PUT",
+      headers: { ...baseHeaders(), ...regHeaders, "Idempotency-Key": idem() },
+      body: JSON.stringify({
+        eventId: createBody.eventId,
+        partyId: createBody.partyId,
+        status: "confirmed",
+        division: "adult",
+        class: "professional",
+        fees: [
+          { code: "entry", amount: 50.00 },
+          { code: "parking", amount: 10.00, qty: 1 }
+        ]
+      })
+    });
+    const updateBody = await update.json().catch(() => ({}));
+    if (!update.ok || updateBody?.status !== "confirmed") {
+      return { test:"registrations:crud", result:"FAIL", reason:"update-failed", update:updateBody };
+    }
+
+    // Validate updatedAt changed
+    if (updateBody.updatedAt === oldUpdatedAt) {
+      return { test:"registrations:crud", result:"FAIL", reason:"updatedAt-not-changed", update:updateBody };
+    }
+
+    // 4) DELETE registration
+    const del = await fetch(`${API}/registrations/${encodeURIComponent(regId)}`, {
+      method: "DELETE",
+      headers: { ...baseHeaders(), ...regHeaders }
+    });
+    if (!del.ok) {
+      return { test:"registrations:crud", result:"FAIL", reason:"delete-failed", delStatus:del.status };
+    }
+
+    // 5) Verify deleted (soft-delete or not in list)
+    const listAfter = await fetch(`${API}/registrations?limit=50`, {
+      headers: { ...baseHeaders(), ...regHeaders }
+    });
+    const listAfterBody = await listAfter.json().catch(() => ({}));
+    const stillThere = listAfter.ok && Array.isArray(listAfterBody?.items) && listAfterBody.items.find(r => r.id === regId);
+    // Note: soft-delete means record may still exist but with deleted flag, or it may be excluded from list
+
+    const pass = create.ok && get1.ok && update.ok && del.ok && !stillThere;
+    return {
+      test: "registrations:crud",
+      result: pass ? "PASS" : "FAIL",
+      artifacts: {
+        id: regId,
+        create: { ok: create.ok, status: create.status },
+        get: { ok: get1.ok, status: get1.status },
+        update: { ok: update.ok, status: update.status, statusChanged: updateBody?.status === "confirmed" },
+        delete: { ok: del.ok, status: del.status }
+      }
+    };
+  },
+
+  "smoke:registrations:filters": async ()=>{
+    await ensureBearer();
+
+    // Enable FEATURE_REGISTRATIONS_ENABLED via dev header
+    const regHeaders = { "X-Feature-Registrations-Enabled": "true" };
+
+    const eventId1 = `evt_${Date.now()}`;
+    const eventId2 = `evt_${Date.now() + 1}`;
+    const partyId1 = `PARTY_ALPHA_${Math.random().toString(36).slice(2, 7)}`;
+    const partyId2 = `PARTY_BETA_${Math.random().toString(36).slice(2, 7)}`;
+
+    // 1) Create registrations with varied eventId, partyId, status
+    const reg1 = await fetch(`${API}/registrations`, {
+      method: "POST",
+      headers: { ...baseHeaders(), ...regHeaders, "Idempotency-Key": idem() },
+      body: JSON.stringify({
+        eventId: eventId1,
+        partyId: partyId1,
+        status: "draft"
+      })
+    });
+    const reg1Body = await reg1.json().catch(() => ({}));
+    if (!reg1.ok || !reg1Body?.id) {
+      return { test:"registrations:filters", result:"FAIL", reason:"create-reg1-failed" };
+    }
+    const regId1 = reg1Body.id;
+
+    const reg2 = await fetch(`${API}/registrations`, {
+      method: "POST",
+      headers: { ...baseHeaders(), ...regHeaders, "Idempotency-Key": idem() },
+      body: JSON.stringify({
+        eventId: eventId1,
+        partyId: partyId2,
+        status: "confirmed"
+      })
+    });
+    const reg2Body = await reg2.json().catch(() => ({}));
+    if (!reg2.ok || !reg2Body?.id) {
+      // Cleanup reg1
+      await fetch(`${API}/registrations/${encodeURIComponent(regId1)}`, { method: "DELETE", headers: { ...baseHeaders(), ...regHeaders } });
+      return { test:"registrations:filters", result:"FAIL", reason:"create-reg2-failed" };
+    }
+    const regId2 = reg2Body.id;
+
+    const reg3 = await fetch(`${API}/registrations`, {
+      method: "POST",
+      headers: { ...baseHeaders(), ...regHeaders, "Idempotency-Key": idem() },
+      body: JSON.stringify({
+        eventId: eventId2,
+        partyId: partyId1,
+        status: "confirmed"
+      })
+    });
+    const reg3Body = await reg3.json().catch(() => ({}));
+    if (!reg3.ok || !reg3Body?.id) {
+      // Cleanup reg1 and reg2
+      await fetch(`${API}/registrations/${encodeURIComponent(regId1)}`, { method: "DELETE", headers: { ...baseHeaders(), ...regHeaders } });
+      await fetch(`${API}/registrations/${encodeURIComponent(regId2)}`, { method: "DELETE", headers: { ...baseHeaders(), ...regHeaders } });
+      return { test:"registrations:filters", result:"FAIL", reason:"create-reg3-failed" };
+    }
+    const regId3 = reg3Body.id;
+
+    // 2) Test eventId filter
+    const listByEvent = await fetch(`${API}/registrations?eventId=${encodeURIComponent(eventId1)}&limit=50`, {
+      headers: { ...baseHeaders(), ...regHeaders }
+    });
+    const listByEventBody = await listByEvent.json().catch(() => ({}));
+    const byEventItems = Array.isArray(listByEventBody?.items) ? listByEventBody.items : [];
+    const allMatchEvent = byEventItems.every(r => r.eventId === eventId1);
+    const byEventCount = byEventItems.length;
+
+    if (!allMatchEvent) {
+      // Cleanup all
+      await fetch(`${API}/registrations/${encodeURIComponent(regId1)}`, { method: "DELETE", headers: { ...baseHeaders(), ...regHeaders } });
+      await fetch(`${API}/registrations/${encodeURIComponent(regId2)}`, { method: "DELETE", headers: { ...baseHeaders(), ...regHeaders } });
+      await fetch(`${API}/registrations/${encodeURIComponent(regId3)}`, { method: "DELETE", headers: { ...baseHeaders(), ...regHeaders } });
+      return { test:"registrations:filters", result:"FAIL", reason:"eventId-filter-mismatch", byEventItems };
+    }
+
+    // 3) Test partyId filter
+    const listByParty = await fetch(`${API}/registrations?partyId=${encodeURIComponent(partyId1)}&limit=50`, {
+      headers: { ...baseHeaders(), ...regHeaders }
+    });
+    const listByPartyBody = await listByParty.json().catch(() => ({}));
+    const byPartyItems = Array.isArray(listByPartyBody?.items) ? listByPartyBody.items : [];
+    const allMatchParty = byPartyItems.every(r => r.partyId === partyId1);
+    const byPartyCount = byPartyItems.length;
+
+    if (!allMatchParty) {
+      // Cleanup all
+      await fetch(`${API}/registrations/${encodeURIComponent(regId1)}`, { method: "DELETE", headers: { ...baseHeaders(), ...regHeaders } });
+      await fetch(`${API}/registrations/${encodeURIComponent(regId2)}`, { method: "DELETE", headers: { ...baseHeaders(), ...regHeaders } });
+      await fetch(`${API}/registrations/${encodeURIComponent(regId3)}`, { method: "DELETE", headers: { ...baseHeaders(), ...regHeaders } });
+      return { test:"registrations:filters", result:"FAIL", reason:"partyId-filter-mismatch", byPartyItems };
+    }
+
+    // 4) Test status filter
+    const listByStatus = await fetch(`${API}/registrations?status=confirmed&limit=50`, {
+      headers: { ...baseHeaders(), ...regHeaders }
+    });
+    const listByStatusBody = await listByStatus.json().catch(() => ({}));
+    const byStatusItems = Array.isArray(listByStatusBody?.items) ? listByStatusBody.items : [];
+    const allMatchStatus = byStatusItems.every(r => r.status === "confirmed");
+    const byStatusCount = byStatusItems.length;
+
+    if (!allMatchStatus) {
+      // Cleanup all
+      await fetch(`${API}/registrations/${encodeURIComponent(regId1)}`, { method: "DELETE", headers: { ...baseHeaders(), ...regHeaders } });
+      await fetch(`${API}/registrations/${encodeURIComponent(regId2)}`, { method: "DELETE", headers: { ...baseHeaders(), ...regHeaders } });
+      await fetch(`${API}/registrations/${encodeURIComponent(regId3)}`, { method: "DELETE", headers: { ...baseHeaders(), ...regHeaders } });
+      return { test:"registrations:filters", result:"FAIL", reason:"status-filter-mismatch", byStatusItems };
+    }
+
+    // 5) Test q (search) filter - case-insensitive substring match on id, partyId, division, class
+    const listByQ = await fetch(`${API}/registrations?q=alp&limit=50`, {
+      headers: { ...baseHeaders(), ...regHeaders }
+    });
+    const listByQBody = await listByQ.json().catch(() => ({}));
+    const byQItems = Array.isArray(listByQBody?.items) ? listByQBody.items : [];
+    // All returned items should contain "alp" (case-insensitive) in id, partyId, division, or class
+    const allMatchQ = byQItems.every(r => {
+      const searchable = [r.id, r.partyId, r.division, r.class].filter(Boolean).join(" ").toLowerCase();
+      return searchable.includes("alp");
+    });
+    const byQCount = byQItems.length;
+
+    if (!allMatchQ || byQCount === 0) {
+      // Cleanup all
+      await fetch(`${API}/registrations/${encodeURIComponent(regId1)}`, { method: "DELETE", headers: { ...baseHeaders(), ...regHeaders } });
+      await fetch(`${API}/registrations/${encodeURIComponent(regId2)}`, { method: "DELETE", headers: { ...baseHeaders(), ...regHeaders } });
+      await fetch(`${API}/registrations/${encodeURIComponent(regId3)}`, { method: "DELETE", headers: { ...baseHeaders(), ...regHeaders } });
+      return { test:"registrations:filters", result:"FAIL", reason:"q-filter-mismatch", byQItems };
+    }
+
+    // 6) Cleanup all temp registrations
+    const del1 = await fetch(`${API}/registrations/${encodeURIComponent(regId1)}`, { method: "DELETE", headers: { ...baseHeaders(), ...regHeaders } });
+    const del2 = await fetch(`${API}/registrations/${encodeURIComponent(regId2)}`, { method: "DELETE", headers: { ...baseHeaders(), ...regHeaders } });
+    const del3 = await fetch(`${API}/registrations/${encodeURIComponent(regId3)}`, { method: "DELETE", headers: { ...baseHeaders(), ...regHeaders } });
+
+    const pass = reg1.ok && reg2.ok && reg3.ok && listByEvent.ok && allMatchEvent && listByParty.ok && allMatchParty && listByStatus.ok && allMatchStatus && listByQ.ok && allMatchQ && del1.ok && del2.ok && del3.ok;
+    return {
+      test: "registrations:filters",
+      result: pass ? "PASS" : "FAIL",
+      counts: {
+        created: 3,
+        byEvent: byEventCount,
+        byParty: byPartyCount,
+        byStatus: byStatusCount,
+        byQ: byQCount
+      }
+    };
   }
 };
 

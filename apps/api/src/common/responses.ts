@@ -14,6 +14,7 @@ const respond = (statusCode: number, body: any) => ({
 });
 
 export const ok = (data: Json, status = 200) => respond(status, data);
+export const noContent = () => ({ statusCode: 204, headers: baseHeaders, body: "" });
 export const bad = (message: string | { message: string } = "Bad Request") => {
   const msg = typeof message === "string" ? message : message.message;
   return respond(400, { error: "BadRequest", message: msg });
