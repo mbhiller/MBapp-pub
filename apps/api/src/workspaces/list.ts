@@ -1,7 +1,8 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
-import { ok, error } from "../common/responses";
+import { ok, internalError } from "../common/responses";
 import { listObjects } from "../objects/repo";
 import { getAuth, requirePerm } from "../auth/middleware";
+import { parsePagination, buildListPage } from "../shared/pagination";
 
 /**
  * GET /workspaces — returns saved Views for the current tenant/user.
@@ -17,8 +18,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
   try {
     const auth = await getAuth(event);
     const qsp = event.queryStringParameters || {};
-    const limit = Number(qsp.limit ?? 20);
-    const next = qsp.next ?? undefined;
+    const { limit, cursor } = parsePagination(qsp, 25);
     const fields = qsp.fields ? String(qsp.fields).split(",").map(s => s.trim()).filter(Boolean) : undefined;
 
     // Extract and validate filter parameters
@@ -32,7 +32,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const page = await listObjects({
       tenantId: auth.tenantId,
       type: "view",
-      next,
+      next: cursor,
       limit,
       fields,
     });
@@ -55,8 +55,8 @@ export async function handle(event: APIGatewayProxyEventV2) {
       );
     }
     
-    return ok({ items: filteredItems, next: page.next });
+    return ok(buildListPage(filteredItems, page.next));
   } catch (e: any) {
-    return error(e);
+    return internalError(e);
   }
 }

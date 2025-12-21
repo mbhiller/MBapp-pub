@@ -168,6 +168,43 @@ export interface paths {
         patch: operations["updateWorkspace"];
         trace?: never;
     };
+    "/registrations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Registrations (Sprint IV v1 with filters + search) */
+        get: operations["listRegistrations"];
+        put?: never;
+        /** Create a Registration */
+        post: operations["createRegistration"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/registrations/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a Registration */
+        get: operations["getRegistration"];
+        /** Update a Registration */
+        put: operations["updateRegistration"];
+        post?: never;
+        /** Delete a Registration */
+        delete: operations["deleteRegistration"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/inventory/{id}/onhand": {
         parameters: {
             query?: never;
@@ -1746,6 +1783,27 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        Error: {
+            /** @description Machine-readable error code */
+            code: string;
+            /** @description Human-readable error message */
+            message: string;
+            /** @description Optional additional context */
+            details?: {
+                [key: string]: unknown;
+            };
+        };
+        ValidationError: components["schemas"]["Error"] & {
+            /** @description Field-specific validation errors */
+            fieldErrors?: {
+                /** @description Field name or path */
+                field: string;
+                /** @description Validation error message */
+                message: string;
+                /** @description Error code for this field */
+                code?: string;
+            }[];
+        };
         Account: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
             type: "account";
@@ -1888,15 +1946,6 @@ export interface components {
             createdAt?: string;
             /** Format: date-time */
             updatedAt?: string;
-        };
-        Error: {
-            /** @description Human-readable summary */
-            message: string;
-            /** @description Stable error code (e.g., insufficient_available_to_commit) */
-            code?: string;
-            details?: {
-                [key: string]: unknown;
-            }[];
         };
         Event: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
@@ -2297,37 +2346,71 @@ export interface components {
         Registration: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
             type: "registration";
+            /** @description ID of the event this registration is for */
             eventId: string;
-            clientId: string;
+            /** @description ID of the party (person/org) being registered */
+            partyId: string;
+            /**
+             * @description Registration status (Sprint IV v1)
+             * @default draft
+             * @enum {string}
+             */
+            status: "draft" | "submitted" | "confirmed" | "cancelled";
+            /** @description Division or category (optional) */
+            division?: string | null;
+            /** @description Class or level (optional) */
+            class?: string | null;
+            /** @description Registration fees */
+            fees?: {
+                /** @description Fee code/identifier */
+                code: string;
+                /** @description Fee amount */
+                amount: number;
+                description?: string | null;
+            }[] | null;
+            /** @description Additional notes */
+            notes?: string | null;
+            /** @description Legacy field (use partyId instead) */
+            clientId?: string | null;
+            /** @description Legacy field */
             clientName?: string | null;
-            /** @default 1 */
-            qty: number;
-            /** Format: date-time */
+            /**
+             * @description Legacy field
+             * @default 1
+             */
+            qty: number | null;
+            /**
+             * Format: date-time
+             * @description Legacy field
+             */
             startsAt?: string | null;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description Legacy field
+             */
             endsAt?: string | null;
             /**
              * Format: date-time
-             * @description Alias of startsAt (deprecated)
+             * @description Legacy alias of startsAt (deprecated)
              */
             start?: string | null;
             /**
              * Format: date-time
-             * @description Alias of endsAt (deprecated)
+             * @description Legacy alias of endsAt (deprecated)
              */
             end?: string | null;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description Legacy field
+             */
             registeredAt?: string | null;
             /**
-             * @default pending
-             * @enum {string}
+             * @description Legacy field
+             * @enum {string|null}
              */
-            status: "pending" | "confirmed" | "checked_in" | "checked_out" | "cancelled";
-            notes?: string | null;
-            partyId?: string;
-            /** @enum {string} */
-            partyKind?: "person" | "organization" | "animal";
-            lines?: components["schemas"]["RegistrationLine"][];
+            partyKind?: "person" | "organization" | "animal" | null;
+            /** @description Legacy field (line items) */
+            lines?: components["schemas"]["RegistrationLine"][] | null;
         };
         RegistrationLine: {
             id?: string;
@@ -2659,6 +2742,17 @@ export interface components {
                 pageSize?: number;
             };
         };
+        RegistrationList: {
+            items?: components["schemas"]["Registration"][];
+            /** @description Opaque cursor for next page (if any) */
+            next?: string | null;
+            /** @description Optional pagination metadata (clients may ignore). */
+            pageInfo?: {
+                hasNext?: boolean;
+                nextCursor?: string | null;
+                pageSize?: number;
+            };
+        };
         WorkspaceTile: {
             moduleKey: string;
             viewId?: string | null;
@@ -2765,13 +2859,16 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    message?: string;
-                    code?: string;
-                    details?: {
-                        [key: string]: unknown;
-                    };
-                };
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Validation error response */
+        ValidationErrorResponse: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ValidationError"];
             };
         };
         /** @description Paged list of objects */
@@ -2825,9 +2922,15 @@ export interface components {
         TenantHeader: string;
         TypePath: string;
         IdPath: string;
+        /** @description Maximum number of items to return */
         Limit: number;
         Next: string;
+        /** @description Optional substring search filter */
         Q: string;
+        /** @description Opaque pagination cursor for next page */
+        Cursor: string;
+        /** @description Filter by entity/object type */
+        EntityType: "purchaseOrder" | "salesOrder" | "inventoryItem" | "party" | "account" | "event" | "employee" | "organization" | "product" | "class" | "division";
         Fields: string;
     };
     requestBodies: never;
@@ -2839,7 +2942,9 @@ export interface operations {
     listObjects: {
         parameters: {
             query?: {
+                /** @description Optional substring search filter */
                 q?: components["parameters"]["Q"];
+                /** @description Maximum number of items to return */
                 limit?: components["parameters"]["Limit"];
                 next?: components["parameters"]["Next"];
                 fields?: components["parameters"]["Fields"];
@@ -2894,7 +2999,9 @@ export interface operations {
     listObjectsExplicit: {
         parameters: {
             query?: {
+                /** @description Optional substring search filter */
                 q?: components["parameters"]["Q"];
+                /** @description Maximum number of items to return */
                 limit?: components["parameters"]["Limit"];
                 next?: components["parameters"]["Next"];
                 fields?: components["parameters"]["Fields"];
@@ -2918,7 +3025,9 @@ export interface operations {
     searchObjects: {
         parameters: {
             query?: {
+                /** @description Optional substring search filter */
                 q?: components["parameters"]["Q"];
+                /** @description Maximum number of items to return */
                 limit?: components["parameters"]["Limit"];
                 next?: components["parameters"]["Next"];
                 fields?: components["parameters"]["Fields"];
@@ -3053,12 +3162,14 @@ export interface operations {
     listViews: {
         parameters: {
             query?: {
-                /** @description Filter by object type (e.g., purchaseOrder, salesOrder) */
-                entityType?: string;
-                /** @description Search views by name */
-                q?: string;
+                /** @description Filter by entity/object type */
+                entityType?: components["parameters"]["EntityType"];
+                /** @description Optional substring search filter */
+                q?: components["parameters"]["Q"];
+                /** @description Maximum number of items to return */
                 limit?: components["parameters"]["Limit"];
-                next?: components["parameters"]["Next"];
+                /** @description Opaque pagination cursor for next page */
+                next?: components["parameters"]["Cursor"];
             };
             header: {
                 "x-tenant-id": components["parameters"]["TenantHeader"];
@@ -3068,24 +3179,34 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ViewList"];
-                };
-            };
-            /** @description Bad request */
+            200: components["responses"]["ListPage"];
+            /** @description Validation error */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ValidationError"];
+                };
             };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     createView: {
@@ -3114,7 +3235,7 @@ export interface operations {
                     "application/json": components["schemas"]["View"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["ValidationErrorResponse"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
         };
@@ -3141,16 +3262,42 @@ export interface operations {
                     "application/json": components["schemas"]["View"];
                 };
             };
-            /** @description Bad request */
+            /** @description Validation error */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ValidationError"];
+                };
             };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     replaceView: {
@@ -3181,10 +3328,42 @@ export interface operations {
                     "application/json": components["schemas"]["View"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
+            /** @description Validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     deleteView: {
@@ -3207,16 +3386,42 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Bad request */
+            /** @description Validation error */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ValidationError"];
+                };
             };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     updateView: {
@@ -3247,19 +3452,55 @@ export interface operations {
                     "application/json": components["schemas"]["View"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
+            /** @description Validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     listWorkspaces: {
         parameters: {
             query?: {
+                /** @description Filter by owner party ID */
                 ownerId?: string;
+                /** @description Filter by shared status */
                 shared?: boolean;
+                /** @description Maximum number of items to return */
                 limit?: components["parameters"]["Limit"];
-                next?: components["parameters"]["Next"];
+                /** @description Opaque pagination cursor for next page */
+                next?: components["parameters"]["Cursor"];
             };
             header: {
                 "x-tenant-id": components["parameters"]["TenantHeader"];
@@ -3269,24 +3510,34 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkspaceList"];
-                };
-            };
-            /** @description Bad request */
+            200: components["responses"]["ListPage"];
+            /** @description Validation error */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ValidationError"];
+                };
             };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     createWorkspace: {
@@ -3315,7 +3566,7 @@ export interface operations {
                     "application/json": components["schemas"]["Workspace"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["ValidationErrorResponse"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
         };
@@ -3342,16 +3593,42 @@ export interface operations {
                     "application/json": components["schemas"]["Workspace"];
                 };
             };
-            /** @description Bad request */
+            /** @description Validation error */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ValidationError"];
+                };
             };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     replaceWorkspace: {
@@ -3382,10 +3659,42 @@ export interface operations {
                     "application/json": components["schemas"]["Workspace"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
+            /** @description Validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     deleteWorkspace: {
@@ -3408,16 +3717,42 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Bad request */
+            /** @description Validation error */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ValidationError"];
+                };
             };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     updateWorkspace: {
@@ -3454,6 +3789,281 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    listRegistrations: {
+        parameters: {
+            query?: {
+                /** @description Filter by event ID */
+                eventId?: string;
+                /** @description Filter by party ID */
+                partyId?: string;
+                /** @description Filter by registration status */
+                status?: "draft" | "submitted" | "confirmed" | "cancelled";
+                /** @description Optional substring search filter */
+                q?: components["parameters"]["Q"];
+                /** @description Maximum number of items to return */
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque pagination cursor for next page */
+                next?: components["parameters"]["Cursor"];
+            };
+            header: {
+                "x-tenant-id": components["parameters"]["TenantHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["ListPage"];
+            /** @description Validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createRegistration: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-tenant-id": components["parameters"]["TenantHeader"];
+                /** @description Optional idempotency key for safe retries. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["Registration"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Registration"];
+                };
+            };
+            /** @description Validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getRegistration: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-tenant-id": components["parameters"]["TenantHeader"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Registration"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    updateRegistration: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-tenant-id": components["parameters"]["TenantHeader"];
+                /** @description Optional idempotency key for safe retries. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["Registration"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Registration"];
+                };
+            };
+            /** @description Validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    deleteRegistration: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-tenant-id": components["parameters"]["TenantHeader"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     createPoFromSuggestion: {

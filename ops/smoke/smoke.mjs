@@ -29,6 +29,19 @@ function baseHeaders(){
   if(b) h["Authorization"]=`Bearer ${b}`;
   return h;
 }
+// Allow per-request Authorization override: "default" | "invalid" | "none"
+function buildHeaders(base = {}, auth = "default") {
+  const h = { "content-type": "application/json", ...base };
+  if (auth === "default") {
+    if (process.env.DEV_API_TOKEN) h.Authorization = `Bearer ${process.env.DEV_API_TOKEN}`;
+  } else if (auth === "invalid") {
+    h.Authorization = "Bearer invalid";
+  } else if (auth === "none") {
+    // do not set Authorization at all
+    if (h.Authorization) delete h.Authorization;
+  }
+  return h;
+}
 function qs(params){
   if (!params) return "";
   const u = new URLSearchParams();
@@ -42,18 +55,21 @@ function qs(params){
 function idem() {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 }
-async function get(p, params){
-  const r=await fetch(API + p + qs(params), {headers:baseHeaders()});
+async function get(p, params, opts){
+  const headers = buildHeaders({ ...baseHeaders(), ...((opts&&opts.headers)||{}) }, (opts&&opts.auth) ?? "default");
+  const r=await fetch(API + p + qs(params), {headers});
   const b=await r.json().catch(()=>({}));
   return {ok:r.ok,status:r.status,body:b};
 }
-async function post(p,body,h={}){
-  const r=await fetch(API+p,{method:"POST",headers:{...baseHeaders(),...h},body:JSON.stringify(body??{})});
+async function post(p,body,h={},opts){
+  const headers = buildHeaders({ ...baseHeaders(), ...h, ...((opts&&opts.headers)||{}) }, (opts&&opts.auth) ?? "default");
+  const r=await fetch(API+p,{method:"POST",headers,body:JSON.stringify(body??{})});
   const j=await r.json().catch(()=>({}));
   return {ok:r.ok,status:r.status,body:j};
 }
-async function put(p,body,h={}){
-  const r=await fetch(API+p,{method:"PUT",headers:{...baseHeaders(),...h},body:JSON.stringify(body??{})});
+async function put(p,body,h={},opts){
+  const headers = buildHeaders({ ...baseHeaders(), ...h, ...((opts&&opts.headers)||{}) }, (opts&&opts.auth) ?? "default");
+  const r=await fetch(API+p,{method:"PUT",headers,body:JSON.stringify(body??{})});
   const j=await r.json().catch(()=>({}));
   return {ok:r.ok,status:r.status,body:j};
 }
@@ -1220,6 +1236,168 @@ const tests = {
         byParty: byPartyCount,
         byStatus: byStatusCount,
         byQ: byQCount
+      }
+    };
+  },
+
+  /* ===================== Common: Pagination ===================== */
+  "smoke:common:pagination": async () => {
+    await ensureBearer();
+
+    // Seed at least 3 views to ensure we have enough data for pagination
+    const view1 = await post(`/objects/view`, {
+      type: "view",
+      name: `Pagination-Test-1-${Date.now()}`,
+      entityType: "inventoryItem",
+      columns: [{ field: "id", label: "ID" }]
+    });
+    const view2 = await post(`/objects/view`, {
+      type: "view",
+      name: `Pagination-Test-2-${Date.now()}`,
+      entityType: "inventoryItem",
+      columns: [{ field: "name", label: "Name" }]
+    });
+    const view3 = await post(`/objects/view`, {
+      type: "view",
+      name: `Pagination-Test-3-${Date.now()}`,
+      entityType: "inventoryItem",
+      columns: [{ field: "status", label: "Status" }]
+    });
+
+    if (!view1.ok || !view2.ok || !view3.ok) {
+      return { test: "common:pagination", result: "FAIL", reason: "view-seeding-failed", view1, view2, view3 };
+    }
+
+    // Step 1: GET /views?limit=1 -> expect items.length === 1 and next != null
+    const page1 = await get(`/views`, { limit: 1 });
+    if (!page1.ok) {
+      return { test: "common:pagination", result: "FAIL", reason: "page1-request-failed", page1 };
+    }
+    const page1Items = page1.body?.items ?? [];
+    const page1Next = page1.body?.next ?? null;
+
+    if (page1Items.length !== 1) {
+      return { test: "common:pagination", result: "FAIL", reason: "page1-items-length-mismatch", expected: 1, actual: page1Items.length, page1 };
+    }
+    if (!page1Next) {
+      return { test: "common:pagination", result: "FAIL", reason: "page1-next-null", page1 };
+    }
+
+    // Step 2: GET /views?limit=1&next=<cursor> -> expect items.length === 1
+    const page2 = await get(`/views`, { limit: 1, next: page1Next });
+    if (!page2.ok) {
+      return { test: "common:pagination", result: "FAIL", reason: "page2-request-failed", page2 };
+    }
+    const page2Items = page2.body?.items ?? [];
+    const page2Next = page2.body?.next ?? null;
+
+    if (page2Items.length !== 1) {
+      return { test: "common:pagination", result: "FAIL", reason: "page2-items-length-mismatch", expected: 1, actual: page2Items.length, page2 };
+    }
+
+    // Step 3: Optionally fetch a third page to ensure eventual next === null (if exists)
+    let page3 = null;
+    let page3Items = [];
+    let page3Next = null;
+    if (page2Next) {
+      page3 = await get(`/views`, { limit: 1, next: page2Next });
+      page3Items = page3?.body?.items ?? [];
+      page3Next = page3?.body?.next ?? null;
+    }
+
+    // Step 4: Verify pagination is working correctly
+    // - Each page should have unique items (no duplicates)
+    const allIds = [
+      page1Items[0]?.id,
+      page2Items[0]?.id,
+      ...(page3Items.length > 0 ? [page3Items[0]?.id] : [])
+    ].filter(Boolean);
+    const uniqueIds = new Set(allIds);
+    if (allIds.length !== uniqueIds.size) {
+      return { test: "common:pagination", result: "FAIL", reason: "duplicate-items-across-pages", allIds };
+    }
+
+    return {
+      test: "common:pagination",
+      result: "PASS",
+      pages: {
+        page1: { count: page1Items.length, hasNext: !!page1Next },
+        page2: { count: page2Items.length, hasNext: !!page2Next },
+        page3: page3 ? { count: page3Items.length, hasNext: !!page3Next } : null
+      },
+      totalFetched: allIds.length
+    };
+  },
+
+  /* ===================== Common: Error Shapes ===================== */
+  "smoke:common:error-shapes": async () => {
+    await ensureBearer();
+
+    // Test 1: 400 Bad Request - missing required fields (ValidationError)
+    const badRequest = await post(`/registrations`, {
+      // Missing eventId and partyId (required fields)
+      status: "draft"
+    }, { "X-Feature-Registrations-Enabled": "1" });
+
+    if (badRequest.status !== 400) {
+      return { test: "common:error-shapes", result: "FAIL", reason: "expected-400-got-" + badRequest.status, badRequest };
+    }
+    if (!badRequest.body?.code || !badRequest.body?.message) {
+      return { test: "common:error-shapes", result: "FAIL", reason: "400-missing-code-or-message", body: badRequest.body };
+    }
+    // Details are optional but should be present for validation errors
+    const has400Shape = typeof badRequest.body.code === "string" && typeof badRequest.body.message === "string";
+    if (!has400Shape) {
+      return { test: "common:error-shapes", result: "FAIL", reason: "400-invalid-shape", body: badRequest.body };
+    }
+
+    // Test 2: 401 Unauthorized - GET /views without Authorization header
+    const unauthorizedReq = await fetch(`${API}/views`, {
+      method: "GET",
+      headers: { "content-type": "application/json", "X-Tenant-Id": TENANT }
+    });
+    const unauthorized = await unauthorizedReq.json().catch(() => ({}));
+    if (unauthorizedReq.status !== 401) {
+      return { test: "common:error-shapes", result: "FAIL", reason: "expected-401-got-" + unauthorizedReq.status, unauthorized: { status: unauthorizedReq.status, body: unauthorized } };
+    }
+    if (!unauthorized?.code || !unauthorized?.message) {
+      return { test: "common:error-shapes", result: "FAIL", reason: "401-missing-code-or-message", body: unauthorized };
+    }
+    const has401Shape = typeof unauthorized.code === "string" && typeof unauthorized.message === "string";
+    if (!has401Shape) {
+      return { test: "common:error-shapes", result: "FAIL", reason: "401-invalid-shape", body: unauthorized };
+    }
+
+    // Test 3: 403 Forbidden - feature disabled (valid auth), POST /registrations without flag
+    const forbidden = await post(`/registrations`, {}, {}, { auth: "default" });
+    if (forbidden.status !== 403) {
+      return { test: "common:error-shapes", result: "FAIL", reason: "expected-403-got-" + forbidden.status, forbidden };
+    }
+    if (!forbidden.body?.code || !forbidden.body?.message) {
+      return { test: "common:error-shapes", result: "FAIL", reason: "403-missing-code-or-message", body: forbidden.body };
+    }
+
+    // Test 4: 404 Not Found - nonexistent resource (feature flag ON)
+    const notFound = await get(`/registrations/NON_EXISTENT_ID`, {}, { headers: { "X-Feature-Registrations-Enabled": "true" }, auth: "default" });
+    if (notFound.status !== 404) {
+      return { test: "common:error-shapes", result: "FAIL", reason: "expected-404-got-" + notFound.status, notFound };
+    }
+    if (!notFound.body?.code || !notFound.body?.message) {
+      return { test: "common:error-shapes", result: "FAIL", reason: "404-missing-code-or-message", body: notFound.body };
+    }
+    const has404Shape = typeof notFound.body.code === "string" && typeof notFound.body.message === "string";
+    if (!has404Shape) {
+      return { test: "common:error-shapes", result: "FAIL", reason: "404-invalid-shape", body: notFoundBody };
+    }
+
+    return {
+      test: "common:error-shapes",
+      result: "PASS",
+      validatedShapes: {
+        "400": { hasCode: !!badRequest.body.code, hasMessage: !!badRequest.body.message, hasDetails: !!badRequest.body.details },
+        "401": { hasCode: !!unauthorized.code, hasMessage: !!unauthorized.message },
+        "403": { hasCode: !!forbidden.body.code, hasMessage: !!forbidden.body.message },
+        "404": { hasCode: !!notFound.body.code, hasMessage: !!notFound.body.message }
       }
     };
   }
