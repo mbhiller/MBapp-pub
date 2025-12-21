@@ -126,6 +126,43 @@ EXPO_PUBLIC_FEATURE_RESERVATIONS_ENABLED=true
 ```
 
 ---
+
+## Sprint VII — Availability-First Reservation UX (Completed 2025-12-21)
+
+**Context**
+- Branch: `feat/tier1-sprint-VII-reservations-availability`
+- Mobile enhancement: show busy blocks, suggest next available slot, add list filters.
+- Smoke: validate availability endpoint reflects created reservations.
+
+**Scope (Mobile-focused)**
+- Goals:
+  - Display **busy blocks** (reservations) on Create/Edit screens for selected resource.
+  - Offer **"Use next available slot"** button when conflict occurs.
+  - Add **resourceId** and **status** filters to ReservationsList.
+  - Enhance smoke to validate availability endpoint includes created reservation.
+- Out of scope:
+  - Calendar/timeline visualization (basic list only).
+  - Advanced scheduling (e.g., recurring, recurring patterns).
+
+**Deliverables**
+- ✅ `getResourceAvailability()` in `apps/mobile/src/features/reservations/api.ts`.
+- ✅ Availability display (14-day window) on Create/Edit screens.
+- ✅ "Use next available slot" button with intelligent suggestion algorithm.
+- ✅ ResourceId and status filters on ReservationsList (client-side composition).
+- ✅ Smoke test extended: `smoke:reservations:conflicts` validates availability endpoint.
+- ✅ Mobile typecheck passes.
+
+**How to Verify**
+```bash
+# Mobile typecheck
+cd apps/mobile
+npm run typecheck
+
+# Smoke test with availability assertion
+node ops/smoke/smoke.mjs smoke:reservations:conflicts
+```
+
+---
 1. Spec updates: add Resource/Reservation schemas, custom endpoints with 409 responses, flag annotations.
 2. API implementation:
    - Flag definition in `apps/api/src/flags.ts`.

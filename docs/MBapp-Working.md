@@ -489,3 +489,47 @@ No-regret prep (ongoing):
 - ✅ Mobile typecheck passes.
 
 ---
+
+## Sprint VII – Availability-First Reservation UX (Mobile)
+
+**Theme:** Empower users to self-resolve conflicts by showing busy blocks and suggesting next available slots.
+
+**Scope:** Mobile-only enhancements + smoke test extension. No API/infra changes (uses existing `/resources/{id}/availability` endpoint).
+
+**Mobile Files Modified:**
+1. `apps/mobile/src/features/reservations/api.ts` – New `getResourceAvailability()` helper
+2. `apps/mobile/src/screens/CreateReservationScreen.tsx` – Availability display + "Use next available slot"
+3. `apps/mobile/src/screens/EditReservationScreen.tsx` – Identical availability UX
+4. `apps/mobile/src/screens/ReservationsListScreen.tsx` – ResourceId + Status filters
+
+**Features:**
+- **Busy Blocks Display (Steps 1–3):** On resource selection, fetch + display next 14 days of busy blocks (from `GET /resources/{id}/availability`). Updates when resourceId changes.
+- **Next Available Slot Button (Step 6):** When conflict error occurs, user taps "Use next available slot" → algorithm iteratively searches up to 20 slots → auto-fills suggested start/end times → clears error → user submits.
+- **Suggestion Algorithm (Step 6):** Iterative search with MAX_ITERATIONS=20; finds first non-overlapping [suggestedStart, suggestedStart + duration] against sorted busyBlocks array; uses interval overlap rule `(a.start < b.end) && (b.start < a.end)`.
+- **List Filters (Steps 4–5):** Client-side composition: ResourceId (case-insensitive partial match) + Status (buttons: All/pending/confirmed/cancelled) both applied together via `filteredReservations` compute.
+
+**Smoke Enhancement (Step 7):**
+- Extended `smoke:reservations:conflicts` flow with Step 5: GET `/resources/{id}/availability?from=T0-1h&to=T1+1h` after conflict creation.
+- Validates: 200 status, `body.busy` is array, reservation A present (by ID OR overlapping block).
+- Output includes: `availabilityEndpoint: { busyBlocks, hasReservationA, hasOverlap }`.
+
+**Definition of Done**
+- ✅ Availability panels render on Create/Edit screens.
+- ✅ Busy blocks fetch on resourceId change (14-day window).
+- ✅ "Use next available slot" suggestion fills form + clears conflict error.
+- ✅ ReservationsListScreen filters apply together (no field-level isolation).
+- ✅ Smoke test validates availability endpoint includes reservation in conflict response.
+- ✅ Mobile typecheck passes.
+- ✅ Smoke syntax valid.
+
+**Verification**
+```bash
+# Mobile implementation
+cd apps/mobile && npm run typecheck
+
+# Smoke test syntax
+node -c ops/smoke/smoke.mjs
+
+# Run availability conflict test (requires API deployed with FEATURE_RESERVATIONS_ENABLED=true)
+node ops/smoke/smoke.mjs smoke:reservations:conflicts
+```
