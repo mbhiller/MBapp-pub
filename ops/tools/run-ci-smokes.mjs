@@ -45,18 +45,26 @@ console.log(JSON.stringify({
 console.log(`[ci-smokes] Running ${flows.length} flows:`);
 flows.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));
 
-const nodeCmd = process.platform === "win32" ? "node.exe" : process.execPath || "node";
-
+const isCI = Boolean(process.env.GITHUB_ACTIONS);
 for (const flow of flows) {
-  console.log(`[ci-smokes] → node ops/smoke/smoke.mjs ${flow}`);
-  const res = spawnSync(nodeCmd, ["ops/smoke/smoke.mjs", flow], {
-    stdio: "inherit",
-    env: process.env,
-    shell: false
-  });
-  if (res.status !== 0) {
-    console.error(`[ci-smokes] ✖ failed: ${flow}`);
-    process.exit(res.status ?? 1);
+  if (isCI) {
+    const npxCmd = process.platform === "win32" ? "npx.cmd" : "npx";
+    console.log(`[ci-smokes] → npx tsx ops/smoke/smoke.mjs ${flow}`);
+    const check = spawnSync(npxCmd, ["tsx", "--version"], { stdio: "ignore" });
+    if (check.status !== 0) {
+      console.error("[ci-smokes] tsx is not available in CI. Falling back to node (may fail on .ts imports).");
+      const nodeCmd = process.execPath || (process.platform === "win32" ? "node.exe" : "node");
+      const res = spawnSync(nodeCmd, ["ops/smoke/smoke.mjs", flow], { stdio: "inherit", env: process.env });
+      if (res.status !== 0) process.exit(res.status ?? 1);
+      continue;
+    }
+    const res = spawnSync(npxCmd, ["tsx", "ops/smoke/smoke.mjs", flow], { stdio: "inherit", env: process.env });
+    if (res.status !== 0) process.exit(res.status ?? 1);
+  } else {
+    const nodeCmd = process.execPath || (process.platform === "win32" ? "node.exe" : "node");
+    console.log(`[ci-smokes] → node ops/smoke/smoke.mjs ${flow}`);
+    const res = spawnSync(nodeCmd, ["ops/smoke/smoke.mjs", flow], { stdio: "inherit", env: process.env });
+    if (res.status !== 0) process.exit(res.status ?? 1);
   }
 }
 
