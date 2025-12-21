@@ -112,5 +112,9 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      - name: Check API base present
+        run: |
+          node -e "console.log(JSON.stringify({ baseSet: Boolean(process.env.MBAPP_API_BASE) }))"
+
       - name: Run curated smokes
         run: npm run smokes:run:ci
