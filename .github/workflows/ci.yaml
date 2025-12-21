@@ -2,131 +2,119 @@ name: CI
 
 on:
   push:
-    branches: [ main, feat/**, feature/** ]
+    branches: [ main, develop, feat/** ]
   pull_request:
-    branches: [ main ]
-  workflow_dispatch:
-    inputs:
-      run_smokes:
-        description: "Run smoke tests (requires API env secrets)"
-        required: false
-        default: "false"
-
-permissions:
-  contents: read
+    types: [ opened, synchronize, reopened ]
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
-  spec:
+  spec-lint:
+    name: spec-lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: "npm"
-      - run: npm ci
+          node-version: 20
+          cache: npm
 
-      - name: Bundle OpenAPI
-        run: |
-          if [ -f spec/MBapp-Modules.yaml ]; then
-            npm run spec:bundle
-          else
-            echo "No spec/MBapp-Modules.yaml — skipping bundle"
-          fi
+      - name: Install deps
+        run: npm ci
 
-      - name: Lint spec (non-blocking)
-        run: |
-          if [ -f spec/MBapp-Modules.yaml ]; then
-            npm run spec:lint || true
-          fi
+      - name: Lint spec
+        run: npm run spec:lint
 
-      - name: Generate types (API & Mobile)
-        run: |
-          if [ -f spec/openapi.yaml ]; then
-            npm run spec:types:api
-            npm run spec:types:mobile
-          fi
-
-  api:
+  typecheck:
+    name: typecheck
     runs-on: ubuntu-latest
-    needs: [ spec ]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-      - run: npm ci
-      - name: Build API
-        run: |
-          npm run api:build || npx tsc -p apps/api/tsconfig.json --pretty false
-
-  mobile:
-    runs-on: ubuntu-latest
-    needs: [ spec ]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-      - run: npm ci
-      - name: Typecheck Mobile
-        run: |
-          # Prefer workspace script if you add it later; otherwise fallback to direct tsc
-          npm run -w apps/mobile typecheck --if-present || npx tsc -p apps/mobile/tsconfig.json --noEmit --pretty false || echo "mobile typecheck skipped"
-
-  smokes:
-    # Run smokes on push, or when manually dispatched with run_smokes=true
-    if: ${{ github.event_name == 'push' || github.event.inputs.run_smokes == 'true' }}
-    runs-on: ubuntu-latest
-    needs: [ api ]
     strategy:
-      fail-fast: false
       matrix:
-        test:
-          # Existing scripts in your package.json
-          - "smoke:sales:happy"
-          - "smoke:sales:guards"
-          - "smoke:purchasing:happy"
-          - "smoke:purchasing:guards"
-          - "smoke:product:flags"
-          - "smoke:backorders:worklist"
-          - "smoke:backorders:ignore-convert"
-          - "smoke:po:suggest-draft"
-          - "smoke:epc:resolve"
-          - "smoke:po:suggest-multivendor"
-          - "smoke:backorders:bulk"
-          - "smoke:po:save-from-suggest"
-          - "smoke:po:quick-receive"
-          - "smoke:po:receive-line"
-          - "smoke:po:receive-line-batch"
-          - "smoke:po:receive-line-idem-different-key"
-          - "smoke:objects:list-pagination"
-          - "smoke:movements:filter-by-poLine"
-          - "smoke:po:vendor-guard:on"
-          - "smoke:po:vendor-guard:off"
-          - "smoke:po:emit-events"
-          - "smoke:objects:pageInfo-present"
+        pkg: [ "apps/api", "apps/mobile" ]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Typecheck ${{ matrix.pkg }}
+        working-directory: ${{ matrix.pkg }}
+        run: npx tsc --noEmit
+
+  infra-typecheck:
+    name: infra-typecheck (soft)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Detect infra tsconfig
+        id: detect
+        shell: bash
+        run: |
+          if [ -f infra/tsconfig.json ]; then
+            echo "found=true" >> $GITHUB_OUTPUT
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Typecheck infra (soft)
+        if: steps.detect.outputs.found == 'true'
+        working-directory: infra
+        shell: bash
+        run: npx tsc --noEmit --pretty false || true
+
+      - name: Summary (infra soft check)
+        if: always()
+        run: echo "Infra typecheck soft-run complete (found=${{ steps.detect.outputs.found }})"
+
+  ci-smokes:
+    name: ci-smokes
+    runs-on: ubuntu-latest
+    needs: [ typecheck ]
     env:
       MBAPP_API_BASE: ${{ secrets.MBAPP_API_BASE }}
-      MBAPP_TENANT_ID: ${{ secrets.MBAPP_TENANT_ID }}
-      # Use whichever you support for auth; keep both available
-      MBAPP_API_KEY: ${{ secrets.MBAPP_API_KEY }}
-      SMOKE_DEV_LOGIN_EMAIL: ${{ secrets.SMOKE_DEV_LOGIN_EMAIL }}
-      SMOKE_DEV_LOGIN_SECRET: ${{ secrets.SMOKE_DEV_LOGIN_SECRET }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: "npm"
-      - run: npm ci
-      - name: List available tests (informational)
-        run: npm run smoke:list || true
-      - name: Run ${{ matrix.test }}
-        run: npm run ${{ matrix.test }}
+          node-version: 20
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Check API base present
+        run: |
+          node -e "console.log(JSON.stringify({ baseSet: Boolean(process.env.MBAPP_API_BASE) }))"
+
+      - name: Run curated smokes
+        run: npm run smokes:run:ci

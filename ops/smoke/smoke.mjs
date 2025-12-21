@@ -8,6 +8,17 @@ const API=(process.env.MBAPP_API_BASE??"http://localhost:3000").replace(/\/+$/,"
 const TENANT=process.env.MBAPP_TENANT_ID??"DemoTenant";
 const EMAIL=process.env.MBAPP_DEV_EMAIL??"dev@example.com";
 
+if (!API || typeof API !== "string" || !/^https?:\/\//.test(API)) {
+  console.error(`[smokes] MBAPP_API_BASE is not set or invalid. Got: "${API ?? ""}"`);
+  console.error(`[smokes] Expected a full URL like https://...  Check CI secrets/env wiring or local Set-MBEnv.ps1.`);
+  process.exit(2);
+}
+console.log(JSON.stringify({
+  base: API,
+  tokenVar: process.env.MBAPP_BEARER ? "MBAPP_BEARER" : (process.env.DEV_API_TOKEN ? "DEV_API_TOKEN" : null),
+  hasToken: Boolean(process.env.MBAPP_BEARER || process.env.DEV_API_TOKEN)
+}));
+
 /* ---------- Auth & HTTP ---------- */
 async function ensureBearer(){
   if(process.env.MBAPP_BEARER) return;
@@ -25,15 +36,16 @@ async function ensureBearer(){
 }
 function baseHeaders(){
   const h={"accept":"application/json","Content-Type":"application/json","X-Tenant-Id":TENANT};
-  const b=process.env.MBAPP_BEARER||process.env.MBAPP_API_KEY;
-  if(b) h["Authorization"]=`Bearer ${b}`;
+  const token=process.env.MBAPP_BEARER||process.env.DEV_API_TOKEN;
+  if(token) h["Authorization"]=`Bearer ${token}`;
   return h;
 }
 // Allow per-request Authorization override: "default" | "invalid" | "none"
 function buildHeaders(base = {}, auth = "default") {
   const h = { "content-type": "application/json", ...base };
+  const token = process.env.MBAPP_BEARER || process.env.DEV_API_TOKEN;
   if (auth === "default") {
-    if (process.env.DEV_API_TOKEN) h.Authorization = `Bearer ${process.env.DEV_API_TOKEN}`;
+    if (token) h.Authorization = `Bearer ${token}`;
   } else if (auth === "invalid") {
     h.Authorization = "Bearer invalid";
   } else if (auth === "none") {

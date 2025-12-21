@@ -1,0 +1,11 @@
+{
+  "flows": [
+    "smoke:views:crud",
+    "smoke:workspaces:list",
+    "smoke:events:enabled-noop",
+    "smoke:common:pagination",
+    "smoke:common:error-shapes",
+    "smoke:registrations:crud",
+    "smoke:registrations:filters"
+  ]
+}
