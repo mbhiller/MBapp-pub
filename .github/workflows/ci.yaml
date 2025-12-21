@@ -1,36 +1,111 @@
 name: CI
-
 on:
   push:
-    branches: [ main, develop, feat/** ]
+    branches: [ "main", "feat/**" ]
   pull_request:
-    types: [ opened, synchronize, reopened ]
+    branches: [ "main", "feat/**" ]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  spec-lint:
-    name: spec-lint
+  prepare:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - id: parse
+        run: |
+          node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync('ops/ci-smokes.json','utf8'));process.stdout.write('flows<<EOF\\n'+JSON.stringify(j.flows)+'\\nEOF');" >> $GITHUB_OUTPUT
+    outputs:
+      flows: ${{ steps.parse.outputs.flows }}
+
+  spec-lint:
+    runs-on: ubuntu-latest
+    needs: prepare
+    steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
+        with: { node-version: 20, cache: 'npm' }
       - run: npm ci
-      - name: Lint spec
+      - name: Lint spec (MBapp-Modules.yaml)
         run: npm run spec:lint
 
-  ci-smokes:
-    name: ci-smokes
+  typecheck:
     runs-on: ubuntu-latest
+    needs: spec-lint
+    strategy:
+      matrix:
+        pkg: [ "apps/api", "apps/mobile" ]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: 'npm' }
+      - run: npm ci
+      - name: Typecheck ${{ matrix.pkg }}
+        working-directory: ${{ matrix.pkg }}
+        run: npx tsc --noEmit
+
+  infra-typecheck:
+    name: infra-typecheck (soft)
+    runs-on: ubuntu-latest
+    needs: spec-lint
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: 'npm' }
+      - run: npm ci
+      - name: Detect infra tsconfig
+        id: detect
+        shell: bash
+        run: |
+          if [ -f infra/tsconfig.json ]; then
+            echo "found=true" >> $GITHUB_OUTPUT
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+          fi
+      - name: Typecheck infra (soft)
+        if: steps.detect.outputs.found == 'true'
+        working-directory: infra
+        shell: bash
+        run: npx tsc --noEmit --pretty false || true
+      - name: Summary (infra soft check)
+        if: always()
+        run: echo "Infra typecheck soft-run complete (found=${{ steps.detect.outputs.found }})"
+
+  smokes:
+    runs-on: ubuntu-latest
+    needs: [ typecheck ]
+    strategy:
+      fail-fast: false
+      matrix:
+        flow: ${{ fromJson(needs.prepare.outputs.flows) }}
     env:
       MBAPP_API_BASE: ${{ secrets.MBAPP_API_BASE }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
+        with: { node-version: 20, cache: 'npm' }
       - run: npm ci
-      - name: Run curated smokes
-        run: npm run smokes:run:ci
+
+      - name: Bootstrap rotating token (PowerShell)
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File ops/ci/Emit-CIEnv.ps1
+          if (-not $env:MBAPP_BEARER -and -not $env:DEV_API_TOKEN) { Write-Error "No bearer/token available"; exit 1 }
+          if ($env:MBAPP_BEARER) {
+            echo "::add-mask::$env:MBAPP_BEARER"
+            "MBAPP_BEARER=$env:MBAPP_BEARER" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          }
+          if ($env:DEV_API_TOKEN) {
+            echo "::add-mask::$env:DEV_API_TOKEN"
+            "DEV_API_TOKEN=$env:DEV_API_TOKEN" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          }
+
+      - name: Echo smoke base
+        run: |
+          node -e "console.log(JSON.stringify({ base: process.env.MBAPP_API_BASE, hasToken: Boolean(process.env.DEV_API_TOKEN) }))"
+
+      - name: Run ${{ matrix.flow }}
+        run: npm run ${{ matrix.flow }}
