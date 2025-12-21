@@ -20,6 +20,11 @@ const token = getBearer();
 process.env.MBAPP_BEARER = token;
 if (!process.env.DEV_API_TOKEN) process.env.DEV_API_TOKEN = token;
 
+const DEFAULT_BASE = "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com";
+if (!process.env.MBAPP_API_BASE || !process.env.MBAPP_API_BASE.trim()) {
+  process.env.MBAPP_API_BASE = DEFAULT_BASE;
+}
+
 const cfgPath = "ops/ci-smokes.json";
 if (!fs.existsSync(cfgPath)) {
   console.error(`[ci-smokes] Missing ${cfgPath}`);
@@ -32,7 +37,7 @@ if (!Array.isArray(flows) || flows.length === 0) {
 }
 
 console.log(JSON.stringify({
-  base: process.env.MBAPP_API_BASE || null,
+  base: process.env.MBAPP_API_BASE,
   tokenVar: process.env.MBAPP_BEARER ? "MBAPP_BEARER" : (process.env.DEV_API_TOKEN ? "DEV_API_TOKEN" : null),
   hasToken: Boolean(process.env.MBAPP_BEARER || process.env.DEV_API_TOKEN)
 }));
@@ -40,12 +45,14 @@ console.log(JSON.stringify({
 console.log(`[ci-smokes] Running ${flows.length} flows:`);
 flows.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));
 
-const npxCmd = process.platform === "win32" ? "npx.cmd" : "npx";
+const nodeCmd = process.platform === "win32" ? "node.exe" : process.execPath || "node";
+
 for (const flow of flows) {
-  console.log(`[ci-smokes] → npx tsx ops/smoke/smoke.mjs ${flow}`);
-  const res = spawnSync(npxCmd, ["tsx", "ops/smoke/smoke.mjs", flow], {
+  console.log(`[ci-smokes] → node ops/smoke/smoke.mjs ${flow}`);
+  const res = spawnSync(nodeCmd, ["ops/smoke/smoke.mjs", flow], {
     stdio: "inherit",
     env: process.env,
+    shell: false
   });
   if (res.status !== 0) {
     console.error(`[ci-smokes] ✖ failed: ${flow}`);

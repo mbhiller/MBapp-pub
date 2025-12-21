@@ -8,6 +8,17 @@ const API=(process.env.MBAPP_API_BASE??"http://localhost:3000").replace(/\/+$/,"
 const TENANT=process.env.MBAPP_TENANT_ID??"DemoTenant";
 const EMAIL=process.env.MBAPP_DEV_EMAIL??"dev@example.com";
 
+if (!API || typeof API !== "string" || !/^https?:\/\//.test(API)) {
+  console.error(`[smokes] MBAPP_API_BASE is not set or invalid. Got: "${API ?? ""}"`);
+  console.error(`[smokes] Expected a full URL like https://...  Check CI secrets/env wiring or local Set-MBEnv.ps1.`);
+  process.exit(2);
+}
+console.log(JSON.stringify({
+  base: API,
+  tokenVar: process.env.MBAPP_BEARER ? "MBAPP_BEARER" : (process.env.DEV_API_TOKEN ? "DEV_API_TOKEN" : null),
+  hasToken: Boolean(process.env.MBAPP_BEARER || process.env.DEV_API_TOKEN)
+}));
+
 /* ---------- Auth & HTTP ---------- */
 async function ensureBearer(){
   if(process.env.MBAPP_BEARER) return;
@@ -1410,11 +1421,6 @@ const fn=tests[cmd];
 if(!fn){ console.error("Unknown command:",cmd); process.exit(1); }
 
 (async()=>{
-  console.log(JSON.stringify({
-    base: API,
-    tokenVar: process.env.MBAPP_BEARER ? "MBAPP_BEARER" : (process.env.DEV_API_TOKEN ? "DEV_API_TOKEN" : null),
-    hasToken: Boolean(process.env.MBAPP_BEARER || process.env.DEV_API_TOKEN)
-  }));
   await ensureBearer();
   const r=await fn();
   console.log(JSON.stringify(r,null,2));
