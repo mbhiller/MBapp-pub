@@ -12,6 +12,7 @@ import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { listReservations } from "../features/reservations/api";
 import { useTheme } from "../providers/ThemeProvider";
+import { FEATURE_RESERVATIONS_ENABLED } from "../features/_shared/flags";
 import type { Reservation } from "../features/reservations/types";
 import type { RootStackParamList } from "../navigation/types";
 
@@ -66,6 +67,23 @@ export default function ReservationsListScreen() {
 
   return (
     <View style={{ flex: 1, padding: 12, backgroundColor: t.colors.bg }}>
+      {/* Create Button (feature-flagged) */}
+      {FEATURE_RESERVATIONS_ENABLED && (
+        <Pressable
+          onPress={() => navigation.navigate("CreateReservation")}
+          style={{
+            backgroundColor: t.colors.primary,
+            paddingVertical: 12,
+            paddingHorizontal: 16,
+            borderRadius: 8,
+            alignItems: "center",
+            marginBottom: 12,
+          }}
+        >
+          <Text style={{ color: "#fff", fontWeight: "700", fontSize: 16 }}>+ Create Reservation</Text>
+        </Pressable>
+      )}
+
       {/* Search Input */}
       <TextInput
         placeholder="Search reservations (id)"

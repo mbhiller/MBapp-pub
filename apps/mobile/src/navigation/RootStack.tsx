@@ -19,6 +19,8 @@ import RegistrationsListScreen from "../screens/RegistrationsListScreen";
 // Reservations (Sprint V)
 import ReservationsListScreen from "../screens/ReservationsListScreen";
 import ReservationDetailScreen from "../screens/ReservationDetailScreen";
+import CreateReservationScreen from "../screens/CreateReservationScreen";
+import EditReservationScreen from "../screens/EditReservationScreen";
 
 // Inventory
 import PartyListScreen from "../screens/PartyListScreen";
@@ -75,6 +77,8 @@ export default function RootStack() {
     {/* Reservations (Sprint V) */}
     <Stack.Screen name="ReservationsList" component={ReservationsListScreen} options={{ title: "Reservations" }} />
     <Stack.Screen name="ReservationDetail" component={ReservationDetailScreen} options={{ title: "Reservation" }} />
+    <Stack.Screen name="CreateReservation" component={CreateReservationScreen} options={{ title: "Create Reservation" }} />
+    <Stack.Screen name="EditReservation" component={EditReservationScreen} options={{ title: "Edit Reservation" }} />
     
     {/* Party List */}
     <Stack.Screen name="PartyList" component={PartyListScreen} options={{ title: "Parties" }}/>

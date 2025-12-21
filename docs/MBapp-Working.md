@@ -451,4 +451,41 @@ No-regret prep (ongoing):
 - Recurring reservations, availability patterns (e.g., "closed Sundays") out-of-scope v1.
 - Capacity/multi-resource reservations (e.g., "need both Arena & Stall") design only in v1.
 
+---
 
+## ✅ Sprint VI — Reservations Write UI (Option A) (Completed 2025-12-21)
+
+**Theme:** Mobile create/edit reservation screens with conflict handling.
+
+**Scope (Mobile-focused)**
+- Added `CreateReservationScreen` with ResourcePicker, ISO datetime inputs, status selector.
+- Added `EditReservationScreen` with pre-populated form from existing reservation.
+- Conflict handling: 409 responses display friendly error + list of conflicting reservations with "View" actions.
+- Feature flag: `FEATURE_RESERVATIONS_ENABLED` (env: `EXPO_PUBLIC_FEATURE_RESERVATIONS_ENABLED=true`, default: false).
+- Create/Edit entry points hidden when flag is OFF; screens remain registered.
+
+**Mobile Files**
+- `apps/mobile/src/screens/CreateReservationScreen.tsx` — new reservation form with ResourcePicker.
+- `apps/mobile/src/screens/EditReservationScreen.tsx` — edit existing reservation.
+- `apps/mobile/src/features/reservations/api.ts` — added `createReservation()`, `updateReservation()` with 409 enrichment.
+- `apps/mobile/src/features/_shared/flags.ts` — `FEATURE_RESERVATIONS_ENABLED` via env.
+- `apps/mobile/src/screens/ReservationsListScreen.tsx` — "+ Create Reservation" button (flag-gated).
+- `apps/mobile/src/screens/ReservationDetailScreen.tsx` — "Edit Reservation" button (flag-gated).
+
+**Conflict Handling**
+- On 409: parse `err.code === "conflict"` and `err.conflicts` array.
+- Display error message + conflict list with IDs and times (if available).
+- "View" action navigates to conflicting reservation detail.
+
+**How to Enable**
+- Set `EXPO_PUBLIC_FEATURE_RESERVATIONS_ENABLED=true` in `.env` or `.env.local`.
+- Restart Expo dev server.
+
+**Definition of Done**
+- ✅ Create/Edit screens functional with ResourcePicker integration.
+- ✅ ISO datetime validation (startsAt < endsAt).
+- ✅ 409 conflicts show user-friendly message + navigable conflict list.
+- ✅ Feature flag hides Create/Edit CTAs when disabled.
+- ✅ Mobile typecheck passes.
+
+---

@@ -12,6 +12,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 import { getReservation } from "../features/reservations/api";
 import { useTheme } from "../providers/ThemeProvider";
+import { FEATURE_RESERVATIONS_ENABLED } from "../features/_shared/flags";
 import type { RootStackParamList } from "../navigation/types";
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
@@ -190,6 +191,23 @@ export default function ReservationDetailScreen() {
         {reservation.createdAt && renderField("Created", formatDateTime(reservation.createdAt))}
         {reservation.updatedAt && renderField("Updated", formatDateTime(reservation.updatedAt))}
       </View>
+
+      {/* Edit Button (feature-flagged) */}
+      {FEATURE_RESERVATIONS_ENABLED && reservation?.id && (
+        <Pressable
+          onPress={() => navigation.navigate("EditReservation", { id: reservation.id })}
+          style={{
+            marginTop: 20,
+            paddingVertical: 12,
+            paddingHorizontal: 16,
+            backgroundColor: t.colors.primary,
+            borderRadius: 8,
+            alignItems: "center",
+          }}
+        >
+          <Text style={{ color: "#fff", fontWeight: "600" }}>Edit Reservation</Text>
+        </Pressable>
+      )}
 
       {/* Refresh Button */}
       <Pressable

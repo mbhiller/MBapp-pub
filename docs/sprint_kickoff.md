@@ -98,6 +98,34 @@ Feature Flag & RBAC
   - `reservation:write` — create/update/delete reservations (checked for overlap on write)
 
 Deliverables (in order)
+
+---
+
+## Sprint VI — Reservations Write UI (Option A) (Completed 2025-12-21)
+
+**Context**
+- Branch: `feat/tier1-sprint-VI-reservations-write`
+- Mobile-focused: Create/Edit reservation screens with conflict handling.
+
+**Scope**
+- Mobile screens: `CreateReservationScreen`, `EditReservationScreen`.
+- Form fields: resourceId (ResourcePicker), startsAt, endsAt, status.
+- Validation: ISO datetime format, startsAt < endsAt.
+- Conflict handling: 409 → show error message + conflict list with "View" actions.
+- Feature flag: `EXPO_PUBLIC_FEATURE_RESERVATIONS_ENABLED` (default: false).
+
+**Deliverables**
+- ✅ Create/Edit screens with ResourcePicker.
+- ✅ 409 conflict enrichment in `reservations/api.ts`.
+- ✅ Flag-gated Create/Edit entry points.
+- ✅ Mobile typecheck passes.
+
+**How to Enable**
+```
+EXPO_PUBLIC_FEATURE_RESERVATIONS_ENABLED=true
+```
+
+---
 1. Spec updates: add Resource/Reservation schemas, custom endpoints with 409 responses, flag annotations.
 2. API implementation:
    - Flag definition in `apps/api/src/flags.ts`.

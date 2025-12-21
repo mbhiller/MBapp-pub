@@ -47,5 +47,7 @@ export type RootStackParamList = {
   // Reservations (Sprint V)
   ReservationsList: undefined;
   ReservationDetail: DetailParams;
+  CreateReservation: undefined;
+  EditReservation: { id: string };
   
 };

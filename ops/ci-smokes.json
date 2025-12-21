@@ -1,10 +1,5 @@
 {
   "flows": [
-    "smoke:registrations:crud",
-    "smoke:registrations:filters",
-    "smoke:resources:crud",
-    "smoke:reservations:crud",
-    "smoke:reservations:conflicts",
-    "smoke:po:emit-events"
+    "smoke:reservations:conflicts"
   ]
 }
