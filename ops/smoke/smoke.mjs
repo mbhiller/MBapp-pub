@@ -25,7 +25,7 @@ async function ensureBearer(){
 }
 function baseHeaders(){
   const h={"accept":"application/json","Content-Type":"application/json","X-Tenant-Id":TENANT};
-  const b=process.env.MBAPP_BEARER||process.env.MBAPP_API_KEY;
+  const b=process.env.DEV_API_TOKEN||process.env.MBAPP_BEARER||process.env.MBAPP_API_KEY;
   if(b) h["Authorization"]=`Bearer ${b}`;
   return h;
 }
@@ -1409,6 +1409,7 @@ const fn=tests[cmd];
 if(!fn){ console.error("Unknown command:",cmd); process.exit(1); }
 
 (async()=>{
+  console.log(JSON.stringify({ base: API, hasToken: !!process.env.DEV_API_TOKEN }));
   await ensureBearer();
   const r=await fn();
   console.log(JSON.stringify(r,null,2));
