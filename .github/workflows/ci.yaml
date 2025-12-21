@@ -76,10 +76,12 @@ jobs:
       - name: Bootstrap rotating token via .ops/Set-MBEnv.ps1
         shell: pwsh
         run: |
-          if (-not (Test-Path ".ops/Set-MBEnv.ps1")) {
-            Write-Error "Missing .ops/Set-MBEnv.ps1"; exit 1
-          }
-          . ./.ops/Set-MBEnv.ps1
+          $p1 = "ops/Set-MBEnv.ps1"
+          $p2 = ".ops/Set-MBEnv.ps1"
+          if (Test-Path $p1) { . "./$p1" }
+          elseif (Test-Path $p2) { . "./$p2" }
+          else { Write-Error "Neither ops/Set-MBEnv.ps1 nor .ops/Set-MBEnv.ps1 found"; exit 1 }
+
           if (-not $env:DEV_API_TOKEN) { Write-Error "Set-MBEnv.ps1 did not populate DEV_API_TOKEN"; exit 1 }
           echo "::add-mask::$env:DEV_API_TOKEN"
           "DEV_API_TOKEN=$env:DEV_API_TOKEN" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
