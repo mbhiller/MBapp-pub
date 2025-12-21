@@ -1,6 +1,7 @@
 // apps/mobile/src/features/reservations/api.ts
-import { listObjects, getObject, createObject } from "../../api/client";
+import { listObjects, getObject } from "../../api/client";
 import type { Reservation, Page } from "./types";
+
 const TYPE = "reservation";
 
 const toOpts = (o?: { limit?: number; next?: string | null; q?: string }) => ({
@@ -10,8 +11,13 @@ const toOpts = (o?: { limit?: number; next?: string | null; q?: string }) => ({
   ...(o?.q ? { q: o.q } : {}),
 });
 
-export const listReservations = (o?: { limit?: number; next?: string | null; q?: string }) =>
-  listObjects<Reservation>(TYPE, toOpts(o)) as unknown as Promise<Page<Reservation>>;
+export const listReservations = async (o?: { limit?: number; next?: string | null; q?: string }) => {
+  const page = await listObjects<Reservation>(TYPE, toOpts(o));
+  return {
+    items: page.items,
+    next: page.next,
+    limit: page.pageInfo?.pageSize,
+  } as Page<Reservation>;
+};
+
 export const getReservation = (id: string) => getObject<Reservation>(TYPE, id);
-export const upsertReservation = (body: Partial<Reservation>) =>
-  createObject<Reservation>(TYPE, { ...body, type: "reservation" });

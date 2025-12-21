@@ -1252,6 +1252,293 @@ const tests = {
     };
   },
 
+  /* ===================== Reservations: CRUD Resources ===================== */
+  "smoke:resources:crud": async ()=>{
+    await ensureBearer();
+
+    const resHeaders = { "X-Feature-Reservations-Enabled": "true" };
+    const name = `Resource-${Date.now()}`;
+    const status = "available";
+
+    // 1) CREATE resource
+    const createRes = await fetch(`${API}/objects/resource`, {
+      method: "POST",
+      headers: { ...baseHeaders(), ...resHeaders, "Idempotency-Key": idem() },
+      body: JSON.stringify({ type: "resource", name, status })
+    });
+    const createBody = await createRes.json().catch(() => ({}));
+    if (!createRes.ok || !createBody?.id) {
+      return { test: "resources:crud", result: "FAIL", reason: "create-failed", createRes: { status: createRes.status, body: createBody } };
+    }
+    const resourceId = createBody.id;
+
+    // 2) GET resource
+    const getRes = await fetch(`${API}/objects/resource/${encodeURIComponent(resourceId)}`, {
+      headers: { ...baseHeaders(), ...resHeaders }
+    });
+    const getBody = await getRes.json().catch(() => ({}));
+    if (!getRes.ok || getBody?.id !== resourceId || getBody?.name !== name) {
+      await fetch(`${API}/objects/resource/${encodeURIComponent(resourceId)}`, { method: "DELETE", headers: { ...baseHeaders(), ...resHeaders } });
+      return { test: "resources:crud", result: "FAIL", reason: "get-failed-or-mismatch", getRes: { status: getRes.status, body: getBody } };
+    }
+
+    // 3) UPDATE resource (change name)
+    const updatedName = `Resource-Updated-${Date.now()}`;
+    const updateRes = await fetch(`${API}/objects/resource/${encodeURIComponent(resourceId)}`, {
+      method: "PUT",
+      headers: { ...baseHeaders(), ...resHeaders },
+      body: JSON.stringify({ type: "resource", name: updatedName, status: "maintenance" })
+    });
+    const updateBody = await updateRes.json().catch(() => ({}));
+    if (!updateRes.ok || updateBody?.name !== updatedName || updateBody?.status !== "maintenance") {
+      await fetch(`${API}/objects/resource/${encodeURIComponent(resourceId)}`, { method: "DELETE", headers: { ...baseHeaders(), ...resHeaders } });
+      return { test: "resources:crud", result: "FAIL", reason: "update-failed-or-mismatch", updateRes: { status: updateRes.status, body: updateBody } };
+    }
+
+    // 4) DELETE resource
+    const deleteRes = await fetch(`${API}/objects/resource/${encodeURIComponent(resourceId)}`, {
+      method: "DELETE",
+      headers: { ...baseHeaders(), ...resHeaders }
+    });
+    if (!deleteRes.ok) {
+      return { test: "resources:crud", result: "FAIL", reason: "delete-failed", deleteRes: { status: deleteRes.status } };
+    }
+
+    // 5) Verify deleted (GET should return 404 or empty)
+    const verifyRes = await fetch(`${API}/objects/resource/${encodeURIComponent(resourceId)}`, {
+      headers: { ...baseHeaders(), ...resHeaders }
+    });
+    if (verifyRes.ok) {
+      return { test: "resources:crud", result: "FAIL", reason: "resource-still-exists-after-delete", verifyRes: { status: verifyRes.status } };
+    }
+
+    return {
+      test: "resources:crud",
+      result: "PASS",
+      resourceId,
+      ops: ["create", "get", "update", "delete", "verify-deleted"]
+    };
+  },
+
+  /* ===================== Reservations: CRUD Reservations ===================== */
+  "smoke:reservations:crud": async ()=>{
+    await ensureBearer();
+
+    const resHeaders = { "X-Feature-Reservations-Enabled": "true" };
+
+    // 1) Create resource first
+    const createResRes = await fetch(`${API}/objects/resource`, {
+      method: "POST",
+      headers: { ...baseHeaders(), ...resHeaders, "Idempotency-Key": idem() },
+      body: JSON.stringify({ type: "resource", name: `Resource-${Date.now()}`, status: "available" })
+    });
+    const createResBody = await createResRes.json().catch(() => ({}));
+    if (!createResRes.ok || !createResBody?.id) {
+      return { test: "reservations:crud", result: "FAIL", reason: "resource-creation-failed", createResRes: { status: createResRes.status, body: createResBody } };
+    }
+    const resourceId = createResBody.id;
+
+    // 2) CREATE reservation
+    const now = new Date();
+    const startsAt = new Date(now.getTime() + 3600000).toISOString(); // +1 hour
+    const endsAt = new Date(now.getTime() + 7200000).toISOString(); // +2 hours
+    const status = "pending";
+
+    const createRes = await fetch(`${API}/objects/reservation`, {
+      method: "POST",
+      headers: { ...baseHeaders(), ...resHeaders, "Idempotency-Key": idem() },
+      body: JSON.stringify({ type: "reservation", resourceId, startsAt, endsAt, status })
+    });
+    const createBody = await createRes.json().catch(() => ({}));
+    if (!createRes.ok || !createBody?.id) {
+      await fetch(`${API}/objects/resource/${encodeURIComponent(resourceId)}`, { method: "DELETE", headers: { ...baseHeaders(), ...resHeaders } });
+      return { test: "reservations:crud", result: "FAIL", reason: "create-reservation-failed", createRes: { status: createRes.status, body: createBody } };
+    }
+    const reservationId = createBody.id;
+
+    // 3) GET reservation
+    const getRes = await fetch(`${API}/objects/reservation/${encodeURIComponent(reservationId)}`, {
+      headers: { ...baseHeaders(), ...resHeaders }
+    });
+    const getBody = await getRes.json().catch(() => ({}));
+    if (!getRes.ok || getBody?.id !== reservationId || getBody?.resourceId !== resourceId) {
+      await fetch(`${API}/objects/reservation/${encodeURIComponent(reservationId)}`, { method: "DELETE", headers: { ...baseHeaders(), ...resHeaders } });
+      await fetch(`${API}/objects/resource/${encodeURIComponent(resourceId)}`, { method: "DELETE", headers: { ...baseHeaders(), ...resHeaders } });
+      return { test: "reservations:crud", result: "FAIL", reason: "get-failed-or-mismatch", getRes: { status: getRes.status, body: getBody } };
+    }
+
+    // 4) UPDATE reservation (change status to confirmed)
+    const updateRes = await fetch(`${API}/objects/reservation/${encodeURIComponent(reservationId)}`, {
+      method: "PUT",
+      headers: { ...baseHeaders(), ...resHeaders },
+      body: JSON.stringify({ type: "reservation", resourceId, startsAt, endsAt, status: "confirmed" })
+    });
+    const updateBody = await updateRes.json().catch(() => ({}));
+    if (!updateRes.ok || updateBody?.status !== "confirmed") {
+      await fetch(`${API}/objects/reservation/${encodeURIComponent(reservationId)}`, { method: "DELETE", headers: { ...baseHeaders(), ...resHeaders } });
+      await fetch(`${API}/objects/resource/${encodeURIComponent(resourceId)}`, { method: "DELETE", headers: { ...baseHeaders(), ...resHeaders } });
+      return { test: "reservations:crud", result: "FAIL", reason: "update-failed-or-mismatch", updateRes: { status: updateRes.status, body: updateBody } };
+    }
+
+    // 5) DELETE reservation
+    const deleteRes = await fetch(`${API}/objects/reservation/${encodeURIComponent(reservationId)}`, {
+      method: "DELETE",
+      headers: { ...baseHeaders(), ...resHeaders }
+    });
+    if (!deleteRes.ok) {
+      await fetch(`${API}/objects/resource/${encodeURIComponent(resourceId)}`, { method: "DELETE", headers: { ...baseHeaders(), ...resHeaders } });
+      return { test: "reservations:crud", result: "FAIL", reason: "delete-failed", deleteRes: { status: deleteRes.status } };
+    }
+
+    // 6) Cleanup resource
+    const cleanupRes = await fetch(`${API}/objects/resource/${encodeURIComponent(resourceId)}`, {
+      method: "DELETE",
+      headers: { ...baseHeaders(), ...resHeaders }
+    });
+    if (!cleanupRes.ok) {
+      return { test: "reservations:crud", result: "FAIL", reason: "resource-cleanup-failed", cleanupRes: { status: cleanupRes.status } };
+    }
+
+    return {
+      test: "reservations:crud",
+      result: "PASS",
+      resourceId,
+      reservationId,
+      ops: ["create-resource", "create-reservation", "get", "update", "delete", "cleanup"]
+    };
+  },
+
+  /* ===================== Reservations: Conflict Detection ===================== */
+  "smoke:reservations:conflicts": async ()=>{
+    await ensureBearer();
+
+    const resHeaders = { "X-Feature-Reservations-Enabled": "true" };
+
+    // 1) Create resource
+    const createResRes = await fetch(`${API}/objects/resource`, {
+      method: "POST",
+      headers: { ...baseHeaders(), ...resHeaders, "Idempotency-Key": idem() },
+      body: JSON.stringify({ type: "resource", name: `Resource-${Date.now()}`, status: "available" })
+    });
+    const createResBody = await createResRes.json().catch(() => ({}));
+    if (!createResRes.ok || !createResBody?.id) {
+      return { test: "reservations:conflicts", result: "FAIL", reason: "resource-creation-failed" };
+    }
+    const resourceId = createResBody.id;
+
+    // 2) Create reservation A (pending status, time window [t0, t1])
+    const now = new Date();
+    const t0 = new Date(now.getTime() + 3600000); // +1 hour
+    const t1 = new Date(now.getTime() + 7200000); // +2 hours
+    const startsAtA = t0.toISOString();
+    const endsAtA = t1.toISOString();
+
+    const createA = await fetch(`${API}/objects/reservation`, {
+      method: "POST",
+      headers: { ...baseHeaders(), ...resHeaders, "Idempotency-Key": idem() },
+      body: JSON.stringify({ type: "reservation", resourceId, startsAt: startsAtA, endsAt: endsAtA, status: "pending" })
+    });
+    const createABody = await createA.json().catch(() => ({}));
+    if (!createA.ok || !createABody?.id) {
+      await fetch(`${API}/objects/resource/${encodeURIComponent(resourceId)}`, { method: "DELETE", headers: { ...baseHeaders(), ...resHeaders } });
+      return { test: "reservations:conflicts", result: "FAIL", reason: "reservation-A-creation-failed" };
+    }
+    const reservationAId = createABody.id;
+
+    // 3) Attempt to create overlapping reservation B (pending, time window [t0+30min, t1+30min])
+    const t0_30 = new Date(t0.getTime() + 1800000); // t0 + 30 min
+    const t1_30 = new Date(t1.getTime() + 1800000); // t1 + 30 min
+    const startsAtB = t0_30.toISOString();
+    const endsAtB = t1_30.toISOString();
+
+    const createB = await fetch(`${API}/objects/reservation`, {
+      method: "POST",
+      headers: { ...baseHeaders(), ...resHeaders, "Idempotency-Key": idem() },
+      body: JSON.stringify({ type: "reservation", resourceId, startsAt: startsAtB, endsAt: endsAtB, status: "pending" })
+    });
+    const createBBody = await createB.json().catch(() => ({}));
+
+    // Should fail with 409 conflict
+    if (createB.status !== 409) {
+      // Cleanup
+      await fetch(`${API}/objects/reservation/${encodeURIComponent(reservationAId)}`, { method: "DELETE", headers: { ...baseHeaders(), ...resHeaders } });
+      await fetch(`${API}/objects/resource/${encodeURIComponent(resourceId)}`, { method: "DELETE", headers: { ...baseHeaders(), ...resHeaders } });
+      return { test: "reservations:conflicts", result: "FAIL", reason: "expected-409-got-" + createB.status, createB: { status: createB.status, body: createBBody } };
+    }
+
+    // Verify conflict response format
+    if (!createBBody?.code || createBBody.code !== "conflict") {
+      await fetch(`${API}/objects/reservation/${encodeURIComponent(reservationAId)}`, { method: "DELETE", headers: { ...baseHeaders(), ...resHeaders } });
+      await fetch(`${API}/objects/resource/${encodeURIComponent(resourceId)}`, { method: "DELETE", headers: { ...baseHeaders(), ...resHeaders } });
+      return { test: "reservations:conflicts", result: "FAIL", reason: "conflict-response-missing-code", createB: { body: createBBody } };
+    }
+
+    if (!Array.isArray(createBBody?.details?.conflicts) || createBBody.details.conflicts.length === 0) {
+      await fetch(`${API}/objects/reservation/${encodeURIComponent(reservationAId)}`, { method: "DELETE", headers: { ...baseHeaders(), ...resHeaders } });
+      await fetch(`${API}/objects/resource/${encodeURIComponent(resourceId)}`, { method: "DELETE", headers: { ...baseHeaders(), ...resHeaders } });
+      return { test: "reservations:conflicts", result: "FAIL", reason: "conflict-details-empty", createB: { body: createBBody } };
+    }
+
+    const conflictingIds = createBBody.details.conflicts.map(c => c.id);
+    const hasReservationA = conflictingIds.includes(reservationAId);
+    if (!hasReservationA) {
+      await fetch(`${API}/objects/reservation/${encodeURIComponent(reservationAId)}`, { method: "DELETE", headers: { ...baseHeaders(), ...resHeaders } });
+      await fetch(`${API}/objects/resource/${encodeURIComponent(resourceId)}`, { method: "DELETE", headers: { ...baseHeaders(), ...resHeaders } });
+      return { test: "reservations:conflicts", result: "FAIL", reason: "conflicting-reservation-A-not-in-details", conflictingIds };
+    }
+
+    // 4) Call POST /reservations:check-conflicts to verify endpoint
+    const checkRes = await fetch(`${API}/reservations:check-conflicts`, {
+      method: "POST",
+      headers: { ...baseHeaders(), ...resHeaders },
+      body: JSON.stringify({ resourceId, startsAt: startsAtB, endsAt: endsAtB })
+    });
+    const checkBody = await checkRes.json().catch(() => ({}));
+
+    if (!checkRes.ok) {
+      await fetch(`${API}/objects/reservation/${encodeURIComponent(reservationAId)}`, { method: "DELETE", headers: { ...baseHeaders(), ...resHeaders } });
+      await fetch(`${API}/objects/resource/${encodeURIComponent(resourceId)}`, { method: "DELETE", headers: { ...baseHeaders(), ...resHeaders } });
+      return { test: "reservations:conflicts", result: "FAIL", reason: "check-conflicts-endpoint-failed", checkRes: { status: checkRes.status, body: checkBody } };
+    }
+
+    if (!Array.isArray(checkBody?.conflicts) || checkBody.conflicts.length === 0) {
+      await fetch(`${API}/objects/reservation/${encodeURIComponent(reservationAId)}`, { method: "DELETE", headers: { ...baseHeaders(), ...resHeaders } });
+      await fetch(`${API}/objects/resource/${encodeURIComponent(resourceId)}`, { method: "DELETE", headers: { ...baseHeaders(), ...resHeaders } });
+      return { test: "reservations:conflicts", result: "FAIL", reason: "check-conflicts-endpoint-empty", checkBody };
+    }
+
+    const checkConflictIds = checkBody.conflicts.map(c => c.id);
+    const checkHasReservationA = checkConflictIds.includes(reservationAId);
+    if (!checkHasReservationA) {
+      await fetch(`${API}/objects/reservation/${encodeURIComponent(reservationAId)}`, { method: "DELETE", headers: { ...baseHeaders(), ...resHeaders } });
+      await fetch(`${API}/objects/resource/${encodeURIComponent(resourceId)}`, { method: "DELETE", headers: { ...baseHeaders(), ...resHeaders } });
+      return { test: "reservations:conflicts", result: "FAIL", reason: "check-conflicts-missing-reservation-A", checkConflictIds };
+    }
+
+    // 5) Cleanup
+    const delA = await fetch(`${API}/objects/reservation/${encodeURIComponent(reservationAId)}`, {
+      method: "DELETE",
+      headers: { ...baseHeaders(), ...resHeaders }
+    });
+    const delRes = await fetch(`${API}/objects/resource/${encodeURIComponent(resourceId)}`, {
+      method: "DELETE",
+      headers: { ...baseHeaders(), ...resHeaders }
+    });
+
+    const pass = delA.ok && delRes.ok;
+    return {
+      test: "reservations:conflicts",
+      result: pass ? "PASS" : "FAIL",
+      resourceId,
+      reservationAId,
+      conflictDetected: {
+        createB409: true,
+        conflictingIds,
+        checkEndpointConflicts: checkConflictIds
+      }
+    };
+  },
+
   /* ===================== Common: Pagination ===================== */
   "smoke:common:pagination": async () => {
     await ensureBearer();

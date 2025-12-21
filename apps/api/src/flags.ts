@@ -41,3 +41,6 @@ export const featureEventsEnabled = withFlag(
 export const featureEventsSimulate = withFlag(
   "FEATURE_EVENT_DISPATCH_SIMULATE", "X-Feature-Events-Simulate", false
 );
+export const featureReservationsEnabled = withFlag(
+  "FEATURE_RESERVATIONS_ENABLED", "X-Feature-Reservations-Enabled", false
+);

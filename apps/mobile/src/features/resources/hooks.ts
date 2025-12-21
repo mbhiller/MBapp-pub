@@ -1,6 +1,6 @@
 // apps/mobile/src/features/resources/hooks.ts
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { listResources, getResource, upsertResource } from "./api";
+import { useQuery } from "@tanstack/react-query";
+import { listResources, getResource } from "./api";
 import type { Resource, Page } from "./types";
 
 const keys = {
@@ -18,15 +18,5 @@ export const Resources = {
   },
   useGet(id?: string) {
     return useQuery({ enabled: !!id, queryKey: keys.byId(id), queryFn: () => getResource(id!) });
-  },
-  useSave() {
-    const qc = useQueryClient();
-    return useMutation({
-      mutationFn: (b: Partial<Resource>) => upsertResource(b),
-      onSuccess: (saved) => {
-        qc.setQueryData(keys.byId(saved.id), saved);
-        qc.invalidateQueries({ queryKey: ["resources"] });
-      },
-    });
   },
 };
