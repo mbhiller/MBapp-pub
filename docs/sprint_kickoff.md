@@ -186,3 +186,38 @@ Acceptance Criteria
 - ✅ All smoke flows passing (CRUD, conflicts, availability).
 - ✅ Mobile reads reservations, does not allow write (button disabled if flag off).
 
+---
+
+## Sprint VIII — ModuleHub Fail-Closed + Resources/Registrations UX Baseline (Completed 2025-12-21)
+
+**Context**
+- Mobile: coherent module recipe for Resources (anchor), Registrations, and Reservations alignment.
+- Hub: fail-closed when policy unavailable.
+
+**Scope**
+- **ModuleHub:** Fail-closed on missing `/auth/policy` → banner + no tiles.
+- **Resources module:** Read-only tile + list/detail screens with pagination, error banners.
+- **Registrations module:** Detail screen added; list rows tap to detail; error banners.
+- **Reservations alignment:** ResourcePicker empty state includes "Go to Resources" CTA; existing availability/suggestion/conflict tap-to-detail unchanged.
+
+**Deliverables**
+- ✅ ModuleHub visibleModules() returns [] when policy null/unavailable; banner shown.
+- ✅ Resources tile + list/detail (name/type/status/timestamps).
+- ✅ Registrations detail screen (eventId/partyId/division/class/created/updated).
+- ✅ Registrations list rows navigate to detail.
+- ✅ All screens show error banners on fetch failures.
+- ✅ ResourcePicker shows "Go to Resources" button on empty state.
+- ✅ Mobile typecheck passes.
+
+**How to Verify**
+```bash
+cd apps/mobile && npm run typecheck
+```
+
+**Manual QA**
+- Open hub → Ensure policy fetch succeeds, resources/registrations/reservations tiles appear.
+- Resources list → View, scroll (pagination), tap row → detail with fields.
+- Registrations list → View, tap row → detail with fields; test error banner (offline).
+- Reservations create → Select resource (picker) → Empty state shows "Go to Resources" button.
+- Availability display, next-available slot button, conflict tap-to-detail all work as before.
+

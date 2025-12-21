@@ -8,15 +8,23 @@ import { apiClient } from "../api/client";
 export default function ModuleHubScreen({ navigation }: any) {
   const t = useColors();
   const [policy, setPolicy] = React.useState<Record<string, boolean> | null>(null);
+  const [policyError, setPolicyError] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
 
   const loadPolicy = React.useCallback(async () => {
     setLoading(true);
+    setPolicyError(false);
     try {
       const p = await apiClient.get<Record<string, boolean>>("/auth/policy");
-      setPolicy(p);
+      if (p) {
+        setPolicy(p);
+      } else {
+        setPolicy(null);
+        setPolicyError(true);
+      }
     } catch {
-      // If policy fetch fails, we just leave policy=null and show all modules.
+      setPolicy(null);
+      setPolicyError(true);
     } finally {
       setLoading(false);
     }
@@ -35,6 +43,23 @@ export default function ModuleHubScreen({ navigation }: any) {
       keyboardShouldPersistTaps="handled"
       refreshControl={<RefreshControl refreshing={loading} onRefresh={loadPolicy} />}
     >
+      {policyError && (
+        <View
+          style={{
+            padding: 10,
+            marginBottom: 12,
+            backgroundColor: "#fdecea",
+            borderColor: "#f5c6cb",
+            borderWidth: 1,
+            borderRadius: 8,
+          }}
+        >
+          <Text style={{ color: "#8a1f2d", fontWeight: "700" }}>
+            Policy unavailable — check auth
+          </Text>
+        </View>
+      )}
+
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
         {modules.map((m) => (
           <Pressable

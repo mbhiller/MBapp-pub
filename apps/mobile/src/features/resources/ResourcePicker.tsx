@@ -10,9 +10,12 @@ import {
   Modal,
   ScrollView,
 } from "react-native";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { listResources } from "./api";
 import { useTheme } from "../../providers/ThemeProvider";
 import type { Resource } from "./types";
+import type { RootStackParamList } from "../../navigation/types";
 
 interface ResourcePickerProps {
   visible: boolean;
@@ -26,6 +29,7 @@ export default function ResourcePicker({
   onCancel,
 }: ResourcePickerProps) {
   const t = useTheme();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [q, setQ] = React.useState("");
   const [resources, setResources] = React.useState<Resource[]>([]);
   const [isLoading, setIsLoading] = React.useState(false);
@@ -116,10 +120,26 @@ export default function ResourcePicker({
               <ActivityIndicator size="large" color={t.colors.primary} />
             </View>
           ) : resources.length === 0 ? (
-            <View style={{ padding: 20, alignItems: "center" }}>
+            <View style={{ padding: 20, alignItems: "center", gap: 8 }}>
               <Text style={{ color: t.colors.textMuted }}>
-                {q ? "No resources found" : "No resources available"}
+                {q ? "No resources found" : "No resources yet"}
               </Text>
+              {!q && (
+                <Pressable
+                  onPress={() => {
+                    onCancel();
+                    navigation.navigate("ResourcesList");
+                  }}
+                  style={{
+                    paddingHorizontal: 12,
+                    paddingVertical: 10,
+                    borderRadius: 8,
+                    backgroundColor: t.colors.primary,
+                  }}
+                >
+                  <Text style={{ color: "#fff", fontWeight: "700" }}>Go to Resources</Text>
+                </Pressable>
+              )}
             </View>
           ) : (
             <FlatList

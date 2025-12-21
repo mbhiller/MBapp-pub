@@ -1,4 +1,5 @@
 // apps/mobile/src/features/_shared/modules.ts
+import { FEATURE_RESERVATIONS_ENABLED } from "./flags";
 
 export type ModuleEntry = {
   key: string;
@@ -6,6 +7,7 @@ export type ModuleEntry = {
   screen: keyof import("../../navigation/types").RootStackParamList;
   icon?: string;
   required?: string[];
+  enabled?: () => boolean;
 };
 
 // helper: case-insensitive policy + wildcard support
@@ -40,8 +42,13 @@ function makePolicyMatcher(policy?: Record<string, boolean> | null) {
 
 /** Given the auth policy map, return only modules the user can access. */
 export function visibleModules(policy?: Record<string, boolean> | null): readonly ModuleEntry[] {
+  if (!policy) return [];
   const can = makePolicyMatcher(policy);
-  return MODULES.filter((m) => (m.required ?? []).every(can));
+  return MODULES.filter((m) => {
+    const allowed = (m.required ?? []).every(can);
+    const enabled = typeof m.enabled === "function" ? m.enabled() : true;
+    return allowed && enabled;
+  });
 }
 
 // NOTE: remove the "hub" tile (you land on Hub already)
@@ -57,11 +64,17 @@ export const MODULES: readonly ModuleEntry[] = [
   { key: "purchaseOrders", title: "Purchasing",      screen: "PurchaseOrdersList", icon: "cart-arrowdown", required: ["purchaseorder:read"] },
   { key: "salesOrders",    title: "Sales",           screen: "SalesOrdersList",    icon: "cart-plus",      required: ["salesorder:read"] },
 
+  // Resources (read-only)
+  { key: "resources", title: "Resources", screen: "ResourcesList", icon: "box", required: ["resource:read"] },
+
   // Operational docs
   { key: "routePlans", title: "Route Plans", screen: "RoutePlanList", icon: "truck", required: ["routing:read"] },
 
   // Sprint III: Workspaces (guarded by workspace:read permission)
   { key: "workspaces", title: "Workspaces", screen: "WorkspaceHub", icon: "folder", required: ["workspace:read"] },
+
+  // Sprint VIII: Reservations (feature-flag + permission)
+  { key: "reservations", title: "Reservations", screen: "ReservationsList", icon: "calendar", required: ["reservation:read"], enabled: () => FEATURE_RESERVATIONS_ENABLED },
 
   // Sprint IV: Registrations (guarded by registration:read permission + feature flag)
   { key: "registrations", title: "Registrations", screen: "RegistrationsList", icon: "calendar", required: ["registration:read"] },

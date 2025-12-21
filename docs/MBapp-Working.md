@@ -1,5 +1,51 @@
-# MBapp-Working — A→G History & Sprint H Plan
-_Last updated: 2025-10-22_
+# Sprint VIII – ModuleHub Fail-Closed + Resources/Registrations UX Baseline (Mobile)
+
+**Theme:** Coherent module recipe (Resources anchor) with fail-closed hub and consistent error UI.
+
+**Scope:**
+- ModuleHub fails closed when `/auth/policy` unavailable (banner, no tiles).
+- Resources module: read-only tile + list/detail screens.
+- Registrations: detail screen + tap-to-detail from list.
+- Reservations: ResourcePicker empty state links to Resources; existing features preserved.
+
+**Mobile Files Modified:**
+1. `apps/mobile/src/features/_shared/modules.ts` – Added Resources module entry; fail-closed policy handling.
+2. `apps/mobile/src/screens/ModuleHubScreen.tsx` – Error banner on missing policy.
+3. `apps/mobile/src/screens/ResourcesListScreen.tsx` – New read-only list with pagination + error banner.
+4. `apps/mobile/src/screens/ResourceDetailScreen.tsx` – New detail screen + error banner + retry.
+5. `apps/mobile/src/screens/RegistrationDetailScreen.tsx` – New detail screen + error banner + retry.
+6. `apps/mobile/src/screens/RegistrationsListScreen.tsx` – List rows tappable to detail; error banner.
+7. `apps/mobile/src/features/resources/ResourcePicker.tsx` – Empty state CTA navigates to ResourcesList.
+8. Navigation: `types.ts` + `RootStack.tsx` updated with ResourcesList/Detail and RegistrationDetail routes.
+
+**Features:**
+- **ModuleHub:** visibleModules(policy) returns [] when policy is null/undefined; shows "Policy unavailable — check auth" banner; permission gating + enabled() flag compose.
+- **Resources:** Permission gated `resource:read` (no feature flag). Pagination via listObjects/limit/next. Error banner on fetch failure.
+- **Registrations:** Permission gated `registration:read`. Detail screen displays eventId, partyId, division, class, timestamps. Error banner + retry.
+- **Reservations:** ResourcePicker shows "Go to Resources" button when empty (closes picker, navigates); existing availability + suggestion + conflict tap-to-detail work unchanged.
+
+**Definition of Done**
+- ✅ ModuleHub fails closed with visible banner when policy unavailable.
+- ✅ Resources list/detail render, pagination works, error visible on failure.
+- ✅ Registrations detail screen loads and shows fields; error banner + retry.
+- ✅ ResourcePicker empty state includes navigation CTA.
+- ✅ All list/detail screens consistent styling and error handling.
+- ✅ Mobile typecheck passes.
+
+**Verification**
+```bash
+cd apps/mobile && npm run typecheck
+```
+
+**Manual QA**
+- ModuleHub: Policy fetch fails → banner visible, no tiles render.
+- Resources: List + detail navigation works; offline → error banner; online → retry loads data.
+- Registrations: List rows tap to detail; offline → error visible.
+- Reservations: Pick resource → empty picker shows "Go to Resources"; navigates and closes modal.
+
+---
+
+
 
 ---
 
