@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { View, TextInput, Text, Pressable, ScrollView, ActivityIndicator, Keyboard } from "react-native";
 import { useColors } from "../_shared/useColors";
-import { findParties, Party } from "./api";
+import { findParties, Party, partyLabel } from "./api";
 
 type Props = {
   role?: string;                    // filter by role (customer/vendor/employee/...)
@@ -45,7 +45,7 @@ export default function PartyPicker({ role, onSelect, autoFocus, placeholder }: 
               setOpen(false);
               Keyboard.dismiss();
             }} style={{ padding: 10 }}>
-              <Text style={{ color: t.colors.text }}>{p.name} <Text style={{ color: t.colors.textMuted }}>({p.kind}{p.roles?.length ? ` · ${p.roles?.join(",")}` : ""})</Text></Text>
+              <Text style={{ color: t.colors.text }}>{partyLabel(p)} <Text style={{ color: t.colors.textMuted }}>({p.kind}{p.roles?.length ? ` · ${p.roles?.join(",")}` : ""})</Text></Text>
             </Pressable>
           ))}
         </ScrollView>

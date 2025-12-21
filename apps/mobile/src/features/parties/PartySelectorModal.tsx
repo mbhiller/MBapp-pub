@@ -3,11 +3,12 @@ import React from "react";
 import { View, Text, Pressable, Keyboard } from "react-native";
 import { useColors } from "../_shared/useColors";
 import PartyPicker from "./PartyPicker";
+import { Party } from "./api";
 
 type Props = {
   role?: string;                    // "customer" | "vendor" | etc.
   onClose: () => void;
-  onSelect: (party: { id: string; name: string; kind: "person" | "org"; roles?: string[] }) => void;
+  onSelect: (party: Party) => void;
 };
 
 export default function PartySelectorModal({ role = "customer", onClose, onSelect }: Props) {

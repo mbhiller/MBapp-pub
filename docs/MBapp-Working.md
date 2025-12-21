@@ -399,6 +399,26 @@ No-regret prep (ongoing):
   - `smoke:workspaces:list` — PASS (v1 list semantics; empty result is valid for v1)
   - `smoke:events:enabled-noop` — PASS (response includes `_dev` metadata; `_dev.provider == "noop"`)
 
+---
+
+## Sprint X — Parties (read-only) + dev seed
+
+**Scope & Features**
+- Module tile gated by permission `parties:read`.
+- PartyListScreen: search + optional role filter, error banner, tap-to-detail.
+- PartyDetailScreen: read-only detail with error banner + retry.
+- Fixed party label resolution and roleFlags typing; PartyPicker/PartySelectorModal no longer rely on `.name`.
+- __DEV__ seed Party button for testing (uses `/objects/party` with optional partyRole alignment).
+
+**How to Verify**
+```bash
+cd apps/mobile && npm run typecheck
+```
+
+**Manual QA**
+- Seed a party (dev button), refresh list (search + role filter), then open detail.
+- Confirm error banners show and retry works when fetch fails.
+
 - **Flags:** Defaults OFF; can be overridden in dev/CI via headers:
   - `FEATURE_VIEWS_ENABLED` / `X-Feature-Views-Enabled`
   - `FEATURE_EVENT_DISPATCH_ENABLED` / `X-Feature-Events-Enabled`
