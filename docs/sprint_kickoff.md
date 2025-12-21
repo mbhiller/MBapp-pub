@@ -1,5 +1,17 @@
 Sprint III — Theme: Views & Workspaces v1 + Event plumbing options
 
+---
+
+## Sprint X — Closeout (Parties read-only + dev seed)
+
+- Parties module tile gated by permission `parties:read`.
+- PartyListScreen: search, optional role filter, error banner, tap-to-detail.
+- PartyDetailScreen: read-only detail with error banner + retry.
+- Party label/roleFlags typing fixed; PartyPicker/PartySelectorModal no longer rely on `.name`.
+- __DEV__ seed party button for testing (uses `/objects/party`, aligns optional `partyRole`).
+- Verification command: `cd apps/mobile && npm run typecheck`.
+- Manual QA: seed a party, refresh list (search + role filter), open detail (error banner/retry paths).
+
 Context
 - Treat previous chats as stale. Use ONLY attached files for this sprint.
 - Repo: C:\Users\bryan\MBapp-pub
