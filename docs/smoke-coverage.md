@@ -1,4 +1,4 @@
-# Smoke Test Coverage (Sprint III)
+# Smoke Test Coverage (Sprint IV)
 
 ## Overview
 
@@ -64,6 +64,13 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 | **smoke:movements:filter-by-poLine** | 1. Create product + item, PO, submit, approve 2. Receive with lot/location 3. GET /inventory/{id}/movements?refId=poId&poLineId=lineId | Movements filtered by refId AND poLineId; lot/location captured | `/inventory/{id}/movements` |
 | **smoke:objects:pageInfo-present** | 1. GET /objects/purchaseOrder?limit=2 | Response has items array AND (pageInfo OR legacy `next`) | `/objects/purchaseOrder` |
 
+### Registrations (Sprint IV)
+
+| Flow | Steps | Assertions | Endpoints |
+|------|-------|-----------|--------|
+| **smoke:registrations:crud** | 1. POST /registrations (eventId, partyId, status:draft) 2. GET /registrations/{id} 3. PUT /registrations/{id} (status:submitted) 4. DELETE /registrations/{id} 5. GET /registrations/{id} verify 404 | Create returns 201 with id; GET returns full object; PUT updates status; DELETE returns 204; verify removal | `/registrations`, `/registrations/{id}` |
+| **smoke:registrations:filters** | 1. Create 3 registrations (2 with eventA, 2 with partyX, 2 with status:submitted) 2. GET /registrations?eventId=eventA 3. GET /registrations?partyId=partyX 4. GET /registrations?status=submitted | Filter by eventId returns 2; by partyId returns 2; by status returns 2; all counts match expected | `/registrations?eventId=...&partyId=...&status=...` |
+
 ### EPC & Misc
 
 | Flow | Steps | Assertions | Endpoints |
@@ -83,6 +90,7 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 | **Pagination & Filtering** | objects:list-pagination, objects:pageInfo-present, movements:filter-by-poLine | ✅ Complete | Cursor pagination, field filters |
 | **Feature Flags** | po:vendor-guard:on, po:vendor-guard:off, po:emit-events | ✅ Complete | Header overrides, simulation |
 | **EPC** | epc:resolve | ✅ Complete | 404 case only |
+| **Registrations** | registrations:crud, registrations:filters | ✅ Complete (Sprint IV) | CRUD lifecycle + filters (eventId, partyId, status); feature-flagged (default OFF) |
 | **Views** | ❌ None | ⚠️ Gap | Spec defines /views (CRUD) — not tested |
 | **Workspaces** | ❌ None | ⚠️ Gap | Spec defines /workspaces (CRUD) — not tested |
 | **Backorders** | ❌ None | ⚠️ Gap | Spec defines backorderRequest (ignore, convert) — not tested |
@@ -92,19 +100,21 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 
 ---
 
-## 3. Gaps vs. Spec (Sprint III Scope)
+## 3. Gaps vs. Spec (Sprint IV Scope)
 
-**Sprint III DoD Requirements** (from copilot-instructions.md):
-- Views v1 (CRUD) — **NOT TESTED**
-- Workspaces (list) — **NOT TESTED**  
-- Events: enabled/noop/simulate — **PARTIALLY TESTED** (simulate only; enabled flag not gated)
+**Sprint IV Delivered** (Registrations v1):
+- ✅ registrations:crud — POST → GET → PUT → DELETE lifecycle
+- ✅ registrations:filters — Query filters (eventId, partyId, status)
+- ✅ Feature flag tested via X-Feature-Registrations-Enabled header
 
-**Critical Gaps**:
-1. **smoke:views:crud** — No test for create/read/update/delete views
-2. **smoke:workspaces:list** — No test for workspaces listing
+**Critical Gaps (Still Pending)**:
+1. **smoke:views:crud** — No test for create/read/update/delete views (Sprint III scope deferred)
+2. **smoke:workspaces:list** — No test for workspaces listing (Sprint III scope deferred)
 3. **smoke:events:enabled-noop** — Event dispatch flag gating NOT tested (featureEventsEnabled still noop stub)
 
-**Pre-Sprint III (Not Expected)**:
+**Out of Scope (Not Expected in Current Tier)**:
+- Registration actions (:cancel, :checkin, :checkout) — Tier 2
+- Registration payments, capacity rules — Tier 2+
 - Backorder workflows (ignore, convert)
 - Routing (graph, plan)
 - Scanner (sessions, actions, simulate)
@@ -288,5 +298,5 @@ Exit code: 0 (PASS), 1 (FAIL)
 
 ---
 
-**Last Updated**: Dec 2025 (Sprint III snapshot)  
-**Status**: 20/23 test flows implemented; 3 new flows proposed for Sprint III DoD
+**Last Updated**: Dec 20, 2025 (Sprint IV)  
+**Status**: 22 test flows implemented (includes Registrations v1); Views/Workspaces CRUD deferred

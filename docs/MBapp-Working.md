@@ -357,3 +357,37 @@ No-regret prep (ongoing):
   - Workspaces v1 exposes minimal listing and view references; full tile composition and rich workspace UX deferred to v2.
   - Dispatcher simulate path is noop and safe; plan to wire real provider (EventBridge/SNS) behind flags later.
   - Consider mapping or migration utilities between legacy Views and future Workspace tile schema when evolving v2.
+
+---
+
+## Sprint IV — Results
+
+- **Summary:** Registrations v1 delivered (CRUD + filters); feature-flagged (default OFF); objects-repo pattern with tenant/RBAC enforcement.
+
+- **Endpoints:**
+  - `POST /registrations` — Create registration (201 Created)
+  - `GET /registrations` — List with filters: eventId, partyId, status (200 OK)
+  - `GET /registrations/{id}` — Get single registration (200 OK)
+  - `PUT /registrations/{id}` — Update registration (200 OK)
+  - `DELETE /registrations/{id}` — Delete registration (204 No Content)
+
+- **Schema (spec/MBapp-Modules.yaml):**
+  - Registration: { eventId, partyId, division?, class?, status: draft|submitted|confirmed|cancelled, fees: [{ code, amount, qty? }], notes? }
+  - Extends ObjectBase (id, tenantId, type, createdAt, updatedAt)
+
+- **Smokes:**
+  - `smoke:registrations:crud` — PASS (create → get → update status to 'confirmed' → delete → verify removal)
+  - `smoke:registrations:filters` — PASS (3 created, filters: byEvent=2, byParty=2, byStatus=2)
+
+- **Flags:** Default OFF; dev-header override in non-prod:
+  - `FEATURE_REGISTRATIONS_ENABLED` / `X-Feature-Registrations-Enabled`
+
+- **API Polish:**
+  - DELETE returns 204 No Content (empty body, RFC 7231 compliant)
+  - Added `noContent()` response helper to `apps/api/src/common/responses.ts`
+
+- **Notes / Next:**
+  - Payments and capacity management out-of-scope for v1
+  - Consider: search (q filter), mobile RegistrationHub screen, registration actions (:cancel, :checkin, :checkout)
+  - No migrations; filters via in-memory post-query (keeps schema clean)
+
