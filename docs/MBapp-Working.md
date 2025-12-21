@@ -199,6 +199,12 @@ Sprint E is wrapped: backorder signals now drive purchasing via a worklist and P
 
 ---
 
+### Sprint V Option 2 – Implementation Notes
+- Flag: FEATURE_RESERVATIONS_ENABLED (env) with dev/CI header override X-Feature-Reservations-Enabled.
+- Overlap rule: (aStart < bEnd) && (bStart < aEnd).
+- Endpoints: POST /reservations:check-conflicts, GET /resources/{id}/availability (flag-gated).
+- Smokes: npm run smoke:resources:crud; npm run smoke:reservations:crud; npm run smoke:reservations:conflicts; npm run smokes:run:ci:win.
+
 **EXAMPLE PR TEMPLATE**
 
 ## PR Description Template (paste into PR)
