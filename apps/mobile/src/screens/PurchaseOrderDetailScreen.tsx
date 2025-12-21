@@ -9,6 +9,7 @@ import { ReceiveHistorySheet } from "../features/purchasing/ReceiveHistorySheet"
 import { VendorGuardBanner } from "../features/_shared/VendorGuardBanner";
 import PartySelectorModal from "../features/parties/PartySelectorModal";
 import { updateObject } from "../api/client";
+import { useTheme } from "../providers/ThemeProvider";
 
 export default function PurchaseOrderDetailScreen() {
   const route = useRoute<any>();
@@ -207,7 +208,7 @@ function Pill({ label, bg, fg }: { label: string; bg: string; fg: string }) {
   );
 }
 function Btn({ onPress, label, disabled }: { onPress: () => void; label: string; disabled?: boolean }) {
-  const t = useColors();
+  const t = useTheme();
   return (
     <Pressable
       onPress={onPress}

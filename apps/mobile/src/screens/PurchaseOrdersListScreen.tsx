@@ -5,7 +5,7 @@ import { useNavigation } from "@react-navigation/native";
 import { useObjects } from "../features/_shared/useObjects"
 
 export default function PurchaseOrdersListScreen() {
-  const nav = useNavigation<any>();
+  const navigation = useNavigation<any>();
   const [q, setQ] = React.useState("");
   const { data, isLoading, reset, hasNext, fetchNext } = useObjects<any>({ type: "purchaseOrder", q });
   // On query change, restart pagination instead of just refetching
@@ -29,7 +29,7 @@ export default function PurchaseOrdersListScreen() {
           data={items}
           keyExtractor={(it) => String(it.id)}
           renderItem={({ item }) => (
-            <Pressable onPress={() => nav.navigate("PurchaseOrderDetail", { id: item.id })}>
+            <Pressable onPress={() => navigation.navigate("PurchaseOrderDetail", { id: item.id })}>
               <View style={{ padding: 10, borderWidth: 1, borderRadius: 8, marginBottom: 8 }}>
                 <Text style={{ fontWeight: "600" }}>{item.id}</Text>
                 <Text>Status: {item.status}</Text>

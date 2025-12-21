@@ -11,7 +11,7 @@ import { useTheme } from "../providers/ThemeProvider";
 import ModuleHubScreen from "../screens/ModuleHubScreen";
 
 // Workspaces
-import WorkspaceHubScreen from "../features/workspaces/WorkspaceHubScreen";
+import WorkspaceHubScreen from "../screens/WorkspaceHubScreen";
 
 // Inventory
 import PartyListScreen from "../screens/PartyListScreen";
