@@ -56,4 +56,8 @@ export type RootStackParamList = {
   CreateReservation: undefined;
   EditReservation: { id: string };
   
+  // Events (Sprint IX)
+  EventsList: undefined;
+  EventDetail: DetailParams;
+  
 };

@@ -33,6 +33,10 @@ import InventoryDetailScreen from "../screens/InventoryDetailScreen";
 import ResourcesListScreen from "../screens/ResourcesListScreen";
 import ResourceDetailScreen from "../screens/ResourceDetailScreen";
 
+// Events (Sprint IX)
+import EventsListScreen from "../screens/EventsListScreen";
+import EventDetailScreen from "../screens/EventDetailScreen";
+
 
 // Purchasing
 import PurchaseOrdersListScreen from "../screens/PurchaseOrdersListScreen";
@@ -96,6 +100,10 @@ export default function RootStack() {
     {/* Resources */}
     <Stack.Screen name="ResourcesList" component={ResourcesListScreen} options={{ title: "Resources" }} />
     <Stack.Screen name="ResourceDetail" component={ResourceDetailScreen} options={{ title: "Resource" }} />
+
+    {/* Events (Sprint IX) */}
+    <Stack.Screen name="EventsList" component={EventsListScreen} options={{ title: "Events" }} />
+    <Stack.Screen name="EventDetail" component={EventDetailScreen} options={{ title: "Event" }} />
 
     {/* Purchase Orders */}
     <Stack.Screen name="PurchaseOrdersList" component={PurchaseOrdersListScreen} options={{ title: "Purchasing" }} />
