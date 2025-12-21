@@ -26,6 +26,10 @@ export type RootStackParamList = {
   InventoryList: undefined;
   InventoryDetail: DetailParams;
 
+  // Resources
+  ResourcesList: undefined;
+  ResourceDetail: DetailParams;
+
   // Purchasing
   PurchaseOrdersList: undefined;
   PurchaseOrderDetail: DetailParams;
@@ -43,10 +47,12 @@ export type RootStackParamList = {
   
   // Registrations (Sprint IV)
   RegistrationsList: undefined;
+  RegistrationDetail: DetailParams;
 
   // Reservations (Sprint V)
   ReservationsList: undefined;
   ReservationDetail: DetailParams;
+  
   CreateReservation: undefined;
   EditReservation: { id: string };
   

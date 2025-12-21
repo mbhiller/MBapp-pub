@@ -1,19 +1,45 @@
 // apps/mobile/src/screens/RegistrationsListScreen.tsx
 import * as React from "react";
 import { View, Text, TextInput, FlatList, Pressable, ActivityIndicator, Alert, Modal } from "react-native";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useRegistrations, useCreateRegistration } from "../features/registrations/hooks";
 import { useTheme } from "../providers/ThemeProvider";
 import type { CreateRegistrationInput } from "../features/registrations/api";
+import type { RootStackParamList } from "../navigation/types";
+
+type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 export default function RegistrationsListScreen() {
   const t = useTheme();
+  const navigation = useNavigation<NavigationProp>();
   const [q, setQ] = React.useState("");
   const [showCreate, setShowCreate] = React.useState(false);
   
-  const { data, isLoading, refetch } = useRegistrations({ q: q || undefined });
+  const { data, isLoading, error, refetch } = useRegistrations({ q: q || undefined });
 
   return (
     <View style={{ flex: 1, padding: 12, backgroundColor: t.colors.bg }}>
+      {error && (
+        <View
+          style={{
+            padding: 8,
+            backgroundColor: "#fdecea",
+            borderColor: "#f5c6cb",
+            borderWidth: 1,
+            borderRadius: 6,
+            marginBottom: 8,
+          }}
+        >
+          <Text style={{ color: "#8a1f2d", fontWeight: "700", marginBottom: 2 }}>
+            Error loading registrations
+          </Text>
+          <Text style={{ color: "#8a1f2d", fontSize: 12 }}>
+            {error instanceof Error ? error.message : String(error)}
+          </Text>
+        </View>
+      )}
+
       {/* Search Input */}
       <TextInput
         placeholder="Search registrations (id, party, division, class)"
@@ -57,7 +83,8 @@ export default function RegistrationsListScreen() {
             const klass = (item as any).class as string | undefined;
             
             return (
-              <View
+              <Pressable
+                onPress={() => navigation.navigate("RegistrationDetail", { id: item.id })}
                 style={{
                   padding: 12,
                   borderWidth: 1,
@@ -89,7 +116,7 @@ export default function RegistrationsListScreen() {
                 <Text style={{ fontSize: 12, color: t.colors.textMuted, marginTop: 4 }}>
                   Updated: {new Date(item.updatedAt).toLocaleDateString()}
                 </Text>
-              </View>
+              </Pressable>
             );
           }}
           ListEmptyComponent={

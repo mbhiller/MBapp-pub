@@ -431,19 +431,24 @@ export default function EditReservationScreen() {
               {conflicts.map((c, i) => {
                 const conflictId = typeof c === "string" ? c : c?.id;
                 return (
-                  <View key={i} style={{ flexDirection: "row", alignItems: "center", marginBottom: 4 }}>
+                  <Pressable
+                    key={i}
+                    onPress={() => conflictId && navigation.navigate("ReservationDetail", { id: conflictId })}
+                    disabled={!conflictId}
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      marginBottom: 4,
+                      opacity: conflictId ? 1 : 0.7,
+                    }}
+                  >
                     <Text style={{ color: "#c33", fontSize: 13, flex: 1 }}>
                       • {formatConflict(c)}
                     </Text>
                     {conflictId && (
-                      <Pressable
-                        onPress={() => navigation.navigate("ReservationDetail", { id: conflictId })}
-                        style={{ paddingHorizontal: 8, paddingVertical: 4 }}
-                      >
-                        <Text style={{ color: t.colors.primary, fontSize: 12, fontWeight: "600" }}>View</Text>
-                      </Pressable>
+                      <Text style={{ color: t.colors.primary, fontSize: 12, fontWeight: "600" }}>View</Text>
                     )}
-                  </View>
+                  </Pressable>
                 );
               })}
             </View>

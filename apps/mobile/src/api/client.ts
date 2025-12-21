@@ -21,6 +21,7 @@ export function setTenantId(tenantId: string) { if (tenantId) TENANT = tenantId;
 export function setBearerToken(token: string | null | undefined) { _bearerToken = token ?? null; }
 export function getBearerToken(): string | null { return _bearerToken; }
 export function clearBearerToken() { _bearerToken = null; }
+export function getTenantId(): string | undefined { return TENANT; }
 
 export function _debugConfig() {
   return { API_BASE, TENANT, hasBearer: Boolean(_bearerToken) };

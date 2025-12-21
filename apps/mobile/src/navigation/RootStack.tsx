@@ -15,10 +15,12 @@ import WorkspaceHubScreen from "../screens/WorkspaceHubScreen";
 
 // Registrations (Sprint IV)
 import RegistrationsListScreen from "../screens/RegistrationsListScreen";
+import RegistrationDetailScreen from "../screens/RegistrationDetailScreen";
 
 // Reservations (Sprint V)
 import ReservationsListScreen from "../screens/ReservationsListScreen";
 import ReservationDetailScreen from "../screens/ReservationDetailScreen";
+
 import CreateReservationScreen from "../screens/CreateReservationScreen";
 import EditReservationScreen from "../screens/EditReservationScreen";
 
@@ -28,6 +30,8 @@ import PartyDetailScreen from "../screens/PartyDetailScreen";
 // Inventory
 import InventoryListScreen from "../screens/InventoryListScreen";
 import InventoryDetailScreen from "../screens/InventoryDetailScreen";
+import ResourcesListScreen from "../screens/ResourcesListScreen";
+import ResourceDetailScreen from "../screens/ResourceDetailScreen";
 
 
 // Purchasing
@@ -73,6 +77,7 @@ export default function RootStack() {
     
     {/* Registrations (Sprint IV) */}
     <Stack.Screen name="RegistrationsList" component={RegistrationsListScreen} options={{ title: "Registrations" }} />
+    <Stack.Screen name="RegistrationDetail" component={RegistrationDetailScreen} options={{ title: "Registration" }} />
     
     {/* Reservations (Sprint V) */}
     <Stack.Screen name="ReservationsList" component={ReservationsListScreen} options={{ title: "Reservations" }} />
@@ -87,6 +92,10 @@ export default function RootStack() {
     {/* Inventory */}
     <Stack.Screen name="InventoryList" component={InventoryListScreen} options={{ title: "Inventory" }} />
     <Stack.Screen name="InventoryDetail" component={InventoryDetailScreen} options={{ title: "Inventory Item" }} />
+
+    {/* Resources */}
+    <Stack.Screen name="ResourcesList" component={ResourcesListScreen} options={{ title: "Resources" }} />
+    <Stack.Screen name="ResourceDetail" component={ResourceDetailScreen} options={{ title: "Resource" }} />
 
     {/* Purchase Orders */}
     <Stack.Screen name="PurchaseOrdersList" component={PurchaseOrdersListScreen} options={{ title: "Purchasing" }} />

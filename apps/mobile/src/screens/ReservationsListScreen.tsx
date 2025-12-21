@@ -15,6 +15,7 @@ import { useTheme } from "../providers/ThemeProvider";
 import { FEATURE_RESERVATIONS_ENABLED } from "../features/_shared/flags";
 import type { Reservation } from "../features/reservations/types";
 import type { RootStackParamList } from "../navigation/types";
+import { _debugConfig } from "../api/client";
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -24,13 +25,30 @@ export default function ReservationsListScreen() {
   const [q, setQ] = React.useState("");
   const [resourceIdFilter, setResourceIdFilter] = React.useState("");
   const [statusFilter, setStatusFilter] = React.useState("All");
+  const [fromFilter, setFromFilter] = React.useState("");
+  const [toFilter, setToFilter] = React.useState("");
   const [reservations, setReservations] = React.useState<Reservation[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [next, setNext] = React.useState<string | null>(null);
+  const [lastError, setLastError] = React.useState<string | null>(null);
+  const [lastStatus, setLastStatus] = React.useState<number | null>(null);
 
   React.useEffect(() => {
+    setReservations([]);
+    setNext(null);
+    setLastError(null);
+    setLastStatus(null);
     loadReservations();
   }, [q]);
+
+  React.useEffect(() => {
+    // Reset pagination when client-side filters change to keep load-more consistent
+    setReservations([]);
+    setNext(null);
+    setLastError(null);
+    setLastStatus(null);
+    loadReservations();
+  }, [resourceIdFilter, statusFilter, fromFilter, toFilter]);
 
   const loadReservations = async () => {
     setIsLoading(true);
@@ -38,10 +56,16 @@ export default function ReservationsListScreen() {
       const result = await listReservations({ q: q || undefined, limit: 20 });
       setReservations(result.items || []);
       setNext(result.next || null);
+      setLastError(null);
+      setLastStatus(null);
     } catch (error) {
       console.error("Failed to load reservations:", error);
       setReservations([]);
       setNext(null);
+      const msg = error instanceof Error ? error.message : "Unknown error";
+      const status = (error as any)?.status || (error as any)?.statusCode || null;
+      setLastError(msg);
+      setLastStatus(status);
     } finally {
       setIsLoading(false);
     }
@@ -53,8 +77,14 @@ export default function ReservationsListScreen() {
       const result = await listReservations({ q: q || undefined, limit: 20, next });
       setReservations([...reservations, ...(result.items || [])]);
       setNext(result.next || null);
+      setLastError(null);
+      setLastStatus(null);
     } catch (error) {
       console.error("Failed to load more reservations:", error);
+      const msg = error instanceof Error ? error.message : "Unknown error";
+      const status = (error as any)?.status || (error as any)?.statusCode || null;
+      setLastError(msg);
+      setLastStatus(status);
     }
   };
 
@@ -69,6 +99,26 @@ export default function ReservationsListScreen() {
 
   // Apply all filters: search (q), resourceId, and status
   const filteredReservations = reservations.filter((item) => {
+    const hasFrom = fromFilter.trim().length > 0;
+    const hasTo = toFilter.trim().length > 0;
+    const fromDate = hasFrom ? new Date(fromFilter) : null;
+    const toDate = hasTo ? new Date(toFilter) : null;
+    const useFrom = hasFrom && fromDate && !isNaN(fromDate.getTime());
+    const useTo = hasTo && toDate && !isNaN(toDate.getTime());
+
+    const startsAt = new Date((item as any).startsAt);
+    const endsAt = new Date((item as any).endsAt);
+    const startsValid = !isNaN(startsAt.getTime());
+    const endsValid = !isNaN(endsAt.getTime());
+
+    // If any date filter is active and parsing fails, exclude this item
+    if ((useFrom || useTo) && (!startsValid || !endsValid)) {
+      return false;
+    }
+
+    if (useFrom && endsAt <= (fromDate as Date)) return false; // needs overlap: reservation.endsAt > from
+    if (useTo && startsAt >= (toDate as Date)) return false;   // needs overlap: reservation.startsAt < to
+
     // resourceId filter (case-insensitive include)
     if (resourceIdFilter.trim()) {
       const itemResourceId = (item as any).resourceId || "";
@@ -90,6 +140,38 @@ export default function ReservationsListScreen() {
 
   return (
     <View style={{ flex: 1, padding: 12, backgroundColor: t.colors.bg }}>
+      {/* Error Banner */}
+      {lastError && (
+        <View
+          style={{
+            padding: 8,
+            backgroundColor: "#fdecea",
+            borderColor: "#f5c6cb",
+            borderWidth: 1,
+            borderRadius: 6,
+            marginBottom: 8,
+          }}
+        >
+          <Text style={{ color: "#8a1f2d", fontWeight: "700", marginBottom: 2 }}>
+            Error loading reservations:
+          </Text>
+          <Text style={{ color: "#8a1f2d", fontSize: 12 }}>
+            {lastError}{lastStatus ? ` (status ${lastStatus})` : ""}
+          </Text>
+        </View>
+      )}
+
+      {/* Debug Line */}
+      {(() => {
+        const dbg = _debugConfig?.();
+        if (!dbg) return null;
+        return (
+          <Text style={{ color: t.colors.textMuted, fontSize: 11, marginBottom: 6 }}>
+            api: {dbg.API_BASE} · tenant: {dbg.TENANT ?? "?"} · feature: reservations={String(FEATURE_RESERVATIONS_ENABLED)}
+          </Text>
+        );
+      })()}
+
       {/* Create Button (feature-flagged) */}
       {FEATURE_RESERVATIONS_ENABLED && (
         <Pressable
@@ -140,6 +222,42 @@ export default function ReservationsListScreen() {
           color: t.colors.text,
         }}
       />
+
+      {/* Date Filters */}
+      <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+        <View style={{ flex: 1 }}>
+          <TextInput
+            placeholder="From (ISO)"
+            placeholderTextColor={t.colors.textMuted}
+            value={fromFilter}
+            onChangeText={setFromFilter}
+            style={{
+              borderWidth: 1,
+              borderColor: t.colors.border,
+              borderRadius: 8,
+              padding: 10,
+              backgroundColor: t.colors.card,
+              color: t.colors.text,
+            }}
+          />
+        </View>
+        <View style={{ flex: 1 }}>
+          <TextInput
+            placeholder="To (ISO)"
+            placeholderTextColor={t.colors.textMuted}
+            value={toFilter}
+            onChangeText={setToFilter}
+            style={{
+              borderWidth: 1,
+              borderColor: t.colors.border,
+              borderRadius: 8,
+              padding: 10,
+              backgroundColor: t.colors.card,
+              color: t.colors.text,
+            }}
+          />
+        </View>
+      </View>
 
       {/* Status Filter */}
       <View style={{ marginBottom: 12 }}>
