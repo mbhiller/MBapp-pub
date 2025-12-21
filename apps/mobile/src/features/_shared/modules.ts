@@ -1,5 +1,5 @@
 // apps/mobile/src/features/_shared/modules.ts
-import { FEATURE_RESERVATIONS_ENABLED } from "./flags";
+import { FEATURE_RESERVATIONS_ENABLED, FEATURE_REGISTRATIONS_ENABLED } from "./flags";
 
 export type ModuleEntry = {
   key: string;
@@ -67,6 +67,9 @@ export const MODULES: readonly ModuleEntry[] = [
   // Resources (read-only)
   { key: "resources", title: "Resources", screen: "ResourcesList", icon: "box", required: ["resource:read"] },
 
+  // Events (read-only)
+  { key: "events", title: "Events", screen: "EventsList", icon: "calendar", required: ["event:read"] },
+
   // Operational docs
   { key: "routePlans", title: "Route Plans", screen: "RoutePlanList", icon: "truck", required: ["routing:read"] },
 
@@ -77,7 +80,7 @@ export const MODULES: readonly ModuleEntry[] = [
   { key: "reservations", title: "Reservations", screen: "ReservationsList", icon: "calendar", required: ["reservation:read"], enabled: () => FEATURE_RESERVATIONS_ENABLED },
 
   // Sprint IV: Registrations (guarded by registration:read permission + feature flag)
-  { key: "registrations", title: "Registrations", screen: "RegistrationsList", icon: "calendar", required: ["registration:read"] },
+  { key: "registrations", title: "Registrations", screen: "RegistrationsList", icon: "calendar", required: ["registration:read"], enabled: () => FEATURE_REGISTRATIONS_ENABLED },
 
 ] as const;
 

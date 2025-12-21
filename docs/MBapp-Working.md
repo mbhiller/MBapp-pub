@@ -1,35 +1,37 @@
-# Sprint VIII – ModuleHub Fail-Closed + Resources/Registrations UX Baseline (Mobile)
+# Sprint IX – Events (Read-Only) + Registrations Linkage (Mobile)
 
-**Theme:** Coherent module recipe (Resources anchor) with fail-closed hub and consistent error UI.
+**Theme:** Events module with client-side Registrations linkage; Registrations feature-gated for safe rollout.
 
 **Scope:**
-- ModuleHub fails closed when `/auth/policy` unavailable (banner, no tiles).
-- Resources module: read-only tile + list/detail screens.
-- Registrations: detail screen + tap-to-detail from list.
-- Reservations: ResourcePicker empty state links to Resources; existing features preserved.
+- Events module: read-only tile + list/detail screens.
+- EventDetail includes Registrations related section (filtered by eventId).
+- Registrations section gated by FEATURE_REGISTRATIONS_ENABLED flag (dev default off).
+- __DEV__ seed button on EventsList for testing.
 
 **Mobile Files Modified:**
-1. `apps/mobile/src/features/_shared/modules.ts` – Added Resources module entry; fail-closed policy handling.
-2. `apps/mobile/src/screens/ModuleHubScreen.tsx` – Error banner on missing policy.
-3. `apps/mobile/src/screens/ResourcesListScreen.tsx` – New read-only list with pagination + error banner.
-4. `apps/mobile/src/screens/ResourceDetailScreen.tsx` – New detail screen + error banner + retry.
-5. `apps/mobile/src/screens/RegistrationDetailScreen.tsx` – New detail screen + error banner + retry.
-6. `apps/mobile/src/screens/RegistrationsListScreen.tsx` – List rows tappable to detail; error banner.
-7. `apps/mobile/src/features/resources/ResourcePicker.tsx` – Empty state CTA navigates to ResourcesList.
-8. Navigation: `types.ts` + `RootStack.tsx` updated with ResourcesList/Detail and RegistrationDetail routes.
+1. `apps/mobile/src/features/events/types.ts` – Event type from generated schema.
+2. `apps/mobile/src/features/events/api.ts` – listEvents(), getEvent(), + create/update (write support).
+3. `apps/mobile/src/screens/EventsListScreen.tsx` – List with pagination/search + __DEV__ seed button.
+4. `apps/mobile/src/screens/EventDetailScreen.tsx` – Detail with event fields + Registrations subsection.
+5. `apps/mobile/src/features/_shared/flags.ts` – Added FEATURE_REGISTRATIONS_ENABLED (default false).
+6. `apps/mobile/src/features/_shared/modules.ts` – Events tile + Registrations enabled() flag.
+7. `apps/mobile/src/navigation/types.ts` – Added EventsList, EventDetail routes.
+8. `apps/mobile/src/navigation/RootStack.tsx` – Registered Events screens.
 
 **Features:**
-- **ModuleHub:** visibleModules(policy) returns [] when policy is null/undefined; shows "Policy unavailable — check auth" banner; permission gating + enabled() flag compose.
-- **Resources:** Permission gated `resource:read` (no feature flag). Pagination via listObjects/limit/next. Error banner on fetch failure.
-- **Registrations:** Permission gated `registration:read`. Detail screen displays eventId, partyId, division, class, timestamps. Error banner + retry.
-- **Reservations:** ResourcePicker shows "Go to Resources" button when empty (closes picker, navigates); existing availability + suggestion + conflict tap-to-detail work unchanged.
+- **Events:** Permission gated `event:read` (no feature flag). List pagination (limit/next) + search. Detail shows name/status/location/start/end/capacity/description/notes.
+- **EventDetail-Registrations:** Fetch registrations using listRegistrations({ limit: 100 }); client-side filter by eventId; display up to 20. Each row tappable to RegistrationDetail.
+- **Registrations flag:** FEATURE_REGISTRATIONS_ENABLED = false in dev by default, env-controlled (EXPO_PUBLIC_FEATURE_REGISTRATIONS_ENABLED) in prod. Affects ModuleHub tile visibility + EventDetailScreen fetch/render.
+- **EventDetailScreen:** If feature off, shows "Registrations are disabled" text (graceful, not error). If fetch fails with "disabled" in message, shows same message.
+- **__DEV__ seed button:** On EventsList; creates minimal event (name: "Seed Event - Dev", status: "scheduled", time: now to now+2h, location: "Dev"). Shows success/error feedback. Resets search + reloads list on success.
 
 **Definition of Done**
-- ✅ ModuleHub fails closed with visible banner when policy unavailable.
-- ✅ Resources list/detail render, pagination works, error visible on failure.
-- ✅ Registrations detail screen loads and shows fields; error banner + retry.
-- ✅ ResourcePicker empty state includes navigation CTA.
-- ✅ All list/detail screens consistent styling and error handling.
+- ✅ Events tile visible on hub (if event:read permission).
+- ✅ Events list/detail pagination, search, error handling work.
+- ✅ Registrations subsection in EventDetail client-side filtered by eventId.
+- ✅ Registrations section gracefully disabled when feature flag off.
+- ✅ Registrations module tile hidden when feature flag off.
+- ✅ __DEV__ seed button functional; creates test event with correct timestamps.
 - ✅ Mobile typecheck passes.
 
 **Verification**
@@ -38,16 +40,13 @@ cd apps/mobile && npm run typecheck
 ```
 
 **Manual QA**
-- ModuleHub: Policy fetch fails → banner visible, no tiles render.
-- Resources: List + detail navigation works; offline → error banner; online → retry loads data.
-- Registrations: List rows tap to detail; offline → error visible.
-- Reservations: Pick resource → empty picker shows "Go to Resources"; navigates and closes modal.
+- Events: List pagination/search works; detail shows all fields; registrations section visible if feature on, shows "disabled" if feature off.
+- Hub: Registrations tile hidden when FEATURE_REGISTRATIONS_ENABLED=false.
+- (Dev) Seed button: Creates event, shows success feedback, reloads list.
 
 ---
 
 
-
----
 
 ## Executive Summary
 Sprint E is wrapped: backorder signals now drive purchasing via a worklist and PO suggestions, and product procurement flags are enforced. Per the playbook, we added minimal UI stubs (badges and simple lists) and verified the whole slice with smokes. Next up (Sprint F): multi-vendor suggestion drafts, Backorders bulk actions + vendor filter, scanner/wizard QoL, and unified mobile hooks.

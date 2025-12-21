@@ -221,3 +221,35 @@ cd apps/mobile && npm run typecheck
 - Reservations create → Select resource (picker) → Empty state shows "Go to Resources" button.
 - Availability display, next-available slot button, conflict tap-to-detail all work as before.
 
+---
+
+## Sprint IX — Events (Read-Only) + Registrations Linkage (Completed 2025-12-21)
+
+**Context**
+- Mobile: add Events module to hub; EventDetail includes Registrations related section (client-side filtered by eventId).
+- Registrations fetch gated behind FEATURE_REGISTRATIONS_ENABLED flag (dev default off, prod env-controlled).
+
+**Scope**
+- **Events module:** Tile + list screen (pagination, search, error banner) + detail screen (fields + Registrations subsection).
+- **EventDetail-Registrations linkage:** Client-side filter by eventId; if registrations feature disabled, show "disabled" message (not error banner).
+- **Dev tooling:** __DEV__ seed button on EventsList for fast event creation (name/status/location/startsAt/endsAt).
+
+**Deliverables**
+- ✅ Events tile on ModuleHub (permission gated `event:read`).
+- ✅ EventsListScreen: pagination (limit/next), search (q), error banner, tap row → EventDetail.
+- ✅ EventDetailScreen: event fields + Registrations section (filtered client-side, tappable to RegistrationDetail).
+- ✅ Registrations section disabled message when FEATURE_REGISTRATIONS_ENABLED = false.
+- ✅ Registrations module entry gated with enabled() feature flag (removed from hub if flag off).
+- ✅ __DEV__ seed button on EventsList (creates test event with now to now+2h time window).
+- ✅ Mobile typecheck passes.
+
+**How to Verify**
+```bash
+cd apps/mobile && npm run typecheck
+```
+
+**Manual QA**
+- Open hub → Events tile visible (if event:read permission).
+- Events list → Search works, pagination works, tap row → detail.
+- EventDetail → Event fields displayed; Registrations section shows linked registrations (if feature enabled) or "disabled" message (if feature off).
+- (Dev) Seed button on EventsList creates test event, resets search, reloads list.
