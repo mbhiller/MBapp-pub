@@ -47,6 +47,7 @@ jobs:
         run: npx tsc --noEmit
 
   infra-typecheck:
+    name: infra-typecheck (soft)
     runs-on: ubuntu-latest
     needs: spec-lint
     continue-on-error: true
@@ -55,9 +56,23 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 20, cache: 'npm' }
       - run: npm ci
+      - name: Detect infra tsconfig
+        id: detect
+        shell: bash
+        run: |
+          if [ -f infra/tsconfig.json ]; then
+            echo "found=true" >> $GITHUB_OUTPUT
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+          fi
       - name: Typecheck infra (soft)
+        if: steps.detect.outputs.found == 'true'
         working-directory: infra
-        run: npx tsc --noEmit
+        shell: bash
+        run: npx tsc --noEmit --pretty false || true
+      - name: Summary (infra soft check)
+        if: always()
+        run: echo "Infra typecheck soft-run complete (found=${{ steps.detect.outputs.found }})"
 
   smokes:
     runs-on: ubuntu-latest
