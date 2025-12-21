@@ -40,10 +40,10 @@ console.log(JSON.stringify({
 console.log(`[ci-smokes] Running ${flows.length} flows:`);
 flows.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));
 
-const nodeCmd = process.execPath;
+const npxCmd = process.platform === "win32" ? "npx.cmd" : "npx";
 for (const flow of flows) {
-  console.log(`[ci-smokes] → node ops/smoke/smoke.mjs ${flow}`);
-  const res = spawnSync(nodeCmd, ["ops/smoke/smoke.mjs", flow], {
+  console.log(`[ci-smokes] → npx tsx ops/smoke/smoke.mjs ${flow}`);
+  const res = spawnSync(npxCmd, ["tsx", "ops/smoke/smoke.mjs", flow], {
     stdio: "inherit",
     env: process.env,
   });
