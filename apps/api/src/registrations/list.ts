@@ -1,19 +1,23 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
-import { ok, bad, error } from "../common/responses";
+import { ok, internalError, unauthorized, forbidden } from "../common/responses";
 import { listObjects } from "../objects/repo";
 import { getAuth, requirePerm } from "../auth/middleware";
+import { parsePagination, buildListPage } from "../shared/pagination";
+import { guardRegistrations } from "./feature";
 
 export async function handle(event: APIGatewayProxyEventV2) {
   try {
+    const guard = guardRegistrations(event);
+    if (guard) return guard;
+
     const auth = await getAuth(event);
     const qsp = event.queryStringParameters || {};
     
-    const limit    = Number(qsp.limit ?? 50);
-    const next     = qsp.next ?? undefined;
-    const eventId  = qsp.eventId ?? undefined;
-    const partyId  = qsp.partyId ?? undefined;
-    const status   = qsp.status ?? undefined;
-    const q        = qsp.q?.trim() || undefined;
+    const { limit, cursor } = parsePagination(qsp, 25);
+    const eventId = qsp.eventId ?? undefined;
+    const partyId = qsp.partyId ?? undefined;
+    const status = qsp.status ?? undefined;
+    const q = qsp.q?.trim() || undefined;
 
     requirePerm(auth, "registration:read");
 
@@ -21,7 +25,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const page = await listObjects({ 
       tenantId: auth.tenantId, 
       type: "registration", 
-      next, 
+      next: cursor, 
       limit 
     });
 
@@ -44,8 +48,11 @@ export async function handle(event: APIGatewayProxyEventV2) {
       return true;
     });
 
-    return ok({ items: filtered, next: page.next });
+    return ok(buildListPage(filtered, page.next));
   } catch (e: any) { 
-    return error(e); 
+    const status = e?.statusCode ?? 500;
+    if (status === 401) return unauthorized(e?.message || "Unauthorized");
+    if (status === 403) return forbidden(e?.message || "Forbidden");
+    return internalError(e);
   }
 }

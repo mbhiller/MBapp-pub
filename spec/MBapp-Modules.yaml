@@ -58,9 +58,11 @@ components:
       in: query
       schema:
         type: integer
+        format: int32
         minimum: 1
         maximum: 200
-        default: 50
+        default: 25
+      description: Maximum number of items to return
     Next:
       name: next
       in: query
@@ -71,6 +73,31 @@ components:
       in: query
       schema:
         type: string
+      description: Optional substring search filter
+    Cursor:
+      name: next
+      in: query
+      schema:
+        type: string
+      description: Opaque pagination cursor for next page
+    EntityType:
+      name: entityType
+      in: query
+      schema:
+        type: string
+        enum:
+        - purchaseOrder
+        - salesOrder
+        - inventoryItem
+        - party
+        - account
+        - event
+        - employee
+        - organization
+        - product
+        - class
+        - division
+      description: Filter by entity/object type
     Fields:
       name: fields
       in: query
@@ -83,15 +110,13 @@ components:
       content:
         application/json:
           schema:
-            type: object
-            properties:
-              message:
-                type: string
-              code:
-                type: string
-              details:
-                type: object
-                additionalProperties: true
+            $ref: '#/components/schemas/Error'
+    ValidationErrorResponse:
+      description: Validation error response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationError'
     ListPage:
       description: Paged list of objects
       content:
@@ -122,6 +147,45 @@ components:
     NotFound:
       description: Not found
   schemas:
+    Error:
+      type: object
+      required:
+      - code
+      - message
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code
+        message:
+          type: string
+          description: Human-readable error message
+        details:
+          type: object
+          additionalProperties: true
+          description: Optional additional context
+    ValidationError:
+      allOf:
+      - $ref: '#/components/schemas/Error'
+      - type: object
+        properties:
+          fieldErrors:
+            type: array
+            description: Field-specific validation errors
+            items:
+              type: object
+              required:
+              - field
+              - message
+              properties:
+                field:
+                  type: string
+                  description: Field name or path
+                message:
+                  type: string
+                  description: Validation error message
+                code:
+                  type: string
+                  description: Error code for this field
     Account:
       allOf:
       - $ref: '#/components/schemas/ObjectBase'
@@ -407,23 +471,6 @@ components:
         updatedAt:
           type: string
           format: date-time
-    Error:
-      type: object
-      additionalProperties: false
-      properties:
-        message:
-          type: string
-          description: Human-readable summary
-        code:
-          type: string
-          description: Stable error code (e.g., insufficient_available_to_commit)
-        details:
-          type: array
-          items:
-            type: object
-            additionalProperties: true
-      required:
-      - message
     Event:
       allOf:
       - $ref: '#/components/schemas/ObjectBase'
@@ -1252,66 +1299,105 @@ components:
             - registration
           eventId:
             type: string
+            description: ID of the event this registration is for
+          partyId:
+            type: string
+            description: ID of the party (person/org) being registered
+          status:
+            type: string
+            default: draft
+            enum:
+            - draft
+            - submitted
+            - confirmed
+            - cancelled
+            description: Registration status (Sprint IV v1)
+          division:
+            type: string
+            nullable: true
+            description: Division or category (optional)
+          class:
+            type: string
+            nullable: true
+            description: Class or level (optional)
+          fees:
+            type: array
+            nullable: true
+            description: Registration fees
+            items:
+              type: object
+              required: [code, amount]
+              properties:
+                code:
+                  type: string
+                  description: Fee code/identifier
+                amount:
+                  type: number
+                  description: Fee amount
+                description:
+                  type: string
+                  nullable: true
+          notes:
+            type: string
+            nullable: true
+            description: Additional notes
           clientId:
             type: string
+            nullable: true
+            description: Legacy field (use partyId instead)
           clientName:
             type: string
             nullable: true
+            description: Legacy field
           qty:
             type: number
             default: 1
             minimum: 1
+            nullable: true
+            description: Legacy field
           startsAt:
             type: string
             format: date-time
             nullable: true
+            description: Legacy field
           endsAt:
             type: string
             format: date-time
             nullable: true
+            description: Legacy field
           start:
             type: string
             format: date-time
-            description: Alias of startsAt (deprecated)
+            description: Legacy alias of startsAt (deprecated)
             nullable: true
           end:
             type: string
             format: date-time
-            description: Alias of endsAt (deprecated)
+            description: Legacy alias of endsAt (deprecated)
             nullable: true
           registeredAt:
             type: string
             format: date-time
             nullable: true
-          status:
-            type: string
-            default: pending
-            enum:
-            - pending
-            - confirmed
-            - checked_in
-            - checked_out
-            - cancelled
-          notes:
-            type: string
-            nullable: true
-          partyId:
-            type: string
+            description: Legacy field
           partyKind:
             type: string
             enum:
             - person
             - organization
             - animal
+            nullable: true
+            description: Legacy field
           lines:
             type: array
+            nullable: true
+            description: Legacy field (line items)
             items:
               $ref: '#/components/schemas/RegistrationLine'
         required:
         - type
         - eventId
-        - clientId
-        - qty
+        - partyId
     RegistrationLine:
       type: object
       properties:
@@ -1957,6 +2043,28 @@ components:
               nullable: true
             pageSize:
               type: integer
+    RegistrationList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Registration'
+        next:
+          type: string
+          nullable: true
+          description: Opaque cursor for next page (if any)
+        pageInfo:
+          description: Optional pagination metadata (clients may ignore).
+          type: object
+          properties:
+            hasNext:
+              type: boolean
+            nextCursor:
+              type: string
+              nullable: true
+            pageSize:
+              type: integer
     WorkspaceTile:
       type: object
       properties:
@@ -2372,31 +2480,31 @@ paths:
       - bearerAuth: []
       parameters:
       - $ref: '#/components/parameters/TenantHeader'
-      - name: entityType
-        in: query
-        schema:
-          type: string
-        description: Filter by object type (e.g., purchaseOrder, salesOrder)
-      - name: q
-        in: query
-        schema:
-          type: string
-        description: Search views by name
+      - $ref: '#/components/parameters/EntityType'
+      - $ref: '#/components/parameters/Q'
       - $ref: '#/components/parameters/Limit'
-      - $ref: '#/components/parameters/Next'
+      - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
-          description: OK
+          $ref: '#/components/responses/ListPage'
+        '400':
+          description: Validation error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ViewList'
+                $ref: '#/components/schemas/ValidationError'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '403':
-          $ref: '#/components/responses/Forbidden'
-        '400':
-          description: Bad request
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
       summary: List Views (Sprint III basic filtering + pagination)
     post:
       tags:
@@ -2420,7 +2528,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/View'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/ValidationErrorResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -2448,13 +2556,29 @@ paths:
               schema:
                 $ref: '#/components/schemas/View'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '400':
-          description: Bad request
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
       summary: Get a View
     put:
       tags:
@@ -2483,13 +2607,29 @@ paths:
               schema:
                 $ref: '#/components/schemas/View'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
       summary: Replace a View
     patch:
       tags:
@@ -2520,13 +2660,29 @@ paths:
               schema:
                 $ref: '#/components/schemas/View'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
       summary: Update a View (partial)
     delete:
       tags:
@@ -2545,13 +2701,29 @@ paths:
         '204':
           description: Deleted
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '400':
-          description: Bad request
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
       summary: Delete a View
   /workspaces:
     get:
@@ -2566,25 +2738,35 @@ paths:
         in: query
         schema:
           type: string
+        description: Filter by owner party ID
       - name: shared
         in: query
         schema:
           type: boolean
+        description: Filter by shared status
       - $ref: '#/components/parameters/Limit'
-      - $ref: '#/components/parameters/Next'
+      - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
-          description: OK
+          $ref: '#/components/responses/ListPage'
+        '400':
+          description: Validation error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/WorkspaceList'
+                $ref: '#/components/schemas/ValidationError'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '403':
-          $ref: '#/components/responses/Forbidden'
-        '400':
-          description: Bad request
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
       summary: List Workspaces (Sprint III v1 lists user/tenant workspaces; full multi-tile composition in v2)
     post:
       tags:
@@ -2608,7 +2790,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Workspace'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/ValidationErrorResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -2636,13 +2818,29 @@ paths:
               schema:
                 $ref: '#/components/schemas/Workspace'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '400':
-          description: Bad request
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
       summary: Get a Workspace
     put:
       tags:
@@ -2671,13 +2869,29 @@ paths:
               schema:
                 $ref: '#/components/schemas/Workspace'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
       summary: Replace a Workspace
     patch:
       tags:
@@ -2732,14 +2946,246 @@ paths:
         '204':
           description: Deleted
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '400':
-          description: Bad request
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
       summary: Delete a Workspace
+  /registrations:
+    get:
+      tags:
+      - Registrations
+      operationId: listRegistrations
+      summary: List Registrations (Sprint IV v1 with filters + search)
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: eventId
+        in: query
+        schema:
+          type: string
+        description: Filter by event ID
+      - name: partyId
+        in: query
+        schema:
+          type: string
+        description: Filter by party ID
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum: [draft, submitted, confirmed, cancelled]
+        description: Filter by registration status
+      - $ref: '#/components/parameters/Q'
+      - $ref: '#/components/parameters/Limit'
+      - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          $ref: '#/components/responses/ListPage'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - Registrations
+      operationId: createRegistration
+      summary: Create a Registration
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Registration'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Registration'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /registrations/{id}:
+    get:
+      tags:
+      - Registrations
+      operationId: getRegistration
+      summary: Get a Registration
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Registration'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags:
+      - Registrations
+      operationId: updateRegistration
+      summary: Update a Registration
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Registration'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Registration'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - Registrations
+      operationId: deleteRegistration
+      summary: Delete a Registration
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: No Content
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /inventory/{id}/onhand:
     get:
       summary: Get computed counters for an inventory item

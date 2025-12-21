@@ -1,15 +1,19 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
-import { ok, bad, error } from "../common/responses";
+import { ok, badRequest, notFound, internalError } from "../common/responses";
 import { getObjectById } from "../objects/repo";
 import { getAuth, requirePerm } from "../auth/middleware";
+import { guardRegistrations } from "./feature";
 
 export async function handle(event: APIGatewayProxyEventV2) {
   try {
+    const guard = guardRegistrations(event);
+    if (guard) return guard;
+
     const auth = await getAuth(event);
     const id = event.pathParameters?.id;
 
     if (!id) {
-      return bad({ message: "id is required" });
+      return badRequest("id is required", { field: "id" });
     }
 
     requirePerm(auth, "registration:read");
@@ -21,11 +25,11 @@ export async function handle(event: APIGatewayProxyEventV2) {
     });
 
     if (!result) {
-      return ok({ message: "Not Found" }, 404);
+      return notFound("Not Found");
     }
 
     return ok(result);
   } catch (e: any) {
-    return error(e);
+    return internalError(e);
   }
 }

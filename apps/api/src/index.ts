@@ -1,8 +1,8 @@
 // apps/src/api/index.ts
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
+import { notFound as respondNotFound, unauthorized, forbidden, internalError } from "./common/responses";
 import { getAuth, requirePerm, policyFromAuth } from "./auth/middleware";
 import { buildCtx, attachCtxToEvent } from "./shared/ctx";
-import { featureRegistrationsEnabled } from "./flags";
 
 /* Routes */
 // Views
@@ -101,7 +101,6 @@ const json = (statusCode: number, body: unknown): APIGatewayProxyResultV2 => ({
   },
   body: JSON.stringify(body),
 });
-const notFound = () => json(404, { message: "Not Found" });
 const methodNotAllowed = () => json(405, { message: "Method Not Allowed" });
 const match = (re: RegExp, s: string) => s.match(re)?.slice(1) ?? null;
 
@@ -219,8 +218,8 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
       }
     }
 
-    // Registrations (Tier-1 foundation; feature-flagged)
-    if (featureRegistrationsEnabled(event)) {
+    // Registrations (Tier-1 foundation; feature-guarded per request)
+    {
       const m = path.match(/^\/registrations(?:\/([^/]+))?$/i);
       if (m) {
         const [, id] = m;
@@ -412,9 +411,13 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
       return methodNotAllowed();
     }
 
-    return notFound();
+    return respondNotFound();
   } catch (e: any) {
     const status = e?.statusCode ?? 500;
-    return json(status, { message: e?.message ?? "Internal Server Error" });
+    const message = e?.message ?? "Internal Server Error";
+    if (status === 401) return unauthorized(message);
+    if (status === 403) return forbidden(message);
+    if (status === 404) return respondNotFound(message);
+    return internalError(e);
   }
 }
