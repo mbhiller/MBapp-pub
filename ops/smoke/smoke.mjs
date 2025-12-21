@@ -1516,7 +1516,45 @@ const tests = {
       return { test: "reservations:conflicts", result: "FAIL", reason: "check-conflicts-missing-reservation-A", checkConflictIds };
     }
 
-    // 5) Cleanup
+    // 5) Call GET /resources/{id}/availability to verify availability endpoint reflects created reservation
+    const fromAvail = new Date(t0.getTime() - 3600000).toISOString(); // t0 - 1 hour
+    const toAvail = new Date(t1.getTime() + 3600000).toISOString();   // t1 + 1 hour
+    const availRes = await fetch(`${API}/resources/${encodeURIComponent(resourceId)}/availability?from=${encodeURIComponent(fromAvail)}&to=${encodeURIComponent(toAvail)}`, {
+      method: "GET",
+      headers: { ...baseHeaders(), ...resHeaders }
+    });
+    const availBody = await availRes.json().catch(() => ({}));
+
+    if (!availRes.ok) {
+      await fetch(`${API}/objects/reservation/${encodeURIComponent(reservationAId)}`, { method: "DELETE", headers: { ...baseHeaders(), ...resHeaders } });
+      await fetch(`${API}/objects/resource/${encodeURIComponent(resourceId)}`, { method: "DELETE", headers: { ...baseHeaders(), ...resHeaders } });
+      return { test: "reservations:conflicts", result: "FAIL", reason: "availability-endpoint-failed", availRes: { status: availRes.status, body: availBody } };
+    }
+
+    if (!Array.isArray(availBody?.busy)) {
+      await fetch(`${API}/objects/reservation/${encodeURIComponent(reservationAId)}`, { method: "DELETE", headers: { ...baseHeaders(), ...resHeaders } });
+      await fetch(`${API}/objects/resource/${encodeURIComponent(resourceId)}`, { method: "DELETE", headers: { ...baseHeaders(), ...resHeaders } });
+      return { test: "reservations:conflicts", result: "FAIL", reason: "availability-busy-not-array", availBody };
+    }
+
+    // Check if reservationA is in busy blocks or if any block overlaps [t0, t1]
+    const busyIds = availBody.busy.map(b => b.id);
+    const hasReservationInBusy = busyIds.includes(reservationAId);
+    const hasOverlappingBlock = availBody.busy.some(b => {
+      const blockStart = new Date(b.startsAt).getTime();
+      const blockEnd = new Date(b.endsAt).getTime();
+      const t0ms = t0.getTime();
+      const t1ms = t1.getTime();
+      return blockStart < t1ms && t0ms < blockEnd; // overlap check
+    });
+
+    if (!hasReservationInBusy && !hasOverlappingBlock) {
+      await fetch(`${API}/objects/reservation/${encodeURIComponent(reservationAId)}`, { method: "DELETE", headers: { ...baseHeaders(), ...resHeaders } });
+      await fetch(`${API}/objects/resource/${encodeURIComponent(resourceId)}`, { method: "DELETE", headers: { ...baseHeaders(), ...resHeaders } });
+      return { test: "reservations:conflicts", result: "FAIL", reason: "availability-missing-reservation-A", busyIds };
+    }
+
+    // 6) Cleanup
     const delA = await fetch(`${API}/objects/reservation/${encodeURIComponent(reservationAId)}`, {
       method: "DELETE",
       headers: { ...baseHeaders(), ...resHeaders }
@@ -1536,6 +1574,11 @@ const tests = {
         createB409: true,
         conflictingIds,
         checkEndpointConflicts: checkConflictIds
+      },
+      availabilityEndpoint: {
+        busyBlocks: availBody.busy?.length || 0,
+        hasReservationA: hasReservationInBusy,
+        hasOverlap: hasOverlappingBlock
       }
     };
   },
