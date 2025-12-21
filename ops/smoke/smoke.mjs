@@ -712,10 +712,11 @@ const tests = {
     const recv = await post(
       `/purchasing/po/${encodeURIComponent(id)}:receive`,
       { lines },
-      { "Idempotency-Key": idem(), "X-Feature-Events-Simulate":"1" }
+      { "Idempotency-Key": idem(), "X-Feature-Events-Simulate": "true", "X-Feature-Events-Enabled": "true" }
     );
+    const statusOk = !recv.body?.status || ["received", "fulfilled"].includes(recv.body.status);
     const emitted = recv.ok && recv.body?._dev?.emitted === true;
-    const pass = !!emitted;
+    const pass = !!emitted && statusOk;
     return { test:"po:emit-events", result: pass?"PASS":"FAIL", recv };
   },
 
