@@ -12,7 +12,10 @@ export function WorkspaceSwitcher() {
   const [items, setItems] = React.useState<Array<{ id: string; name: string }>>([]);
 
   React.useEffect(() => {
-    workspacesApi.list().then((ws) => setItems(ws || [])).catch(() => {});
+    workspacesApi
+      .list()
+      .then((ws) => setItems((ws?.items ?? []).map((item) => ({ id: item.id, name: item.name }))))
+      .catch(() => {});
   }, []);
 
   const current = items.find((w) => w.id === workspaceId);

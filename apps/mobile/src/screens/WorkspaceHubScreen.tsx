@@ -1,8 +1,8 @@
-// apps/mobile/src/features/workspaces/WorkspaceHubScreen.tsx
+// apps/mobile/src/screens/WorkspaceHubScreen.tsx
 import React, { useState } from "react";
 import { View, Text, TextInput, ScrollView, Pressable, RefreshControl, Alert } from "react-native";
-import { useColors } from "../_shared/useColors";
-import { useWorkspaceItems } from "./hooks";
+import { useColors } from "../features/_shared/useColors";
+import { useWorkspaceItems } from "../features/workspaces/hooks";
 
 const ENTITY_TYPES = [
   { label: "All", value: undefined },
