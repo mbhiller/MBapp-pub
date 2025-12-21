@@ -25,15 +25,16 @@ async function ensureBearer(){
 }
 function baseHeaders(){
   const h={"accept":"application/json","Content-Type":"application/json","X-Tenant-Id":TENANT};
-  const b=process.env.DEV_API_TOKEN||process.env.MBAPP_BEARER||process.env.MBAPP_API_KEY;
-  if(b) h["Authorization"]=`Bearer ${b}`;
+  const token=process.env.MBAPP_BEARER||process.env.DEV_API_TOKEN;
+  if(token) h["Authorization"]=`Bearer ${token}`;
   return h;
 }
 // Allow per-request Authorization override: "default" | "invalid" | "none"
 function buildHeaders(base = {}, auth = "default") {
   const h = { "content-type": "application/json", ...base };
+  const token = process.env.MBAPP_BEARER || process.env.DEV_API_TOKEN;
   if (auth === "default") {
-    if (process.env.DEV_API_TOKEN) h.Authorization = `Bearer ${process.env.DEV_API_TOKEN}`;
+    if (token) h.Authorization = `Bearer ${token}`;
   } else if (auth === "invalid") {
     h.Authorization = "Bearer invalid";
   } else if (auth === "none") {
@@ -1409,7 +1410,11 @@ const fn=tests[cmd];
 if(!fn){ console.error("Unknown command:",cmd); process.exit(1); }
 
 (async()=>{
-  console.log(JSON.stringify({ base: API, hasToken: !!process.env.DEV_API_TOKEN }));
+  console.log(JSON.stringify({
+    base: API,
+    tokenVar: process.env.MBAPP_BEARER ? "MBAPP_BEARER" : (process.env.DEV_API_TOKEN ? "DEV_API_TOKEN" : null),
+    hasToken: Boolean(process.env.MBAPP_BEARER || process.env.DEV_API_TOKEN)
+  }));
   await ensureBearer();
   const r=await fn();
   console.log(JSON.stringify(r,null,2));

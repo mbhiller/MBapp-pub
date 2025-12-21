@@ -1,40 +1,56 @@
-#!/usr/bin/env node
 import fs from "fs";
-import path from "path";
-import { execSync } from "child_process";
-import { fileURLToPath } from "url";
+import { spawnSync } from "child_process";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ciSmokeFile = path.join(__dirname, "../ci-smokes.json");
+function getBearer() {
+  const ps = spawnSync("pwsh", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "ops/ci/Emit-CIEnv.ps1", "-EmitTokenOnly"], { encoding: "utf8" });
+  if (ps.status !== 0) {
+    console.error("[ci-smokes] failed to acquire token:", ps.stderr || ps.stdout);
+    process.exit(ps.status ?? 1);
+  }
+  const out = (ps.stdout || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  const tok = out[out.length - 1] || "";
+  if (!tok || tok.includes(" ")) {
+    console.error("[ci-smokes] invalid/empty token emitted");
+    process.exit(1);
+  }
+  return tok;
+}
 
-// 1. Read ci-smokes.json
-const ciConfig = JSON.parse(fs.readFileSync(ciSmokeFile, "utf-8"));
-const flows = ciConfig.flows || [];
+const token = getBearer();
+process.env.MBAPP_BEARER = token;
+if (!process.env.DEV_API_TOKEN) process.env.DEV_API_TOKEN = token;
 
-console.log(`\n🔄 Running ${flows.length} CI smokes...\n`);
+const cfgPath = "ops/ci-smokes.json";
+if (!fs.existsSync(cfgPath)) {
+  console.error(`[ci-smokes] Missing ${cfgPath}`);
+  process.exit(1);
+}
+const { flows } = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+if (!Array.isArray(flows) || flows.length === 0) {
+  console.error("[ci-smokes] No flows found in ops/ci-smokes.json");
+  process.exit(1);
+}
 
-let passed = 0;
-let failed = 0;
-const results = [];
+console.log(JSON.stringify({
+  base: process.env.MBAPP_API_BASE || null,
+  tokenVar: process.env.MBAPP_BEARER ? "MBAPP_BEARER" : (process.env.DEV_API_TOKEN ? "DEV_API_TOKEN" : null),
+  hasToken: Boolean(process.env.MBAPP_BEARER || process.env.DEV_API_TOKEN)
+}));
 
-// 2. Run each flow sequentially
+console.log(`[ci-smokes] Running ${flows.length} flows:`);
+flows.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));
+
+const nodeCmd = process.execPath;
 for (const flow of flows) {
-  try {
-    console.log(`  ⏳ ${flow}...`);
-    execSync(`npm run ${flow}`, { stdio: "inherit" });
-    console.log(`  ✅ ${flow}\n`);
-    passed++;
-    results.push({ flow, status: "PASS" });
-  } catch (e) {
-    console.error(`  ❌ ${flow}\n`);
-    failed++;
-    results.push({ flow, status: "FAIL" });
-    process.exit(1); // Fail fast
+  console.log(`[ci-smokes] → node ops/smoke/smoke.mjs ${flow}`);
+  const res = spawnSync(nodeCmd, ["ops/smoke/smoke.mjs", flow], {
+    stdio: "inherit",
+    env: process.env,
+  });
+  if (res.status !== 0) {
+    console.error(`[ci-smokes] ✖ failed: ${flow}`);
+    process.exit(res.status ?? 1);
   }
 }
 
-// 3. Print summary
-console.log("\n" + "=".repeat(60));
-console.log(`✅ All ${flows.length} smokes passed!`);
-console.log("=".repeat(60) + "\n");
-console.log(JSON.stringify({ total: flows.length, passed, failed, results }, null, 2));
+console.log("[ci-smokes] ✔ all flows passed");

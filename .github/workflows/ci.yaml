@@ -73,20 +73,24 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 20, cache: 'npm' }
       - run: npm ci
-      - name: Bootstrap rotating token via .ops/Set-MBEnv.ps1
+
+      - name: Bootstrap rotating token (PowerShell)
         shell: pwsh
         run: |
-          $p1 = "ops/Set-MBEnv.ps1"
-          $p2 = ".ops/Set-MBEnv.ps1"
-          if (Test-Path $p1) { . "./$p1" }
-          elseif (Test-Path $p2) { . "./$p2" }
-          else { Write-Error "Neither ops/Set-MBEnv.ps1 nor .ops/Set-MBEnv.ps1 found"; exit 1 }
+          pwsh -NoProfile -ExecutionPolicy Bypass -File ops/ci/Emit-CIEnv.ps1
+          if (-not $env:MBAPP_BEARER -and -not $env:DEV_API_TOKEN) { Write-Error "No bearer/token available"; exit 1 }
+          if ($env:MBAPP_BEARER) {
+            echo "::add-mask::$env:MBAPP_BEARER"
+            "MBAPP_BEARER=$env:MBAPP_BEARER" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          }
+          if ($env:DEV_API_TOKEN) {
+            echo "::add-mask::$env:DEV_API_TOKEN"
+            "DEV_API_TOKEN=$env:DEV_API_TOKEN" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          }
 
-          if (-not $env:DEV_API_TOKEN) { Write-Error "Set-MBEnv.ps1 did not populate DEV_API_TOKEN"; exit 1 }
-          echo "::add-mask::$env:DEV_API_TOKEN"
-          "DEV_API_TOKEN=$env:DEV_API_TOKEN" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Echo smoke base
         run: |
           node -e "console.log(JSON.stringify({ base: process.env.MBAPP_API_BASE, hasToken: Boolean(process.env.DEV_API_TOKEN) }))"
+
       - name: Run ${{ matrix.flow }}
         run: npm run ${{ matrix.flow }}
