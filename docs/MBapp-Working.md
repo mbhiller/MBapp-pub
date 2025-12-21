@@ -391,3 +391,9 @@ No-regret prep (ongoing):
   - Consider: search (q filter), mobile RegistrationHub screen, registration actions (:cancel, :checkin, :checkout)
   - No migrations; filters via in-memory post-query (keeps schema clean)
 
+- **Polish:**
+  - Added `?q` search to GET /registrations (case-insensitive substring on id, partyId, division, class)
+  - Minimal mobile RegistrationsListScreen (search + create modal, feature-flagged)
+  - All smokes passing (registrations:crud, registrations:filters incl. q filter)
+  - No schema/migrations
+

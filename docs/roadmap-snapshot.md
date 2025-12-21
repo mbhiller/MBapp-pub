@@ -29,13 +29,16 @@
 - **Tier 1.3 Extensions (delivered v1, feature-flagged)**: Views v1 (CRUD) + Workspaces list (v1 behind flags).
 - **Event dispatcher plumbing**: noop/simulate path implemented (simulate returns `_dev` metadata; provider = "noop").
 
-### ✅ Sprint IV — Results
-- **Tier 1 Registrations v1 (delivered, feature-flagged)**: CRUD + filters (eventId, partyId, status); objects-repo pattern.
-- **API Polish**: 204 No Content on DELETE; `noContent()` response helper added.
-- **Smokes**: registrations:crud, registrations:filters (both PASS).
+### ✅ Sprint IV — Results (Complete)
+- **Tier 1 Registrations v1 (delivered, feature-flagged)**: CRUD + filters (eventId, partyId, status, q); objects-repo pattern.
+- **API Polish**: 204 No Content on DELETE; `noContent()` response helper added; `?q` search filter.
+- **Mobile**: RegistrationsListScreen (search + create modal, feature-flagged).
+- **Smokes**: registrations:crud, registrations:filters (both PASS, incl. q filter validation).
+- **Status**: Sprint IV **complete**.
 
-### 🚧 In Progress
-- **Tier 1 Foundations**: Still completing guardrails and shared patterns; Registrations polish (search, mobile screen, actions) deferred to v2.
+### Next: Sprint V Kickoff
+- **Options**: Events plumbing hardening (outbox pattern, retry logic) OR Reservations/Resources foundation (Tier 2).
+- See sprint_kickoff_template.md for planning.
 
 ---
 

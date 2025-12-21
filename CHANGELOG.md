@@ -3,7 +3,7 @@
 ## v0.4.0 — 2025-12-20
 
 ### Added
-- **Registrations v1 (Tier 1 foundation)**: CRUD + filters (eventId, partyId, status); feature-flagged via `FEATURE_REGISTRATIONS_ENABLED` (default OFF)
+- **Registrations v1 (Tier 1 foundation)**: CRUD + filters (eventId, partyId, status, `?q`); feature-flagged via `FEATURE_REGISTRATIONS_ENABLED` (default OFF)
 - **API Endpoints**:
   - `POST /registrations` — Create registration (201)
   - `GET /registrations` — List with filters (200)
@@ -12,6 +12,8 @@
   - `DELETE /registrations/{id}` — Delete (204 No Content)
 - **Schema**: Registration { eventId, partyId, division?, class?, status, fees[], notes? }
 - **Smoke tests**: `smoke:registrations:crud`, `smoke:registrations:filters` (both PASS)
+- **Mobile**: RegistrationsListScreen (search via `?q` + create modal, feature-flagged)
+- **Polish**: `?q` filter on GET /registrations (case-insensitive substring search on id, partyId, division, class)
 
 ### Changed
 - **API**: DELETE operations now return 204 No Content (RFC 7231 compliant; no response body)
