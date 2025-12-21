@@ -34,15 +34,12 @@ export async function findParties(params: { q?: string; role?: string }): Promis
     let items = page.items || [];
 
     // Client-side role filtering (best-effort; roles field may not be present)
-    if (params.role) {
+    const role = params?.role;
+    if (role) {
       items = items.filter((p) => {
-        const role = params?.role?.trim();
-        if (role) {
-          const roles = Array.isArray(p.roles) ? p.roles : [];
-          const roleFlags = (p as any).roleFlags as Record<string, boolean> | undefined;
-          return roleFlags?.[role] === true || roles.includes(role);
-        }
-        return true;
+        const roleFlags = (p.roleFlags as Record<string, boolean> | undefined) || {};
+        const roles = p.roles || [];
+        return roleFlags[role] === true || roles.includes(role);
       });
     }
 
