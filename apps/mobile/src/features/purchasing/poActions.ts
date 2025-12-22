@@ -7,6 +7,26 @@ export async function saveFromSuggestion(draftOrDrafts: any | any[]) {
   return apiClient.post(`/purchasing/po:create-from-suggestion`, body);
 }
 
+export async function submit(poId: string) {
+  const res = await apiClient.post(`/purchasing/po/${encodeURIComponent(poId)}:submit`, {});
+  return (res as any)?.body ?? res;
+}
+
+export async function approve(poId: string) {
+  const res = await apiClient.post(`/purchasing/po/${encodeURIComponent(poId)}:approve`, {});
+  return (res as any)?.body ?? res;
+}
+
+export async function cancel(poId: string) {
+  const res = await apiClient.post(`/purchasing/po/${encodeURIComponent(poId)}:cancel`, {});
+  return (res as any)?.body ?? res;
+}
+
+export async function close(poId: string) {
+  const res = await apiClient.post(`/purchasing/po/${encodeURIComponent(poId)}:close`, {});
+  return (res as any)?.body ?? res;
+}
+
 export async function receiveAll(poSnap: any) {
   const rem = (ln: any) => Math.max(0, Number(ln?.qty ?? 0) - Number(ln?.receivedQty ?? 0));
   const lines = (poSnap?.lines ?? [])

@@ -288,10 +288,10 @@ npm run typecheck
 ```
 
 
-## Sprint XVI — Kickoff (Template)
+## Sprint XVII — Kickoff (Template)
 
 **Context**
-- Branch: `feat/tier1-sprint-XVI`
+- Branch: `feat/tier1-sprint-XVII`
 - Scope/Theme: {{fill in}}
 
 **Scope / Deliverables**
@@ -307,6 +307,22 @@ cd apps/mobile && npm run typecheck
 
 **Notes / Additional Context**
 - {{fill in}}
+
+---
+
+## Sprint XVI — Wrap (Sales/Purchasing List Parity)
+
+**Highlights**
+- **SalesOrdersListScreen:** Create → return from detail auto-refetches in background and scrolls to top (new SO visible at top); normal back navigation preserves scroll position; newest-first stable list behavior; "+ New Sales Order" primary button aligned to Registrations/Reservations pattern; card styling aligned to Inventory standard; NEW badges on rows for items created within 10 minutes.
+- **PurchaseOrdersListScreen:** Identical behavior to SalesOrdersListScreen (create-return focuses newest; no jump on normal back); newest-first stable list; "+ New Purchase Order" primary button; card styling aligned to Inventory standard; NEW badges on rows.
+- **BackordersListScreen:** Card styling standardized to Inventory gold standard; NEW badges added to rows; fixed TypeScript errors (removed inline `useTheme()` calls).
+- **Header/UI consistency:** Primary button styling (background: primary, color: white, "+ New {Type}") aligned across SO/PO/Registrations/Reservations/Resources; card containers use theme colors (`t.colors.border`, `t.colors.card`).
+- **No regressions:** All list screens maintain stable pagination, search, and sort; typecheck passes.
+
+**Verification**
+```bash
+cd apps/mobile && npm run typecheck
+```
 
 ---
 

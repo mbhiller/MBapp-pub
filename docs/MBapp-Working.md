@@ -274,10 +274,12 @@ cd apps/mobile && npm run typecheck
 - UI Stubs: list with q filter; detail with read-only badges; minimal actions only.
 
 **List stability rules (mobile lists)**
-- `useObjects` list-mode supports `q/filter/query/params`; put `sort/by` inside `query`.
-- Prefer client-side newest-first render sort: createdAt desc → updatedAt desc → id desc.
-- Use larger dev page size when needed (e.g., limit 200) so new items appear on page 1 and don’t disappear with pagination.
-- Use soft focus refetch (InteractionManager) to refresh without a jarring screen reload.
+- **Server query:** Use `query: { sort: "desc", by: "updatedAt" }` when supported.
+- **Dev page size:** Set `params: { limit: __DEV__ ? 200 : 50 }` so newly created items appear on first page without pagination jump.
+- **Client deterministic sort:** Fallback render sort: createdAt desc → updatedAt desc → id desc (newest-first).
+- **Soft focus refetch:** Use `useFocusEffect` + `InteractionManager.runAfterInteractions` for background refresh without data clearing.
+- **Create-return behavior:** After creating a record, set `scrollToTopOnNextFocus.current = true` before navigation; on return, scroll to top after refetch so new item is immediately visible; normal back navigation preserves scroll position via `maintainVisibleContentPosition={{ minIndexForVisible: 0 }}`.
+- **Dev seed UI:** All seed actions live in DevTools screen; per-screen seed buttons removed from list screens.
 
 ---
 
@@ -341,9 +343,9 @@ Legend: ✅ done • 🟨 stub/partial • ⬜ planned
 |---------------------|:----:|:-------:|:------:|:--------:|--------------|
 | Products            | ✅   | ✅      | ✅     | 🟨       | List stable (newest-first + refresh) |
 | Inventory           | ✅   | ✅      | ✅     | ✅       | List stabilized (refresh/sort/limit) |
-| SalesOrders         | ✅   | ✅      | ✅     | ✅       | Wizard QoL next |
-| PurchaseOrders      | ✅   | ✅      | ✅     | ✅       | Multi-vendor drafts (F) |
-| BackOrders          | ✅   | ✅      | ✅     | ✅       | Bulk actions + vendor filter (F) |
+| SalesOrders         | ✅   | ✅      | ✅     | ✅       | List stabilized: newest-first + create-return scroll-to-top |
+| PurchaseOrders      | ✅   | ✅      | ✅     | ✅       | List stabilized: same behavior as Sales |
+| BackOrders          | ✅   | ✅      | ✅     | ✅       | Bulk actions + vendor filter; card styling aligned |
 | Party (CRM)         | ✅   | ✅      | ✅     | 🟨       | Hook unification |
 | RoutePlans          | ✅   | ✅      | ✅     | 🟨       | Hook unification |
 | Scans / EPC         | 🟨   | ✅      | 🟨     | ⬜       | Add seed+resolve (optional) |

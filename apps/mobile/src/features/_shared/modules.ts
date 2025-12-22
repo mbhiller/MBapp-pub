@@ -64,6 +64,7 @@ export const MODULES: readonly ModuleEntry[] = [
   // Purchasing / Sales
   { key: "purchaseOrders", title: "Purchasing",      screen: "PurchaseOrdersList", icon: "cart-arrowdown", required: ["purchaseorder:read"] },
   { key: "salesOrders",    title: "Sales",           screen: "SalesOrdersList",    icon: "cart-plus",      required: ["salesorder:read"] },
+  { key: "backorders",     title: "Backorders",      screen: "BackordersList",     icon: "box",            enabled: () => __DEV__ },
 
   // Resources (read-only)
   { key: "resources", title: "Resources", screen: "ResourcesList", icon: "box", required: ["resource:read"] },

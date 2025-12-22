@@ -3,7 +3,7 @@ import { View, Text, ActivityIndicator, FlatList, Pressable, Modal, TextInput } 
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { useObjects } from "../features/_shared/useObjects";
 import { FEATURE_PO_QUICK_RECEIVE } from "../features/_shared/flags";
-import { saveFromSuggestion, receiveAll, receiveLine } from "../features/purchasing/poActions";
+import { saveFromSuggestion, receiveAll, receiveLine, submit, approve, cancel, close } from "../features/purchasing/poActions";
 import { useToast } from "../features/_shared/Toast";
 import { ReceiveHistorySheet } from "../features/purchasing/ReceiveHistorySheet";
 import { VendorGuardBanner } from "../features/_shared/VendorGuardBanner";
@@ -77,7 +77,7 @@ export default function PurchaseOrderDetailScreen() {
       </View>
 
       {/* Actions */}
-      <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
+      <View style={{ flexDirection: "row", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
         {po?.status === "draft" && (
           <Pressable
             onPress={async () => {
@@ -93,6 +93,36 @@ export default function PurchaseOrderDetailScreen() {
             <Text>Save Draft</Text>
           </Pressable>
         )}
+        <Pressable
+          onPress={async () => {
+            try {
+              await submit(po?.id);
+              toast("Submitted", "success");
+              await refetch();
+            } catch (e: any) {
+              console.error(e);
+              toast(e?.message || "Submit failed", "error");
+            }
+          }}
+          style={{ paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 8 }}
+        >
+          <Text>Submit</Text>
+        </Pressable>
+        <Pressable
+          onPress={async () => {
+            try {
+              await approve(po?.id);
+              toast("Approved", "success");
+              await refetch();
+            } catch (e: any) {
+              console.error(e);
+              toast(e?.message || "Approve failed", "error");
+            }
+          }}
+          style={{ paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 8 }}
+        >
+          <Text>Approve</Text>
+        </Pressable>
         {FEATURE_PO_QUICK_RECEIVE && po?.id && (
           <Pressable
             disabled={vendorGuardActive || !receivable}
@@ -102,6 +132,36 @@ export default function PurchaseOrderDetailScreen() {
             <Text>Receive All</Text>
           </Pressable>
         )}
+        <Pressable
+          onPress={async () => {
+            try {
+              await cancel(po?.id);
+              toast("Cancelled", "success");
+              await refetch();
+            } catch (e: any) {
+              console.error(e);
+              toast(e?.message || "Cancel failed", "error");
+            }
+          }}
+          style={{ paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 8 }}
+        >
+          <Text>Cancel</Text>
+        </Pressable>
+        <Pressable
+          onPress={async () => {
+            try {
+              await close(po?.id);
+              toast("Closed", "success");
+              await refetch();
+            } catch (e: any) {
+              console.error(e);
+              toast(e?.message || "Close failed", "error");
+            }
+          }}
+          style={{ paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 8 }}
+        >
+          <Text>Close</Text>
+        </Pressable>
       </View>
 
       <FlatList
