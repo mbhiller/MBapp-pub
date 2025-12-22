@@ -1,7 +1,7 @@
 // List "open" BackorderRequest rows with bulk Ignore/Convert, vendor filter, and drill to created POs.
 import * as React from "react";
 import { View, Text, Pressable, FlatList, ActivityIndicator, TextInput, Alert, InteractionManager } from "react-native";
-import { useNavigation, useFocusEffect } from "@react-navigation/native";
+import { useNavigation, useRoute, useFocusEffect } from "@react-navigation/native";
 import { useObjects } from "../features/_shared/useObjects";
 import { useColors } from "../features/_shared/useColors";
 import { apiClient } from "../api/client";
@@ -13,6 +13,8 @@ type Row = { id: string; itemId: string; qty: number; status: string; preferredV
 
 export default function BackordersListScreen() {
   const nav = useNavigation<any>();
+  const route = useRoute<any>();
+  const soId = route.params?.soId as string | undefined;
   const t = useColors();
   const toast = (useToast?.() as any) ?? ((msg: string) => console.log("TOAST:", msg));
   const [vendorFilter, setVendorFilter] = React.useState<string>("");
@@ -36,9 +38,16 @@ export default function BackordersListScreen() {
     });
   }, [rawItems]);
 
-  const filtered = vendorFilter.trim()
-    ? items.filter((r) => (r as any)?.preferredVendorId === vendorFilter.trim())
-    : items;
+  const filtered = React.useMemo(() => {
+    let result = items;
+    if (vendorFilter.trim()) {
+      result = result.filter((r) => (r as any)?.preferredVendorId === vendorFilter.trim());
+    }
+    if (soId) {
+      result = result.filter((r) => (r as any)?.soId === soId);
+    }
+    return result;
+  }, [items, vendorFilter, soId]);
 
   function toggle(id: string) {
     setSelected((s) => ({ ...s, [id]: !s[id] }));
@@ -112,6 +121,15 @@ export default function BackordersListScreen() {
 
   return (
     <View style={{ flex: 1, padding: 12, backgroundColor: t.colors.bg }}>
+      {/* soId filter banner */}
+      {soId && (
+        <View style={{ marginBottom: 12, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: "#e3f2fd", borderRadius: 8, flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+          <Text style={{ fontSize: 12, color: "#1976d2", fontWeight: "500" }}>Filtered to Sales Order: {soId}</Text>
+          <Pressable onPress={() => nav.setParams({ soId: undefined })} style={{ paddingHorizontal: 6, paddingVertical: 4 }}>
+            <Text style={{ fontSize: 12, color: "#1976d2", fontWeight: "600" }}>Clear</Text>
+          </Pressable>
+        </View>
+      )}
       <DraftChooserModal
         visible={chooserOpen}
         drafts={chooserDrafts}
