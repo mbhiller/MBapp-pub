@@ -230,6 +230,34 @@ cd apps/mobile && npm run typecheck
 
 ---
 
+## ✅ Sprint XVIII — Sales Availability + 409 UX (2025-12-22)
+
+**Theme:** SO detail visibility into inventory shortages; actionable 409 error UX; backorders navigation QoL.
+
+**Mobile**
+- **Per-line availability pills**: SO detail renders `{onHand, reserved, available}` for each line via new `useSalesOrderAvailability` hook (calls POST `/inventory/onhand:batch`).
+- **409 error parsing**: Reserve/Commit 409s parse structured `shortages[]` payload and show a single alert listing top 3 items with demand vs. available; fallback to generic toast if data missing.
+- **Availability refetch**: After any action success or 409, refetch availability so pills stay current.
+- **Backorders navigation**: SO detail header shows tappable "Backorders present" badge when `so.backorders.length > 0`; navigates to BackordersList (unfiltered; shows all open backorders).
+- **Duplicate CTA cleanup**: commitHint "View Backorders" button only shows when no header CTA (zero duplication).
+
+**Backend**
+- No changes; reuses existing `POST /inventory/onhand:batch`, `POST /sales/so/{id}:reserve`, `POST /sales/so/{id}:commit` (strict/non-strict) with structured shortage payloads already in place.
+
+**Files Modified**
+- Mobile: `apps/mobile/src/screens/SalesOrderDetailScreen.tsx` (availability pills, 409 parsing, refetch, badge CTA)
+- Mobile: `apps/mobile/src/features/salesOrders/useAvailabilityBatch.ts` (new hook for batch availability fetch)
+
+**Definition of Done**
+- [x] SO lines show availability pill when data loads; graceful fallback ("Avail: —") when missing
+- [x] 409 reserve/commit shows alert with top 3 shortages (Item <id> need <qty> avail <qty>); generic fallback if no structured data
+- [x] Availability refetched after actions + 409
+- [x] Badge tap navigates to BackordersList when backorders exist
+- [x] No duplicate CTAs (header badge is sole entry point)
+- [x] Typecheck passes
+
+---
+
 ## ✅ Sprint II — Results (2025-10-24)
 
 **Theme:** Vendor guardrails, receive idempotency, movement filters, and event stubs — with smoke coverage and DX flags.
@@ -377,6 +405,11 @@ Authoritative references for system design and implementation:
 - **Dev seed tooling:** [apps/mobile/src/screens/DevTools.tsx](../apps/mobile/src/screens/DevTools.tsx)
 - **Smokes (source):** [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs)
 - **CI smoke matrix:** [ops/ci-smokes.json](../ops/ci-smokes.json)
+- **Sales Availability UX (Sprint XVIII):**
+  - Mobile hook: [apps/mobile/src/features/salesOrders/useAvailabilityBatch.ts](../apps/mobile/src/features/salesOrders/useAvailabilityBatch.ts)
+  - Mobile detail screen: [apps/mobile/src/screens/SalesOrderDetailScreen.tsx](../apps/mobile/src/screens/SalesOrderDetailScreen.tsx)
+  - Backend batch endpoint: [apps/api/src/inventory/onhand-batch.ts](../apps/api/src/inventory/onhand-batch.ts)
+  - Backend availability logic: [apps/api/src/sales/so-reserve.ts](../apps/api/src/sales/so-reserve.ts) and [so-commit.ts](../apps/api/src/sales/so-commit.ts)
 
 ---
 
@@ -473,6 +506,10 @@ Use a stable key for a given (poId, lineId, qty, lot, location), e.g.:
 
 **Notes / Deferred optimization**
 - 📌 **Future:** *Inventory movements: add GSI1 (partition key `ITEM#<itemId>`, time-ordered sort) and toggle read path behind `MBAPP_USE_GSI1`.* We’ll pick this up in the optimization sprint.
+
+### Known Limitations / Future Polish (Sprint XVIII)
+- **BackordersList filtering:** No backend support yet for SO or itemId filtering. CTA from SO detail navigates to global open backorders list. Recommend adding `soId` query param + backend filter when needed.
+- **409 UX for Cancel/Close:** Currently show generic toast only (status-based guards don't include structured shortage detail like Reserve/Commit). No action needed unless we want parity; current UX acceptable.
 
 ### Future Epic — Config-Driven Business Processes (Deferred)
 We will add light orchestration for cross-object flows (e.g., Registration → communications → Reservation → Sales Order).
