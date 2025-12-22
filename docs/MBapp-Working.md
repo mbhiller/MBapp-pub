@@ -238,7 +238,7 @@ cd apps/mobile && npm run typecheck
 - **Per-line availability pills**: SO detail renders `{onHand, reserved, available}` for each line via new `useSalesOrderAvailability` hook (calls POST `/inventory/onhand:batch`).
 - **409 error parsing**: Reserve/Commit 409s parse structured `shortages[]` payload and show a single alert listing top 3 items with demand vs. available; fallback to generic toast if data missing.
 - **Availability refetch**: After any action success or 409, refetch availability so pills stay current.
-- **Backorders navigation**: SO detail header shows tappable "Backorders present" badge when `so.backorders.length > 0`; navigates to BackordersList (unfiltered; shows all open backorders).
+- **Backorders navigation**: SO detail header shows tappable "Backorders present" badge when `so.backorders.length > 0`; navigates to BackordersList and passes `soId` param for client-side filtering (v2 in Sprint XIX).
 - **Duplicate CTA cleanup**: commitHint "View Backorders" button only shows when no header CTA (zero duplication).
 
 **Backend**
@@ -254,6 +254,31 @@ cd apps/mobile && npm run typecheck
 - [x] Availability refetched after actions + 409
 - [x] Badge tap navigates to BackordersList when backorders exist
 - [x] No duplicate CTAs (header badge is sole entry point)
+- [x] Typecheck passes
+
+---
+
+## ✅ Sprint XIX — BackordersList Deep-Link Filter by soId (2025-12-22)
+
+**Theme:** Client-side filtering of BackordersList when navigating from SalesOrderDetailScreen, passing Sales Order context without backend changes.
+
+**Mobile**
+- **SO → BackordersList deep-link**: SO detail backorder badge/pill now passes `{ soId: so.id }` to BackordersList route; BackordersList reads `route.params?.soId` and applies client-side filter to show only backorders matching that soId.
+- **Filter banner**: When soId is active, a non-invasive blue banner at top shows "Filtered to Sales Order: <id>" with a "Clear" pressable that navigates back to BackordersList without params (resetting to show all open backorders).
+- **Preserved behavior**: Existing vendor filter and pagination remain unaffected; soId filter chains with vendor filter if both present.
+- **Note:** Client-side filter only; backend list endpoint does not support `filter.soId` yet. When both filters applied, client receives full list and filters locally.
+
+**Files Modified**
+- Mobile: `apps/mobile/src/navigation/types.ts` (BackordersList param type)
+- Mobile: `apps/mobile/src/screens/SalesOrderDetailScreen.tsx` (pass soId to nav)
+- Mobile: `apps/mobile/src/screens/BackordersListScreen.tsx` (read soId, apply filter, show banner)
+
+**Definition of Done**
+- [x] Navigation param type updated (soId optional)
+- [x] SalesOrderDetailScreen passes soId on badge/button press
+- [x] BackordersListScreen reads and filters by soId
+- [x] Filter banner shown when soId present; Clear button resets
+- [x] Existing vendor filter and pagination work with soId
 - [x] Typecheck passes
 
 ---

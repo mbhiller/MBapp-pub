@@ -189,7 +189,7 @@ export default function SalesOrderDetailScreen() {
       <Text>Status: {so?.status}</Text>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
         {backorders.length > 0 ? (
-          <Pressable onPress={() => nav.navigate("BackordersList")}>
+          <Pressable onPress={() => so?.id ? nav.navigate("BackordersList", { soId: so.id }) : nav.navigate("BackordersList")}>
             <BackorderHeaderBadge count={backorders.length} />
           </Pressable>
         ) : (
@@ -202,7 +202,7 @@ export default function SalesOrderDetailScreen() {
         <View style={{ marginTop: 10, padding: 10, borderRadius: 8, backgroundColor: commitHint.type === "success" ? "#e8f5e9" : "#fff3e0", borderLeftWidth: 4, borderLeftColor: commitHint.type === "success" ? "#4caf50" : "#ff9800" }}>
           <Text style={{ fontSize: 13, marginBottom: 6, color: commitHint.type === "success" ? "#2e7d32" : "#e65100" }}>{commitHint.message}</Text>
           {commitHint.type === "success" && backorders.length === 0 && (
-            <Pressable onPress={() => { setCommitHint(null); nav.navigate("BackordersList"); }} style={{ paddingHorizontal: 10, paddingVertical: 6, backgroundColor: "#4caf50", borderRadius: 4, alignSelf: "flex-start" }}>
+            <Pressable onPress={() => { setCommitHint(null); so?.id ? nav.navigate("BackordersList", { soId: so.id }) : nav.navigate("BackordersList"); }} style={{ paddingHorizontal: 10, paddingVertical: 6, backgroundColor: "#4caf50", borderRadius: 4, alignSelf: "flex-start" }}>
               <Text style={{ color: "#fff", fontWeight: "600", fontSize: 12 }}>View Backorders</Text>
             </Pressable>
           )}
