@@ -41,6 +41,9 @@ export type RootStackParamList = {
   SalesOrdersList: undefined;
   SalesOrderDetail: DetailParams;
 
+  // Backorders
+  BackordersList: undefined;
+
   // Routing and Delivery
   RoutePlanList: undefined;
   RoutePlanDetail: DetailParams;

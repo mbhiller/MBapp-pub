@@ -64,11 +64,15 @@ export default function DevToolsScreen({ navigation }: any) {
   /* -------------------- Open list shortcuts -------------------- */
   const openEvents = () => navigation.navigate("EventsList");
   const openParties = () => navigation.navigate("PartyList");
+  const openSalesOrders = () => navigation.navigate("SalesOrdersList");
   const openProducts = () => navigation.navigate("ProductsList");
   const openInventory = () => navigation.navigate("InventoryList");
   const openResources = () => navigation.navigate("ResourcesList");
   const openReservations = () => navigation.navigate("ReservationsList");
   const openRegistrations = () => navigation.navigate("RegistrationsList");
+
+  /* -------------------- Seed button wrappers (convert Promise<T> to Promise<void>) -------------------- */
+  const onSeedPartyPress = async () => { await seedParty(); };
 
   /* -------------------- Seed helpers -------------------- */
   const seedEvent = async () => {
@@ -101,8 +105,10 @@ export default function DevToolsScreen({ navigation }: any) {
       setLastPartyId(p?.id ?? null);
       toast(`✓ Party created: ${p?.id ?? "(unknown)"}`, "success");
       qc.invalidateQueries({ queryKey: ["party"] });
+      return p?.id ?? null;
     } catch (e: any) {
       toast(`✗ Party seed failed: ${e?.message ?? String(e)}`, "error");
+      return null;
     }
   };
 
@@ -196,6 +202,11 @@ export default function DevToolsScreen({ navigation }: any) {
     return await seedInventoryItem();
   };
 
+  const ensurePartyId = async (): Promise<string | null> => {
+    if (lastPartyId) return lastPartyId;
+    return await seedParty();
+  };
+
   const ensureVendorId = async (): Promise<string | null> => {
     if (lastVendorId) return lastVendorId;
     return await seedVendor();
@@ -234,6 +245,34 @@ export default function DevToolsScreen({ navigation }: any) {
       toast(`✓ PO received: ${poId}`, "success");
     } catch (e: any) {
       toast(`✗ PO receive failed: ${e?.message ?? String(e)}`, "error");
+    }
+  };
+
+  const seedSalesOrder = async () => {
+    try {
+      const partyId = await ensurePartyId();
+      if (!partyId) throw new Error("No party available");
+
+      const itemId = await ensureInventoryId();
+      if (!itemId) throw new Error("No inventory item available");
+
+      const shortId = Math.random().toString(36).slice(2, 8);
+      const so = await apiClient.post<any>(
+        "/objects/salesOrder",
+        {
+          type: "salesOrder" as any,
+          status: "draft" as any,
+          partyId,
+          lines: [{ id: `L${shortId}`, itemId, qty: 2, uom: "ea" }],
+        }
+      );
+      const soId = (so as any)?.id ?? (so as any)?.body?.id;
+      if (!soId) throw new Error("Sales order create failed");
+
+      setLastSalesOrderId(soId);
+      toast(`✓ SO created: ${soId}`, "success");
+    } catch (e: any) {
+      toast(`✗ Sales order seed failed: ${e?.message ?? String(e)}`, "error");
     }
   };
 
@@ -375,6 +414,7 @@ export default function DevToolsScreen({ navigation }: any) {
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
           <Button title="Events" onPress={openEvents} />
           <Button title="Parties" onPress={openParties} />
+          <Button title="Open Sales Orders" onPress={openSalesOrders} />
           <Button title="Products" onPress={openProducts} />
           <Button title="Open Inventory" onPress={openInventory} />
           <Button title="Resources" onPress={openResources} />
@@ -388,11 +428,12 @@ export default function DevToolsScreen({ navigation }: any) {
         {sectionTitle("Seed")}
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
           <Button title="Seed Event" onPress={seedEvent} />
-          <Button title="Seed Party" onPress={seedParty} />
+          <Button title="Seed Party" onPress={onSeedPartyPress} />
           <Button title="Seed Vendor" onPress={async () => { await seedVendor(); }} />
           <Button title="Seed Product" onPress={seedProduct} />
           <Button title="Seed Inventory Item" onPress={async () => { await seedInventoryItem(); }} />
           <Button title="Seed PO + Receive" onPress={async () => { await seedPurchaseOrderReceive(); }} />
+          <Button title="Seed Sales Order" onPress={seedSalesOrder} />
           <Button title="Check Stock (last inventory)" onPress={async () => { await checkStockLastInventory(); }} disabled={!lastInventoryId} />
           <Button title="Seed Resource" onPress={seedResource} />
           <Button title="Seed Reservation" onPress={seedReservation} />

@@ -53,6 +53,9 @@ import PurchaseOrderDetailScreen from "../screens/PurchaseOrderDetailScreen";
 import SalesOrdersListScreen from   "../screens/SalesOrdersListScreen";
 import SalesOrderDetailScreen from  "../screens/SalesOrderDetailScreen";
 
+// Backorders
+import BackordersListScreen from "../screens/BackordersListScreen";
+
 import RoutePlanListScreen from "../screens/RoutePlanListScreen";
 import RoutePlanDetailScreen from "../screens/RoutePlanDetailScreen";
 
@@ -130,6 +133,9 @@ export default function RootStack() {
     {/* Sales Orders */}
     <Stack.Screen name="SalesOrdersList" component={SalesOrdersListScreen} options={{ title: "Sales" }} />
     <Stack.Screen name="SalesOrderDetail" component={SalesOrderDetailScreen} options={{ title: "Sales Order" }} />
+    
+    {/* Backorders */}
+    <Stack.Screen name="BackordersList" component={BackordersListScreen} options={{ title: "Backorders" }} />
 
   </Stack.Navigator>
   );
