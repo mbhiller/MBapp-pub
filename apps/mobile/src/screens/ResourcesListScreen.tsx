@@ -3,7 +3,7 @@ import * as React from "react";
 import { View, Text, FlatList, Pressable, ActivityIndicator } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { listResources, createResource } from "../features/resources/api";
+import { listResources } from "../features/resources/api";
 import type { Resource } from "../features/resources/types";
 import type { RootStackParamList } from "../navigation/types";
 import { useTheme } from "../providers/ThemeProvider";
@@ -20,7 +20,6 @@ export default function ResourcesListScreen() {
   const [isLoading, setIsLoading] = React.useState(true);
   const [isLoadingMore, setIsLoadingMore] = React.useState(false);
   const [lastError, setLastError] = React.useState<string | null>(null);
-  const [seedStatus, setSeedStatus] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     void load();
@@ -62,24 +61,6 @@ export default function ResourcesListScreen() {
     if (!value) return "";
     const d = new Date(value);
     return isNaN(d.getTime()) ? String(value) : d.toLocaleString();
-  };
-
-  const seedResource = async () => {
-    setSeedStatus(null);
-    try {
-      const name = `Resource ${new Date().toISOString().replace(/[:.]/g, "-")}`;
-      await createResource({
-        // minimal payload aligned with smokes
-        type: "resource" as any,
-        name: name as any,
-        status: "available" as any,
-      });
-      setSeedStatus("✓ Resource created");
-      await load();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setSeedStatus(`✗ Failed: ${msg}`);
-    }
   };
 
   const renderItem = ({ item }: { item: Resource }) => {
@@ -132,27 +113,6 @@ export default function ResourcesListScreen() {
 
   return (
     <View style={{ flex: 1, padding: 12, backgroundColor: t.colors.bg }}>
-      {__DEV__ && (
-        <View style={{ marginBottom: 8 }}>
-          <View style={{ flexDirection: "row", alignItems: "center" }}>
-            <Pressable
-              onPress={seedResource}
-              style={{
-                paddingVertical: 8,
-                paddingHorizontal: 12,
-                backgroundColor: t.colors.primary,
-                borderRadius: 6,
-                marginRight: 8,
-              }}
-            >
-              <Text style={{ color: "#fff", fontWeight: "700" }}>Seed Resource</Text>
-            </Pressable>
-            {seedStatus && (
-              <Text style={{ color: t.colors.textMuted }}>{seedStatus}</Text>
-            )}
-          </View>
-        </View>
-      )}
       {lastError && (
         <View
           style={{

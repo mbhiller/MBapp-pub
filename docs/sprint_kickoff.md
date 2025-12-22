@@ -287,6 +287,48 @@ npm run typecheck
 # 3) Create Reservation → see availability blocks for selected resource
 ```
 
+
+## Sprint XVI — Kickoff (Template)
+
+**Context**
+- Branch: `feat/tier1-sprint-XVI`
+- Scope/Theme: {{fill in}}
+
+**Scope / Deliverables**
+- {{fill in}}
+
+**Acceptance Criteria**
+- {{fill in}}
+
+**Verification**
+```bash
+cd apps/mobile && npm run typecheck
+```
+
+**Notes / Additional Context**
+- {{fill in}}
+
+---
+
+## Sprint XV — Wrap (Housekeeping + Stabilization)
+
+**Highlights**
+- InventoryListScreen stabilized: refresh on focus, deterministic newest-first render sort, dev limit 200 so new items don’t disappear when navigating.
+- EventsListScreen sorting fixed (newest-first).
+- StockCard “Recent movements” clarified: shows action + signed qty; clear date line; PO/SO reference line (with line id when available); removed confusing index/"0" label.
+- Removed per-screen seed buttons from mobile list screens (DevTools is the only seed UI):
+  - apps/mobile/src/screens/EventsListScreen.tsx
+  - apps/mobile/src/screens/PartyListScreen.tsx
+  - apps/mobile/src/screens/ResourcesListScreen.tsx
+  - apps/mobile/src/screens/RegistrationsListScreen.tsx
+- ReservationsListScreen: removed debug API base/tenant/token/headers display and console logs.
+- Products list confirmed stable (sort/refresh pattern aligned).
+
+**Verification**
+```bash
+cd apps/mobile && npm run typecheck
+```
+
 ---
 
 ## Sprint XIII — Dev Tools + Feature Consolidation

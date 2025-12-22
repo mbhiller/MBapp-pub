@@ -3,7 +3,7 @@ import * as React from "react";
 import { View, Text, FlatList, Pressable, ActivityIndicator, TextInput } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { listEvents, createEvent } from "../features/events/api";
+import { listEvents } from "../features/events/api";
 import type { Event } from "../features/events/types";
 import type { RootStackParamList } from "../navigation/types";
 import { useTheme } from "../providers/ThemeProvider";
@@ -21,8 +21,6 @@ export default function EventsListScreen() {
   const [isLoadingMore, setIsLoadingMore] = React.useState(false);
   const [lastError, setLastError] = React.useState<string | null>(null);
   const [q, setQ] = React.useState("");
-  const [seedMessage, setSeedMessage] = React.useState<string | null>(null);
-  const [isSeeding, setIsSeeding] = React.useState(false);
 
   React.useEffect(() => {
     void load();
@@ -64,33 +62,6 @@ export default function EventsListScreen() {
     if (!value) return "";
     const d = new Date(value);
     return isNaN(d.getTime()) ? String(value) : d.toLocaleString();
-  };
-
-  const seedEvent = async () => {
-    setIsSeeding(true);
-    setSeedMessage(null);
-    try {
-      const now = new Date();
-      const endsAt = new Date(now.getTime() + 2 * 60 * 60 * 1000); // +2 hours
-      await createEvent({
-        name: "Seed Event - Dev",
-        status: "scheduled",
-        startsAt: now.toISOString(),
-        endsAt: endsAt.toISOString(),
-        location: "Dev",
-      });
-      setSeedMessage("✓ Event created");
-      // Reset search and reload list
-      setQ("");
-      setItems([]);
-      setNext(null);
-      await load();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      setSeedMessage(`✗ Failed to create event: ${msg}`);
-    } finally {
-      setIsSeeding(false);
-    }
   };
 
   const renderItem = ({ item }: { item: Event }) => {
@@ -139,6 +110,18 @@ export default function EventsListScreen() {
     );
   };
 
+  const sortedItems = React.useMemo(() => {
+    return [...items].sort((a, b) => {
+      const aCreated = (a as any).createdAt ? new Date((a as any).createdAt).getTime() : 0;
+      const bCreated = (b as any).createdAt ? new Date((b as any).createdAt).getTime() : 0;
+      if (aCreated !== bCreated) return bCreated - aCreated;
+      const aUpdated = (a as any).updatedAt ? new Date((a as any).updatedAt).getTime() : 0;
+      const bUpdated = (b as any).updatedAt ? new Date((b as any).updatedAt).getTime() : 0;
+      if (aUpdated !== bUpdated) return bUpdated - aUpdated;
+      return (b.id || "").localeCompare(a.id || "");
+    });
+  }, [items]);
+
   return (
     <View style={{ flex: 1, padding: 12, backgroundColor: t.colors.bg }}>
       {lastError && (
@@ -156,38 +139,6 @@ export default function EventsListScreen() {
             Error loading events
           </Text>
           <Text style={{ color: "#8a1f2d", fontSize: 12 }}>{lastError}</Text>
-        </View>
-      )}
-
-      {__DEV__ && (
-        <View style={{ marginBottom: 12, flexDirection: "row", gap: 8, alignItems: "center" }}>
-          <Pressable
-            onPress={seedEvent}
-            disabled={isSeeding}
-            style={{
-              paddingVertical: 8,
-              paddingHorizontal: 12,
-              backgroundColor: isSeeding ? "#ccc" : "#4CAF50",
-              borderRadius: 6,
-              flex: 1,
-              alignItems: "center",
-            }}
-          >
-            <Text style={{ color: "#fff", fontWeight: "600", fontSize: 12 }}>
-              {isSeeding ? "Seeding..." : "Seed Event"}
-            </Text>
-          </Pressable>
-          {seedMessage && (
-            <Text
-              style={{
-                fontSize: 11,
-                color: seedMessage.startsWith("✓") ? "#4CAF50" : "#d32f2f",
-                flex: 1,
-              }}
-            >
-              {seedMessage}
-            </Text>
-          )}
         </View>
       )}
 
@@ -216,7 +167,7 @@ export default function EventsListScreen() {
         </View>
       ) : (
         <FlatList
-          data={items}
+          data={sortedItems}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
           onEndReached={loadMore}

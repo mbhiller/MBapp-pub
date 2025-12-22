@@ -139,6 +139,7 @@ export default function PartyDetailScreen() {
   return (
     <ScrollView style={{ flex: 1, padding: 16, backgroundColor: t.colors.background }}>
       {/* Core Fields */}
+      {renderField("ID", party.id)}
       {renderField("Name", displayName)}
       {renderField("Kind", kind)}
       {renderField("Status", status)}
