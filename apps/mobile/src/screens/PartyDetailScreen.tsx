@@ -5,6 +5,9 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 import { getParty } from "../features/parties/api";
+import { listRegistrations } from "../features/registrations/api";
+import type { Registration } from "../features/registrations/types";
+import { FEATURE_REGISTRATIONS_ENABLED } from "../features/_shared/flags";
 import type { RootStackParamList } from "../navigation/types";
 import { useColors } from "../features/_shared/useColors";
 
@@ -21,6 +24,10 @@ export default function PartyDetailScreen() {
   const [isLoading, setIsLoading] = React.useState(true);
   const [lastError, setLastError] = React.useState<string | null>(null);
 
+  const [registrations, setRegistrations] = React.useState<Registration[]>([]);
+  const [regIsLoading, setRegIsLoading] = React.useState(false);
+  const [regError, setRegError] = React.useState<string | null>(null);
+
   React.useEffect(() => {
     void load();
   }, [partyId]);
@@ -36,12 +43,31 @@ export default function PartyDetailScreen() {
     try {
       const res = await getParty(partyId);
       setParty(res);
+      if (FEATURE_REGISTRATIONS_ENABLED) {
+        await loadRegistrations(partyId);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
       setLastError(msg);
       setParty(null);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const loadRegistrations = async (pId: string) => {
+    setRegIsLoading(true);
+    setRegError(null);
+    try {
+      const page = await listRegistrations({ limit: 100 });
+      const filtered = (page.items || []).filter((r) => (r as any).partyId === pId);
+      setRegistrations(filtered.slice(0, 20));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      setRegError(msg);
+      setRegistrations([]);
+    } finally {
+      setRegIsLoading(false);
     }
   };
 
@@ -204,6 +230,70 @@ export default function PartyDetailScreen() {
           )}
         </View>
       )}
+
+      {/* Registrations Section */}
+      <View style={{ marginTop: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: t.colors.border }}>
+        <Text style={{ fontSize: 16, fontWeight: "700", color: t.colors.text, marginBottom: 12 }}>
+          Registrations
+        </Text>
+
+        {!FEATURE_REGISTRATIONS_ENABLED ? (
+          <Text style={{ color: t.colors.textMuted, fontSize: 12 }}>Registrations are disabled</Text>
+        ) : regError && regError.toLowerCase().includes("disabled") ? (
+          <Text style={{ color: t.colors.textMuted, fontSize: 12 }}>Registrations are disabled</Text>
+        ) : regError ? (
+          <View
+            style={{
+              padding: 8,
+              backgroundColor: "#fdecea",
+              borderColor: "#f5c6cb",
+              borderWidth: 1,
+              borderRadius: 6,
+              marginBottom: 8,
+            }}
+          >
+            <Text style={{ color: "#8a1f2d", fontSize: 12, marginBottom: 6 }}>{regError}</Text>
+            <Pressable
+              onPress={() => party?.id && loadRegistrations(party.id)}
+              style={{
+                paddingVertical: 6,
+                paddingHorizontal: 10,
+                backgroundColor: t.colors.primary,
+                borderRadius: 6,
+                alignSelf: "flex-start",
+              }}
+            >
+              <Text style={{ color: "#fff", fontWeight: "600" }}>Retry registrations</Text>
+            </Pressable>
+          </View>
+        ) : regIsLoading ? (
+          <ActivityIndicator size="small" color={t.colors.primary} />
+        ) : registrations.length === 0 ? (
+          <Text style={{ color: t.colors.textMuted, fontSize: 12 }}>No registrations for this party</Text>
+        ) : (
+          <View>
+            {registrations.slice(0, 20).map((r) => (
+              <Pressable
+                key={r.id}
+                onPress={() => navigation.navigate("RegistrationDetail", { id: r.id })}
+                style={{
+                  padding: 10,
+                  borderWidth: 1,
+                  borderColor: t.colors.border,
+                  borderRadius: 6,
+                  marginBottom: 6,
+                  backgroundColor: t.colors.card,
+                }}
+              >
+                <Text style={{ color: t.colors.text, fontWeight: "600", marginBottom: 2 }}>
+                  {r.eventId || r.id}
+                </Text>
+                <Text style={{ color: t.colors.textMuted, fontSize: 12 }}>Status: {(r as any).status || "draft"}</Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
+      </View>
 
       <View style={{ height: 32 }} />
     </ScrollView>

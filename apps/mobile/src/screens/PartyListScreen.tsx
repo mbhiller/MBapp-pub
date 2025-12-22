@@ -3,7 +3,7 @@ import * as React from "react";
 import { View, Text, FlatList, Pressable, ActivityIndicator, TextInput } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { findParties, createParty } from "../features/parties/api";
+import { findParties, createParty, addPartyRole } from "../features/parties/api";
 import type { Party } from "../features/parties/api";
 import type { RootStackParamList } from "../navigation/types";
 import { useColors } from "../features/_shared/useColors";
@@ -31,7 +31,6 @@ export default function PartyListScreen() {
     try {
       const parties = await findParties({
         q: q || undefined,
-        role: role || undefined,
       });
       setItems(parties || []);
     } catch (err) {
@@ -56,11 +55,19 @@ export default function PartyListScreen() {
     setIsSeeding(true);
     setSeedMessage(null);
     try {
-      await createParty({
+      const created = await createParty({
         kind: "person",
         name: "Seed Party - Dev",
       });
-      setSeedMessage("✓ Party created");
+      // Attempt to add a default role based on kind
+      try {
+        const roleToAdd: "customer" | "vendor" = (created as any).kind === "organization" ? "vendor" : "customer";
+        await addPartyRole(created.id, roleToAdd);
+        setSeedMessage("✓ Party + role created");
+      } catch (e: any) {
+        const msg = e?.message || "Unknown error";
+        setSeedMessage(`✗ Role create failed: ${msg}`);
+      }
       // Reset search and reload list
       setQ("");
       setRole("");
@@ -78,6 +85,22 @@ export default function PartyListScreen() {
     const title = displayName(item);
     const kind = (item as any).kind || "unknown";
     const status = (item as any).status || "active";
+    const createdAt = (item as any).createdAt as string | undefined;
+    const updatedAt = (item as any).updatedAt as string | undefined;
+
+    const formatDateTime = (value?: string) => {
+      if (!value) return "";
+      const d = new Date(value);
+      return isNaN(d.getTime()) ? String(value) : d.toLocaleString();
+    };
+
+    const isNew = (() => {
+      if (!createdAt) return false;
+      const now = Date.now();
+      const ts = new Date(createdAt).getTime();
+      if (isNaN(ts)) return false;
+      return now - ts <= 10 * 60 * 1000; // 10 minutes
+    })();
 
     return (
       <Pressable
@@ -91,17 +114,47 @@ export default function PartyListScreen() {
           backgroundColor: t.colors.card,
         }}
       >
-        <Text style={{ color: t.colors.text, fontWeight: "700", marginBottom: 4 }}>
-          {title}
-        </Text>
+        <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 4 }}>
+          <Text style={{ color: t.colors.text, fontWeight: "700" }}>{title}</Text>
+          {isNew && (
+            <View style={{ marginLeft: 8, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10, backgroundColor: t.colors.primary }}>
+              <Text style={{ color: "#fff", fontSize: 10, fontWeight: "700" }}>NEW</Text>
+            </View>
+          )}
+        </View>
         <Text style={{ color: t.colors.textMuted, fontSize: 12, marginBottom: 2 }}>
           Kind: {kind}
         </Text>
         <Text style={{ color: t.colors.textMuted, fontSize: 12 }}>Status: {status}</Text>
+        <Text style={{ color: t.colors.textMuted, fontSize: 11, marginTop: 4 }}>
+          {createdAt ? `Created: ${formatDateTime(createdAt)}` : updatedAt ? `Updated: ${formatDateTime(updatedAt)}` : ""}
+        </Text>
       </Pressable>
     );
   };
 
+  // Derived display list: client-side role filtering + sort newest first
+  const displayItems = React.useMemo(() => {
+    const f = (role || "").trim().toLowerCase();
+    let out = [...items];
+    if (f) {
+      out = out.filter((p: any) => {
+        const flags: Record<string, boolean> = (p.roleFlags as any) || {};
+        const roles: string[] = Array.isArray(p.roles) ? (p.roles as string[]) : [];
+        const matchFlag = Object.entries(flags).some(([k, v]) => v === true && k.toLowerCase().includes(f));
+        const matchRole = roles.some((r) => (r || "").toLowerCase().includes(f));
+        return matchFlag || matchRole;
+      });
+    }
+    const score = (p: any): number => {
+      const ca = p?.createdAt ? new Date(p.createdAt).getTime() : NaN;
+      const ua = p?.updatedAt ? new Date(p.updatedAt).getTime() : NaN;
+      const ts = !isNaN(ca) ? ca : !isNaN(ua) ? ua : 0;
+      return ts;
+    };
+    out.sort((a, b) => score(b) - score(a));
+    return out;
+  }, [items, role]);
   return (
     <View style={{ flex: 1, padding: 12, backgroundColor: t.colors.background }}>
       {lastError && (
@@ -209,7 +262,7 @@ export default function PartyListScreen() {
         </View>
       ) : (
         <FlatList
-          data={items}
+          data={displayItems}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
         />

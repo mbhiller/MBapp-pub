@@ -419,6 +419,25 @@ cd apps/mobile && npm run typecheck
 - Seed a party (dev button), refresh list (search + role filter), then open detail.
 - Confirm error banners show and retry works when fetch fails.
 
+---
+
+## Sprint XI — Registrations Enabled + Parties UX Improvements
+
+**Registrations**
+- Mobile flag: `FEATURE_REGISTRATIONS_ENABLED` now respects `EXPO_PUBLIC_FEATURE_REGISTRATIONS_ENABLED` (removed `__DEV__` forced false). Registrations tile appears when enabled.
+- Backend `/registrations` returns 200; related registrations render on EventDetail and PartyDetail (client-side filter by `eventId`/`partyId`, up to 20, tappable to RegistrationDetail).
+- __DEV__ Seed Registration button (when present) creates minimal registration; CI now includes registrations smokes via `ops/ci-smokes.json`.
+
+**Parties**
+- Dev seed creates `partyRole` (customer/vendor) after creating the party to match smoke canonical setup.
+- PartyListScreen: shows created/updated timestamps, adds a "NEW" badge for items created within 10 minutes, sorts newest-first, and fixes role filtering client-side (checks `roleFlags` and `roles`).
+
+**Verify**
+```bash
+cd apps/mobile && npm run typecheck
+node ops/tools/run-ci-smokes.mjs
+```
+
 - **Flags:** Defaults OFF; can be overridden in dev/CI via headers:
   - `FEATURE_VIEWS_ENABLED` / `X-Feature-Views-Enabled`
   - `FEATURE_EVENT_DISPATCH_ENABLED` / `X-Feature-Events-Enabled`

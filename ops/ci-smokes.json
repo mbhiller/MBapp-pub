@@ -1,5 +1,7 @@
 {
   "flows": [
+    "smoke:registrations:crud",
+    "smoke:registrations:filters",
     "smoke:reservations:conflicts"
   ]
 }
