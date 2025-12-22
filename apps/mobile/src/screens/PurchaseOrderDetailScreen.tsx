@@ -18,6 +18,7 @@ export default function PurchaseOrderDetailScreen() {
 
   const { data, isLoading, refetch } = useObjects<any>({ type: "purchaseOrder", id });
   const po = data;
+  const { data: vendorParty } = useObjects<any>({ type: "party", id: po?.vendorId });
   const lines = (po?.lines ?? []) as any[];
   const toast = (useToast?.() as any) ?? ((t: string) => console.log("TOAST:", t));
 
@@ -58,6 +59,7 @@ export default function PurchaseOrderDetailScreen() {
   const receivable = po?.status === "approved" || po?.status === "partially_fulfilled";
   // Match banner semantics: vendor must exist AND have the "vendor" role
   const vendorHasRole =
+    !!(vendorParty?.roles?.includes("vendor")) ||
     !!(po?.vendorHasVendorRole === true) ||
     !!(Array.isArray((po as any)?.vendorRoles) && (po as any).vendorRoles.includes("vendor"));
   const vendorGuardActive = !po?.vendorId || !vendorHasRole;
@@ -72,6 +74,22 @@ export default function PurchaseOrderDetailScreen() {
     <View style={{ flex: 1, padding: 12 }}>
       <Text style={{ fontSize: 18, fontWeight: "700", marginBottom: 6 }}>Purchase Order {po?.id}</Text>
       <Text>Status: {po?.status}</Text>
+
+      {/* Vendor identity row */}
+      <View style={{ marginTop: 8, marginBottom: 4, flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+        <Text style={{ fontWeight: "600" }}>Vendor:</Text>
+        <Text style={{ flexShrink: 1 }}>
+          {vendorParty?.name || vendorParty?.displayName || po?.vendorId || "(required)"}
+        </Text>
+        <Pressable onPress={() => setVendorModalOpen(true)} style={{ paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderRadius: 6 }}>
+          <Text>Change</Text>
+        </Pressable>
+        {!!po?.vendorId && (
+          <Pressable onPress={() => navigation.navigate("PartyDetail", { id: po?.vendorId })} style={{ paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderRadius: 6 }}>
+            <Text>Open</Text>
+          </Pressable>
+        )}
+      </View>
 
       {/* Vendor Guard (friendly banner when missing/invalid vendor) */}
       <View style={{ marginTop: 10 }}>

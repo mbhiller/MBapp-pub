@@ -87,9 +87,35 @@ export default function SalesOrderDetailScreen() {
       await refetch();
     } catch (e: any) {
       console.error(e);
-      if (e?.status === 409 && label === "Commit (strict)") {
-        toast("Shortages detected. Strict commit blocked.", "warning");
-        setCommitHint({ type: "error", message: "Try non-strict commit to create backorders." });
+      if (e?.status === 409) {
+        // User-friendly 409 messages
+        if (label === "Commit (strict)") {
+          toast("Shortages detected. Strict commit blocked.", "warning");
+          setCommitHint({ type: "error", message: "Try non-strict commit to create backorders." });
+        } else if (label === "Commit") {
+          toast("Insufficient availability to commit.", "warning");
+          setCommitHint(null);
+        } else if (label === "Reserve") {
+          toast(e?.message || "Insufficient availability to reserve.", "warning");
+        } else if (label === "Release") {
+          toast(e?.message || "Cannot release: inventory conflict.", "warning");
+        } else if (label === "Fulfill") {
+          toast(e?.message || "Insufficient availability to fulfill.", "warning");
+        } else if (label === "Cancel") {
+          toast(e?.message || "Cannot cancel with reservations or fulfillments.", "warning");
+        } else if (label === "Close") {
+          toast(e?.message || "Cannot close unless order is fulfilled.", "warning");
+        } else {
+          toast(e?.message || `${label} failed (conflict)`, "warning");
+        }
+      } else if (e?.status === 500) {
+        // Handle server errors
+        if (label === "Close") {
+          toast("Close failed (server error). Try again after refresh.", "error");
+        } else {
+          toast(e?.message || `${label} failed`, "error");
+        }
+        setCommitHint(null);
       } else {
         toast(e?.message || `${label} failed`, "error");
         setCommitHint(null);
@@ -97,13 +123,18 @@ export default function SalesOrderDetailScreen() {
     }
   }
 
+  const hasReservations = lines.some((line: any) => Number(line?.qtyReserved ?? 0) > 0);
+  const hasFulfillments = lines.some((line: any) => Number(line?.qtyFulfilled ?? 0) > 0);
+  const isCancelled = ["canceled", "cancelled"].includes(so?.status);
+  const isClosed = so?.status === "closed";
+
   const canSubmit = so?.status === "draft";
   const canCommit = ["submitted"].includes(so?.status);
   const canReserve = ["submitted", "committed", "partially_fulfilled"].includes(so?.status);
   const canRelease = ["submitted", "committed", "partially_fulfilled"].includes(so?.status);
   const canFulfill = ["submitted", "committed", "partially_fulfilled"].includes(so?.status);
-  const canCancel = !["fulfilled", "cancelled", "canceled", "closed"].includes(so?.status);
-  const canClose = !["cancelled", "canceled", "closed"].includes(so?.status);
+  const canCancel = !(hasReservations || hasFulfillments || isCancelled || isClosed);
+  const canClose = !(isCancelled || isClosed);
 
   if (isLoading) return <ActivityIndicator />;
 
