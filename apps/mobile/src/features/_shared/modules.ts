@@ -58,6 +58,7 @@ export const MODULES: readonly ModuleEntry[] = [
 
   { key: "parties",       title: "Parties",          screen: "PartyList",      icon: "users",           required: ["parties:read"] },
   { key: "inventory",     title: "Inventory",        screen: "InventoryList",    icon: "boxes",           required: ["inventory:read"] },
+  { key: "products",      title: "Products",         screen: "ProductsList",     icon: "package",         required: ["products:read"] },
 
 
   // Purchasing / Sales

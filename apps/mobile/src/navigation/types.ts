@@ -63,4 +63,8 @@ export type RootStackParamList = {
   EventsList: undefined;
   EventDetail: DetailParams;
   
+  // Products (Sprint XIV)
+  ProductsList: undefined;
+  ProductDetail: DetailParams;
+  
 };

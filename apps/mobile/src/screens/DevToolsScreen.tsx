@@ -6,6 +6,7 @@ import { useToast } from "../features/_shared/Toast";
 import { listEvents, createEvent } from "../features/events/api";
 import { findParties, createParty, addPartyRole } from "../features/parties/api";
 import { listResources, createResource } from "../features/resources/api";
+import { createProduct } from "../features/products/api";
 import { createRegistration } from "../features/registrations/api";
 import { createReservation } from "../features/reservations/api";
 
@@ -18,6 +19,7 @@ export default function DevToolsScreen({ navigation }: any) {
   const [lastPartyId, setLastPartyId] = React.useState<string | null>(null);
   const [lastVendorId, setLastVendorId] = React.useState<string | null>(null);
   const [lastResourceId, setLastResourceId] = React.useState<string | null>(null);
+  const [lastProductId, setLastProductId] = React.useState<string | null>(null);
   const [lastReservationId, setLastReservationId] = React.useState<string | null>(null);
   const [lastRegistrationId, setLastRegistrationId] = React.useState<string | null>(null);
 
@@ -55,6 +57,7 @@ export default function DevToolsScreen({ navigation }: any) {
   /* -------------------- Open list shortcuts -------------------- */
   const openEvents = () => navigation.navigate("EventsList");
   const openParties = () => navigation.navigate("PartyList");
+  const openProducts = () => navigation.navigate("ProductsList");
   const openResources = () => navigation.navigate("ResourcesList");
   const openReservations = () => navigation.navigate("ReservationsList");
   const openRegistrations = () => navigation.navigate("RegistrationsList");
@@ -118,6 +121,23 @@ export default function DevToolsScreen({ navigation }: any) {
       toast(`✓ Resource created: ${(r as any)?.id ?? "(unknown)"}`, "success");
     } catch (e: any) {
       toast(`✗ Resource seed failed: ${e?.message ?? String(e)}`, "error");
+    }
+  };
+
+  const seedProduct = async () => {
+    try {
+      const shortId = Math.random().toString(36).slice(2, 8);
+      const prod = await createProduct({
+        type: "product" as any,
+        name: `Seed Product - Dev ${shortId}`,
+        sku: `SKU-${shortId}`,
+        kind: "good" as any,
+        reorderEnabled: true as any,
+      });
+      setLastProductId((prod as any)?.id ?? null);
+      toast(`✓ Product created: ${(prod as any)?.id ?? "(unknown)"}`, "success");
+    } catch (e: any) {
+      toast(`✗ Product seed failed: ${e?.message ?? String(e)}`, "error");
     }
   };
 
@@ -205,6 +225,7 @@ export default function DevToolsScreen({ navigation }: any) {
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
           <Button title="Events" onPress={openEvents} />
           <Button title="Parties" onPress={openParties} />
+          <Button title="Products" onPress={openProducts} />
           <Button title="Resources" onPress={openResources} />
           <Button title="Reservations" onPress={openReservations} />
           <Button title="Registrations" onPress={openRegistrations} />
@@ -218,6 +239,7 @@ export default function DevToolsScreen({ navigation }: any) {
           <Button title="Seed Event" onPress={seedEvent} />
           <Button title="Seed Party" onPress={seedParty} />
           <Button title="Seed Vendor" onPress={seedVendor} />
+          <Button title="Seed Product" onPress={seedProduct} />
           <Button title="Seed Resource" onPress={seedResource} />
           <Button title="Seed Reservation" onPress={seedReservation} />
           <Button title="Seed Registration" onPress={seedRegistration} />
@@ -231,6 +253,7 @@ export default function DevToolsScreen({ navigation }: any) {
           <Text style={{ color: t.colors.textMuted, fontSize: 12 }}>Event: {lastEventId ?? "—"}</Text>
           <Text style={{ color: t.colors.textMuted, fontSize: 12 }}>Party: {lastPartyId ?? "—"}</Text>
           <Text style={{ color: t.colors.textMuted, fontSize: 12 }}>Vendor: {lastVendorId ?? "—"}</Text>
+          <Text style={{ color: t.colors.textMuted, fontSize: 12 }}>Product: {lastProductId ?? "—"}</Text>
           <Text style={{ color: t.colors.textMuted, fontSize: 12 }}>Resource: {lastResourceId ?? "—"}</Text>
           <Text style={{ color: t.colors.textMuted, fontSize: 12 }}>Reservation: {lastReservationId ?? "—"}</Text>
           <Text style={{ color: t.colors.textMuted, fontSize: 12 }}>Registration: {lastRegistrationId ?? "—"}</Text>
