@@ -1,55 +1,8 @@
 // apps/mobile/src/features/reservations/api.ts
-import { listObjects, getObject, createObject, updateObject } from "../../api/client";
+import { listObjects, getObject, createObject, updateObject, apiClient } from "../../api/client";
 import type { Reservation, Page } from "./types";
 
 const TYPE = "reservation";
-
-// Helper to make raw GET requests to the API
-async function request<T>(path: string): Promise<T> {
-  const API_BASE = (
-    process.env.MBAPP_API_BASE ??
-    process.env.EXPO_PUBLIC_API_BASE ??
-    "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com"
-  ).replace(/\/+$/, "");
-
-  const TENANT =
-    process.env.MBAPP_TENANT_ID ??
-    process.env.EXPO_PUBLIC_TENANT_ID ??
-    "DemoTenant";
-
-  const bearerToken = process.env.MBAPP_BEARER as string | undefined;
-
-  const headers: Record<string, string> = {
-    "accept": "application/json",
-    "content-type": "application/json",
-    "X-Tenant-Id": TENANT,
-    "x-tenant-id": TENANT,
-  };
-
-  if (bearerToken) {
-    headers["Authorization"] = `Bearer ${bearerToken}`;
-    headers["authorization"] = `Bearer ${bearerToken}`;
-  }
-
-  const url = `${API_BASE}${path}`;
-  const res = await fetch(url, { method: "GET", headers });
-
-  if (!res.ok) {
-    let detail = "";
-    try {
-      const data = await res.json();
-      const code = data?.code ? ` ${data.code}` : "";
-      const msg = typeof data?.message === "string" ? data.message : JSON.stringify(data);
-      detail = `${code} — ${msg}`;
-    } catch {
-      const text = await res.text().catch(() => "");
-      detail = text;
-    }
-    throw new Error(`HTTP ${res.status} ${res.statusText} for ${path}${detail ? ` — ${detail}` : ""}`);
-  }
-
-  return (await res.json()) as T;
-}
 
 const toOpts = (o?: { limit?: number; next?: string | null; q?: string }) => ({
   by: "updatedAt" as const, sort: "desc" as const,
@@ -125,7 +78,6 @@ export async function getResourceAvailability(
   from: string,
   to: string
 ): Promise<{ busy: Reservation[] }> {
-  return request<{ busy: Reservation[] }>(
-    `/resources/${encodeURIComponent(resourceId)}/availability?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
-  );
+  const path = `/resources/${encodeURIComponent(resourceId)}/availability?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+  return apiClient.get<{ busy: Reservation[] }>(path);
 }

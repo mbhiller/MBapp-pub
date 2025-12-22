@@ -1,5 +1,5 @@
 // apps/mobile/src/features/resources/api.ts
-import { listObjects, getObject } from "../../api/client";
+import { listObjects, getObject, createObject } from "../../api/client";
 import type { Resource, Page } from "./types";
 
 const TYPE = "resource";
@@ -21,3 +21,6 @@ export const listResources = async (o?: { limit?: number; next?: string | null; 
 };
 
 export const getResource = (id: string) => getObject<Resource>(TYPE, id);
+
+export const createResource = (payload: Partial<Resource>) =>
+  createObject<Resource>(TYPE, payload);
