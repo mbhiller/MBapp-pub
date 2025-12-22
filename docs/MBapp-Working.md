@@ -73,6 +73,37 @@ Sprint E is wrapped: backorder signals now drive purchasing via a worklist and P
 - Router wired; handlers implemented; movement persistence consistent with counters.
 - Smokes: Sales and Purchasing happy paths + guards.
 
+### ✅ Sprint XII — PartyRoles + Resource Seed + Availability Fix (Mobile)
+**Scope**
+- Parties: Seed Party/Vendor now prepends to list, clears filters, scrolls to top; role filter + unified NEW badge.
+- Resources: __DEV__ seed button; timestamps + NEW badge (10-minute window); newest-first sort.
+- Registrations/Reservations: Fixed `getResourceAvailability()` to use authenticated client (bearer always sent).
+
+**Mobile Files Modified:**
+1. `apps/mobile/src/screens/PartyListScreen.tsx` – Added Seed Vendor button, prepend/scroll logic, import getParty.
+2. `apps/mobile/src/screens/ResourcesListScreen.tsx` – Seed Resource button, timestamps, unified NEW badge pill style.
+3. `apps/mobile/src/features/resources/api.ts` – Added createResource() helper.
+4. `apps/mobile/src/features/reservations/api.ts` – Replaced unauthenticated request helper with apiClient.get().
+
+**Definition of Done**
+- ✅ Seed Party/Vendor appears at list top with NEW badge; role filter works; roleFlags/roles reflected.
+- ✅ Seed Resource appears at top with NEW badge; created/updated timestamps visible.
+- ✅ getResourceAvailability() authenticated (bearer token always sent).
+- ✅ NEW badge style unified (pill with primary background, white text, fontSize 10).
+- ✅ Mobile typecheck passes.
+
+**Verification**
+```bash
+cd apps/mobile && npm run typecheck
+```
+
+**Manual QA**
+- Parties: seed party/vendor → list updates, scrolls to top, NEW badge visible, role filter can filter new vendor.
+- Resources: seed resource → list updates, scrolls to top, NEW badge visible, timestamps shown.
+- Registrations: create reservation, select resource → availability blocks display correctly.
+
+---
+
 ### ✅ Sprint E — Backorders & Product Flags
 **Spec**
 - Product additions: reorderEnabled (default true), preferredVendorId, minOrderQty, leadTimeDays.

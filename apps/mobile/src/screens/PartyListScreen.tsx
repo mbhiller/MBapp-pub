@@ -3,7 +3,7 @@ import * as React from "react";
 import { View, Text, FlatList, Pressable, ActivityIndicator, TextInput } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { findParties, createParty, addPartyRole } from "../features/parties/api";
+import { findParties, createParty, addPartyRole, getParty } from "../features/parties/api";
 import type { Party } from "../features/parties/api";
 import type { RootStackParamList } from "../navigation/types";
 import { useColors } from "../features/_shared/useColors";
@@ -20,6 +20,7 @@ export default function PartyListScreen() {
   const [role, setRole] = React.useState("");
   const [seedMessage, setSeedMessage] = React.useState<string | null>(null);
   const [isSeeding, setIsSeeding] = React.useState(false);
+  const listRef = React.useRef<FlatList<Party>>(null);
 
   React.useEffect(() => {
     void load();
@@ -63,19 +64,64 @@ export default function PartyListScreen() {
       try {
         const roleToAdd: "customer" | "vendor" = (created as any).kind === "organization" ? "vendor" : "customer";
         await addPartyRole(created.id, roleToAdd);
-        setSeedMessage("✓ Party + role created");
+        setSeedMessage(`✓ Party + role created (${created.id})`);
       } catch (e: any) {
         const msg = e?.message || "Unknown error";
         setSeedMessage(`✗ Role create failed: ${msg}`);
       }
-      // Reset search and reload list
+      // Reset filters so item isn't hidden
       setQ("");
       setRole("");
-      setItems([]);
-      await load();
+      // Fetch the party again to reflect roleFlags/roles, fallback to created
+      let fresh: Party = created as Party;
+      try {
+        fresh = await getParty(created.id);
+      } catch {
+        // ignore and use created
+      }
+      // Prepend refreshed party and scroll to top
+      setItems((prev) => [fresh, ...prev.filter((x) => x.id !== fresh.id)]);
+      listRef.current?.scrollToOffset({ offset: 0, animated: true });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
       setSeedMessage(`✗ Failed to create party: ${msg}`);
+    } finally {
+      setIsSeeding(false);
+    }
+  };
+
+  const seedVendor = async () => {
+    setIsSeeding(true);
+    setSeedMessage(null);
+    try {
+      const shortId = Math.random().toString(36).slice(2, 8);
+      const created = await createParty({
+        kind: "organization",
+        name: `Seed Vendor - Dev ${shortId}`,
+      });
+      try {
+        await addPartyRole(created.id, "vendor");
+        setSeedMessage(`✓ Vendor party + role created (${created.id})`);
+      } catch (e: any) {
+        const msg = e?.message || "Unknown error";
+        setSeedMessage(`✗ Vendor role create failed: ${msg}`);
+      }
+      // Reset filters so item isn't hidden
+      setQ("");
+      setRole("");
+      // Fetch the party again to reflect roleFlags/roles, fallback to created
+      let fresh: Party = created as Party;
+      try {
+        fresh = await getParty(created.id);
+      } catch {
+        // ignore and use created
+      }
+      // Prepend refreshed party and scroll to top
+      setItems((prev) => [fresh, ...prev.filter((x) => x.id !== fresh.id)]);
+      listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      setSeedMessage(`✗ Failed to create vendor: ${msg}`);
     } finally {
       setIsSeeding(false);
     }
@@ -206,6 +252,22 @@ export default function PartyListScreen() {
               {isSeeding ? "Seeding..." : "Seed Party"}
             </Text>
           </Pressable>
+          <Pressable
+            onPress={seedVendor}
+            disabled={isSeeding}
+            style={{
+              paddingVertical: 8,
+              paddingHorizontal: 12,
+              backgroundColor: isSeeding ? t.colors.border : t.colors.primary,
+              borderRadius: 6,
+              flex: 1,
+              alignItems: "center",
+            }}
+          >
+            <Text style={{ color: "#fff", fontWeight: "600", fontSize: 12 }}>
+              {isSeeding ? "Seeding..." : "Seed Vendor"}
+            </Text>
+          </Pressable>
           {seedMessage && (
             <Text
               style={{
@@ -262,6 +324,7 @@ export default function PartyListScreen() {
         </View>
       ) : (
         <FlatList
+          ref={listRef}
           data={displayItems}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}

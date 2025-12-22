@@ -16,34 +16,22 @@ Sprint III — Theme: Views & Workspaces v1 + Event plumbing options
 
 ## Sprint XI — Registrations Enabled + Parties UX
 
-- Registrations:
   - Mobile `FEATURE_REGISTRATIONS_ENABLED` now respects `EXPO_PUBLIC_FEATURE_REGISTRATIONS_ENABLED` (removed `__DEV__` forced false).
   - Registrations tile visible when enabled; backend `/registrations` returns 200.
   - Related registrations shown on EventDetail and PartyDetail when enabled.
   - __DEV__ Seed Registration button added; CI runs registrations smokes via `ops/ci-smokes.json`.
 
-- Parties:
   - __DEV__ Seed Party also creates `partyRole` (customer/vendor) to match smoke canonical seeding.
   - PartyListScreen: created/updated timestamp, NEW badge for recent items, newest-first sort, fixed client-side role filter — easier to spot newly seeded parties.
 
 Verification
-- `cd apps/mobile && npm run typecheck`
-- `node ops/tools/run-ci-smokes.mjs`
 
 Context
-- Treat previous chats as stale. Use ONLY attached files for this sprint.
-- Repo: C:\Users\bryan\MBapp-pub
-- Target branch: feat/tier1-sprint-III
-- Smoke runner: ops/smoke/smoke.mjs (seeds in ops/smoke/seed/*)
-- Mobile app: Expo React Native
-- API app: apps/api/src
 
 Scope (no code yet)
-- Goals:
   - V1 “Views”: API + minimal UI to save/search/update/delete list views (entity type, filters, sort, columns).
   - “Workspaces” landing UI to browse/launch saved views.
   - Event dispatcher options (feature-flagged): keep noop default; optionally emit to EventBridge/SNS.
-- Out of scope:
   - Data migrations (we will not create GSI in this sprint).
   - Complex query builders; we’ll support key/value filters first.
 
@@ -58,47 +46,28 @@ Deliverables I expect (sequence)
 5) After I approve: drop-in code PRs.
 
 Guardrails
-- Use feature flags:
   - `FEATURE_VIEWS_ENABLED` (default: false)
   - `FEATURE_EVENT_DISPATCH_ENABLED` (default: false)
   - `FEATURE_EVENT_DISPATCH_SIMULATE` (default: false)
-- Mirror existing patterns: `/objects/*` style for storage; `flags.ts` header overrides in dev only.
-- Do not change purchase order flows in this sprint.
 
 Environment & Flags (confirm before coding)
-- FEATURE_VIEWS_ENABLED=<default false>
-- FEATURE_EVENT_DISPATCH_ENABLED=<default false>
-- FEATURE_EVENT_DISPATCH_SIMULATE=<default false>
-- MBAPP_USE_GSI1=<default false> (design stub only this sprint)
 
 Smokes & Commands
-- New flows:
   - `smoke:views:crud` — create a view, list/search views, update name/filters, delete view.
   - `smoke:workspaces:list` — list views for the workspace hub (expects at least 1).
   - `smoke:events:enabled-noop` — ensure dispatcher toggles on w/ simulate path, no external.
-- I’ll run with:
   - `node ops/smoke/smoke.mjs smoke:views:crud`
   - `node ops/smoke/smoke.mjs smoke:workspaces:list`
   - `node ops/smoke/smoke.mjs smoke:events:enabled-noop`
 
-Files attached now
 - (You will attach after kickoff approval): current `flags.ts`, `events/dispatcher.ts`, `ops/smoke/smoke.mjs`, any frontend routing files.
 
 Before coding, respond with:
 - (A) Scope confirmation
-- (B) File gaps (exact paths you still need)
-- (C) Per-file change plan
 - (D) Smoke plan (flows + assertions)
-
----
-
-Sprint V — Theme: Resources/Reservations (Option 2 foundation)
 
 Context
 - Branch: `feat/tier1-sprint-V-option2-reservations`
-- Repo: C:\Users\bryan\MBapp-pub
-- Smoke runner: ops/smoke/smoke.mjs (new flows for reservations)
-- API app: apps/api/src (uses existing generic /objects/* CRUD)
 
 Scope
 - Goals:
@@ -112,10 +81,7 @@ Scope
   - RBAC: `resource:read|write`, `reservation:read|write` permissions.
 - Out of scope:
   - Reservation actions (cancel, start, end) — foundation only.
-  - Mobile UI beyond read-only preview.
-  - Complex calendar/scheduling UI.
 
-Overlap Rule
 - Two time slots overlap if: `(aStart < bEnd) && (bStart < aEnd)`.
 - On overlap: throw 409 with `{ code: "conflict", message: string, details: { conflicts: [...] } }`.
 
@@ -283,3 +249,35 @@ cd apps/mobile && npm run typecheck
 - Events list → Search works, pagination works, tap row → detail.
 - EventDetail → Event fields displayed; Registrations section shows linked registrations (if feature enabled) or "disabled" message (if feature off).
 - (Dev) Seed button on EventsList creates test event, resets search, reloads list.
+
+---
+
+## Sprint XII — PartyRoles + Resource Seed + Availability Fix (Completed 2025-12-21)
+
+**Context**
+- Mobile: dev tooling polish for Parties, Resources, and Registrations.
+- API: ensure availability endpoint is authenticated and works.
+
+**Scope**
+- **Parties:** Seed Party and __DEV__ Seed Vendor (new) both prepend created party to list, clear filters, scroll to top for immediate visibility.
+- **Parties UX:** Role filter confirmed working; NEW badge + timestamps unified across Parties and Resources.
+- **Resources:** __DEV__ Seed Resource button; shows `createdAt/updatedAt` timestamps and NEW badge (10-minute window); newest-first sort.
+- **Reservations:** Fixed `getResourceAvailability()` to use authenticated `apiClient.get()` (bearer token always sent).
+- **Backend:** Ensured `FEATURE_RESERVATIONS_ENABLED` in Lambda so availability endpoint is accessible (no "feature disabled" 404).
+
+**Deliverables**
+- ✅ Seed Party/Vendor prepends to list, clears filters, scrolls to top; shows created id in message.
+- ✅ Resources seed, timestamps, NEW badge (pill style unified with Parties), newest-first sort.
+- ✅ `getResourceAvailability()` uses authenticated client; removed local request helper.
+- ✅ Mobile typecheck passes.
+
+**How to Verify**
+```bash
+cd apps/mobile
+npm run typecheck
+
+# Manual QA
+# 1) Seed Party/Vendor → appears at top with NEW badge, role filter works
+# 2) Seed Resource → appears at top with NEW badge
+# 3) Create Reservation → see availability blocks for selected resource
+```
