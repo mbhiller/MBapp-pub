@@ -6,6 +6,5 @@ export const FEATURE_RESERVATIONS_ENABLED = __DEV__
   : RAW_RESERVATIONS?.toLowerCase() === "true" || RAW_RESERVATIONS === "1";
 
 const RAW_REGISTRATIONS = process.env.EXPO_PUBLIC_FEATURE_REGISTRATIONS_ENABLED;
-export const FEATURE_REGISTRATIONS_ENABLED = __DEV__
-  ? false
-  : RAW_REGISTRATIONS?.toLowerCase() === "true" || RAW_REGISTRATIONS === "1";
+export const FEATURE_REGISTRATIONS_ENABLED =
+  RAW_REGISTRATIONS?.toLowerCase() === "true" || RAW_REGISTRATIONS === "1";

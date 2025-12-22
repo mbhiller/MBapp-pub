@@ -12,6 +12,24 @@ Sprint III — Theme: Views & Workspaces v1 + Event plumbing options
 - Verification command: `cd apps/mobile && npm run typecheck`.
 - Manual QA: seed a party, refresh list (search + role filter), open detail (error banner/retry paths).
 
+---
+
+## Sprint XI — Registrations Enabled + Parties UX
+
+- Registrations:
+  - Mobile `FEATURE_REGISTRATIONS_ENABLED` now respects `EXPO_PUBLIC_FEATURE_REGISTRATIONS_ENABLED` (removed `__DEV__` forced false).
+  - Registrations tile visible when enabled; backend `/registrations` returns 200.
+  - Related registrations shown on EventDetail and PartyDetail when enabled.
+  - __DEV__ Seed Registration button added; CI runs registrations smokes via `ops/ci-smokes.json`.
+
+- Parties:
+  - __DEV__ Seed Party also creates `partyRole` (customer/vendor) to match smoke canonical seeding.
+  - PartyListScreen: created/updated timestamp, NEW badge for recent items, newest-first sort, fixed client-side role filter — easier to spot newly seeded parties.
+
+Verification
+- `cd apps/mobile && npm run typecheck`
+- `node ops/tools/run-ci-smokes.mjs`
+
 Context
 - Treat previous chats as stale. Use ONLY attached files for this sprint.
 - Repo: C:\Users\bryan\MBapp-pub

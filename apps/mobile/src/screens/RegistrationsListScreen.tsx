@@ -4,6 +4,10 @@ import { View, Text, TextInput, FlatList, Pressable, ActivityIndicator, Alert, M
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useRegistrations, useCreateRegistration } from "../features/registrations/hooks";
+import { createRegistration } from "../features/registrations/api";
+import { listEvents, createEvent } from "../features/events/api";
+import { findParties, createParty } from "../features/parties/api";
+import { FEATURE_REGISTRATIONS_ENABLED } from "../features/_shared/flags";
 import { useTheme } from "../providers/ThemeProvider";
 import type { CreateRegistrationInput } from "../features/registrations/api";
 import type { RootStackParamList } from "../navigation/types";
@@ -15,8 +19,70 @@ export default function RegistrationsListScreen() {
   const navigation = useNavigation<NavigationProp>();
   const [q, setQ] = React.useState("");
   const [showCreate, setShowCreate] = React.useState(false);
+  const [isSeeding, setIsSeeding] = React.useState(false);
+  const [seedMessage, setSeedMessage] = React.useState<string | null>(null);
   
   const { data, isLoading, error, refetch } = useRegistrations({ q: q || undefined });
+
+  const seedRegistration = async () => {
+    if (!FEATURE_REGISTRATIONS_ENABLED) {
+      setSeedMessage("Registrations feature is disabled");
+      return;
+    }
+    setIsSeeding(true);
+    setSeedMessage(null);
+    try {
+      let eventId: string | undefined;
+      let partyId: string | undefined;
+
+      // Ensure an event exists
+      try {
+        const evPage = await listEvents({ limit: 1 });
+        eventId = evPage.items?.[0]?.id;
+      } catch (err) {
+        // ignore; we'll try to create
+      }
+      if (!eventId) {
+        const now = new Date();
+        const endsAt = new Date(now.getTime() + 60 * 60 * 1000);
+        const ev = await createEvent({
+          name: "Seed Event - Dev",
+          status: "scheduled",
+          startsAt: now.toISOString(),
+          endsAt: endsAt.toISOString(),
+          location: "Dev",
+          type: "event" as any,
+        });
+        eventId = ev.id;
+      }
+
+      // Ensure a party exists
+      try {
+        const parties = await findParties({ q: "", role: undefined as any });
+        partyId = parties[0]?.id;
+      } catch (err) {
+        // ignore; we'll try to create
+      }
+      if (!partyId) {
+        const party = await createParty({ kind: "person", name: "Seed Party - Dev" });
+        partyId = party.id;
+      }
+
+      if (!eventId || !partyId) {
+        setSeedMessage("✗ Seed failed: please seed an event and a party first");
+        return;
+      }
+
+      await createRegistration({ eventId, partyId, status: "draft" });
+      setSeedMessage("✓ Registration created");
+      await refetch();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      setSeedMessage(`✗ Failed to seed: ${msg}`);
+    } finally {
+      setIsSeeding(false);
+    }
+  };
 
   return (
     <View style={{ flex: 1, padding: 12, backgroundColor: t.colors.bg }}>
@@ -37,6 +103,40 @@ export default function RegistrationsListScreen() {
           <Text style={{ color: "#8a1f2d", fontSize: 12 }}>
             {error instanceof Error ? error.message : String(error)}
           </Text>
+        </View>
+      )}
+
+      {/* Dev Seed */}
+      {__DEV__ && (
+        <View style={{ marginBottom: 12, flexDirection: "row", gap: 8, alignItems: "center" }}>
+          <Pressable
+            onPress={seedRegistration}
+            disabled={isSeeding || !FEATURE_REGISTRATIONS_ENABLED}
+            style={{
+              paddingVertical: 8,
+              paddingHorizontal: 12,
+              backgroundColor: isSeeding || !FEATURE_REGISTRATIONS_ENABLED ? "#ccc" : "#4CAF50",
+              borderRadius: 6,
+              flex: 1,
+              alignItems: "center",
+            }}
+          >
+            <Text style={{ color: "#fff", fontWeight: "600", fontSize: 12 }}>
+              {isSeeding ? "Seeding..." : "Seed Registration"}
+            </Text>
+          </Pressable>
+          {seedMessage && (
+            <Text
+              style={{
+                fontSize: 11,
+                color: seedMessage.startsWith("✓") ? "#4CAF50" : "#d32f2f",
+                flex: 1,
+              }}
+              numberOfLines={2}
+            >
+              {seedMessage}
+            </Text>
+          )}
         </View>
       )}
 

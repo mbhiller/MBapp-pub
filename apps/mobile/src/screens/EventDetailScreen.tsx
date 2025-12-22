@@ -189,7 +189,19 @@ export default function EventDetailScreen() {
               marginBottom: 8,
             }}
           >
-            <Text style={{ color: "#8a1f2d", fontSize: 12 }}>{regError}</Text>
+            <Text style={{ color: "#8a1f2d", fontSize: 12, marginBottom: 6 }}>{regError}</Text>
+            <Pressable
+              onPress={() => event?.id && loadRegistrations(event.id)}
+              style={{
+                paddingVertical: 6,
+                paddingHorizontal: 10,
+                backgroundColor: t.colors.primary,
+                borderRadius: 6,
+                alignSelf: "flex-start",
+              }}
+            >
+              <Text style={{ color: "#fff", fontWeight: "600" }}>Retry registrations</Text>
+            </Pressable>
           </View>
         ) : regIsLoading ? (
           <ActivityIndicator size="small" color={t.colors.primary} />

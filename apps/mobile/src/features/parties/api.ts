@@ -84,7 +84,7 @@ export async function createParty(input: {
  */
 export async function addPartyRole(
   partyId: string,
-  role: "customer" | "vendor" | "employee" | "event_staff" | "rider" | "owner" | "judge"
+  role: "customer" | "vendor"
 ): Promise<any> {
   return createObject("partyRole", {
     type: "partyRole",
