@@ -108,7 +108,7 @@ cd apps/mobile && npm run typecheck
 **Spec**
 - Product additions: reorderEnabled (default true), preferredVendorId, minOrderQty, leadTimeDays.
 - New object: BackorderRequest { id, type:'backorderRequest', soId, soLineId, itemId, qty, status:'open|ignored|converted', createdAt }.
-- New paths: POST /purchasing/suggest-po; POST /purchasing/po:create-from-suggestion; POST /objects/backorderRequest/{id}:ignore; POST /objects/backorderRequest/{id}:convert.
+- New paths: `POST /purchasing/suggest-po`; `POST /purchasing/po:create-from-suggestion`; `POST /objects/backorderRequest/{id}:ignore`; `POST /objects/backorderRequest/{id}:convert`.
 **Backend**
 - SO non-strict commit enqueues BackorderRequest for shortages when product.reorderEnabled !== false.
 - Purchasing + Backorders action handlers; router patches.
@@ -147,6 +147,8 @@ cd apps/mobile && npm run typecheck
 4) **Hooks consolidation (mobile)**: Introduced single canonical `useObjects` hook. **List** mode returns `{ items, total? }`; **single** returns the object. Updated PO/SO/Inventory/List+Detail and Backorders screens.
 5) **Smokes**: `smoke:po:save-from-suggest` and `smoke:po:quick-receive` added and passing.
 6) **CI**: Workflow runs spec bundle/types, API build, Mobile typecheck, and the two new smokes in matrix.
+
+**Note:** CI runs smokes defined in `ops/ci-smokes.json`. Additional smoke flows in `ops/smoke/smoke.mjs` can be run manually but are not in CI by default.
 
 **Spec**
 - Added `/purchasing/po:create-from-suggestion` to **MBapp-Modules.yaml** (request: `draft|drafts`; response: `{ id?, ids[] }`).
@@ -360,52 +362,60 @@ Legend: ✅ done • 🟨 stub/partial • ⬜ planned
 
 ---
 
+## Sources of Truth (SSOT)
+
+Authoritative references for system design and implementation:
+
+- **Roadmap:** [docs/MBapp-Roadmap-Master-v10.0.md](MBapp-Roadmap-Master-v10.0.md)
+- **Object schemas / contracts:** [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml)
+- **API implementation entrypoints:** [apps/api/src/index.ts](../apps/api/src/index.ts) + per-module handlers under `apps/api/src/*`
+- **Mobile route names:** [apps/mobile/src/navigation/types.ts](../apps/mobile/src/navigation/types.ts) + [RootStack.tsx](../apps/mobile/src/navigation/RootStack.tsx)
+- **Mobile module tiles + required permissions:** [apps/mobile/src/features/_shared/modules.ts](../apps/mobile/src/features/_shared/modules.ts)
+- **Feature flags:**
+  - Backend: [apps/api/src/flags.ts](../apps/api/src/flags.ts)
+  - Mobile: [apps/mobile/src/features/_shared/flags.ts](../apps/mobile/src/features/_shared/flags.ts)
+- **Dev seed tooling:** [apps/mobile/src/screens/DevTools.tsx](../apps/mobile/src/screens/DevTools.tsx)
+- **Smokes (source):** [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs)
+- **CI smoke matrix:** [ops/ci-smokes.json](../ops/ci-smokes.json)
+
+---
+
 ## Feature Flags Reference
 
 This section documents flags used across the backend (AWS Lambda) and mobile (Expo) to control feature rollout and dev/test behaviors.
 
-### Backend (AWS Lambda) Flags
+### Feature Flags Mapping
 
-- **`FEATURE_REGISTRATIONS_ENABLED`** (env: `FEATURE_REGISTRATIONS_ENABLED`, header: `X-Feature-Registrations-Enabled`)
-  - Controls whether registration endpoints are accessible and functional.
-  - Default: `false` (disabled in prod unless explicitly configured).
-  - Dev/CI: Can be overridden via `X-Feature-Registrations-Enabled` header for testing without env redeploy.
+| Feature | Backend Env | Mobile Env | Dev/CI Header Override | Mobile __DEV__ Override | Default |
+|---------|------------|------------|----------------------|------------------------|--------|
+| **Registrations** | `FEATURE_REGISTRATIONS_ENABLED` | `EXPO_PUBLIC_FEATURE_REGISTRATIONS_ENABLED` | `X-Feature-Registrations-Enabled` | No | `false` |
+| **Reservations** | `FEATURE_RESERVATIONS_ENABLED` | `EXPO_PUBLIC_FEATURE_RESERVATIONS_ENABLED` | `X-Feature-Reservations-Enabled` | Yes (`true`) | `false` |
+| **Views** | `FEATURE_VIEWS_ENABLED` | _(none)_ | `X-Feature-Views-Enabled` | No | `false` |
+| **Event Dispatch** | `FEATURE_EVENT_DISPATCH_ENABLED` | _(none)_ | `X-Feature-Events-Enabled` | No | `false` |
+| **Event Simulate** | `FEATURE_EVENT_DISPATCH_SIMULATE` | _(none)_ | `X-Feature-Events-Simulate` | No | `false` |
 
-- **`FEATURE_RESERVATIONS_ENABLED`** (env: `FEATURE_RESERVATIONS_ENABLED`, header: `X-Feature-Reservations-Enabled`)
-  - Controls whether reservation endpoints and availability checks are accessible.
-  - Default: `false` (disabled in prod unless explicitly configured).
-  - Dev/CI: Can be overridden via `X-Feature-Reservations-Enabled` header.
-
-### Mobile (Expo) Flags
-
-- **`EXPO_PUBLIC_FEATURE_REGISTRATIONS_ENABLED`**
-  - Mobile reads this Expo public environment variable to set `FEATURE_REGISTRATIONS_ENABLED` in `apps/mobile/src/features/_shared/flags.ts`.
-  - Controls visibility of Registrations module tile in ModuleHub and related features.
-  - Default: `false`.
-
-- **`EXPO_PUBLIC_FEATURE_RESERVATIONS_ENABLED`**
-  - Mobile reads this Expo public environment variable to set `FEATURE_RESERVATIONS_ENABLED`.
-  - Controls visibility of Reservations module tile and Create/Edit actions.
-  - Default: `false`.
-
-### Dev/Test Header Overrides
-
-Backend flags can be temporarily overridden in dev and CI environments using HTTP headers of the form `X-Feature-<Name>-Enabled` (e.g., `X-Feature-Registrations-Enabled: true`). This allows testing feature behavior without redeploy.
+**Notes:**
+- Backend flags (env + header override) defined in [apps/api/src/flags.ts](../apps/api/src/flags.ts)
+- Mobile flags defined in [apps/mobile/src/features/_shared/flags.ts](../apps/mobile/src/features/_shared/flags.ts)
+- Header overrides only work in dev/CI (ignored in prod for security)
+- Mobile Views/Events have no local flag (controlled by backend only)
+- Reservations mobile flag: `__DEV__ ? true : (env === "true" || env === "1")`
+- Registrations mobile flag: `env === "true" || env === "1"` (no __DEV__ override)
 
 ### Auth Policy & Module Visibility
 
 The mobile ModuleHub fetches `GET /auth/policy` to determine which modules are visible and enabled:
 
 - **Fail-closed behavior:** If `/auth/policy` returns `null` or fails, ModuleHub shows an error banner and displays no tiles (empty module list).
-- **Policy structure:** Returns a map of permissions (e.g., `{ "parties:read": true, "event:read": true, "*:*": false }`).
-- **Permission matching:** The mobile app uses wildcard matching on the policy map:
+- **Runtime policy:** JWT `mbapp.policy` claim is `Record<string, boolean>` (e.g., `{ "parties:read": true, "event:read": true }`) used by backend `hasPerm`/`requirePerm` for enforcement.
+- **Permission matching:** Mobile uses wildcard matching on the policy map:
   - `"*"` → superuser (all permissions allowed)
   - `"*:*"` or `"*:all"` → all resources and actions
   - `"*:<action>"` → all resources with a specific action (e.g., `*:read`)
-  - `"<resource>:*"` → all actions on a specific resource (e.g., `parties:*`)
+  - `"<type>:*"` → all actions on a specific type (e.g., `parties:*`)
   - Case-insensitive matching of permission strings.
 
-**Development note:** The backend auth implementation in [apps/api/src/auth/policy.ts](../apps/api/src/auth/policy.ts) currently returns a permissive policy structure with `scopes: ["*:*"]` for dev tenants. In production, real JWT parsing and role derivation should be implemented (see TODO at line 9).
+**Development note:** The `/auth/policy` endpoint ([apps/api/src/auth/policy.ts](../apps/api/src/auth/policy.ts)) currently returns a dev stub with `scopes: ["*:*"]` array plus user/roles/tenants/version/issuedAt. This is NOT the same as the JWT policy claim. In production, the endpoint should derive scopes from JWT roles (see TODO at line 9).
 
 ---
 # NEXT SPRINT

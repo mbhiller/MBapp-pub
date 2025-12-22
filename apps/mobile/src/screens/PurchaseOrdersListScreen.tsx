@@ -59,12 +59,21 @@ export default function PurchaseOrdersListScreen() {
         try {
           await addPartyRole(parties[0].id, "vendor");
           return parties[0].id;
-        } catch {}
+        } catch (err) {
+          console.error("Failed to add vendor role to existing party", err);
+        }
       }
-    } catch {}
+    } catch (err) {
+      console.error(err);
+    }
     const shortId = Math.random().toString(36).slice(2, 8);
     const p = await createParty({ kind: "organization", name: `Seed Vendor - UI ${shortId}` });
-    await addPartyRole(p.id, "vendor");
+    try {
+      await addPartyRole(p.id, "vendor");
+    } catch (err) {
+      console.error("Failed to add vendor role to new party", err);
+      throw new Error("Failed to assign vendor role to new party");
+    }
     return p.id;
   };
 
@@ -86,8 +95,11 @@ export default function PurchaseOrdersListScreen() {
   const createDraft = async () => {
     try {
       const vendorId = await ensureVendorId();
+      if (!vendorId) { toast("No vendor available (seed failed).", "error"); return; }
       const itemId = await ensureInventoryId();
+      if (!itemId) { toast("No inventory item available (seed failed).", "error"); return; }
       const shortId = Math.random().toString(36).slice(2, 8);
+      if (__DEV__) console.log("[PO] Creating draft with vendorId:", vendorId, "itemId:", itemId);
       const po = await apiClient.post<any>("/objects/purchaseOrder", {
         type: "purchaseOrder" as any,
         status: "draft" as any,
@@ -103,10 +115,6 @@ export default function PurchaseOrdersListScreen() {
       toast(`✗ Create failed: ${e?.message ?? String(e)}`, "error");
     }
   };
-
-  const onNew = React.useCallback(() => {
-    navigation.navigate("PurchaseOrderDetail", { mode: "new" });
-  }, [navigation]);
 
   const isNew = (iso?: string) => {
     if (!iso) return false;

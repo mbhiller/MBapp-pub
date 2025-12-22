@@ -63,6 +63,8 @@ For each epic **E**:
   - `ops/smoke.mjs smoke:<slice>:happy|guards|idempotency`
 - GitHub Actions jobs: `spec`, `api`, `mobile`, with smoke matrix per slice.
 
+**Note:** CI runs only the flows listed in `ops/ci-smokes.json` (currently: registrations:crud, registrations:filters, reservations:conflicts). Additional smoke flows may exist in `ops/smoke/smoke.mjs` but are not included in CI by default.
+
 ## Definition of Done (per slice)
 - Spec updated + tagged
 - Types re‑generated & committed

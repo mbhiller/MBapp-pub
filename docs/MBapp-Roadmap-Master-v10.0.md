@@ -1,5 +1,5 @@
 # MBapp — Master Roadmap (Tiers 1 → 10)
-_Updated October 14, 2025 12:50_
+_Updated December 22, 2025_
 
 This is the **living**, presentation‑ready roadmap for MBapp. It consolidates and supersedes prior versions (v3.2, v3.3, v4.0, v5.0).  
 Each Tier uses the same structure so we can later expand any Phase into a detailed sprint plan.
@@ -11,17 +11,25 @@ Each Tier uses the same structure so we can later expand any Phase into a detail
 
 ---
 
+## Delivery Notes (How We Ship)
+- **Mobile-first vertical slices:** Actual delivery uses Sprint A→XII naming, cutting end-to-end features across multiple Tiers simultaneously.
+- **Phase sprint numbers:** Generic numbers (1-2) are sizing estimates, not delivery order.
+- **Feature gating:** tems may be implemented but feature-flagged (backend FEATURE_*, mobile EXPO_PUBLIC_FEATURE_*) or __DEV__-only until promoted.
+- **CI coverage:** CI runs only the flows listed in ops/ci-smokes.json (currently Registrations CRUD/Filters + Reservations Conflicts). Additional flows in ops/smoke/smoke.mjs may exist but are not in CI by default.
+
+---
+
 # 🧰 Tier 1 — Core Platform & Modules (Phases 1.0–1.3)
 
-### 1.0 Foundations
+### 1.0 Foundations ✅ Implemented (Sprints A–D)
 - 🎯 Normalize object model and client API; seed shared utilities.
 - 🧱 Schemas: ObjectBase; Party (person|animal|organization) + PartyRole; Product; Inventory; SalesOrder; PurchaseOrder.
 - 🔄 Flows: SO/PO draft→submit; inventory movements compute on‑hand.
 - ⚙️ Guards: status gates; required fields; tenancy headers.
 - 💻 UI/UX: base lists/details; shared pickers; client.ts baseline.
 - 🧪 Smokes: `smoke:salesOrder:flow`, `smoke:purchaseOrder:flow`.
-- 🕓 Sprints: 1.
-- 🏁 Outcome: stable foundation and APIs.
+- 🕓 Sprints: A–D (Shipped).
+- 🏁 Outcome: Objects CRUD, Inventory counters/movements, PO/SO core operational.
 
 ### 1.1 Shared Line Editors
 - 🎯 Adopt `_key/CID` + normalize→toPatchLines→re‑normalize across modules.
@@ -33,78 +41,89 @@ Each Tier uses the same structure so we can later expand any Phase into a detail
 - 🕓 Sprints: 1.
 - 🏁 Outcome: reliable, consistent line editing.
 
-### 1.2 Commerce Core
+### 1.2 Commerce Core ✅ Implemented (Sprints D–E)
 - 🎯 Consistent totals, tax, pricing; inventory search & reports.
 - 🧪 Smokes: backorder, reserve, fulfill, goods‑receipt.
-- 🕓 Sprints: 1.
+- 🕓 Sprints: D–E (Shipped).
+- 💡 **Includes:** Products (procurement flags), Backorders worklist (dev-only tile), SO actions (reserve/release/fulfill), PO receive flows.
 
-### 1.3 Guardrails
+### 1.3 Guardrails ✅ Implemented (Sprint D+)
 - 🎯 Over‑commit/over‑fulfill prevention; cancel/close rules.
-- 🕓 Sprints: 0.5.
-- 🏁 Outcome: production safety nets.
+- 🕓 Sprints: D+ (Shipped).
+- 🏁 Outcome: Vendor role guards, status gates, 409 conflict patterns (strict commit, reservation overlaps), production safety nets operational.
 
 ---
 
 # 🐎 Tier 2 — Operations: Events, Resources, Animals, Auctions (Phases 2.0–2.6)
 
-### 2.0 Events & Registrations v1
+### 2.0 Events & Registrations v1 ✅ Implemented (Feature-Gated)
 - 🎯 Mobile wizard; capacity & duplicate checks; fee rules.
 - 🧱 Schemas: Event (+EventLine), Registration.
-- 🧪 Smokes: `registrations:edit-in-place`, `events:capacity-guard`.
-- 🕓 Sprints: 1–2.
+- 🧪 Smokes: `smoke:registrations:crud`, `smoke:registrations:filters` (in CI).
+- 🕓 Sprints: IV, IX, XI (Shipped with feature flag: `FEATURE_REGISTRATIONS_ENABLED`).
+- 💡 **Status:** EventsList/EventDetail + RegistrationsList/RegistrationDetail operational; tiles gated by permission + flag.
 
-### 2.1 Resources & Reservations v1
+### 2.1 Resources & Reservations v1 ✅ Implemented (Feature-Gated)
 - 🎯 Conflict detection; per‑resource day grid.
 - 🧱 Schemas: Resource, Reservation.
-- 🧪 Smokes: `reservations:conflict-guard`, edit‑in‑place.
-- 🕓 Sprints: 1.
+- 🧪 Smokes: `smoke:reservations:conflicts` (in CI); availability checks.
+- 🕓 Sprints: V–VII (Shipped with feature flag: `FEATURE_RESERVATIONS_ENABLED`).
+- 💡 **Status:** ResourcesList/ResourceDetail + ReservationsList/ReservationDetail/CreateReservation operational; 409 conflict guard enforced on overlaps.
 
-### 2.2 Scheduling Foundations
+### 2.2 Scheduling Foundations ⬜ Planned (Not Started)
 - 🎯 Venue/Facility; blackout; ride‑time slots; double‑book detector.
-- 🕓 Sprints: 1–2.
+- 🕓 Sprints: 1–2 (Estimated).
 
-### 2.3 Auctions v1
+### 2.3 Auctions v1 ⬜ Planned (Not Started)
 - 🎯 Lots, catalog, live/online bidding, settlements, bidder board.
 - 🧱 Schemas: Auction, Lot, Bid, Settlement.
-- 🕓 Sprints: 1–2.
+- 🕓 Sprints: 1–2 (Estimated).
 
-### 2.4 Animals v1 + Breeding Stub
+### 2.4 Animals v1 + Breeding Stub ⬜ Planned (Not Started)
 - 🎯 Health, breed, insurance attrs; breeding plan scaffolds.
 - 🧱 Schemas: Animal, HealthRecord (basic), BreedingPlan.
-- 🕓 Sprints: 1.
+- 🕓 Sprints: 1 (Estimated).
 
-### 2.5 Displays & Boards
+### 2.5 Displays & Boards ⬜ Planned (Not Started)
 - 🎯 Ring grid, on‑deck, leaderboards, auction presentation boards.
-- 🕓 Sprints: 0.5–1.
+- 🕓 Sprints: 0.5–1 (Estimated).
 
-### 2.6 Commerce Enhancers
+### 2.6 Commerce Enhancers ⬜ Planned (Not Started)
 - 🎯 Packages/discounts tied to events; quick POS add‑ons.
-- 🕓 Sprints: 0.5–1.
+- 🕓 Sprints: 0.5–1 (Estimated).
 - 🏁 Outcome: end‑to‑end ops ready for finance posting.
 
 
-### 2.7 Business Processes (Config-Driven) v1
-- 🎯 Event-driven “recipes” to orchestrate cross-object flows without a heavy BPM engine (e.g., Registration → comms → Stall Reservation → SO).
+### 2.7 Business Processes (Config-Driven) v1 ⬜ Planned (Not Started)
+- 🎯 Event-driven "recipes" to orchestrate cross-object flows without a heavy BPM engine (e.g., Registration → comms → Stall Reservation → SO).
 - 🧱 Schemas: **ProcessDefinition**, **ProcessInstance**, **Prompt** (await signal), **MessageLog** (reuse), **OutboxEvent** (if needed).
 - 🔄 Flows: trigger on domain events; idempotent steps (`createObject`, `sendMessage`, `prompt/awaitSignal`), simple `branch when:` conditions.
 - ⚙️ Guards: idempotency via step keys; per-process enable/disable; retry with back-off; audit trail.
-- 💻 UI/UX: minimal “Process timeline” on object detail; small “flow active” badge.
+- 💻 UI/UX: minimal "Process timeline" on object detail; small "flow active" badge.
 - 🧪 Smokes: `process:registration-flow` (email→prompt→reservation→SO), `process:retry-idempotent`.
-- 🕓 Sprints: 1.
+- 🕓 Sprints: 1 (Estimated).
 - 🏁 Outcome: configurable cross-object automation foundation (can remain disabled until we flip it on).
 
-- 🏁 Outcome: ops automation foundation + handoff to Finance
+### 2.8 Workspaces & Views v1 🟨 In Progress (Sprint III)
+- 🎯 Save/search/update/delete list views; workspace hub UI.
+- 🧱 Schemas: View (entity type, filters, sort, columns), Workspace.
+- 💻 UI/UX: WorkspaceHub tile; minimal Views CRUD.
+- 🧪 Smokes: `smoke:views:crud`, `smoke:workspaces:list`, `smoke:events:enabled-noop` (exist in smoke.mjs but NOT in ci-smokes.json).
+- 🕓 Sprint III (In Progress).
+- 💡 **Status:** Backend handlers + mobile stubs present; event dispatcher options (noop/simulate) implemented.
+
 ---
 
 # 💰 Tier 3 — Finance & Accounting (Phases 3.0–3.2)
+📌 **Status:** All Tier 3+ phases are planned roadmap items; current delivery focus is Tier 1-2 vertical slices.
 
-### 3.0 Accounting Core
+### 3.0 Accounting Core ⬜ Planned (Not Started)
 - 🎯 Double‑entry ledger; posting rules; cost centers; revenue share.
 - 🧱 Schemas: Account, JournalEntry/Line, LedgerBalance, PostingRule, RevenueShareRule/Entry.
 - 🔄 Flows: post on operational finalizations (SO fulfill, PO receive, Auction settle…).
 - 💻 UI/UX: Chart, Journal browser, TB/P&L/BS, Posting tester.
 - 🧪 Smokes: `acct:post-*`, `acct:balance-check`, `acct:trial-balance`.
-- 🕓 Sprints: 2.
+- 🕓 Sprints: 2 (Estimated).
 
 ### 3.1 Billing (AR/AP)
 - 🎯 Invoices/Bills/Payments/Refunds/Statements.
