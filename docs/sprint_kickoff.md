@@ -19,7 +19,7 @@ Sprint III — Theme: Views & Workspaces v1 + Event plumbing options
   - Mobile `FEATURE_REGISTRATIONS_ENABLED` reads `EXPO_PUBLIC_FEATURE_REGISTRATIONS_ENABLED` (no `__DEV__` override).
   - Registrations tile visible when enabled; backend `/registrations` returns 200.
   - Related registrations shown on EventDetail and PartyDetail when enabled.
-  - __DEV__ Seed Registration button added; CI runs registrations smokes via `ops/ci-smokes.json`.
+  - __DEV__ Seed Registration button added; CI runs registrations smokes via `ops/ci-smokes.json` (registrations:crud, registrations:filters, reservations:conflicts).
 
   - __DEV__ Seed Party also creates `partyRole` (customer/vendor) to match smoke canonical seeding.
   - PartyListScreen: created/updated timestamp, NEW badge for recent items, newest-first sort, fixed client-side role filter — easier to spot newly seeded parties.
@@ -65,6 +65,8 @@ Smokes & Commands
   - `node ops/smoke/smoke.mjs smoke:workspaces:list`
   - `node ops/smoke/smoke.mjs smoke:events:enabled-noop`
 
+**Note:** These Sprint III flows exist in `ops/smoke/smoke.mjs` but are NOT yet included in `ops/ci-smokes.json` (CI still runs only registrations/reservations flows).
+
 - (You will attach after kickoff approval): current `flags.ts`, `events/dispatcher.ts`, `ops/smoke/smoke.mjs`, any frontend routing files.
 
 Before coding, respond with:
@@ -83,7 +85,7 @@ Scope
     - `GET /resources/{id}/availability?from=ISO&to=ISO` — list busy periods.
   - Enforce overlap detection on reservation create/update: return **409 Conflict** with code="conflict".
   - Feature flag: `FEATURE_RESERVATIONS_ENABLED` (default: false, dev header override).
-  - RBAC: `resource:read|write`, `reservation:read|write` permissions.
+  - RBAC: `resource:read`, `resource:write`, `reservation:read`, `reservation:write` permissions (matches modules.ts).
 - Out of scope:
   - Reservation actions (cancel, start, end) — foundation only.
 
@@ -92,11 +94,12 @@ Scope
 
 Feature Flag & RBAC
 - Flag: `FEATURE_RESERVATIONS_ENABLED` (env: `FEATURE_RESERVATIONS_ENABLED`, header: `X-Feature-Reservations-Enabled`).
-- Permissions:
+- Permissions (exact strings from modules.ts):
   - `resource:read` — list/get resources
   - `resource:write` — create/update/delete resources
   - `reservation:read` — list/get reservations
   - `reservation:write` — create/update/delete reservations (checked for overlap on write)
+  - Backend enforces via `requirePerm(auth, "type:action")` with wildcard support: `type:*`, `*:action`, `*:*`, `*`
 
 Deliverables (in order)
 

@@ -62,6 +62,12 @@ export default function PurchaseOrderDetailScreen() {
     !!(Array.isArray((po as any)?.vendorRoles) && (po as any).vendorRoles.includes("vendor"));
   const vendorGuardActive = !po?.vendorId || !vendorHasRole;
 
+  // Status-aware gating
+  const canSubmit = po?.status === "draft" && !vendorGuardActive;
+  const canApprove = po?.status === "submitted" && !vendorGuardActive;
+  const canCancel = (po?.status === "draft" || po?.status === "submitted") && po?.status !== "cancelled" && po?.status !== "canceled" && po?.status !== "closed";
+  const canClose = (po?.status === "approved" || po?.status === "received" || po?.status === "partially_fulfilled" || po?.status === "fulfilled") && po?.status !== "cancelled" && po?.status !== "canceled" && po?.status !== "closed";
+
   return (
     <View style={{ flex: 1, padding: 12 }}>
       <Text style={{ fontSize: 18, fontWeight: "700", marginBottom: 6 }}>Purchase Order {po?.id}</Text>
@@ -94,6 +100,7 @@ export default function PurchaseOrderDetailScreen() {
           </Pressable>
         )}
         <Pressable
+          disabled={!canSubmit}
           onPress={async () => {
             try {
               await submit(po?.id);
@@ -104,11 +111,12 @@ export default function PurchaseOrderDetailScreen() {
               toast(e?.message || "Submit failed", "error");
             }
           }}
-          style={{ paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 8 }}
+          style={{ paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 8, opacity: canSubmit ? 1 : 0.5 }}
         >
           <Text>Submit</Text>
         </Pressable>
         <Pressable
+          disabled={!canApprove}
           onPress={async () => {
             try {
               await approve(po?.id);
@@ -119,7 +127,7 @@ export default function PurchaseOrderDetailScreen() {
               toast(e?.message || "Approve failed", "error");
             }
           }}
-          style={{ paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 8 }}
+          style={{ paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 8, opacity: canApprove ? 1 : 0.5 }}
         >
           <Text>Approve</Text>
         </Pressable>
@@ -133,6 +141,7 @@ export default function PurchaseOrderDetailScreen() {
           </Pressable>
         )}
         <Pressable
+          disabled={!canCancel}
           onPress={async () => {
             try {
               await cancel(po?.id);
@@ -143,11 +152,12 @@ export default function PurchaseOrderDetailScreen() {
               toast(e?.message || "Cancel failed", "error");
             }
           }}
-          style={{ paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 8 }}
+          style={{ paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 8, opacity: canCancel ? 1 : 0.5 }}
         >
           <Text>Cancel</Text>
         </Pressable>
         <Pressable
+          disabled={!canClose}
           onPress={async () => {
             try {
               await close(po?.id);
@@ -158,7 +168,7 @@ export default function PurchaseOrderDetailScreen() {
               toast(e?.message || "Close failed", "error");
             }
           }}
-          style={{ paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 8 }}
+          style={{ paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 8, opacity: canClose ? 1 : 0.5 }}
         >
           <Text>Close</Text>
         </Pressable>

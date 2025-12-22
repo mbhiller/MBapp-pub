@@ -9,19 +9,35 @@ This doc explains how our **router**, **auth**, and **module endpoints** are str
 
 ## 2) Auth & permissions
 - `getAuth(event)` → `{ userId, tenantId, roles, policy }` (Bearer required).
+  - **policy**: `Record<string, boolean>` from JWT `mbapp.policy` claim (runtime enforcement).
 - `injectPreAuth(event, auth)` → stores auth into `event.requestContext.authorizer.mbapp`.
-- `requirePerm(auth, "<scope>:<verb>")` guards routes.
+- `requirePerm(auth, "<type>:<action>")` guards routes with wildcard support: `type:*`, `*:action`, `*:*`, `*`.
 - **Tenant header**: send both `X-Tenant-Id` and `x-tenant-id`.
 - **Idempotency**: `"Idempotency-Key"` header for retriable actions.
 
-## 3) Router map (high level)
+## 3) Feature Flags
+
+Backend flags (from `apps/api/src/flags.ts`):
+
+| Flag Env Variable | Header Override (dev/CI only) | Default | Purpose |
+|-------------------|-------------------------------|---------|----------|
+| `FEATURE_REGISTRATIONS_ENABLED` | `X-Feature-Registrations-Enabled` | `false` | Registration endpoints |
+| `FEATURE_RESERVATIONS_ENABLED` | `X-Feature-Reservations-Enabled` | `false` | Reservation endpoints + conflicts |
+| `FEATURE_VIEWS_ENABLED` | `X-Feature-Views-Enabled` | `false` | Views CRUD endpoints |
+| `FEATURE_EVENT_DISPATCH_ENABLED` | `X-Feature-Events-Enabled` | `false` | Event dispatcher (EventBridge/SNS) |
+| `FEATURE_EVENT_DISPATCH_SIMULATE` | `X-Feature-Events-Simulate` | `false` | Return `_dev.emitted: true` instead of real dispatch |
+| `FEATURE_ENFORCE_VENDOR_ROLE` | `X-Feature-Enforce-Vendor` | `true` | Require vendor partyRole on PO |
+
+**Note:** Header overrides only work in non-prod environments (controlled by `IS_PROD` check).
+
+## 4) Router map (high level)
 **Public**: `GET /` or `/health`, `POST /auth/dev-login` (dev)  
-**Auth**: `GET /auth/policy`  
+**Auth**: `GET /auth/policy` (dev stub returns `{ scopes: ["*:*"], user, roles, tenants, version, issuedAt }`)  
 **Views**: `GET/POST /views`, `GET/PUT/DELETE /views/{id}`  
 **Workspaces**: `GET/POST /workspaces`, `GET/PUT/DELETE /workspaces/{id}`  
 **Objects**: `GET/POST /objects/{type}`, `GET/PUT/DELETE /objects/{type}/{id}`, `POST /objects/{type}/search`  
-**Purchasing (PO)**: `POST /purchasing/po/{id}:(submit|approve|receive|cancel|close)`  
-**Sales (SO)**: `POST /sales/so/{id}:(submit|commit|reserve|release|fulfill|cancel|close)`  
+**Purchasing (PO)**: `POST /purchasing/po/{id}:(submit|approve|receive|cancel|close)`, `POST /purchasing/suggest-po`, `POST /purchasing/po:create-from-suggestion`  
+**Sales (SO)**: `POST /sales/so/{id}:(submit|commit|reserve|release|fulfill|cancel|close)` (commit accepts `?strict=1`)  
 **Inventory**: `GET /inventory/{itemId}/onhand`, `POST /inventory/onhand:batch`, `GET /inventory/{itemId}/movements`, `POST /inventory/search`  
 **Events/Resources**: `POST /events/registration/{id}:(cancel|checkin|checkout)`, `POST /resources/reservation/{id}:(cancel|start|end)`  
 **EPC & Scanner**: `GET /epc/resolve?epc=...`, `POST /scanner/sessions`, `POST /scanner/actions`, `POST /scanner/simulate` (dev)  

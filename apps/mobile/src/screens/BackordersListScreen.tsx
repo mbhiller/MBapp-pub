@@ -6,12 +6,15 @@ import { useObjects } from "../features/_shared/useObjects";
 import { useColors } from "../features/_shared/useColors";
 import { apiClient } from "../api/client";
 import DraftChooserModal, { PurchaseOrderDraft as Draft } from "../features/purchasing/DraftChooserModal";
+import { saveFromSuggestion } from "../features/purchasing/poActions";
+import { useToast } from "../features/_shared/Toast";
 
 type Row = { id: string; itemId: string; qty: number; status: string; preferredVendorId?: string | null };
 
 export default function BackordersListScreen() {
   const nav = useNavigation<any>();
   const t = useColors();
+  const toast = (useToast?.() as any) ?? ((msg: string) => console.log("TOAST:", msg));
   const [vendorFilter, setVendorFilter] = React.useState<string>("");
   const [selected, setSelected] = React.useState<Record<string, boolean>>({});
   const [chooserOpen, setChooserOpen] = React.useState(false);
@@ -26,12 +29,9 @@ export default function BackordersListScreen() {
   const rawItems: Row[] = data?.items ?? [];
   const items = React.useMemo(() => {
     return [...rawItems].sort((a, b) => {
-      const aCreated = (a as any)?.createdAt ? new Date((a as any).createdAt).getTime() : 0;
-      const bCreated = (b as any)?.createdAt ? new Date((b as any).createdAt).getTime() : 0;
-      if (aCreated !== bCreated) return bCreated - aCreated;
-      const aUpdated = (a as any)?.updatedAt ? new Date((a as any).updatedAt).getTime() : 0;
-      const bUpdated = (b as any)?.updatedAt ? new Date((b as any).updatedAt).getTime() : 0;
-      if (aUpdated !== bUpdated) return bUpdated - aUpdated;
+      const ta = Date.parse((a as any)?.updatedAt ?? "") || Date.parse((a as any)?.createdAt ?? "") || 0;
+      const tb = Date.parse((b as any)?.updatedAt ?? "") || Date.parse((b as any)?.createdAt ?? "") || 0;
+      if (tb !== ta) return tb - ta;
       return String(b.id || "").localeCompare(String(a.id || ""));
     });
   }, [rawItems]);
@@ -47,29 +47,40 @@ export default function BackordersListScreen() {
   async function bulk(action: "ignore" | "convert") {
     const picks = Object.keys(selected).filter((k) => selected[k]);
     if (picks.length === 0) return;
+    
+    // Step 1: Convert each backorder
     for (const id of picks) {
       await apiClient.post(`/objects/backorderRequest/${encodeURIComponent(id)}:${action}`, {});
     }
     await refetch?.();
 
-    // If converting and vendor filter is set, offer suggest-po and drill to drafts.
+    // Step 2: If converting, suggest-po and create draft(s)
     if (action === "convert") {
       try {
         const reqs = picks.map((id) => ({ backorderRequestId: id }));
-        const res = (await apiClient.post(`/purchasing/suggest-po`, {
+        const res = await apiClient.post(`/purchasing/suggest-po`, {
           requests: reqs,
           vendorId: vendorFilter || null,
-        })) as unknown as Response;
-        const j: any = await (res as any).json();
-        const drafts: Draft[] = Array.isArray(j?.drafts) ? j.drafts : (j?.draft ? [j.draft] : []);
-        if (drafts.length === 1) {
-          nav.navigate("PurchaseOrderDetail", { id: drafts[0].id, mode: "draft" });
-        } else if (drafts.length > 1) {
-          setChooserDrafts(drafts);
+        });
+        const j: any = (res as any)?.body ?? res;
+        
+        // Step 3: Handle single draft or multiple drafts
+        if (j?.draft) {
+          // Single draft: save and navigate immediately
+          const createRes: any = await saveFromSuggestion(j.draft);
+          const createdId = createRes?.id ?? createRes?.ids?.[0];
+          if (createdId) {
+            toast("Draft PO created", "success");
+            nav.navigate("PurchaseOrderDetail", { id: createdId });
+          }
+        } else if (Array.isArray(j?.drafts) && j.drafts.length > 0) {
+          // Multiple drafts: show chooser modal
+          setChooserDrafts(j.drafts);
           setChooserOpen(true);
         }
-      } catch (e) {
-        Alert.alert("Draft creation", "Converted backorders; failed to open draft(s).");
+      } catch (e: any) {
+        console.error(e);
+        Alert.alert("Draft creation", e?.message || "Converted backorders; failed to create draft(s).");
       }
     }
     setSelected({});
@@ -89,6 +100,12 @@ export default function BackordersListScreen() {
     return Date.now() - ts < 10 * 60 * 1000;
   };
 
+  const formatDateTime = (value?: string | null) => {
+    if (!value) return "";
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? String(value) : d.toLocaleString();
+  };
+
   if (isLoading && !data) return <ActivityIndicator />;
 
   const selectedCount = Object.values(selected).filter(Boolean).length;
@@ -98,9 +115,19 @@ export default function BackordersListScreen() {
       <DraftChooserModal
         visible={chooserOpen}
         drafts={chooserDrafts}
-        onPick={(d) => {
-          setChooserOpen(false);
-          nav.navigate("PurchaseOrderDetail", { id: d.id, mode: "draft" });
+        onPick={async (d) => {
+          try {
+            const createRes: any = await saveFromSuggestion(d);
+            const createdId = createRes?.id ?? createRes?.ids?.[0];
+            if (createdId) {
+              toast("Draft PO created", "success");
+              setChooserOpen(false);
+              nav.navigate("PurchaseOrderDetail", { id: createdId });
+            }
+          } catch (e: any) {
+            console.error(e);
+            Alert.alert("Error", e?.message || "Failed to create PO from draft");
+          }
         }}
         onClose={() => setChooserOpen(false)}
       />
@@ -159,13 +186,12 @@ export default function BackordersListScreen() {
                 </View>
               )}
             </View>
-            <Text style={{ color: t.colors.textMuted, fontSize: 12 }}>
-              Qty: {item.qty} • Status: {item.status}
-            </Text>
+            <Text style={{ color: t.colors.textMuted, fontSize: 12, marginBottom: 2 }}>Qty: {item.qty} • Status: {item.status}</Text>
             {"preferredVendorId" in item && item.preferredVendorId ? (
-              <Text style={{ color: t.colors.textMuted, fontSize: 12 }}>Preferred Vendor: {String((item as any).preferredVendorId)}</Text>
+              <Text style={{ color: t.colors.textMuted, fontSize: 12, marginBottom: 2 }}>Vendor: {String((item as any).preferredVendorId)}</Text>
             ) : null}
-            <Text style={{ color: t.colors.textMuted, fontSize: 12 }}>Tap to {selected[item.id] ? "unselect" : "select"}</Text>
+            <Text style={{ color: t.colors.textMuted, fontSize: 12 }}>Updated: {formatDateTime((item as any).updatedAt) || "—"}</Text>
+            <Text style={{ color: t.colors.textMuted, fontSize: 12 }}>Created: {formatDateTime((item as any).createdAt) || "—"}</Text>
           </Pressable>
         )}
       />

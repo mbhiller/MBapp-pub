@@ -49,6 +49,33 @@ Keep CRUD (reusable) separate from action RPCs.
 - Stack params: `{ id?, mode?, expandScanner? }`.
 - (Optional) `WorkspaceProvider` stores `workspaceId`; include it in list/search calls and in create/update bodies.
 
+**Navigation route names** (from `apps/mobile/src/navigation/types.ts`):
+- Parties: `PartyList`, `PartyDetail`
+- Inventory: `InventoryList`, `InventoryDetail`
+- Products: `ProductsList`, `ProductDetail`
+- Purchasing: `PurchaseOrdersList`, `PurchaseOrderDetail`
+- Sales: `SalesOrdersList`, `SalesOrderDetail`
+- Backorders: `BackordersList`
+- Resources: `ResourcesList`, `ResourceDetail`
+- Events: `EventsList`, `EventDetail`
+- Routing: `RoutePlanList`, `RoutePlanDetail`
+- Workspaces: `WorkspaceHub`
+- Reservations: `ReservationsList`, `ReservationDetail`, `CreateReservation`, `EditReservation`
+- Registrations: `RegistrationsList`, `RegistrationDetail`
+- Dev: `DevTools`
+
+## 6) Feature Flags
+
+Mobile feature flags (from `apps/mobile/src/features/_shared/flags.ts`):
+
+| Flag | Env Variable | __DEV__ Override | Default | Usage |
+|------|--------------|------------------|---------|-------|
+| `FEATURE_REGISTRATIONS_ENABLED` | `EXPO_PUBLIC_FEATURE_REGISTRATIONS_ENABLED` | No | `false` | Registrations tile + sections |
+| `FEATURE_RESERVATIONS_ENABLED` | `EXPO_PUBLIC_FEATURE_RESERVATIONS_ENABLED` | Yes (`true`) | `false` | Reservations tile + create/edit |
+| `FEATURE_PO_QUICK_RECEIVE` | _(hardcoded)_ | No | `true` | PO "Receive All" button |
+
+**Note:** Views and Events have no mobile-side flags (backend-controlled only via permissions + backend flags).
+
 ## 6) Actions helpers
 **Sales Orders**
 ```ts
