@@ -6,7 +6,7 @@
 - Events module: read-only tile + list/detail screens.
 - EventDetail includes Registrations related section (filtered by eventId).
 - Registrations section gated by FEATURE_REGISTRATIONS_ENABLED flag (dev default off).
-- __DEV__ seed button on EventsList for testing.
+- Dev seeding is centralized in DevTools; per-screen seed buttons (Events/Parties/Resources/Registrations) have been removed.
 
 **Mobile Files Modified:**
 1. `apps/mobile/src/features/events/types.ts` – Event type from generated schema.
@@ -23,7 +23,7 @@
 - **EventDetail-Registrations:** Fetch registrations using listRegistrations({ limit: 100 }); client-side filter by eventId; display up to 20. Each row tappable to RegistrationDetail.
 - **Registrations flag:** FEATURE_REGISTRATIONS_ENABLED = false in dev by default, env-controlled (EXPO_PUBLIC_FEATURE_REGISTRATIONS_ENABLED) in prod. Affects ModuleHub tile visibility + EventDetailScreen fetch/render.
 - **EventDetailScreen:** If feature off, shows "Registrations are disabled" text (graceful, not error). If fetch fails with "disabled" in message, shows same message.
-- **__DEV__ seed button:** On EventsList; creates minimal event (name: "Seed Event - Dev", status: "scheduled", time: now to now+2h, location: "Dev"). Shows success/error feedback. Resets search + reloads list on success.
+- **Dev seeding:** Lives only in DevTools; EventsList no longer hosts a per-screen seed button.
 
 **Definition of Done**
 - ✅ Events tile visible on hub (if event:read permission).
@@ -273,6 +273,12 @@ cd apps/mobile && npm run typecheck
 - Smokes naming: smoke:<module>:<flow>.
 - UI Stubs: list with q filter; detail with read-only badges; minimal actions only.
 
+**List stability rules (mobile lists)**
+- `useObjects` list-mode supports `q/filter/query/params`; put `sort/by` inside `query`.
+- Prefer client-side newest-first render sort: createdAt desc → updatedAt desc → id desc.
+- Use larger dev page size when needed (e.g., limit 200) so new items appear on page 1 and don’t disappear with pagination.
+- Use soft focus refetch (InteractionManager) to refresh without a jarring screen reload.
+
 ---
 
 ### Sprint V Option 2 – Implementation Notes
@@ -333,8 +339,8 @@ Legend: ✅ done • 🟨 stub/partial • ⬜ planned
 
 | Module              | Spec | Backend | Smokes | UI Stubs | Notes / Next |
 |---------------------|:----:|:-------:|:------:|:--------:|--------------|
-| Products            | ✅   | ✅      | ✅     | 🟨       | Add Products list/detail stub |
-| Inventory           | ✅   | ✅      | ✅     | ✅       | Counters/movements present |
+| Products            | ✅   | ✅      | ✅     | 🟨       | List stable (newest-first + refresh) |
+| Inventory           | ✅   | ✅      | ✅     | ✅       | List stabilized (refresh/sort/limit) |
 | SalesOrders         | ✅   | ✅      | ✅     | ✅       | Wizard QoL next |
 | PurchaseOrders      | ✅   | ✅      | ✅     | ✅       | Multi-vendor drafts (F) |
 | BackOrders          | ✅   | ✅      | ✅     | ✅       | Bulk actions + vendor filter (F) |
@@ -342,7 +348,7 @@ Legend: ✅ done • 🟨 stub/partial • ⬜ planned
 | RoutePlans          | ✅   | ✅      | ✅     | 🟨       | Hook unification |
 | Scans / EPC         | 🟨   | ✅      | 🟨     | ⬜       | Add seed+resolve (optional) |
 | Organizations       | 🟨   | 🟨      | 🟨     | ⬜       | Basic objects exist; UX later |
-| Events              | ✅   | ✅      | ✅     | ✅       | List/detail screens completed (Sprint IX) |
+| Events              | ✅   | ✅      | ✅     | ✅       | List sorting fixed (newest-first) |
 | Registrations       | ✅   | ✅      | ✅     | ✅       | CRUD + filters completed (Sprints IV/XI) |
 | Resources           | ✅   | ✅      | ✅     | ✅       | List/detail + seed/badges completed (Sprints V/VIII/XII) |
 | Reservations        | ✅   | ✅      | ✅     | ✅       | CRUD + conflicts + availability completed (Sprints V–VII) |

@@ -23,33 +23,29 @@ export type Movement = {
 };
 
 export async function fetchOnHand(itemId: string): Promise<OnHandResponse> {
-  const raw = await apiClient.get<any>(`/inventory/${encodeURIComponent(itemId)}/onhand`);
+  const res = await apiClient.get<any>(`/inventory/${encodeURIComponent(itemId)}/onhand`);
+  const raw = (res as any)?.body ?? res;
 
-  // Accept either spec shape or legacy:
-  // Spec: { id, qtyOnHand, qtyAvailable }
-  // Legacy: { itemId, onHand, reserved, available }
-  const id = raw?.id ?? raw?.itemId ?? itemId;
-  const onHand =
-    raw?.qtyOnHand != null ? Number(raw.qtyOnHand) :
-    raw?.onHand != null    ? Number(raw.onHand)    :
-    0;
+  // Support shapes:
+  // A) { items: [ { onHand, reserved, available, ... } ] }
+  // B) { itemId, onHand, reserved, available, ... }
+  // C) { qtyOnHand, qtyReserved, qtyAvailable, ... }
+  // D) { items: [ { qtyOnHand, qtyReserved, qtyAvailable } ] }
+  const src = Array.isArray(raw?.items) && raw.items.length ? raw.items[0] : raw;
 
-  const reserved =
-    raw?.reserved != null ? Number(raw.reserved) : undefined;
-
-  const available =
-    raw?.available != null   ? Number(raw.available) :
-    raw?.qtyAvailable != null? Number(raw.qtyAvailable) :
-    (reserved != null ? onHand - reserved : undefined);
+  const id = src?.itemId ?? src?.id ?? raw?.itemId ?? raw?.id ?? itemId;
+  const onHand = Number(src?.onHand ?? src?.qtyOnHand ?? 0);
+  const reserved = Number(src?.reserved ?? src?.qtyReserved ?? 0);
+  const available = Number(src?.available ?? src?.qtyAvailable ?? 0);
 
   return { itemId: id, onHand, reserved, available };
 }
 
 
 export async function fetchMovements(itemId: string): Promise<Movement[]> {
-  const data = await apiClient.get<any>(`/inventory/${encodeURIComponent(itemId)}/movements`);
-  if (Array.isArray(data)) return data;
-  if (data?.items && Array.isArray(data.items)) return data.items;
-  return [];
+  const res = await apiClient.get<any>(`/inventory/${encodeURIComponent(itemId)}/movements`);
+  const raw = (res as any)?.body ?? res;
+  const src = Array.isArray(raw) ? raw : (Array.isArray(raw?.items) ? raw.items : []);
+  return src ?? [];
 }
 

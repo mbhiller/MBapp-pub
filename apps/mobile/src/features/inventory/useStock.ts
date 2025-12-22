@@ -21,5 +21,17 @@ export function useStock(itemId?: string) {
     enabled: !!itemId,
   });
 
-  return { onhand, movements };
+  const refetch = () => {
+    void onhand.refetch();
+    void movements.refetch();
+  };
+
+  return { 
+    onhand, 
+    movements: { 
+      ...movements, 
+      data: Array.isArray(movements.data) ? movements.data : [] 
+    }, 
+    refetch 
+  };
 }

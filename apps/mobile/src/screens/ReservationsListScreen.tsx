@@ -15,7 +15,6 @@ import { useTheme } from "../providers/ThemeProvider";
 import { FEATURE_RESERVATIONS_ENABLED } from "../features/_shared/flags";
 import type { Reservation } from "../features/reservations/types";
 import type { RootStackParamList } from "../navigation/types";
-import { _debugConfig } from "../api/client";
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -59,7 +58,6 @@ export default function ReservationsListScreen() {
       setLastError(null);
       setLastStatus(null);
     } catch (error) {
-      console.error("Failed to load reservations:", error);
       setReservations([]);
       setNext(null);
       const msg = error instanceof Error ? error.message : "Unknown error";
@@ -80,7 +78,6 @@ export default function ReservationsListScreen() {
       setLastError(null);
       setLastStatus(null);
     } catch (error) {
-      console.error("Failed to load more reservations:", error);
       const msg = error instanceof Error ? error.message : "Unknown error";
       const status = (error as any)?.status || (error as any)?.statusCode || null;
       setLastError(msg);
@@ -160,17 +157,6 @@ export default function ReservationsListScreen() {
           </Text>
         </View>
       )}
-
-      {/* Debug Line */}
-      {(() => {
-        const dbg = _debugConfig?.();
-        if (!dbg) return null;
-        return (
-          <Text style={{ color: t.colors.textMuted, fontSize: 11, marginBottom: 6 }}>
-            api: {dbg.API_BASE} · tenant: {dbg.TENANT ?? "?"} · feature: reservations={String(FEATURE_RESERVATIONS_ENABLED)}
-          </Text>
-        );
-      })()}
 
       {/* Create Button (feature-flagged) */}
       {FEATURE_RESERVATIONS_ENABLED && (

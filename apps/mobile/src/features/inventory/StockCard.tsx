@@ -7,8 +7,12 @@ import { useStock } from "./useStock";
 export default function StockCard({ itemId }: { itemId?: string }) {
   const t = useColors();
   const { onhand, movements } = useStock(itemId);
-
-  const recent = (movements.data ?? []).slice(0, 5);
+  const mvItems = Array.isArray(movements.data)
+    ? movements.data
+    : Array.isArray((movements.data as any)?.items)
+    ? (movements.data as any).items
+    : [];
+  const recent = mvItems.slice(0, 5);
 
   return (
     <View
@@ -46,9 +50,9 @@ export default function StockCard({ itemId }: { itemId?: string }) {
       {/* Recent movements (rendered non-virtualized to avoid nested VirtualizedList warning) */}
       {movements.isLoading ? null : recent.length > 0 ? (
         <View style={{ marginTop: 10 }}>
-          <Text style={{ color: t.colors.muted, marginBottom: 6 }}>Recent movements</Text>
+          <Text style={{ color: t.colors.muted, marginBottom: 6 }}>Recent movements ({mvItems.length})</Text>
           <View>
-            {recent.map((item, i) => (
+            {recent.map((item: any, i: number) => (
               <View key={String(item.id ?? i)} style={{ paddingVertical: 8 }}>
                 {i > 0 ? <View style={{ height: 1, backgroundColor: t.colors.border, marginBottom: 8 }} /> : null}
                 <MovementRow item={item} />
@@ -85,23 +89,69 @@ function RowNumbers(props: {
 function MovementRow({
   item,
 }: {
-  item: { ts?: string; kind?: string; delta?: number; refType?: string; refId?: string; note?: string };
+  item: { 
+    ts?: string; 
+    at?: string;
+    kind?: string; 
+    action?: string;
+    delta?: number;
+    qty?: number;
+    deltaQty?: number;
+    refType?: string; 
+    refId?: string;
+    poLineId?: string;
+    soLineId?: string;
+    note?: string;
+  };
 }) {
   const t = useColors();
-  const when = item.ts ? new Date(item.ts).toLocaleString() : "";
-  const meta = [item.refType, item.refId].filter(Boolean).join("/");
-  const sign = item.delta != null && item.delta >= 0 ? "+" : "";
+  
+  // Action label: capitalize first letter of action or kind
+  const actionRaw = item.action || item.kind || "Movement";
+  const actionLabel = actionRaw.charAt(0).toUpperCase() + actionRaw.slice(1);
+  
+  // Quantity: prefer qty > deltaQty > 0
+  const qtyValue = item.qty !== undefined ? item.qty : (item.deltaQty !== undefined ? item.deltaQty : 0);
+  
+  // Signed quantity based on action
+  const actionLower = actionRaw.toLowerCase();
+  let signedQty = "";
+  if (actionLower === "receive" || actionLower === "adjust") {
+    signedQty = `+${qtyValue}`;
+  } else if (actionLower === "reserve" || actionLower === "fulfill") {
+    signedQty = `-${qtyValue}`;
+  } else {
+    signedQty = String(qtyValue);
+  }
+  
+  // Timestamp: use at field
+  const when = item.at ? new Date(item.at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "";
+  
+  // Reference line with smart formatting
+  let refText = "";
+  if (item.refId) {
+    if (item.poLineId) {
+      refText = `PO: ${item.refId} · Line: ${item.poLineId}`;
+    } else if (item.soLineId) {
+      refText = `SO: ${item.refId} · Line: ${item.soLineId}`;
+    } else {
+      refText = `Ref: ${item.refId}`;
+    }
+  }
+  
   return (
     <View>
       <Text style={{ color: t.colors.text, fontWeight: "600" }}>
-        {item.kind || "movement"} {sign}
-        {item.delta ?? 0}
+        {actionLabel} {signedQty}
       </Text>
       <Text style={{ color: t.colors.muted, fontSize: 12 }}>
         {when}
-        {meta ? ` • ${meta}` : ""}
-        {item.note ? ` • ${item.note}` : ""}
       </Text>
+      {refText ? (
+        <Text style={{ color: t.colors.muted, fontSize: 12, marginTop: 2 }}>
+          {refText}
+        </Text>
+      ) : null}
     </View>
   );
 }

@@ -1,14 +1,14 @@
 // apps/mobile/src/screens/ProductsListScreen.tsx
 import * as React from "react";
-import { View, Text, TextInput, FlatList, Pressable, ActivityIndicator } from "react-native";
-import { useNavigation } from "@react-navigation/native";
+import { View, Text, TextInput, FlatList, Pressable, ActivityIndicator, InteractionManager } from "react-native";
+import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { listProducts } from "../features/products/api";
 import type { Product } from "../features/products/types";
 import type { RootStackParamList } from "../navigation/types";
 import { useTheme } from "../providers/ThemeProvider";
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = __DEV__ ? 200 : 20;
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -28,6 +28,19 @@ export default function ProductsListScreen() {
     setLastError(null);
     loadProducts();
   }, [q]);
+
+  const refetch = React.useCallback(() => {
+    void loadProducts();
+  }, [q]);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      const task = InteractionManager.runAfterInteractions(() => {
+        void refetch();
+      });
+      return () => task.cancel?.();
+    }, [refetch])
+  );
 
   const loadProducts = async () => {
     setIsLoading(true);
@@ -60,6 +73,18 @@ export default function ProductsListScreen() {
       setIsLoadingMore(false);
     }
   };
+
+  const sortedItems = React.useMemo(() => {
+    return [...items].sort((a, b) => {
+      const aCreated = (a as any).createdAt ? new Date((a as any).createdAt).getTime() : 0;
+      const bCreated = (b as any).createdAt ? new Date((b as any).createdAt).getTime() : 0;
+      if (aCreated !== bCreated) return bCreated - aCreated;
+      const aUpdated = (a as any).updatedAt ? new Date((a as any).updatedAt).getTime() : 0;
+      const bUpdated = (b as any).updatedAt ? new Date((b as any).updatedAt).getTime() : 0;
+      if (aUpdated !== bUpdated) return bUpdated - aUpdated;
+      return (b.id || "").localeCompare(a.id || "");
+    });
+  }, [items]);
 
   const formatDateTime = (value?: string | null) => {
     if (!value) return "";
@@ -190,15 +215,7 @@ export default function ProductsListScreen() {
         </View>
       ) : (
         <FlatList
-          data={[...items].sort((a, b) => {
-            const aCreated = (a as any).createdAt ? new Date((a as any).createdAt).getTime() : 0;
-            const bCreated = (b as any).createdAt ? new Date((b as any).createdAt).getTime() : 0;
-            if (aCreated !== bCreated) return bCreated - aCreated;
-            const aUpdated = (a as any).updatedAt ? new Date((a as any).updatedAt).getTime() : 0;
-            const bUpdated = (b as any).updatedAt ? new Date((b as any).updatedAt).getTime() : 0;
-            if (aUpdated !== bUpdated) return bUpdated - aUpdated;
-            return (b.id || "").localeCompare(a.id || "");
-          })}
+          data={sortedItems}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
           onEndReached={loadMore}
