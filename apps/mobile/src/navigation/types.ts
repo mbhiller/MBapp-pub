@@ -17,6 +17,9 @@ export type ScanParams = {
 export type RootStackParamList = {
   // Hub / global
   Hub: undefined;
+  
+  // Dev Tools
+  DevTools: undefined;
 
   // Parties
   PartyList: { role?: string; q?: string } | undefined;

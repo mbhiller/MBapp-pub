@@ -97,6 +97,17 @@ export default function EventsListScreen() {
     const title = (item as any).name || item.id || "(no name)";
     const status = (item as any).status || "draft";
     const startsAt = formatDateTime((item as any).startsAt);
+    const createdRaw = (item as any).createdAt as string | undefined;
+    const updatedRaw = (item as any).updatedAt as string | undefined;
+    const created = formatDateTime(createdRaw);
+    const updated = formatDateTime(updatedRaw);
+    
+    const isNew = (() => {
+      if (!createdRaw) return false;
+      const ts = new Date(createdRaw).getTime();
+      if (isNaN(ts)) return false;
+      return Date.now() - ts < 10 * 60 * 1000; // 10 minutes
+    })();
 
     return (
       <Pressable
@@ -110,11 +121,20 @@ export default function EventsListScreen() {
           backgroundColor: t.colors.card,
         }}
       >
-        <Text style={{ color: t.colors.text, fontWeight: "700", marginBottom: 4 }}>
-          {title}
-        </Text>
+        <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 4 }}>
+          <Text style={{ color: t.colors.text, fontWeight: "700" }}>
+            {title}
+          </Text>
+          {isNew && (
+            <View style={{ marginLeft: 8, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10, backgroundColor: t.colors.primary }}>
+              <Text style={{ color: "#fff", fontSize: 10, fontWeight: "700" }}>NEW</Text>
+            </View>
+          )}
+        </View>
         <Text style={{ color: t.colors.textMuted, fontSize: 12, marginBottom: 2 }}>Status: {status}</Text>
         <Text style={{ color: t.colors.textMuted, fontSize: 12 }}>Starts: {startsAt || "—"}</Text>
+        {createdRaw && <Text style={{ color: t.colors.textMuted, fontSize: 11, marginTop: 4 }}>Created: {created}</Text>}
+        {updatedRaw && <Text style={{ color: t.colors.textMuted, fontSize: 11 }}>Updated: {updated}</Text>}
       </Pressable>
     );
   };

@@ -182,7 +182,15 @@ export default function ResourcesListScreen() {
         </View>
       ) : (
         <FlatList
-          data={items}
+          data={[...items].sort((a, b) => {
+            const aCreated = (a as any).createdAt ? new Date((a as any).createdAt).getTime() : 0;
+            const bCreated = (b as any).createdAt ? new Date((b as any).createdAt).getTime() : 0;
+            if (aCreated !== bCreated) return bCreated - aCreated;
+            const aUpdated = (a as any).updatedAt ? new Date((a as any).updatedAt).getTime() : 0;
+            const bUpdated = (b as any).updatedAt ? new Date((b as any).updatedAt).getTime() : 0;
+            if (aUpdated !== bUpdated) return bUpdated - aUpdated;
+            return (b.id || "").localeCompare(a.id || "");
+          })}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
           onEndReached={loadMore}
