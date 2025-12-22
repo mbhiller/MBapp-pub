@@ -82,6 +82,9 @@ export const MODULES: readonly ModuleEntry[] = [
   // Sprint IV: Registrations (guarded by registration:read permission + feature flag)
   { key: "registrations", title: "Registrations", screen: "RegistrationsList", icon: "calendar", required: ["registration:read"], enabled: () => FEATURE_REGISTRATIONS_ENABLED },
 
+  // Dev Tools (Sprint XIII)
+  { key: "devtools", title: "Dev Tools", screen: "DevTools", icon: "wrench", enabled: () => __DEV__ },
+
 ] as const;
 
 export default MODULES;

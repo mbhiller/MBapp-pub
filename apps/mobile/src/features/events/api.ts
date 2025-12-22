@@ -5,13 +5,13 @@ import type { Event, Page } from "./types";
 const TYPE = "event";
 
 function toClientOpts(opts?: { limit?: number; next?: string | null; q?: string }) {
-  const out: { limit?: number; next?: string; sort?: "asc" | "desc"; by?: string; q?: string } = {};
-  if (opts?.limit != null) out.limit = opts.limit;
-  if (opts?.next) out.next = opts.next;            // keep as string; client will pass through
-  if (opts?.q) out.q = opts.q;
-  out.by = "updatedAt";
-  out.sort = "desc";
-  return out;
+  return {
+    by: "updatedAt" as const,
+    sort: "desc" as const,
+    ...(opts?.limit != null ? { limit: opts.limit } : {}),
+    ...(opts?.next ? { next: opts.next } : {}),
+    ...(opts?.q ? { q: opts.q } : {}),
+  };
 }
 
 export function listEvents(opts: { limit?: number; next?: string | null; q?: string } = {}): Promise<Page<Event>> {

@@ -37,6 +37,9 @@ import ResourceDetailScreen from "../screens/ResourceDetailScreen";
 import EventsListScreen from "../screens/EventsListScreen";
 import EventDetailScreen from "../screens/EventDetailScreen";
 
+// Dev Tools (Sprint XIII)
+import DevToolsScreen from "../screens/DevToolsScreen";
+
 
 // Purchasing
 import PurchaseOrdersListScreen from "../screens/PurchaseOrdersListScreen";
@@ -104,6 +107,9 @@ export default function RootStack() {
     {/* Events (Sprint IX) */}
     <Stack.Screen name="EventsList" component={EventsListScreen} options={{ title: "Events" }} />
     <Stack.Screen name="EventDetail" component={EventDetailScreen} options={{ title: "Event" }} />
+
+    {/* Dev Tools (Sprint XIII) */}
+    <Stack.Screen name="DevTools" component={DevToolsScreen} options={{ title: "Dev Tools" }} />
 
     {/* Purchase Orders */}
     <Stack.Screen name="PurchaseOrdersList" component={PurchaseOrdersListScreen} options={{ title: "Purchasing" }} />

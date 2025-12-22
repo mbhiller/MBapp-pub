@@ -16,7 +16,7 @@ Sprint III — Theme: Views & Workspaces v1 + Event plumbing options
 
 ## Sprint XI — Registrations Enabled + Parties UX
 
-  - Mobile `FEATURE_REGISTRATIONS_ENABLED` now respects `EXPO_PUBLIC_FEATURE_REGISTRATIONS_ENABLED` (removed `__DEV__` forced false).
+  - Mobile `FEATURE_REGISTRATIONS_ENABLED` reads `EXPO_PUBLIC_FEATURE_REGISTRATIONS_ENABLED` (no `__DEV__` override).
   - Registrations tile visible when enabled; backend `/registrations` returns 200.
   - Related registrations shown on EventDetail and PartyDetail when enabled.
   - __DEV__ Seed Registration button added; CI runs registrations smokes via `ops/ci-smokes.json`.
@@ -25,6 +25,11 @@ Sprint III — Theme: Views & Workspaces v1 + Event plumbing options
   - PartyListScreen: created/updated timestamp, NEW badge for recent items, newest-first sort, fixed client-side role filter — easier to spot newly seeded parties.
 
 Verification
+
+```bash
+cd apps/mobile
+npm run typecheck
+```
 
 Context
 
@@ -260,10 +265,10 @@ cd apps/mobile && npm run typecheck
 
 **Scope**
 - **Parties:** Seed Party and __DEV__ Seed Vendor (new) both prepend created party to list, clear filters, scroll to top for immediate visibility.
-- **Parties UX:** Role filter confirmed working; NEW badge + timestamps unified across Parties and Resources.
+- **Parties UX:** Role filter confirmed working; NEW badge + timestamps unified across Parties and Resources. Added DEV Seed Vendor button to PartyListScreen (creates party with vendor role).
 - **Resources:** __DEV__ Seed Resource button; shows `createdAt/updatedAt` timestamps and NEW badge (10-minute window); newest-first sort.
 - **Reservations:** Fixed `getResourceAvailability()` to use authenticated `apiClient.get()` (bearer token always sent).
-- **Backend:** Ensured `FEATURE_RESERVATIONS_ENABLED` in Lambda so availability endpoint is accessible (no "feature disabled" 404).
+- **Backend:** `FEATURE_RESERVATIONS_ENABLED` flag exists and gates availability endpoint (default false; dev header override supported).
 
 **Deliverables**
 - ✅ Seed Party/Vendor prepends to list, clears filters, scrolls to top; shows created id in message.
@@ -281,3 +286,47 @@ npm run typecheck
 # 2) Seed Resource → appears at top with NEW badge
 # 3) Create Reservation → see availability blocks for selected resource
 ```
+
+---
+
+## Sprint XIII — Dev Tools + Feature Consolidation
+
+**Context**
+- Branch: `feat/tier1-sprint-XIII`
+- Mobile: dev-only ModuleHub tile with consolidated seed actions and quick navigation shortcuts.
+
+**Scope**
+- **Dev Tools tile:** Dev-only (`__DEV__`) module visible in hub.
+- **DevTools screen:** Single consolidated dev utilities hub.
+  - Quick-nav buttons (5): Events, Parties, Resources, Reservations, Registrations.
+  - Seed buttons (6): Event, Party, Vendor, Resource, Reservation, Registration.
+  - Last-created-IDs tracker displayed.
+- **Seed actions:** Auto-resolve dependencies (e.g., Resource before Reservation, Event+Party before Registration).
+- **UI polish:** All seed actions show toast feedback with created IDs; NEW badge + timestamps on Events/Registrations/Reservations/Resources list screens.
+- **Sorting:** Ensure all list screens order newest-first (createdAt desc → updatedAt desc → id desc).
+
+**Acceptance Criteria**
+- ✅ Dev Tools tile visible only in `__DEV__` mode.
+- ✅ All 6 seed buttons execute and display created IDs in toast.
+- ✅ Quick-nav buttons route to respective list screens.
+- ✅ NEW badge appears on items created within 10 minutes (Events, Registrations, Resources, Reservations).
+- ✅ Timestamps displayed (createdAt/updatedAt) on all list screens.
+- ✅ All list screens sorted newest-first by createdAt → updatedAt → id.
+- ✅ Mobile typecheck passes.
+- ✅ No regressions in existing flows.
+
+**How to Verify**
+```bash
+cd apps/mobile
+npm run typecheck
+```
+
+**Files Touched**
+- `apps/mobile/src/screens/DevToolsScreen.tsx` (new)
+- `apps/mobile/src/features/_shared/modules.ts`
+- `apps/mobile/src/navigation/RootStack.tsx`
+- `apps/mobile/src/navigation/types.ts`
+- `apps/mobile/src/screens/EventsListScreen.tsx`
+- `apps/mobile/src/screens/RegistrationsListScreen.tsx`
+- `apps/mobile/src/screens/ReservationsListScreen.tsx`
+- `apps/mobile/src/screens/ResourcesListScreen.tsx`

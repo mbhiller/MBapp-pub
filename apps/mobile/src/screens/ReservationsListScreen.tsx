@@ -298,45 +298,88 @@ export default function ReservationsListScreen() {
         </View>
       ) : (
         <FlatList
-          data={filteredReservations}
+          data={[...filteredReservations].sort((a, b) => {
+            const aCreated = (a as any).createdAt ? new Date((a as any).createdAt).getTime() : 0;
+            const bCreated = (b as any).createdAt ? new Date((b as any).createdAt).getTime() : 0;
+            if (aCreated !== bCreated) return bCreated - aCreated;
+            const aUpdated = (a as any).updatedAt ? new Date((a as any).updatedAt).getTime() : 0;
+            const bUpdated = (b as any).updatedAt ? new Date((b as any).updatedAt).getTime() : 0;
+            if (aUpdated !== bUpdated) return bUpdated - aUpdated;
+            return (b.id || "").localeCompare(a.id || "");
+          })}
           keyExtractor={(item) => item.id}
           onEndReached={loadMore}
           onEndReachedThreshold={0.5}
-          renderItem={({ item }) => (
-            <Pressable
-              onPress={() =>
-                navigation.navigate("ReservationDetail", { id: item.id })
-              }
-              style={{
-                padding: 12,
-                borderWidth: 1,
-                borderColor: t.colors.border,
-                borderRadius: 8,
-                marginBottom: 8,
-                backgroundColor: t.colors.card,
-              }}
-            >
-              <Text
+          renderItem={({ item }) => {
+            const createdRaw = (item as any).createdAt;
+            const updatedRaw = (item as any).updatedAt;
+            const isNew = (() => {
+              if (!createdRaw) return false;
+              const ts = new Date(createdRaw).getTime();
+              if (isNaN(ts)) return false;
+              return Date.now() - ts < 10 * 60 * 1000;
+            })();
+
+            return (
+              <Pressable
+                onPress={() =>
+                  navigation.navigate("ReservationDetail", { id: item.id })
+                }
                 style={{
-                  fontWeight: "600",
-                  color: t.colors.text,
-                  marginBottom: 4,
+                  padding: 12,
+                  borderWidth: 1,
+                  borderColor: t.colors.border,
+                  borderRadius: 8,
+                  marginBottom: 8,
+                  backgroundColor: t.colors.card,
                 }}
               >
-                {item.id}
-              </Text>
-              <Text style={{ fontSize: 13, color: t.colors.textMuted }}>
-                Resource: {(item as any).resourceId}
-              </Text>
-              <Text style={{ fontSize: 13, color: t.colors.textMuted }}>
-                Status: {(item as any).status}
-              </Text>
-              <Text style={{ fontSize: 12, color: t.colors.textMuted, marginTop: 4 }}>
-                {formatDateTime((item as any).startsAt)} →{" "}
-                {formatDateTime((item as any).endsAt)}
-              </Text>
-            </Pressable>
-          )}
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                  <Text
+                    style={{
+                      fontWeight: "600",
+                      color: t.colors.text,
+                      flex: 1,
+                    }}
+                  >
+                    {item.id}
+                  </Text>
+                  {isNew && (
+                    <View
+                      style={{
+                        backgroundColor: t.colors.primary,
+                        borderRadius: 10,
+                        paddingHorizontal: 6,
+                        paddingVertical: 2,
+                      }}
+                    >
+                      <Text style={{ color: "#fff", fontSize: 10, fontWeight: "700" }}>NEW</Text>
+                    </View>
+                  )}
+                </View>
+                <Text style={{ fontSize: 13, color: t.colors.textMuted }}>
+                  Resource: {(item as any).resourceId}
+                </Text>
+                <Text style={{ fontSize: 13, color: t.colors.textMuted }}>
+                  Status: {(item as any).status}
+                </Text>
+                <Text style={{ fontSize: 12, color: t.colors.textMuted, marginTop: 4 }}>
+                  {formatDateTime((item as any).startsAt)} →{" "}
+                  {formatDateTime((item as any).endsAt)}
+                </Text>
+                {createdRaw && (
+                  <Text style={{ fontSize: 11, color: t.colors.textMuted, marginTop: 4 }}>
+                    Created: {formatDateTime(createdRaw)}
+                  </Text>
+                )}
+                {updatedRaw && (
+                  <Text style={{ fontSize: 11, color: t.colors.textMuted }}>
+                    Updated: {formatDateTime(updatedRaw)}
+                  </Text>
+                )}
+              </Pressable>
+            );
+          }}
         />
       )}
     </View>

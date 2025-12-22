@@ -342,13 +342,62 @@ Legend: ✅ done • 🟨 stub/partial • ⬜ planned
 | RoutePlans          | ✅   | ✅      | ✅     | 🟨       | Hook unification |
 | Scans / EPC         | 🟨   | ✅      | 🟨     | ⬜       | Add seed+resolve (optional) |
 | Organizations       | 🟨   | 🟨      | 🟨     | ⬜       | Basic objects exist; UX later |
-| Events              | ⬜   | ⬜      | ⬜     | ⬜       | Roadmap-driven |
-| Registrations       | ⬜   | ⬜      | ⬜     | ⬜       | Depends on Events |
-| Resources           | ⬜   | ⬜      | ⬜     | ⬜       | Roadmap-driven |
-| Reservations        | ⬜   | ⬜      | ⬜     | ⬜       | Roadmap-driven |
+| Events              | ✅   | ✅      | ✅     | ✅       | List/detail screens completed (Sprint IX) |
+| Registrations       | ✅   | ✅      | ✅     | ✅       | CRUD + filters completed (Sprints IV/XI) |
+| Resources           | ✅   | ✅      | ✅     | ✅       | List/detail + seed/badges completed (Sprints V/VIII/XII) |
+| Reservations        | ✅   | ✅      | ✅     | ✅       | CRUD + conflicts + availability completed (Sprints V–VII) |
 | Workspaces/Views    | 🟨   | 🟨      | ⬜     | 🟨       | Minimal present |
 | Scorecards/Reports  | ⬜   | ⬜      | ⬜     | ⬜       | Later tier |
 | Settings/Config     | ⬜   | ⬜      | ⬜     | ⬜       | Global flags, tenants |
+
+---
+
+## Feature Flags Reference
+
+This section documents flags used across the backend (AWS Lambda) and mobile (Expo) to control feature rollout and dev/test behaviors.
+
+### Backend (AWS Lambda) Flags
+
+- **`FEATURE_REGISTRATIONS_ENABLED`** (env: `FEATURE_REGISTRATIONS_ENABLED`, header: `X-Feature-Registrations-Enabled`)
+  - Controls whether registration endpoints are accessible and functional.
+  - Default: `false` (disabled in prod unless explicitly configured).
+  - Dev/CI: Can be overridden via `X-Feature-Registrations-Enabled` header for testing without env redeploy.
+
+- **`FEATURE_RESERVATIONS_ENABLED`** (env: `FEATURE_RESERVATIONS_ENABLED`, header: `X-Feature-Reservations-Enabled`)
+  - Controls whether reservation endpoints and availability checks are accessible.
+  - Default: `false` (disabled in prod unless explicitly configured).
+  - Dev/CI: Can be overridden via `X-Feature-Reservations-Enabled` header.
+
+### Mobile (Expo) Flags
+
+- **`EXPO_PUBLIC_FEATURE_REGISTRATIONS_ENABLED`**
+  - Mobile reads this Expo public environment variable to set `FEATURE_REGISTRATIONS_ENABLED` in `apps/mobile/src/features/_shared/flags.ts`.
+  - Controls visibility of Registrations module tile in ModuleHub and related features.
+  - Default: `false`.
+
+- **`EXPO_PUBLIC_FEATURE_RESERVATIONS_ENABLED`**
+  - Mobile reads this Expo public environment variable to set `FEATURE_RESERVATIONS_ENABLED`.
+  - Controls visibility of Reservations module tile and Create/Edit actions.
+  - Default: `false`.
+
+### Dev/Test Header Overrides
+
+Backend flags can be temporarily overridden in dev and CI environments using HTTP headers of the form `X-Feature-<Name>-Enabled` (e.g., `X-Feature-Registrations-Enabled: true`). This allows testing feature behavior without redeploy.
+
+### Auth Policy & Module Visibility
+
+The mobile ModuleHub fetches `GET /auth/policy` to determine which modules are visible and enabled:
+
+- **Fail-closed behavior:** If `/auth/policy` returns `null` or fails, ModuleHub shows an error banner and displays no tiles (empty module list).
+- **Policy structure:** Returns a map of permissions (e.g., `{ "parties:read": true, "event:read": true, "*:*": false }`).
+- **Permission matching:** The mobile app uses wildcard matching on the policy map:
+  - `"*"` → superuser (all permissions allowed)
+  - `"*:*"` or `"*:all"` → all resources and actions
+  - `"*:<action>"` → all resources with a specific action (e.g., `*:read`)
+  - `"<resource>:*"` → all actions on a specific resource (e.g., `parties:*`)
+  - Case-insensitive matching of permission strings.
+
+**Development note:** The backend auth implementation in [apps/api/src/auth/policy.ts](../apps/api/src/auth/policy.ts) currently returns a permissive policy structure with `scopes: ["*:*"]` for dev tenants. In production, real JWT parsing and role derivation should be implemented (see TODO at line 9).
 
 ---
 # NEXT SPRINT
@@ -520,7 +569,7 @@ node ops/tools/run-ci-smokes.mjs
 
 ---
 
-## Sprint V — Resources/Reservations Foundation (In Progress)
+## ✅ Sprint V — Resources/Reservations Foundation (Completed 2025-12-21)
 
 **Theme:** Add Resource and Reservation objects with overlap conflict detection; custom endpoints for availability checks.
 

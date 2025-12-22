@@ -176,11 +176,39 @@ export default function RegistrationsListScreen() {
         <ActivityIndicator size="large" color={t.colors.primary} />
       ) : (
         <FlatList
-          data={data}
+          data={[...data].sort((a, b) => {
+            // Primary: createdAt descending
+            const aCreated = (a as any).createdAt ? new Date((a as any).createdAt).getTime() : 0;
+            const bCreated = (b as any).createdAt ? new Date((b as any).createdAt).getTime() : 0;
+            if (aCreated !== bCreated) return bCreated - aCreated;
+            
+            // Fallback: updatedAt descending
+            const aUpdated = (a as any).updatedAt ? new Date((a as any).updatedAt).getTime() : 0;
+            const bUpdated = (b as any).updatedAt ? new Date((b as any).updatedAt).getTime() : 0;
+            if (aUpdated !== bUpdated) return bUpdated - aUpdated;
+            
+            // Final fallback: id descending lexicographically
+            return (b.id || "").localeCompare(a.id || "");
+          })}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => {
             const division = (item as any).division as string | undefined;
             const klass = (item as any).class as string | undefined;
+            const createdRaw = (item as any).createdAt as string | undefined;
+            const updatedRaw = (item as any).updatedAt as string | undefined;
+            
+            const formatDateTime = (value?: string) => {
+              if (!value) return "";
+              const d = new Date(value);
+              return isNaN(d.getTime()) ? String(value) : d.toLocaleString();
+            };
+
+            const isNew = (() => {
+              if (!createdRaw) return false;
+              const ts = new Date(createdRaw).getTime();
+              if (isNaN(ts)) return false;
+              return Date.now() - ts < 10 * 60 * 1000; // 10 minutes
+            })();
             
             return (
               <Pressable
@@ -194,9 +222,16 @@ export default function RegistrationsListScreen() {
                   backgroundColor: t.colors.card,
                 }}
               >
-                <Text style={{ fontWeight: "600", color: t.colors.text, marginBottom: 4 }}>
-                  {item.id}
-                </Text>
+                <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 4 }}>
+                  <Text style={{ fontWeight: "600", color: t.colors.text }}>
+                    {item.id}
+                  </Text>
+                  {isNew && (
+                    <View style={{ marginLeft: 8, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10, backgroundColor: t.colors.primary }}>
+                      <Text style={{ color: "#fff", fontSize: 10, fontWeight: "700" }}>NEW</Text>
+                    </View>
+                  )}
+                </View>
                 <Text style={{ fontSize: 13, color: t.colors.textMuted }}>
                   Party: {item.partyId}
                 </Text>
@@ -213,9 +248,8 @@ export default function RegistrationsListScreen() {
                     Class: {klass}
                   </Text>
                 )}
-                <Text style={{ fontSize: 12, color: t.colors.textMuted, marginTop: 4 }}>
-                  Updated: {new Date(item.updatedAt).toLocaleDateString()}
-                </Text>
+                {createdRaw && <Text style={{ fontSize: 12, color: t.colors.textMuted, marginTop: 4 }}>Created: {formatDateTime(createdRaw)}</Text>}
+                {updatedRaw && <Text style={{ fontSize: 12, color: t.colors.textMuted }}>Updated: {formatDateTime(updatedRaw)}</Text>}
               </Pressable>
             );
           }}
