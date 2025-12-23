@@ -4,46 +4,40 @@ import assert from "node:assert/strict";
 import { baseGraph } from "./seed/routing.ts";
 import { seedParties, seedVendor } from "./seed/parties.ts";
 
-const API=(process.env.MBAPP_API_BASE??"http://localhost:3000").replace(/\/+$/,"");
-const TENANT=process.env.MBAPP_TENANT_ID??"DemoTenant";
-const EMAIL=process.env.MBAPP_DEV_EMAIL??"dev@example.com";
+const API_RAW = process.env.MBAPP_API_BASE;
+if (!API_RAW || typeof API_RAW !== "string" || !/^https?:\/\//.test(API_RAW)) {
+  console.error('[smokes] MBAPP_API_BASE is required and must be a full URL (e.g., https://..). No localhost or defaults allowed.');
+  process.exit(2);
+}
+const API = API_RAW.replace(/\/+$/, "");
+const TENANT = process.env.MBAPP_TENANT_ID ?? "DemoTenant";
+const EMAIL = process.env.MBAPP_DEV_EMAIL ?? "dev@example.com";
+
+const TOKEN = process.env.MBAPP_BEARER;
+if (!TOKEN || TOKEN.trim().length === 0) {
+  console.error('[smokes] MBAPP_BEARER is required. Set a valid bearer token in the environment.');
+  process.exit(2);
+}
 
 if (!API || typeof API !== "string" || !/^https?:\/\//.test(API)) {
   console.error(`[smokes] MBAPP_API_BASE is not set or invalid. Got: "${API ?? ""}"`);
   console.error(`[smokes] Expected a full URL like https://...  Check CI secrets/env wiring or local Set-MBEnv.ps1.`);
   process.exit(2);
 }
-console.log(JSON.stringify({
-  base: API,
-  tokenVar: process.env.MBAPP_BEARER ? "MBAPP_BEARER" : (process.env.DEV_API_TOKEN ? "DEV_API_TOKEN" : null),
-  hasToken: Boolean(process.env.MBAPP_BEARER || process.env.DEV_API_TOKEN)
-}));
+console.log(JSON.stringify({ base: API, tokenVar: "MBAPP_BEARER", hasToken: true }));
 
 /* ---------- Auth & HTTP ---------- */
-async function ensureBearer(){
-  if(process.env.MBAPP_BEARER) return;
-  try{
-    const r=await fetch(API+"/auth/dev-login",{
-      method:"POST",
-      headers:{"Content-Type":"application/json","X-Tenant-Id":TENANT},
-      body:JSON.stringify({email:EMAIL,tenantId:TENANT})
-    });
-    if(r.ok){
-      const j=await r.json().catch(()=>({}));
-      if(j?.token) process.env.MBAPP_BEARER=j.token;
-    }
-  }catch{}
-}
+async function ensureBearer(){ /* bearer must be provided via MBAPP_BEARER at startup */ }
 function baseHeaders(){
   const h={"accept":"application/json","Content-Type":"application/json","X-Tenant-Id":TENANT};
-  const token=process.env.MBAPP_BEARER||process.env.DEV_API_TOKEN;
+  const token=process.env.MBAPP_BEARER;
   if(token) h["Authorization"]=`Bearer ${token}`;
   return h;
 }
 // Allow per-request Authorization override: "default" | "invalid" | "none"
 function buildHeaders(base = {}, auth = "default") {
   const h = { "content-type": "application/json", ...base };
-  const token = process.env.MBAPP_BEARER || process.env.DEV_API_TOKEN;
+  const token = process.env.MBAPP_BEARER;
   if (auth === "default") {
     if (token) h.Authorization = `Bearer ${token}`;
   } else if (auth === "invalid") {
@@ -258,6 +252,56 @@ const tests = {
     }
     const pass = create.ok && search.ok && update.ok;
     return { test:"parties-happy", result:pass?"PASS":"FAIL", create, search, update };
+  },
+
+  "smoke:parties:crud": async ()=>{
+    await ensureBearer();
+    const name = `SmokeParty-${Date.now()}`;
+    const updatedName = `${name}-Updated`;
+
+    const create = await post(`/objects/${encodeURIComponent(PARTY_TYPE)}`,
+      { kind: "org", name, roles: ["customer"] },
+      { "Idempotency-Key": idem() }
+    );
+    const id = create.body?.id;
+    if (!create.ok || !id) {
+      return { test: "parties-crud", result: "FAIL", step: "create", create };
+    }
+
+    const get1 = await get(`/objects/${encodeURIComponent(PARTY_TYPE)}/${encodeURIComponent(id)}`);
+    if (!get1.ok || (get1.body?.name ?? "") !== name) {
+      return { test: "parties-crud", result: "FAIL", step: "get1", get1 };
+    }
+
+    const update = await put(`/objects/${encodeURIComponent(PARTY_TYPE)}/${encodeURIComponent(id)}`,
+      { name: updatedName, notes: "updated by parties-crud" },
+      { "Idempotency-Key": idem() }
+    );
+    if (!update.ok) {
+      return { test: "parties-crud", result: "FAIL", step: "update", update };
+    }
+
+    const get2 = await get(`/objects/${encodeURIComponent(PARTY_TYPE)}/${encodeURIComponent(id)}`);
+    const gotUpdated = get2.ok && (get2.body?.name ?? "") === updatedName;
+    if (!gotUpdated) {
+      return { test: "parties-crud", result: "FAIL", step: "get2", get2 };
+    }
+
+    // Presence check via search with tiny retry (eventual consistency safe)
+    let searchOrList = null;
+    let found = false;
+    for (let i=0;i<5 && !found;i++){
+      // prefer POST /objects/party/search when available
+      searchOrList = await post(`/objects/${encodeURIComponent(PARTY_TYPE)}/search`, { q: updatedName, limit: 20 });
+      if (searchOrList.ok) {
+        const items = Array.isArray(searchOrList.body?.items) ? searchOrList.body.items : [];
+        found = items.some(p => p.id === id || p.name === updatedName);
+      }
+      if (!found) await sleep(200);
+    }
+
+    const pass = create.ok && get1.ok && update.ok && gotUpdated && searchOrList?.ok && found;
+    return { test: "parties-crud", result: pass ? "PASS" : "FAIL", create, get1, update, get2, searchOrList, found };
   },
 
   "smoke:inventory:onhand": async ()=>{

@@ -76,7 +76,25 @@ Each exports `async function handle(event)`. Read path/query/body, use `authoriz
 - Prefer `200` returning the updated domain object.
 - Error body: `{ message, code?, ...context }` (no global `#/components/schemas/Error` needed).
 
-## 8) Smokes
+## 8) Smokes & Environment Requirements
+
+**Smoke Env Requirements (Sprint XXVI+):**
+- **MBAPP_API_BASE** (required): Full HTTPS URL to AWS API Gateway (e.g., `https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com`). No localhost fallback. Script exits(2) if missing.
+- **MBAPP_BEARER** (required): Valid bearer token for tenant. No dev-login fallback. Script exits(2) if missing.
+- **MBAPP_TENANT_ID** (optional): Defaults to `DemoTenant` if unset.
+- **X-Tenant-Id**: Always injected in `baseHeaders()` for multi-tenant scoping.
+- **X-Feature-* headers**: Override flags in non-prod environments (e.g., `X-Feature-Events-Simulate: 1`).
+
+**Running a Smoke Locally:**
+```bash
+export MBAPP_API_BASE=https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com
+export MBAPP_TENANT_ID=DemoTenant
+export MBAPP_BEARER=<your-token>
+
+node ops/smoke/smoke.mjs smoke:parties:crud
+node ops/smoke/smoke.mjs smoke:close-the-loop
+```
+
 See the Handoff Quickstart for the canonical set.
 
 ## Aligned Addenda — Tier 1 Canonical Model (Backend)

@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        pkg: [ "apps/api", "apps/mobile" ]
+        pkg: [ "apps/api", "apps/mobile", "apps/web" ]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
