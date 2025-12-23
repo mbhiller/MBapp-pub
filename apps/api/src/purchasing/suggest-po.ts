@@ -1,6 +1,6 @@
 // apps/api/src/purchasing/suggest-po.ts
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
-import { GetCommand } from "@aws-sdk/lib-dynamodb";
+import { GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 import { ddb, tableObjects } from "../common/ddb";
 import { getObjectById } from "../objects/repo";
 
@@ -227,11 +227,10 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
         }));
         bo.status = "converted";
         bo.updatedAt = new Date().toISOString();
-        await ddb.send({
+        await ddb.send(new PutCommand({
           TableName: tableObjects,
           Item: bo,
-          // Use PutCommand if needed
-        });
+        }));
       }
     } catch {}
 

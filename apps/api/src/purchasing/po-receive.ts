@@ -25,6 +25,16 @@ function tid(e: APIGatewayProxyEventV2): string | null {
   return t ? String(t) : null;
 }
 
+/** Safe numeric extraction from unknown values */
+const num = (v: unknown, fallback = 0): number => {
+  if (typeof v === "number") return v;
+  if (typeof v === "string") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : fallback;
+  }
+  return fallback;
+};
+
 /** Idempotency ledger: (tenant, poId) × { Idempotency-Key | payload signature } */
 async function alreadyAppliedKey(tenantId: string, poId: string, idk?: string | null) {
   if (!idk) return false;
@@ -252,18 +262,27 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
           try {
             const backorder = await getObjectById({ tenantId, type: "backorderRequest", id: backorderId });
             if (backorder) {
-              let remaining = typeof backorder.remainingQty === "number" ? backorder.remainingQty : (backorder.qty - (backorder.fulfilledQty ?? 0));
+              const bo: any = backorder as any;
+              const qty = num(bo.qty);
+              const fulfilled = num(bo.fulfilledQty);
+              const remainingExisting = bo.remainingQty;
+              let remaining =
+                typeof remainingExisting === "number"
+                  ? remainingExisting
+                  : Math.max(0, qty - fulfilled);
               remaining -= Number(r.deltaQty ?? 0);
               if (remaining <= 0) {
                 // Fulfill
+                const newFulfilled = qty;
                 await ddb.send(new PutCommand({
                   TableName: tableObjects,
-                  Item: { ...backorder, status: "fulfilled", remainingQty: 0, fulfilledQty: backorder.qty, updatedAt: now }
+                  Item: { ...bo, status: "fulfilled", remainingQty: 0, fulfilledQty: newFulfilled, updatedAt: now }
                 }));
               } else {
+                const newFulfilled = Math.max(0, qty - remaining);
                 await ddb.send(new PutCommand({
                   TableName: tableObjects,
-                  Item: { ...backorder, remainingQty: remaining, fulfilledQty: (backorder.qty - remaining), updatedAt: now }
+                  Item: { ...bo, remainingQty: remaining, fulfilledQty: newFulfilled, updatedAt: now }
                 }));
               }
             }
@@ -277,7 +296,8 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     // Next status: emit only 'fulfilled' or 'partially-received' (never 'partially_fulfilled' from receive)
     let allFull = true;
     for (const ln of po.lines ?? []) {
-      const got = Number(ln.receivedQty ?? totals[ln.id ?? ln.lineId] ?? 0);
+      const lineId = ln.id;
+      const got = num(totals[lineId] ?? (ln as any).receivedQty ?? 0);
       if (got < Number(ln.qty ?? 0)) { allFull = false; break; }
     }
     const nextStatus = allFull ? "fulfilled" : "partially-received";
