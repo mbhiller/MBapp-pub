@@ -283,6 +283,56 @@ cd apps/mobile && npm run typecheck
 
 ---
 
+## ✅ Sprint XXI — Backorders Worklist Filters + Deep-Link Polish (Tier 1) (2025-12-23)
+
+**Theme:** Extend BackordersList to support multi-filter deep-linking (soId, itemId, status, preferredVendorId) and enable per-line navigation from SalesOrderDetailScreen.
+
+**Mobile**
+- **Navigation param expansion**: BackordersList now accepts `{ soId?, itemId?, status?, preferredVendorId? }` (all optional, backward compatible).
+- **Server-side filter with defaults**: BackordersListScreen reads all route params and builds server-side filter:
+  ```ts
+  const filter = {
+    status: status ?? "open",  // Default to "open" if not specified
+    ...(soId ? { soId } : {}),
+    ...(itemId ? { itemId } : {}),
+    ...(preferredVendorId ? { preferredVendorId } : {}),
+  };
+  ```
+  - **Removed `q: "open"`** — now exclusively using `filter.status="open"` on backend
+  - Vendor text filter remains client-side only (optional refinement, not sent to server)
+- **Multi-filter banner**: Displays all active filters in one readable line:
+  ```
+  Filters: status=open · soId=... · itemId=... · vendor=...
+  ```
+  - Shows only when any filter is active (soId || itemId || status !== "open" || preferredVendorId)
+  - **Clear All** button resets all params via `setParams()` (no navigation stack duplication)
+- **Per-line deep-link**: SalesOrderDetailScreen backorder badge now tappable when qty > 0
+  - Pressing badge navigates to BackordersList filtered by both `soId` + `itemId`
+  - BadgeComponent updated to accept optional `onPress` prop and render as Pressable when provided
+  - Non-pressable (View) when qty == 0 (no deep-link)
+
+**Backend** (unchanged from Sprint XX, reused)
+- Filter parsing and application already support arbitrary `filter.*` params
+- `filter.status`, `filter.itemId`, `filter.preferredVendorId` all handled via generic exact-match AND logic
+
+**Files Modified**
+- Mobile: `apps/mobile/src/navigation/types.ts` (extend BackordersList param type)
+- Mobile: `apps/mobile/src/screens/BackordersListScreen.tsx` (read all params, build server-side filter, update banner)
+- Mobile: `apps/mobile/src/features/backorders/BackorderBadges.tsx` (add onPress prop to BackorderLineBadge)
+- Mobile: `apps/mobile/src/screens/SalesOrderDetailScreen.tsx` (deep-link navigation from line badge)
+
+**Definition of Done**
+- [x] BackordersList route param type extended to include itemId, status, preferredVendorId
+- [x] BackordersListScreen reads all route params and builds server-side filter with status default
+- [x] Removed `q: "open"`; now exclusively using `filter.status="open"` on backend
+- [x] Multi-filter banner displays all active filters; Clear All resets all params via setParams()
+- [x] BackorderLineBadge accepts optional onPress prop; renders as Pressable when provided
+- [x] SalesOrderDetailScreen deep-links to BackordersList with soId + itemId when line badge tapped (qty > 0)
+- [x] Vendor text filter remains client-side only (not sent to server)
+- [x] Typecheck passes on all modified files
+
+---
+
 ## ✅ Sprint XX — Server-Side filter.soId Support + Pagination-Aware Cursor (2025-12-23)
 
 **Theme:** Move soId filtering from mobile client to backend, enabling server-side efficiency and enabling pagination correctness when filtering causes mid-page early exit.

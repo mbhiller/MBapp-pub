@@ -1,8 +1,8 @@
 import * as React from "react";
-import { View, Text, StyleSheet } from "react-native";
+import { View, Text, StyleSheet, Pressable } from "react-native";
 
 type HeaderBadgeProps = { count?: number | null | undefined };
-type LineBadgeProps = { qty?: number | null | undefined };
+type LineBadgeProps = { qty?: number | null | undefined; onPress?: () => void };
 
 export function BackorderHeaderBadge({ count }: HeaderBadgeProps) {
   const n = typeof count === "number" ? count : 0;
@@ -14,12 +14,20 @@ export function BackorderHeaderBadge({ count }: HeaderBadgeProps) {
   );
 }
 
-export function BackorderLineBadge({ qty }: LineBadgeProps) {
+export function BackorderLineBadge({ qty, onPress }: LineBadgeProps) {
   const n = typeof qty === "number" ? qty : 0;
   if (n <= 0) return null;
+  const badge = <Text style={styles.badge}>Backordered ({n})</Text>;
+  if (onPress) {
+    return (
+      <Pressable style={styles.lineWrap} onPress={onPress}>
+        {badge}
+      </Pressable>
+    );
+  }
   return (
     <View style={styles.lineWrap}>
-      <Text style={styles.badge}>Backordered ({n})</Text>
+      {badge}
     </View>
   );
 }
