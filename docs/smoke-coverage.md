@@ -62,6 +62,9 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 |------|-------|-----------|-----------|
 | **smoke:objects:list-pagination** | 1. GET /objects/purchaseOrder?limit=2&sort=desc 2. If next cursor, fetch second page | pageInfo or legacy `next` present; cursor works | `/objects/purchaseOrder` |
 | **smoke:objects:list-filter-soId** | 1. Create SO with 2 lines, shortage qty 2. Commit to trigger backorder requests 3. GET /objects/backorderRequest?filter.soId={soId}&limit=1 4. If next cursor, fetch page 2 with same filter | All returned items have soId matching filter; pagination respects filter on both pages | `/objects/backorderRequest?filter.soId=...` |
+| **smoke:objects:list-filter-itemId** | *(Planned Sprint XXI)* 1. Create SO with backorders 2. GET /objects/backorderRequest?filter.itemId={itemId} | All returned items have itemId matching filter | `/objects/backorderRequest?filter.itemId=...` |
+| **smoke:objects:list-filter-status** | *(Planned Sprint XXI)* 1. Create backorder requests with mixed status 2. GET /objects/backorderRequest?filter.status=open 3. GET /objects/backorderRequest?filter.status=ignored | Returned items match status filter | `/objects/backorderRequest?filter.status=...` |
+| **smoke:objects:list-filter-soId+itemId** | *(Planned Sprint XXI)* 1. Create SO with 2 backorder lines 2. GET /objects/backorderRequest?filter.soId={soId}&filter.itemId={itemId1} | Only items matching both soId AND itemId returned (AND logic) | `/objects/backorderRequest?filter.soId=...&filter.itemId=...` |
 | **smoke:movements:filter-by-poLine** | 1. Create product + item, PO, submit, approve 2. Receive with lot/location 3. GET /inventory/{id}/movements?refId=poId&poLineId=lineId | Movements filtered by refId AND poLineId; lot/location captured | `/inventory/{id}/movements` |
 | **smoke:objects:pageInfo-present** | 1. GET /objects/purchaseOrder?limit=2 | Response has items array AND (pageInfo OR legacy `next`) | `/objects/purchaseOrder` |
 
@@ -94,7 +97,7 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 | **Registrations** | registrations:crud, registrations:filters | ✅ Complete (Sprint IV) | CRUD lifecycle + filters (eventId, partyId, status); feature-flagged (default OFF) |
 | **Views** | ❌ None | ⚠️ Gap | Spec defines /views (CRUD) — not tested |
 | **Workspaces** | ❌ None | ⚠️ Gap | Spec defines /workspaces (CRUD) — not tested |
-| **Backorders** | objects:list-filter-soId | ✅ Partial (Sprint XX) | filter.soId + pagination; ignore/convert actions not tested |
+| **Backorders** | objects:list-filter-soId, objects:list-filter-itemId (planned), objects:list-filter-status (planned), objects:list-filter-soId+itemId (planned) | ✅ Partial (Sprint XX); 🔄 Planned (Sprint XXI) | soId + pagination working (Sprint XX); itemId, status, combo filters planned (Sprint XXI) |
 | **Routing** | ❌ None | ⚠️ Gap | Spec defines /routing/graph, /routing/plan (deprecated in Sprint III?) — not tested |
 | **Scanner** | ❌ None | ⚠️ Gap | Spec defines sessions, actions, simulate — not tested |
 | **Audit** | ❌ None | ⚠️ Gap | Spec defines /admin/audit — not tested |

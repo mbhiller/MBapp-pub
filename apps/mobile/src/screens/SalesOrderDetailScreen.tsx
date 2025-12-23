@@ -273,32 +273,36 @@ export default function SalesOrderDetailScreen() {
         style={{ marginTop: 12 }}
         data={lines}
         keyExtractor={(l: any) => String(l.id ?? l.itemId)}
-        renderItem={({ item: line }: any) => (
-          <View style={{ padding: 10, borderWidth: 1, borderRadius: 8, marginBottom: 8 }}>
-            <Text style={{ fontWeight: "600" }}>{line.itemId}</Text>
-            <Text>Qty: {line.qty} {line.uom || "ea"}</Text>
-            {(() => {
-              const availability = availabilityMap[String(line.itemId ?? "")];
-              const onHand = Number.isFinite(availability?.onHand) ? availability?.onHand : undefined;
-              const reserved = Number.isFinite(availability?.reserved) ? availability?.reserved : undefined;
-              const available = Number.isFinite(availability?.available)
-                ? availability?.available
-                : (onHand != null && reserved != null ? onHand - reserved : undefined);
-              if (!line?.itemId) {
-                return <Text style={{ color: "#555", fontSize: 12, marginTop: 4 }}>Avail: —</Text>;
-              }
-              if (!availability) {
-                return <Text style={{ color: "#555", fontSize: 12, marginTop: 4 }}>Avail: {isAvailabilityLoading ? "…" : "—"}</Text>;
-              }
-              return (
-                <Text style={{ color: "#555", fontSize: 12, marginTop: 4 }}>
-                  Avail: {available ?? "?"} (OnHand {onHand ?? "?"}, Res {reserved ?? "?"})
-                </Text>
-              );
-            })()}
-            <BackorderLineBadge qty={(line as any)?.backordered ?? boMap[String(line.id ?? "")]} />
-          </View>
-        )}
+        renderItem={({ item: line }: any) => {
+          const backorderQty = (line as any)?.backordered ?? boMap[String(line.id ?? "")];
+          const canNavigateToBackorders = backorderQty > 0 && so?.id && line.itemId;
+          return (
+            <View style={{ padding: 10, borderWidth: 1, borderRadius: 8, marginBottom: 8 }}>
+              <Text style={{ fontWeight: "600" }}>{line.itemId}</Text>
+              <Text>Qty: {line.qty} {line.uom || "ea"}</Text>
+              {(() => {
+                const availability = availabilityMap[String(line.itemId ?? "")];
+                const onHand = Number.isFinite(availability?.onHand) ? availability?.onHand : undefined;
+                const reserved = Number.isFinite(availability?.reserved) ? availability?.reserved : undefined;
+                const available = Number.isFinite(availability?.available)
+                  ? availability?.available
+                  : (onHand != null && reserved != null ? onHand - reserved : undefined);
+                if (!line?.itemId) {
+                  return <Text style={{ color: "#555", fontSize: 12, marginTop: 4 }}>Avail: —</Text>;
+                }
+                if (!availability) {
+                  return <Text style={{ color: "#555", fontSize: 12, marginTop: 4 }}>Avail: {isAvailabilityLoading ? "…" : "—"}</Text>;
+                }
+                return (
+                  <Text style={{ color: "#555", fontSize: 12, marginTop: 4 }}>
+                    Avail: {available ?? "?"} (OnHand {onHand ?? "?"}, Res {reserved ?? "?"})
+                  </Text>
+                );
+              })()}
+              <BackorderLineBadge qty={backorderQty} onPress={canNavigateToBackorders ? () => nav.navigate("BackordersList", { soId: so.id, itemId: line.itemId }) : undefined} />
+            </View>
+          );
+        }}
       />
     </View>
   );

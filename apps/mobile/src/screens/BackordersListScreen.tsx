@@ -15,16 +15,24 @@ export default function BackordersListScreen() {
   const nav = useNavigation<any>();
   const route = useRoute<any>();
   const soId = route.params?.soId as string | undefined;
+  const itemId = route.params?.itemId as string | undefined;
+  const status = route.params?.status as "open" | "ignored" | "converted" | undefined;
+  const preferredVendorId = route.params?.preferredVendorId as string | undefined;
   const t = useColors();
   const toast = (useToast?.() as any) ?? ((msg: string) => console.log("TOAST:", msg));
   const [vendorFilter, setVendorFilter] = React.useState<string>("");
   const [selected, setSelected] = React.useState<Record<string, boolean>>({});
   const [chooserOpen, setChooserOpen] = React.useState(false);
   const [chooserDrafts, setChooserDrafts] = React.useState<Draft[]>([]);
+  const filter = {
+    status: status ?? "open",
+    ...(soId ? { soId } : {}),
+    ...(itemId ? { itemId } : {}),
+    ...(preferredVendorId ? { preferredVendorId } : {}),
+  };
   const { data, isLoading, refetch } = useObjects<Row>({
     type: "backorderRequest",
-    q: "open",
-    filter: soId ? { soId } : undefined,
+    filter,
     query: { sort: "desc", by: "updatedAt" },
     params: { limit: __DEV__ ? 200 : 50 },
   });
@@ -117,14 +125,21 @@ export default function BackordersListScreen() {
 
   const selectedCount = Object.values(selected).filter(Boolean).length;
 
+  const hasActiveFilters = soId || itemId || (status !== "open") || preferredVendorId;
+
   return (
     <View style={{ flex: 1, padding: 12, backgroundColor: t.colors.bg }}>
-      {/* soId filter banner */}
-      {soId && (
+      {/* Multi-filter banner */}
+      {hasActiveFilters && (
         <View style={{ marginBottom: 12, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: "#e3f2fd", borderRadius: 8, flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-          <Text style={{ fontSize: 12, color: "#1976d2", fontWeight: "500" }}>Filtered to Sales Order: {soId}</Text>
-          <Pressable onPress={() => nav.setParams({ soId: undefined })} style={{ paddingHorizontal: 6, paddingVertical: 4 }}>
-            <Text style={{ fontSize: 12, color: "#1976d2", fontWeight: "600" }}>Clear</Text>
+          <Text style={{ fontSize: 12, color: "#1976d2", fontWeight: "500" }}>
+            Filters: status={status || "open"}
+            {soId && ` · soId=${soId}`}
+            {itemId && ` · itemId=${itemId}`}
+            {preferredVendorId && ` · vendor=${preferredVendorId}`}
+          </Text>
+          <Pressable onPress={() => nav.setParams({ soId: undefined, itemId: undefined, status: undefined, preferredVendorId: undefined })} style={{ paddingHorizontal: 6, paddingVertical: 4 }}>
+            <Text style={{ fontSize: 12, color: "#1976d2", fontWeight: "600" }}>Clear All</Text>
           </Pressable>
         </View>
       )}
