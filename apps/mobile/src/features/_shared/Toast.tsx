@@ -3,16 +3,17 @@ import React from "react";
 import { View, Text } from "react-native";
 import { useColors } from "./useColors";
 
-type ToastMsg = { id: number; text: string; kind: "success" | "error" };
+type ToastKind = "success" | "error" | "warning" | "info" | undefined;
+type ToastMsg = { id: number; text: string; kind: ToastKind };
 
-const Ctx = React.createContext<{ push: (text: string, kind?: "success"|"error", ms?: number) => void } | null>(null);
+const Ctx = React.createContext<{ push: (text: string, kind?: ToastKind, ms?: number) => void } | null>(null);
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const t = useColors();
   const [msg, setMsg] = React.useState<ToastMsg | null>(null);
   const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const push = React.useCallback((text: string, kind: "success"|"error"="success", ms=1800) => {
+  const push = React.useCallback((text: string, kind: ToastKind = "success", ms=1800) => {
     if (timer.current) { clearTimeout(timer.current); timer.current = null; }
     const next = { id: Date.now(), text, kind };
     setMsg(next);
@@ -20,9 +21,14 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   React.useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
-
-  const bg = msg?.kind === "success" ? (t.colors.success ?? "#0a7") : (t.colors.danger ?? "#c33");
-  const fg = t.colors.buttonText || "#fff";
+  const variantKind = msg?.kind ?? "success";
+  const variants: Record<string, { bg: string; fg: string }> = {
+    success: { bg: t.colors.success ?? "#0a7", fg: t.colors.buttonText || "#fff" },
+    error: { bg: t.colors.danger ?? "#c33", fg: t.colors.buttonText || "#fff" },
+    warning: { bg: "#f59e0b", fg: "#111" },
+    info: { bg: t.colors.primary ?? "#007aff", fg: t.colors.buttonText || "#fff" },
+  };
+  const palette = variants[variantKind] ?? variants.success;
 
   return (
     <Ctx.Provider value={{ push }}>
@@ -31,9 +37,9 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         <View style={{
           position: "absolute", left: 12, right: 12, bottom: 12,
           borderRadius: 10, paddingVertical: 10, paddingHorizontal: 12,
-          backgroundColor: bg, shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 6, elevation: 5,
+          backgroundColor: palette.bg, shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 6, elevation: 5,
         }}>
-          <Text style={{ color: fg, fontWeight: "700" }}>{msg.text}</Text>
+          <Text style={{ color: palette.fg, fontWeight: "700" }}>{msg.text}</Text>
         </View>
       ) : null}
     </Ctx.Provider>
