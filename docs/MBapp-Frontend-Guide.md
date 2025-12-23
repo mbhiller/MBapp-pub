@@ -27,7 +27,7 @@ Keep CRUD (reusable) separate from action RPCs.
 
 ## 2) API client
 `apps/mobile/src/api/client.ts`:
-- Dual tenant headers; Bearer handling; dev auto-login on 401.
+- Dual tenant headers; Bearer token required (no automatic dev-login fallback).
 - `listObjects/getObject/createObject/updateObject/deleteObject`.
 - `apiClient.get/post/put/del` with optional idempotency.
 

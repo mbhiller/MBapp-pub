@@ -131,8 +131,8 @@ const API = (process.env.MBAPP_API_BASE ?? "http://localhost:3000").replace(/\/+
 const TENANT = process.env.MBAPP_TENANT_ID ?? "DemoTenant";
 ```
 
-**Status:** ⚠️ **Localhost fallback exists** — Defaults to `http://localhost:3000` if `MBAPP_API_BASE` unset  
-**Auth:** Uses `MBAPP_BEARER` env var or calls `/auth/dev-login` to obtain token
+**Status:** ✅ **AWS-only** — Requires `MBAPP_API_BASE` (no localhost fallback); exits(2) if unset  
+**Auth:** Requires `MBAPP_BEARER` env var; smokes fail fast if missing (no dev-login fallback)
 
 ---
 

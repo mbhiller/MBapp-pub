@@ -222,12 +222,12 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 ### Prerequisites
 
 ```bash
-export MBAPP_API_BASE="http://localhost:3000"
+# Required: AWS API Gateway endpoint (no localhost fallback)
+export MBAPP_API_BASE="https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com"
 export MBAPP_TENANT_ID="DemoTenant"
-export MBAPP_DEV_EMAIL="dev@example.com"
 
-# Optional: Bearer token (if not using dev-login)
-export MBAPP_BEARER="<your token>"
+# Required: Valid bearer token (smokes fail fast if missing; no dev-login fallback)
+export MBAPP_BEARER="<your-token>"
 
 # Optional: override movement type (default inventoryMovement)
 export SMOKE_MOVEMENT_TYPE="inventoryMovement"

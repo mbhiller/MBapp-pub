@@ -29,6 +29,7 @@ post.json
 apps/api/dist/
 apps/api/dist/*.zip
 tools/qr-*.png
+.mbapp.dev.jwt
 # Build outputs
 dist/
 dist.zip
