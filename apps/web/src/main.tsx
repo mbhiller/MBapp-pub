@@ -1,7 +1,17 @@
-import React from 'react';
-import { createRoot } from 'react-dom/client';
-import App from './App';
-console.log("VITE_API_BASE =", import.meta.env.VITE_API_BASE);
-console.log("VITE_TENANT   =", import.meta.env.VITE_TENANT);
-const root = createRoot(document.getElementById('root')!);
-root.render(<App />);
+import React from "react";
+import { createRoot } from "react-dom/client";
+import { BrowserRouter } from "react-router-dom";
+import App from "./App";
+import { AuthProvider } from "./providers/AuthProvider";
+
+const root = createRoot(document.getElementById("root")!);
+
+root.render(
+	<React.StrictMode>
+		<AuthProvider>
+			<BrowserRouter>
+				<App />
+			</BrowserRouter>
+		</AuthProvider>
+	</React.StrictMode>
+);

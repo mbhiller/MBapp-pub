@@ -15,6 +15,12 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 ### Health & Core
 
 | Flow | Steps | Assertions | Endpoints |
+|------|-------|-----------|----------|
+| **smoke:parties:crud** | 1. POST /objects/party (create with kind, name, roles) 2. GET /objects/party/{id} 3. PUT /objects/party/{id} (update name) 4. GET /objects/party/{id} (verify) 5. POST /objects/party/search with retry (eventual consistency) | Create returns 200 + id; both GETs return matching name; update succeeds; search finds party within 5×200ms | `/objects/party`, `/objects/party/{id}`, `/objects/party/search` |
+
+### Health & Core (continued)
+
+| Flow | Steps | Assertions | Endpoints |
 |------|-------|-----------|-----------|
 | **smoke:ping** | 1. GET /ping | 200 OK, text response | `/ping` |
 
@@ -95,7 +101,7 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 | **Inventory** | onhand, guards, onhand-batch, list-movements | ✅ Complete | CRUD + guards + batch ops + filter |
 | **Sales Orders** | sales:happy, sales:guards | ✅ Complete | Lifecycle (draft→closed) + guards (reserve lock, oversell) |
 | **Purchase Orders** | purchasing:happy, purchasing:guards, po:save-from-suggest, po:quick-receive, po:receive-line*, po:receive-line-batch, po:receive-line-idem-* | ✅ Complete | Lifecycle, receipt variants, idempotency, vendor guard, events |
-| **Parties** | parties:happy | ✅ Complete | Create, search, update |
+| **Parties** | parties:happy, parties:crud | ✅ Complete | CRUD lifecycle + search with idempotency + eventual consistency retry |
 | **Pagination & Filtering** | objects:list-pagination, objects:list-filter-soId, objects:pageInfo-present, movements:filter-by-poLine | ✅ Complete | Cursor pagination, query param filters (filter.*) |
 | **Feature Flags** | po:vendor-guard:on, po:vendor-guard:off, po:emit-events | ✅ Complete | Header overrides, simulation |
 | **EPC** | epc:resolve | ✅ Complete | 404 case only |

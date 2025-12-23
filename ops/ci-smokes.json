@@ -1,7 +1,6 @@
 {
   "flows": [
-    
-  "smoke:close-the-loop"
-  
-    ]
+    "smoke:parties:crud",
+    "smoke:close-the-loop"
+  ]
 }

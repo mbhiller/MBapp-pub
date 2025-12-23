@@ -1,4 +1,42 @@
-## Sprint Wrap – 2025-12-23 (38/38 Smoke Pass)
+## Sprint XXVI — Tier 1 Foundations: Web Client + AWS-Only Smokes (2025-12-23)
+
+**Date:** 2025-12-23  
+**Environment:** AWS API Gateway (https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com)  
+**Tenant:** DemoTenant  
+**Smoke Results:** 39 total (38 baseline + 1 new), 39 passed, 0 failed ✅
+
+**Scope:**
+- Web app foundational CRUD: Parties list/search → detail → create → edit with bearer token UI.
+- AWS-only smokes: removed localhost fallback, dev-login removed, require `MBAPP_BEARER` and `MBAPP_API_BASE` at startup.
+- New smoke: `smoke:parties:crud` validates create → read → update → search with idempotency keys and eventual-consistency retry.
+
+**Key Deliverables:**
+- **Web client**: HttpProvider (http.ts) + AuthProvider + Layout with nav + token setter UI; Parties CRUD pages (PartiesListPage, PartyDetailPage, CreatePartyPage, EditPartyPage) using apiFetch.
+- **Smokes AWS-only**: API base and bearer required; no localhost fallback; no dev-login fallback. Exits(2) with clear error if env missing.
+- **New smoke:parties:crud**: create party → GET by id → update name → GET verify → search to find party (5 retries × 200ms for eventual consistency).
+- **CI wiring**: smoke:parties:crud added to ops/ci-smokes.json before close-the-loop.
+
+**Files Changed:**
+- `apps/web/.env.sample` — AWS API Gateway defaults.
+- `apps/web/src/lib/http.ts` — HTTP wrapper with bearer + tenant headers, error normalization.
+- `apps/web/src/providers/AuthProvider.tsx` — Token context (localStorage + VITE_BEARER).
+- `apps/web/src/components/Layout.tsx` — Nav links + token input UI.
+- `apps/web/src/components/PartyForm.tsx` — Shared form for create/edit.
+- `apps/web/src/pages/*.tsx` — Parties list/detail/create/edit pages.
+- `apps/web/src/App.tsx`, `main.tsx` — Router wiring + AuthProvider wrapper.
+- `ops/smoke/smoke.mjs` — AWS-only enforcement, new smoke:parties:crud test.
+- `ops/ci-smokes.json` — Added smoke:parties:crud to flows.
+
+**Acceptance:**
+- ✅ Web parties CRUD works end-to-end against AWS (with bearer + tenant headers).
+- ✅ smoke:parties:crud passes (create → get → update → search).
+- ✅ Smokes fail fast if MBAPP_API_BASE or MBAPP_BEARER missing.
+- ✅ No localhost fallback anywhere.
+- ✅ npm run typecheck passes (apps/web).
+
+---
+
+## Sprint XXV Wrap – 2025-12-23 (38/38 Smoke Pass)
 
 **Date:** 2025-12-23  
 **Environment:** AWS API Gateway (https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com)  
