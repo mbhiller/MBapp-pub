@@ -30,9 +30,9 @@ export async function findParties(params: { q?: string; role?: string }): Promis
       limit: 100,
       sort: "desc",
       q: params.q || undefined,
+      role: params.role || undefined,
     });
     let items = page.items || [];
-
     // Client-side role filtering (best-effort; roles field may not be present)
     if (params.role) {
       items = items.filter((p) => {
@@ -45,7 +45,6 @@ export async function findParties(params: { q?: string; role?: string }): Promis
         return true;
       });
     }
-
     return items;
   } catch (err) {
     console.error("findParties error:", err);

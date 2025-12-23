@@ -145,6 +145,101 @@ const PARTY_TYPE="party";
 
 /* ---------- Tests ---------- */
 const tests = {
+    "smoke:close-the-loop": async () => {
+      await ensureBearer();
+      // Seed vendor first so product/inventory can reference it
+      const { vendorId } = await seedVendor(api);
+      // 1) Create item with low/zero onHand
+      const prod = await createProduct({ name: "LoopTest", preferredVendorId: vendorId });
+      if (!prod.ok) return { test: "close-the-loop", result: "FAIL", step: "createProduct", prod };
+      const item = await createInventoryForProduct(prod.body?.id, "LoopTestItem");
+      if (!item.ok) return { test: "close-the-loop", result: "FAIL", step: "createInventory", item };
+      const itemId = item.body?.id;
+      // Create a customer party for the SO
+      const { partyId } = await seedParties(api);
+      // Ensure onHand is 0 by adjusting based on current onHand
+      const onhandPre = await onhand(itemId);
+      const currentOnHand = onhandPre.body?.items?.[0]?.onHand ?? 0;
+      if (currentOnHand !== 0) {
+        await post(`/objects/inventoryMovement`, { itemId, type: "adjust", qty: -currentOnHand });
+      }
+      const onhand0 = await onhand(itemId);
+      // 2) Create Sales Order where qty > available
+      const so = await post(`/objects/salesOrder`, {
+        type: "salesOrder", status: "draft", partyId, lines: [{ itemId, qty: 5, uom: "ea" }]
+      });
+      if (!so.ok) return { test: "close-the-loop", result: "FAIL", step: "createSO", so };
+      const soId = so.body?.id;
+      // 3) Commit SO
+      await post(`/sales/so/${encodeURIComponent(soId)}:submit`, {}, { "Idempotency-Key": idem() });
+      await post(`/sales/so/${encodeURIComponent(soId)}:commit`, {}, { "Idempotency-Key": idem() });
+      // Assert backorderRequests exist with status="open"
+      const boRes = await post(`/objects/backorderRequest/search`, { soId, itemId, status: "open" });
+      if (!boRes.ok || !Array.isArray(boRes.body?.items) || boRes.body.items.length === 0)
+        return { test: "close-the-loop", result: "FAIL", step: "backorderRequest-open", boRes };
+      const boIds = boRes.body.items.map(b => b.id);
+      // 4) Call /purchasing/suggest-po
+      const suggest = await post(`/purchasing/suggest-po`, { requests: boIds.map(id => ({ backorderRequestId: id })) });
+      // Debug: if suggest skipped entries, fetch vendor fields from BO/inventory/product
+      if (suggest.ok && Array.isArray(suggest.body?.skipped) && suggest.body.skipped.length > 0) {
+        for (const skip of suggest.body.skipped) {
+          const debugBo = await get(`/objects/backorderRequest/${encodeURIComponent(skip.backorderRequestId)}`);
+          const boData = debugBo.body;
+          const debugInv = boData?.itemId ? await get(`/objects/inventory/${encodeURIComponent(boData.itemId)}`) : { ok: false };
+          const invData = debugInv.body;
+          const debugProd = invData?.productId ? await get(`/objects/product/${encodeURIComponent(invData.productId)}`) : { ok: false };
+          const prodData = debugProd.body;
+          console.log("[DEBUG close-the-loop] Skipped BO vendor trace:", {
+            skip,
+            bo: { id: boData?.id, preferredVendorId: boData?.preferredVendorId, vendorId: boData?.vendorId, itemId: boData?.itemId },
+            inv: { id: invData?.id, preferredVendorId: invData?.preferredVendorId, vendorId: invData?.vendorId, productId: invData?.productId },
+            prod: { id: prodData?.id, preferredVendorId: prodData?.preferredVendorId, vendorId: prodData?.vendorId, defaultVendorId: prodData?.defaultVendorId }
+          });
+        }
+      }
+      if (!suggest.ok || !Array.isArray(suggest.body?.drafts) || suggest.body.drafts.length === 0)
+        return { test: "close-the-loop", result: "FAIL", step: "suggest-po", suggest };
+      const draft = suggest.body.drafts[0];
+      // Ensure vendor present and PO lines include backorderRequestIds
+      const hasVendor = !!draft.vendorId;
+      const hasBackorderIds = draft.lines.every(l => Array.isArray(l.backorderRequestIds) && l.backorderRequestIds.length > 0);
+      if (!hasVendor || !hasBackorderIds)
+        return { test: "close-the-loop", result: "FAIL", step: "draft-check", hasVendor, hasBackorderIds, draft };
+      // 5) Save/create the draft PO
+      const poSave = await post(`/objects/purchaseOrder`, { ...draft, status: "approved" });
+      if (!poSave.ok) return { test: "close-the-loop", result: "FAIL", step: "po-save", poSave };
+      const poId = poSave.body?.id;
+      // 6) Receive PO: POST /purchasing/po/{id}:receive with lines deltaQty
+      const lines = (poSave.body?.lines ?? []).map(ln => ({ lineId: ln.id ?? ln.lineId, deltaQty: (ln.qty - (ln.receivedQty ?? 0)) })).filter(l => l.deltaQty > 0);
+      const idk = idem();
+      const receive = await post(`/purchasing/po/${encodeURIComponent(poId)}:receive`, { lines }, { "Idempotency-Key": idk });
+      if (!receive.ok) return { test: "close-the-loop", result: "FAIL", step: "po-receive", receive };
+      // 7) Assert inventory onHand increased
+      const onhandAfter = await onhand(itemId);
+      // Assert backorderRequests status becomes "fulfilled"
+      const boFulfilled = await post(`/objects/backorderRequest/search`, { soId, itemId, status: "fulfilled" });
+      // Assert no backorderRequests with status="open"
+      const boOpen = await post(`/objects/backorderRequest/search`, { soId, itemId, status: "open" });
+      // Idempotency check: call receive again with SAME Idempotency-Key
+      const receiveAgain = await post(`/purchasing/po/${encodeURIComponent(poId)}:receive`, { lines }, { "Idempotency-Key": idk });
+      const onhandFinal = await onhand(itemId);
+      const boFulfilledFinal = await post(`/objects/backorderRequest/search`, { soId, itemId, status: "fulfilled" });
+      const boOpenFinal = await post(`/objects/backorderRequest/search`, { soId, itemId, status: "open" });
+      // Checks
+      const pass = (onhandAfter.body?.items?.[0]?.onHand ?? 0) > (onhand0.body?.items?.[0]?.onHand ?? 0)
+        && Array.isArray(boFulfilled.body?.items) && boFulfilled.body.items.length > 0
+        && Array.isArray(boOpen.body?.items) && boOpen.body.items.length === 0
+        && (onhandFinal.body?.items?.[0]?.onHand ?? 0) === (onhandAfter.body?.items?.[0]?.onHand ?? 0)
+        && JSON.stringify(boFulfilledFinal.body?.items) === JSON.stringify(boFulfilled.body?.items)
+        && Array.isArray(boOpenFinal.body?.items) && boOpenFinal.body.items.length === 0;
+      return {
+        test: "close-the-loop",
+        result: pass ? "PASS" : "FAIL",
+        steps: {
+          prod, item, onhand0, so, boRes, suggest, draft, poSave, receive, onhandAfter, boFulfilled, boOpen, receiveAgain, onhandFinal, boFulfilledFinal, boOpenFinal
+        }
+      };
+    },
   "list": async ()=>Object.keys(tests),
 
   "smoke:ping": async ()=>{
@@ -537,15 +632,27 @@ const tests = {
     const recv = await post(`/purchasing/po/${encodeURIComponent(id)}:receive`, {
       lines:[{ lineId:"RL1", deltaQty:2, lot:"LOT-ABC", locationId:"LOC-A1" }]
     }, { "Idempotency-Key": idem() });
-    const ok1 = recv.ok && (recv.body?.status === "partially_fulfilled");
+    const ok1 = recv.ok && (recv.body?.status === "partially-received");
+    
+    // Retry with same key but over-receive attempt (deltaQty:2 when only 1 remains)
+    // Should fail with 409 both times (failed operations are not cached for idempotency)
     const retry = await post(`/purchasing/po/${encodeURIComponent(id)}:receive`, {
       lines:[{ lineId:"RL1", deltaQty:2, lot:"LOT-ABC", locationId:"LOC-A1" }]
     }, { "Idempotency-Key": "HARDKEY-TEST-RL1" });
     const retry2 = await post(`/purchasing/po/${encodeURIComponent(id)}:receive`, {
       lines:[{ lineId:"RL1", deltaQty:2, lot:"LOT-ABC", locationId:"LOC-A1" }]
     }, { "Idempotency-Key": "HARDKEY-TEST-RL1" });
-    const idemOk = retry.ok && retry2.ok;
-    return { test:"po-receive-line", result: (ok1 && idemOk) ? "PASS" : "FAIL", create, recv, retry, retry2 };
+    
+    const ok2 = !retry.ok 
+      && retry.status === 409 
+      && retry.body?.code === "conflict"
+      && retry.body?.details?.code === "RECEIVE_EXCEEDS_REMAINING";
+    const ok3 = !retry2.ok 
+      && retry2.status === 409 
+      && retry2.body?.code === "conflict"
+      && retry2.body?.details?.code === "RECEIVE_EXCEEDS_REMAINING";
+    
+    return { test:"po-receive-line", result: (ok1 && ok2 && ok3) ? "PASS" : "FAIL", create, recv, retry, retry2 };
   },
 
   "smoke:po:receive-line-batch": async ()=>{
@@ -603,11 +710,18 @@ const tests = {
     const KEY_A = `kA-${Math.random().toString(36).slice(2)}`;
     const payload = { lines: [{ lineId: "RL1", deltaQty: 2, lot: "LOT-X", locationId: "A1" }] };
     const recv1 = await post(`/purchasing/po/${encodeURIComponent(id)}:receive`, payload, { "Idempotency-Key": KEY_A });
-    const ok1 = recv1.ok && (recv1.body?.status === "partially_fulfilled");
+    const ok1 = recv1.ok && (recv1.body?.status === "partially-received");
 
     const KEY_B = `kB-${Math.random().toString(36).slice(2)}`;
     const recv2 = await post(`/purchasing/po/${encodeURIComponent(id)}:receive`, payload, { "Idempotency-Key": KEY_B });
-    const ok2 = recv2.ok && (recv2.body?.status === "partially_fulfilled");
+    // recv2 should be REJECTED with 409 conflict (over-receive)
+    const ok2 = !recv2.ok 
+      && recv2.status === 409 
+      && recv2.body?.code === "conflict"
+      && recv2.body?.details?.code === "RECEIVE_EXCEEDS_REMAINING"
+      && recv2.body?.details?.lineId === "RL1"
+      && recv2.body?.details?.remaining === 1
+      && recv2.body?.details?.attemptedDelta === 2;
 
     const finish = await post(`/purchasing/po/${encodeURIComponent(id)}:receive`, {
       lines: [{ lineId:"RL1", deltaQty: 1, lot: "LOT-X", locationId:"A1" }]
@@ -2135,8 +2249,8 @@ const tests = {
       return { test: "common:error-shapes", result: "FAIL", reason: "401-invalid-shape", body: unauthorized };
     }
 
-    // Test 3: 403 Forbidden - feature disabled (valid auth), POST /registrations without flag
-    const forbidden = await post(`/registrations`, {}, {}, { auth: "default" });
+    // Test 3: 403 Forbidden - feature disabled (valid auth), POST /registrations with flag = 0
+    const forbidden = await post(`/registrations`, {}, { "X-Feature-Registrations-Enabled": "0" }, { auth: "default" });
     if (forbidden.status !== 403) {
       return { test: "common:error-shapes", result: "FAIL", reason: "expected-403-got-" + forbidden.status, forbidden };
     }

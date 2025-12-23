@@ -4,6 +4,10 @@
 
 Smoke tests are integration tests for critical API flows. All tests use idempotency keys for safe retry and include party/vendor seeding. Run with `node ops/smoke/smoke.mjs <test-name>`.
 
+**Close-the-loop flow:** SO shortage → BO open (with preferredVendorId derived from product) → suggest-po (returns drafts with vendorId) → save draft PO → receive → onhand increases → BO fulfilled → idempotency replay (no double-apply). Vendor party is seeded at flow start; product.preferredVendorId set so so:commit populates backorderRequest.preferredVendorId and suggest-po avoids MISSING_VENDOR errors.
+
+**Feature flag testing:** Tests explicitly set feature flag headers (e.g., `X-Feature-Registrations-Enabled: 0`) to ensure deterministic behavior regardless of AWS environment defaults.
+
 ---
 
 ## 1. Current Smoke Flows
@@ -45,9 +49,9 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 | **smoke:purchasing:suggest-po-skips** | 1. Create backorderRequest qty 0 and another with missing vendor 2. POST /purchasing/suggest-po with both ids | ZERO_QTY and MISSING_VENDOR/NOT_FOUND appear in skipped; drafts (if any) have vendorId | `/objects/backorderRequest`, `/purchasing/suggest-po` |
 | **smoke:po:save-from-suggest** | 1. Suggest PO (or hardcode draft) 2. Create from suggestion 3. Get created PO | PO id returned; status is draft | `/purchasing/suggest-po`, `/purchasing/po:create-from-suggestion`, `/objects/purchaseOrder/{id}` |
 | **smoke:po:quick-receive** | 1. Create PO, submit, approve 2. Read full lines 3. Receive all outstanding | All lines received; status fulfilled | `/purchasing/po/{id}:receive` |
-| **smoke:po:receive-line** | 1. Create product + item 2. Create PO line 3. Submit, approve 4. Receive 2 qty with lot+location 5. Retry same payload with different Idempotency-Key (idem via payload sig) 6. Retry again 7. Receive final qty | Status: draft→submitted→approved→partially_fulfilled; retries succeed (payload sig idempotency) | `/purchasing/po/{id}:receive` |
-| **smoke:po:receive-line-batch** | 1. Create 2 products + items 2. Create PO 2 lines 3. Submit, approve 4. Receive line BL1 qty 2 + BL2 qty 1 5. Receive BL2 remaining qty 3 | BL1 fully received, BL2 fully received; status fulfilled | `/purchasing/po/{id}:receive` |
-| **smoke:po:receive-line-idem-different-key** | 1. Create PO 2. Submit, approve 3. Receive with payload + KEY_A 4. Receive same payload + KEY_B 5. Finish receive with third key | Both KEY_A and KEY_B succeed idempotently; final status fulfilled | `/purchasing/po/{id}:receive` |
+| **smoke:po:receive-line** | 1. Create product + item 2. Create PO line (qty 3) 3. Submit, approve 4. Receive 2 qty with lot+location 5. Retry over-receive attempt (deltaQty 2 when only 1 remains) with same Idempotency-Key → 409 conflict 6. Retry again with same key → 409 again (failed ops not cached) | Status: draft→submitted→approved→partially-received; over-receive validation returns 409 with RECEIVE_EXCEEDS_REMAINING; failed operations are NOT cached for idempotency | `/purchasing/po/{id}:receive` |
+| **smoke:po:receive-line-batch** | 1. Create 2 products + items 2. Create PO 2 lines 3. Submit, approve 4. Receive line BL1 qty 2 + BL2 qty 1 5. Receive BL2 remaining qty 3 | BL1 fully received, BL2 fully received; final PO status transitions to `fulfilled` (not `received`) | `/purchasing/po/{id}:receive` |
+| **smoke:po:receive-line-idem-different-key** | 1. Create PO (line qty 3) 2. Submit, approve 3. Receive deltaQty 2 with KEY_A (succeeds) 4. Receive same payload + KEY_B → 409 conflict (over-receive) 5. Finish receive deltaQty 1 with third key → status `fulfilled` | KEY_A succeeds; KEY_B fails over-receive validation (409 with RECEIVE_EXCEEDS_REMAINING); final status `fulfilled`; validates that payload-sig idempotency happens AFTER validation | `/purchasing/po/{id}:receive` |
 
 ### Feature Flags & Events
 

@@ -1,6 +1,6 @@
 // apps/api/src/purchasing/suggest-po.ts
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
-import { GetCommand } from "@aws-sdk/lib-dynamodb";
+import { GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 import { ddb, tableObjects } from "../common/ddb";
 import { getObjectById } from "../objects/repo";
 
@@ -24,12 +24,14 @@ type SkippedEntry = {
  * Outbound PO line (draft)
  */
 type PurchaseOrderLine = {
+  id?: string;
   itemId: string;
   qty: number;
   uom?: string;
   /** Annotation for UI when MOQ bumps the quantity */
   minOrderQtyApplied?: number;
   adjustedFrom?: number;
+  backorderRequestIds?: string[];
 };
 
 /**
@@ -207,14 +209,35 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
 
   for (const it of gathered) {
     const key = it.vendorId;
-
     const baseQty = Math.max(0, Number(it.qty || 0));
     const bumpedQty =
       it.minOrderQty && baseQty > 0 && baseQty < it.minOrderQty ? it.minOrderQty : baseQty;
 
+    // Find all backorderRequestIds for this item/vendor
+    const backorderRequestIds = [it.boId];
+
+    // Convert backorderRequest to status="converted" (minimal logic)
+    try {
+      const bo = await loadBackorder(tenantId, it.boId);
+      if (bo && bo.status === "open") {
+        // If convertBackorderRequest helper exists, use it; else update inline
+        await ddb.send(new GetCommand({
+          TableName: tableObjects,
+          Key: { [PK]: tenantId, [SK]: `backorderRequest#${it.boId}` },
+        }));
+        bo.status = "converted";
+        bo.updatedAt = new Date().toISOString();
+        await ddb.send(new PutCommand({
+          TableName: tableObjects,
+          Item: bo,
+        }));
+      }
+    } catch {}
+
     const line: PurchaseOrderLine = {
       itemId: it.itemId,
       qty: bumpedQty,
+      backorderRequestIds,
     };
     if (it.minOrderQty && baseQty < it.minOrderQty) {
       line.minOrderQtyApplied = it.minOrderQty;
@@ -225,6 +248,8 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     const existing = arr.find((l) => l.itemId === line.itemId);
     if (existing) {
       existing.qty += line.qty;
+      // Merge backorderRequestIds
+      existing.backorderRequestIds = Array.from(new Set([...(existing.backorderRequestIds ?? []), ...backorderRequestIds]));
     } else {
       arr.push(line);
     }
@@ -236,6 +261,10 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
   const drafts: PurchaseOrderDraft[] = [];
 
   for (const [key, lines] of groups.entries()) {
+    // Assign sequential line ids to any line missing one
+    lines.forEach((ln, idx) => {
+      if (!ln.id) ln.id = `L${idx + 1}`;
+    });
     drafts.push({
       id: poDraftId(),
       type: "purchaseOrder",

@@ -196,7 +196,18 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
         const product = await getProductForItem(tenantId, s.itemId);
         const reorderEnabled = product == null ? true : (product as any).reorderEnabled !== false;
         if (!reorderEnabled) continue;
-        const bo = {
+        
+        // Derive preferredVendorId from inventory item or product
+        let preferredVendorId: string | undefined;
+        try {
+          const inv = await getObjectById({ tenantId, type: "inventory", id: s.itemId }).catch(() => null);
+          preferredVendorId = (inv as any)?.preferredVendorId ?? (inv as any)?.vendorId;
+          if (!preferredVendorId && product) {
+            preferredVendorId = (product as any)?.preferredVendorId ?? (product as any)?.vendorId ?? (product as any)?.defaultVendorId;
+          }
+        } catch {}
+        
+        const bo: any = {
           id: boId(),
           type: "backorderRequest",
           tenantId,
@@ -208,7 +219,8 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
           createdAt: now,
           updatedAt: now,
         };
-         await createObject({ tenantId, type: "backorderRequest", body: bo });
+        if (preferredVendorId) bo.preferredVendorId = preferredVendorId;
+        await createObject({ tenantId, type: "backorderRequest", body: bo });
       }
     }
 

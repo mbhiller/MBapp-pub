@@ -1,5 +1,7 @@
 {
   "flows": [
-    "smoke:parties:happy"
+    
+  "smoke:close-the-loop"
+  
     ]
 }

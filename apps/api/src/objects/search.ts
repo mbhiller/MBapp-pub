@@ -18,7 +18,16 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const limit  = Number(body.limit ?? 20);
     const fields = Array.isArray(body.fields) ? body.fields : undefined;
 
-    const page = await searchObjects({ tenantId: auth.tenantId, type, q, next, limit, fields });
+    // Extract remaining keys as exact-match filters
+    const reservedKeys = new Set(["q", "next", "limit", "fields"]);
+    const filters: Record<string, any> = {};
+    for (const [key, value] of Object.entries(body)) {
+      if (!reservedKeys.has(key) && value != null && value !== "") {
+        filters[key] = value;
+      }
+    }
+
+    const page = await searchObjects({ tenantId: auth.tenantId, type, q, filters, next, limit, fields });
     // Backward-compatible: keep { items, next } and also include pageInfo
     return ok({
       ...page,

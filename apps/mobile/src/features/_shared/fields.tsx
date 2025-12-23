@@ -15,11 +15,15 @@ type BaseProps = {
 };
 
 function PickerFor({ searchKey, ...p }: BaseProps & { searchKey: SearchKey }) {
+  const searchTypes = getSearchTypes(
+    searchKey,
+    searchKey === "vendor" ? "vendor" : searchKey === "customer" ? "customer" : undefined,
+  );
   return (
     <AutoCompleteField
       placeholder={p.placeholder}
       initialText={p.initialText ?? ""}
-      searchTypes={getSearchTypes(searchKey)}
+      searchTypes={searchTypes}
       debounceMs={p.debounceMs ?? 220}
       minChars={p.minChars ?? 1}
       inputRef={p.inputRef}
