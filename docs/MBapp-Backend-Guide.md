@@ -54,6 +54,15 @@ Each exports `async function handle(event)`. Read path/query/body, use `authoriz
 - Throw `{ statusCode, message }` to bubble clean errors.
 - **Sales**: `commit(strict)` → 409 if shortages; no over-ship; no negative release.
 - **Inventory**: `available = onHand - reserved` (≥ 0). Fulfill reduces **both** onHand & reserved.
+- **Purchasing (PO receive):**
+  - **Over-receive guard:** Returns 409 conflict with `details.code = "RECEIVE_EXCEEDS_REMAINING"` including `{ lineId, ordered, received, remaining, attemptedDelta }`.
+  - **PO status transitions:** `draft → submitted → approved → partially-received → fulfilled` (when all lines fully received).
+  - **Idempotency behavior:**
+    - Dual-track: `Idempotency-Key` header (key-based) + payload-signature (content-based).
+    - Key-based idempotency checked BEFORE validation (safe short-circuit for previously successful requests).
+    - Payload-signature idempotency checked AFTER validation (prevents caching invalid requests).
+    - **Caching policy:** Idempotency keys are marked/applied ONLY on successful writes; failed operations (e.g., over-receive) are NOT cached.
+    - **Retry behavior:** Repeating an invalid request with the same idempotency key will re-validate and fail again (not return cached success).
 
 ## 6) Adding a new action route (checklist)
 1. New file `src/<module>/<action>.ts` with `handle()`.

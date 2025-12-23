@@ -6,12 +6,16 @@ export type SearchKey =
 
 const registry: Record<SearchKey, string[]> = {
   salesLine: ["product", "inventory"],
-  customer: ["employee","vendor","client","organization","contact","person","customer","patient"],
-  purchaseLine: ["product","inventory"],
-  // Use unified party type for vendor search; backend supports party search
-  vendor: ["party"],
+  customer: ["party:customer"],
+  purchaseLine: ["product", "inventory"],
+  vendor: ["party:vendor"],
 };
 
-export function getSearchTypes(key: SearchKey) {
+
+// Role-aware search registry for party
+export function getSearchTypes(key: SearchKey, role?: string) {
+  if ((key === "vendor" || key === "customer") && role) {
+    return [`party:${role}`];
+  }
   return registry[key] ?? [];
 }

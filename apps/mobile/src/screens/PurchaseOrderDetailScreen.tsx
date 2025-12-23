@@ -3,7 +3,7 @@ import { View, Text, ActivityIndicator, FlatList, Pressable, Modal, TextInput } 
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { useObjects } from "../features/_shared/useObjects";
 import { FEATURE_PO_QUICK_RECEIVE } from "../features/_shared/flags";
-import { saveFromSuggestion, receiveAll, receiveLine, submit, approve, cancel, close } from "../features/purchasing/poActions";
+import { saveFromSuggestion, receiveLine, receiveLines, submit, approve, cancel, close } from "../features/purchasing/poActions";
 import { useToast } from "../features/_shared/Toast";
 import { copyText } from "../features/_shared/copy";
 import { ReceiveHistorySheet } from "../features/purchasing/ReceiveHistorySheet";
@@ -57,7 +57,8 @@ export default function PurchaseOrderDetailScreen() {
     }
   }
 
-  const receivable = po?.status === "approved" || po?.status === "partially_fulfilled";
+  // Only allow receive for backend-allowed statuses
+  const receivable = ["open", "partially-received", "approved", "partially_fulfilled"].includes(String(po?.status ?? "").toLowerCase());
   // Match banner semantics: vendor must exist AND have the "vendor" role
   const vendorHasRole =
     !!(vendorParty?.roles?.includes("vendor")) ||
@@ -162,11 +163,32 @@ export default function PurchaseOrderDetailScreen() {
         >
           <Text>Approve</Text>
         </Pressable>
-        {FEATURE_PO_QUICK_RECEIVE && po?.id && (
+        {FEATURE_PO_QUICK_RECEIVE && po?.id && receivable && (
           <Pressable
-            disabled={vendorGuardActive || !receivable}
-            onPress={async () => { try { await receiveAll(po); await refetch(); } catch (e) { console.error(e); } }}
-            style={{ paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 8, opacity: vendorGuardActive || !receivable ? 0.5 : 1 }}
+            disabled={vendorGuardActive}
+            onPress={async () => {
+              try {
+                const linesToReceive = (po?.lines ?? [])
+                  .map((line: any) => {
+                    const remaining = Number(line?.qty ?? 0) - Number(line?.receivedQty ?? 0);
+                    return { lineId: String(line.id ?? line.lineId), deltaQty: remaining };
+                  })
+                  .filter((ln: any) => ln.deltaQty > 0);
+
+                if (!po?.id || linesToReceive.length === 0) {
+                  toast("No items to receive", "info");
+                  return;
+                }
+
+                await receiveLines(po.id, linesToReceive);
+                await refetch();
+                toast("All items received", "success");
+              } catch (e) {
+                console.error(e);
+                toast("Receive All failed", "error");
+              }
+            }}
+            style={{ paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 8, opacity: vendorGuardActive ? 0.5 : 1 }}
           >
             <Text>Receive All</Text>
           </Pressable>

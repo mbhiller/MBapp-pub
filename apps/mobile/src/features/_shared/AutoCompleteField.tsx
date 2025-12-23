@@ -2,6 +2,7 @@ import * as React from "react";
 import { View, TextInput, Text, Pressable, ScrollView, ActivityIndicator, Keyboard } from "react-native";
 import { useColors } from "./useColors";
 import { searchObjects } from "../../api/client";
+import { findParties } from "../parties/api";
 
 type ResultItem = { id: string; label: string; type?: string };
 
@@ -15,6 +16,18 @@ function mapToResultItems(type: string, rows: any[]): ResultItem[] {
     .filter(Boolean) as ResultItem[];
 }
 async function searchPerType(type: string, q: string, limit: number) {
+  // Special-case role-aware party searches encoded as strings
+  if (type === "party:vendor" || type === "party:customer") {
+    try {
+      const role = type.split(":")[1];
+      const items = await findParties({ q, role });
+      return mapToResultItems("party", items).slice(0, limit);
+    } catch (err) {
+      console.warn?.("AutoCompleteField: party search failed", { type, q }, err);
+      return [];
+    }
+  }
+
   const attempts: Array<Record<string, any>> = [{ q }, { query: q }];
   for (const body of attempts) {
     try {

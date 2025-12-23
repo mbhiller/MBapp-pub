@@ -81,6 +81,18 @@ export const forbidden = (message = "Forbidden") =>
 export const notFoundError = notFound;
 
 /**
+ * 409 Conflict - Error shape per spec
+ * @param message - Human-readable error message
+ * @param details - Optional additional context
+ */
+export const conflictError = (message: string, details?: Record<string, any>) =>
+  respond(409, {
+    code: "conflict",
+    message,
+    ...(details && { details }),
+  });
+
+/**
  * 500 Internal Server Error - Error shape per spec
  * @param err - Error object or message
  */

@@ -1,3 +1,32 @@
+## Sprint Wrap – 2025-12-23 (38/38 Smoke Pass)
+
+**Date:** 2025-12-23  
+**Environment:** AWS API Gateway (https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com)  
+**Tenant:** DemoTenant  
+**Smoke Results:** 38 total, 38 passed, 0 failed ✅
+
+**Key Fixes:**
+- **PO receive status:** Fully received POs now transition to `fulfilled` status (was `received`), aligning with po-close requirements
+- **Over-receive validation:** `POST /purchasing/po/{id}:receive` now validates over-receive attempts BEFORE idempotency checks, returning 409 conflict with `RECEIVE_EXCEEDS_REMAINING` error code including detailed delta validation (lineId, ordered, received, remaining, attemptedDelta)
+- **Idempotency behavior clarified:** Key-based and payload-signature idempotency keys are marked/applied ONLY on successful writes; failed operations (e.g., over-receive) are NOT cached and will re-validate on retry
+- **Close-the-loop smoke flow:** Updated to seed vendor party at flow start, set `preferredVendorId` on product, so `so:commit` derives vendor for backorderRequests and `suggest-po` returns drafts without MISSING_VENDOR errors
+- **Registrations feature flag:** `smoke:common:error-shapes` now explicitly sends `X-Feature-Registrations-Enabled: 0` header for 403 forbidden test, ensuring deterministic behavior regardless of AWS environment feature flag settings
+
+**Files Changed:**
+- `ops/smoke/smoke.mjs` — Updated smoke expectations (receive status, over-receive 409, vendor seeding, feature flag headers)
+- `apps/api/src/purchasing/po-receive.ts` — Status naming fix (fulfilled), over-receive guard moved before payload-sig idempotency, enhanced 409 error details
+- `apps/api/src/sales/so-commit.ts` — `preferredVendorId` derivation for backorderRequests (product.preferredVendorId → backorderRequest.preferredVendorId)
+- `apps/api/src/common/responses.ts` — Added `conflictError()` helper matching error shape conventions
+
+---
+
+## Sprint XXV – Close-the-loop, Role-aware Pickers, Smoke Coverage
+
+- PO receive supports both deltaQty and receivedQty for compatibility; status guard logic normalized
+- Receiving writes inventory movements; /inventory/{itemId}/onhand derives from movements
+- suggest-po populates PurchaseOrderLine.backorderRequestIds and marks requests as converted
+- Receiving fulfills linked backorderRequests (status="fulfilled")
+- VendorPicker/CustomerPicker role-aware autocomplete passes role hint through searchRegistry to findParties (role query param)
 # Sprint IX – Events (Read-Only) + Registrations Linkage (Mobile)
 
 **Theme:** Events module with client-side Registrations linkage; Registrations feature-gated for safe rollout.
@@ -189,7 +218,13 @@ cd apps/mobile && npm run typecheck
 
 **Highlights**
 - Per-line `POST /purchasing/po/{id}:receive` now supports `{ lineId, deltaQty, lot?, locationId? }`.
-- Idempotency: both **Idempotency-Key** and **payload-signature**. Same payload (lines, qty, lot, location) returns current PO even if a different key is used.
+- **Idempotency behavior:**
+  - **Dual-track:** Both `Idempotency-Key` header (key-based) and payload-signature (content-based).
+  - **Key-based** idempotency is checked BEFORE validation (safe short-circuit for previously successful requests).
+  - **Payload-signature** idempotency is checked AFTER validation (prevents caching invalid requests).
+  - **Caching policy:** Idempotency keys are marked/applied ONLY on successful writes; failed operations (e.g., over-receive) are NOT cached.
+  - **Over-receive validation:** Returns 409 conflict with `details.code = "RECEIVE_EXCEEDS_REMAINING"` including `{ lineId, ordered, received, remaining, attemptedDelta }`.
+  - **Retry behavior:** Repeating an invalid over-receive with the same idempotency key will still return 409 (not cached success).
 - Inventory movement writes normalized (`type/docType`, `action`, `at`, `refId`, `poLineId`, optional `lot/locationId`).
 - Inventory create hardening: verb coercion and **reserve guard** (409 if qty > available).
 - List APIs include optional `pageInfo`; mobile hook surfaces it without breaking `{ items, total? }`.
