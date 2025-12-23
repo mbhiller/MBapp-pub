@@ -1,3 +1,48 @@
+## Sprint XXVII — Products + Inventory Vertical Slice (2025-12-23)
+
+**Date:** 2025-12-23  
+**Environment:** AWS API Gateway (https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com)  
+**Tenant:** DemoTenant  
+**Smoke Results:** 41 total (39 baseline + 2 new), 41 passed, 0 failed ✅
+
+**Scope:**
+- Products: Full CRUD on Web + Mobile (create/edit forms, list/detail with search + pagination).
+- Inventory: Read-only views on Web + Mobile (list/detail with onHand stats + movements table).
+- New smokes: `smoke:products:crud` (create → get → update → search) and `smoke:inventory:crud` (create → get → update → onhand).
+- CI wiring: Both new smokes added to `ops/ci-smokes.json` flows.
+
+**Key Deliverables:**
+- **Web Products**: ProductForm (reusable component), ProductsListPage, ProductDetailPage, CreateProductPage, EditProductPage with search + pagination + inventory cross-link.
+- **Web Inventory**: InventoryListPage (with productId filter support), InventoryDetailPage (with optional onHand fetch + movements table).
+- **Mobile Products**: CreateProductScreen + EditProductScreen with type selector (good/service toggle), price field, preferredVendorId; integrated with ProductsListScreen ("Create" button) and ProductDetailScreen ("Edit" button).
+- **Mobile navigation**: Added CreateProduct/EditProduct to RootStackParamList; registered screens in RootStack.
+- **Smokes AWS-only**: `smoke:products:crud` validates create → get (with retry) → update (name+price) → search (with retry); `smoke:inventory:crud` validates create → get → update → onhand fetch.
+- **Typecheck enforcement**: All three apps (api/web/mobile) pass `npm run typecheck` with zero errors.
+
+**Files Changed:**
+- **Web (new)**: `ProductForm.tsx`, `ProductsListPage.tsx`, `ProductDetailPage.tsx`, `CreateProductPage.tsx`, `EditProductPage.tsx`, `InventoryListPage.tsx`, `InventoryDetailPage.tsx`
+- **Web (modified)**: `Layout.tsx` (Products + Inventory nav links), `App.tsx` (6 product/inventory routes)
+- **Mobile (new)**: `CreateProductScreen.tsx`, `EditProductScreen.tsx`
+- **Mobile (modified)**: `RootStack.tsx` (screen registration), `navigation/types.ts` (CreateProduct/EditProduct types), `ProductsListScreen.tsx` (Create button), `ProductDetailScreen.tsx` (Edit button)
+- **Smokes**: `ops/smoke/smoke.mjs` (added smoke:products:crud + smoke:inventory:crud), `ops/ci-smokes.json` (flows updated)
+
+**Acceptance:**
+- ✅ Web Products CRUD works end-to-end (create/edit forms, list/search/pagination, detail view with inventory link).
+- ✅ Web Inventory read-only works (list with productId filter, detail with onHand + movements).
+- ✅ Mobile Products CRUD works (create/edit screens, navigation integration, type selector, price validation).
+- ✅ smoke:products:crud passes (create → get → update → search with eventual-consistency retry).
+- ✅ smoke:inventory:crud passes (create → get → update → onhand fetch).
+- ✅ CI smokes: 41/41 pass (parties-crud, products-crud, inventory-crud, close-the-loop).
+- ✅ TypeScript: All apps pass typecheck (api ✅, web ✅, mobile ✅).
+- ✅ AWS-only enforcement: No localhost fallback, no hardcoded tokens.
+
+**What's Next (Sprint XXVIII):**
+- Close-the-loop surfaced on Web (SO detail shows BO links; PO detail shows receive history).
+- Mobile: Inventory adjust UI (increment/decrement onHand with movement capture).
+- Polish: Error boundaries, loading states, toast notifications on web.
+
+---
+
 ## Sprint XXVI — Tier 1 Foundations: Web Client + AWS-Only Smokes (2025-12-23)
 
 **Date:** 2025-12-23  

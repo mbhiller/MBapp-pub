@@ -304,6 +304,105 @@ const tests = {
     return { test: "parties-crud", result: pass ? "PASS" : "FAIL", create, get1, update, get2, searchOrList, found };
   },
 
+  "smoke:products:crud": async ()=>{
+    await ensureBearer();
+    const sku = `SMOKE-SKU-${Date.now()}`;
+    const name = `SmokeProduct-${Date.now()}`;
+    const updatedName = `${name}-Updated`;
+    const updatedPrice = 99.99;
+
+    const create = await post(`/objects/product`,
+      { sku, name, type: "good", uom: "ea", price: 49.99, preferredVendorId: "vendor-test" },
+      { "Idempotency-Key": idem() }
+    );
+    const id = create.body?.id;
+    if (!create.ok || !id) {
+      return { test: "products-crud", result: "FAIL", step: "create", create };
+    }
+
+    // Retry GET for eventual consistency
+    let get1 = null;
+    let found1 = false;
+    for (let i=0;i<5 && !found1;i++){
+      get1 = await get(`/objects/product/${encodeURIComponent(id)}`);
+      found1 = get1.ok && (get1.body?.sku ?? "") === sku;
+      if (!found1) await sleep(200);
+    }
+    if (!found1) {
+      return { test: "products-crud", result: "FAIL", step: "get1", get1 };
+    }
+
+    const update = await put(`/objects/product/${encodeURIComponent(id)}`,
+      { name: updatedName, price: updatedPrice },
+      { "Idempotency-Key": idem() }
+    );
+    if (!update.ok) {
+      return { test: "products-crud", result: "FAIL", step: "update", update };
+    }
+
+    const get2 = await get(`/objects/product/${encodeURIComponent(id)}`);
+    const gotUpdated = get2.ok && (get2.body?.name ?? "") === updatedName && (get2.body?.price ?? 0) === updatedPrice;
+    if (!gotUpdated) {
+      return { test: "products-crud", result: "FAIL", step: "get2", get2 };
+    }
+
+    // Verify it appears in list
+    let list = null;
+    let found = false;
+    for (let i=0;i<5 && !found;i++){
+      list = await get(`/objects/product`, { limit: 20, q: sku });
+      if (list.ok) {
+        const items = Array.isArray(list.body?.items) ? list.body.items : [];
+        found = items.some(p => p.id === id || p.sku === sku);
+      }
+      if (!found) await sleep(200);
+    }
+
+    const pass = create.ok && found1 && update.ok && gotUpdated && list?.ok && found;
+    return { test: "products-crud", result: pass ? "PASS" : "FAIL", create, get1, update, get2, list, found };
+  },
+
+  "smoke:inventory:crud": async ()=>{
+    await ensureBearer();
+    const itemId = `smoke-item-${Date.now()}`;
+    const productId = `smoke-prod-${Date.now()}`;
+
+    const create = await post(`/objects/inventoryItem`,
+      { itemId, productId, name: "Smoke Inventory Item" },
+      { "Idempotency-Key": idem() }
+    );
+    const id = create.body?.id;
+    if (!create.ok || !id) {
+      return { test: "inventory-crud", result: "FAIL", step: "create", create };
+    }
+
+    const get1 = await get(`/objects/inventoryItem/${encodeURIComponent(id)}`);
+    if (!get1.ok || (get1.body?.itemId ?? "") !== itemId) {
+      return { test: "inventory-crud", result: "FAIL", step: "get1", get1 };
+    }
+
+    const update = await put(`/objects/inventoryItem/${encodeURIComponent(id)}`,
+      { name: "Smoke Inventory Item Updated" },
+      { "Idempotency-Key": idem() }
+    );
+    if (!update.ok) {
+      return { test: "inventory-crud", result: "FAIL", step: "update", update };
+    }
+
+    const get2 = await get(`/objects/inventoryItem/${encodeURIComponent(id)}`);
+    const gotUpdated = get2.ok && (get2.body?.name ?? "") === "Smoke Inventory Item Updated";
+    if (!gotUpdated) {
+      return { test: "inventory-crud", result: "FAIL", step: "get2", get2 };
+    }
+
+    // Optional: check onhand endpoint returns an entry
+    const onhandRes = await get(`/inventory/${encodeURIComponent(id)}/onhand`);
+    const onhandOk = onhandRes.ok; // Don't enforce structure, just that it doesn't error
+
+    const pass = create.ok && get1.ok && update.ok && gotUpdated && onhandOk;
+    return { test: "inventory-crud", result: pass ? "PASS" : "FAIL", create, get1, update, get2, onhandRes };
+  },
+
   "smoke:inventory:onhand": async ()=>{
     await ensureBearer();
     const item = await post(`/objects/${ITEM_TYPE}`, { productId:"prod-smoke" });

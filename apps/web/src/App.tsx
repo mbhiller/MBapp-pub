@@ -5,15 +5,23 @@ import CreatePartyPage from "./pages/CreatePartyPage";
 import EditPartyPage from "./pages/EditPartyPage";
 import PartiesListPage from "./pages/PartiesListPage";
 import PartyDetailPage from "./pages/PartyDetailPage";
+import CreateProductPage from "./pages/CreateProductPage";
+import EditProductPage from "./pages/EditProductPage";
+import ProductsListPage from "./pages/ProductsListPage";
+import ProductDetailPage from "./pages/ProductDetailPage";
+import InventoryListPage from "./pages/InventoryListPage";
+import InventoryDetailPage from "./pages/InventoryDetailPage";
 
 function HomePage() {
   return (
     <div style={{ display: "grid", gap: 12 }}>
       <h1>Welcome to MBapp Web</h1>
       <p>This is the AWS-first web client foundation.</p>
-      <p>
-        <Link to="/parties">Go to Parties</Link>
-      </p>
+      <div style={{ display: "flex", gap: 12 }}>
+        <Link to="/parties">Parties</Link>
+        <Link to="/products">Products</Link>
+        <Link to="/inventory">Inventory</Link>
+      </div>
     </div>
   );
 }
@@ -28,6 +36,12 @@ export default function App() {
           <Route path="/parties/new" element={<CreatePartyPage />} />
           <Route path="/parties/:id" element={<PartyDetailPage />} />
           <Route path="/parties/:id/edit" element={<EditPartyPage />} />
+          <Route path="/products" element={<ProductsListPage />} />
+          <Route path="/products/new" element={<CreateProductPage />} />
+          <Route path="/products/:id" element={<ProductDetailPage />} />
+          <Route path="/products/:id/edit" element={<EditProductPage />} />
+          <Route path="/inventory" element={<InventoryListPage />} />
+          <Route path="/inventory/:id" element={<InventoryDetailPage />} />
         </Routes>
       </Layout>
     </ErrorBoundary>

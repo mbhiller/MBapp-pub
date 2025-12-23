@@ -130,6 +130,7 @@ export default function ProductDetailScreen() {
           borderColor: t.colors.border,
           borderRadius: 8,
           padding: 12,
+          marginBottom: 16,
         }}
       >
         <Row label="SKU" value={(product as any).sku} />
@@ -153,6 +154,19 @@ export default function ProductDetailScreen() {
         <Row label="Created" value={formatDateTime((product as any).createdAt)} />
         <Row label="Updated" value={formatDateTime((product as any).updatedAt)} />
       </View>
+
+      {/* Edit Button */}
+      <Pressable
+        onPress={() => productId && navigation.navigate("EditProduct", { id: productId })}
+        style={{
+          padding: 12,
+          backgroundColor: t.colors.primary,
+          borderRadius: 8,
+          alignItems: "center",
+        }}
+      >
+        <Text style={{ color: "#fff", fontSize: 16, fontWeight: "700" }}>Edit Product</Text>
+      </Pressable>
 
       <View style={{ height: 24 }} />
     </ScrollView>

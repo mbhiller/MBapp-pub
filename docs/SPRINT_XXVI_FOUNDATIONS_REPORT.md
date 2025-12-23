@@ -1,4 +1,4 @@
-# Sprint XXVI — Tier 1–4 Foundations Report
+# Sprint XXVI–XXVII — Tier 1–4 Foundations Report
 **Generated:** 2025-12-23  
 **Scope:** Mobile + Web client foundations for production-ready MVP
 
@@ -6,38 +6,38 @@
 
 ## Roadmap Alignment (Tier 1–4)
 
-This section aligns the Sprint XXVI Foundations checklist to the Tiered roadmap in [MBapp-Roadmap-Master-v10.0.md](MBapp-Roadmap-Master-v10.0.md).
+This section aligns the Sprint XXVI–XXVII Foundations checklist to the Tiered roadmap in [MBapp-Roadmap-Master-v10.0.md](MBapp-Roadmap-Master-v10.0.md).
 
 | Checklist Item | Tier | Roadmap Area | Backend | Mobile | Web | Smokes | Notes |
 |---|---|---|---|---|---|---|---|
-| Remove localhost fallback in `ops/smoke/smoke.mjs` | 1 | Core Platform & Modules | ✅ | ✅ | ✅ | ⬜ | Fail fast if MBAPP_API_BASE unset |
-| Create `apps/web/.env.sample` (AWS defaults) | 1 | Core Platform & Modules | ✅ | ✅ | ⬜ | ✅ | Documented env setup for web |
-| Shared web fetch/error/pagination (`lib/http.ts`) | 1 | Core Platform & Modules | ✅ | ✅ | ⬜ | ✅ | Auth headers + error normalization |
-| Web AuthProvider + Layout + Router | 1 | Core Platform & Modules | ✅ | ✅ | ⬜ | ✅ | Foundation for all Tier 1–4 screens |
-| Parties — Web pages (List/Detail/Create/Edit) | 1 | Core Identity (Parties) | ✅ | 🟨 | ⬜ | 🟨 | API complete; mobile missing create/edit |
-| Parties — Mobile screens (Create/Edit + routes) | 1 | Core Identity (Parties) | ✅ | ⬜ | ✅ | 🟨 | Adds reusable form pattern on mobile |
-| Products — Web/Mobile forms (Create/Edit) | 1.2 | Commerce Core | ✅ | 🟨 | ⬜ | 🟨 | Products exist; add CRUD forms |
-| Inventory — Web read-only (List/Detail) | 1.2 | Commerce Core | ✅ | ✅ | ⬜ | ✅ | Show onHand + movements; adjust later |
-| Update docs + add parties smoke | 1 | Delivery Notes | ✅ | 🟨 | 🟨 | ⬜ | Add smoke: parties create/edit |
+| Remove localhost fallback in `ops/smoke/smoke.mjs` | 1 | Core Platform & Modules | ✅ | ✅ | ✅ | ✅ | Fail fast if MBAPP_API_BASE unset (Sprint XXVI) |
+| Create `apps/web/.env.sample` (AWS defaults) | 1 | Core Platform & Modules | ✅ | ✅ | ✅ | ✅ | Documented env setup for web (Sprint XXVI) |
+| Shared web fetch/error/pagination (`lib/http.ts`) | 1 | Core Platform & Modules | ✅ | ✅ | ✅ | ✅ | Auth headers + error normalization (Sprint XXVI) |
+| Web AuthProvider + Layout + Router | 1 | Core Platform & Modules | ✅ | ✅ | ✅ | ✅ | Foundation for all Tier 1–4 screens (Sprint XXVI) |
+| Parties — Web pages (List/Detail/Create/Edit) | 1 | Core Identity (Parties) | ✅ | ✅ | ✅ | ✅ | API complete; web+mobile CRUD delivered (Sprint XXVI) |
+| Parties — Mobile screens (Create/Edit + routes) | 1 | Core Identity (Parties) | ✅ | ✅ | ✅ | ✅ | Adds reusable form pattern on mobile (Sprint XXVI) |
+| Products — Web/Mobile forms (Create/Edit) | 1.2 | Commerce Core | ✅ | ✅ | ✅ | ✅ | Web ProductForm + mobile screens delivered (Sprint XXVII) |
+| Inventory — Web read-only (List/Detail) | 1.2 | Commerce Core | ✅ | ✅ | ✅ | ✅ | Show onHand + movements; adjust later (Sprint XXVII) |
+| Update docs + add parties/products/inventory smokes | 1 | Delivery Notes | ✅ | ✅ | ✅ | ✅ | smoke:parties:crud + smoke:products:crud + smoke:inventory:crud (Sprint XXVI–XXVII) |
 
 Legend: ✅ done · 🟨 partial · ⬜ missing (planned)
 
-### Gap Matrix (Tier 1–2)
+### Gap Matrix (Tier 1–2) — Post Sprint XXVII
 
 | Capability | Backend | Mobile | Web | Smokes | Note |
 |---|---|---|---|---|---|
-| Parties CRUD + roles | ✅ | 🟨 | ⬜ | ✅ | Mobile lacks create/edit; role guards enforced |
-| Products CRUD | ✅ | 🟨 | ⬜ | 🟨 | Forms missing; list/detail present on mobile |
-| Inventory CRUD + OnHand | ✅ | 🟨 | ⬜ | ✅ | Read flows OK; adjust/create UI missing |
+| Parties CRUD + roles | ✅ | ✅ | ✅ | ✅ | Complete: web+mobile CRUD; role guards enforced; smokes passing |
+| Products CRUD | ✅ | ✅ | ✅ | ✅ | Complete: web ProductForm + mobile create/edit screens; smokes passing |
+| Inventory CRUD + OnHand | ✅ | 🟨 | ✅ | ✅ | Read flows complete; adjust/create UI missing on mobile |
 | Sales Order create/commit | ✅ | ✅ | ⬜ | ✅ | Mobile has create+commit; web missing |
 | Backorders + suggest‑po + receive loop | ✅ | 🟨 | ⬜ | ✅ | End‑to‑end smokes green; minimal UI |
 | Views CRUD | ✅ | ⬜ | ⬜ | 🟨 | Handlers exist; smokes exist (not in CI) |
 | Workspaces CRUD | ✅ | 🟨 | ⬜ | 🟨 | Hub stub on mobile; CRUD UI missing |
-| Auth/config | ✅ | ✅ | 🟨 | ✅ | Web missing auth provider; smokes use bearer/env |
+| Auth/config | ✅ | ✅ | ✅ | ✅ | Web has AuthProvider; smokes use bearer/env (Sprint XXVI) |
 
 ### Recommended Sprint Sequence (XXVI–XXVIII)
 
-#### Sprint XXVI — Web foundation + Parties vertical slice
+#### Sprint XXVI — Web foundation + Parties vertical slice ✅ COMPLETE
 - Scope:
   - Web: `lib/http.ts`, AuthProvider, Router, Layout
   - Web: Parties List/Detail/Create/Edit + shared `PartyForm`
@@ -48,7 +48,7 @@ Legend: ✅ done · 🟨 partial · ⬜ missing (planned)
   - Mobile Parties create/edit works end‑to‑end
   - Smokes: run full suite + new parties smoke (expected: 39/39 PASS)
 
-#### Sprint XXVII — Products + Inventory forms + OnHand polish
+#### Sprint XXVII — Products + Inventory forms + OnHand polish ✅ COMPLETE
 - Scope:
   - Web: Products Create/Edit; Inventory List/Detail (read‑only)
   - Mobile: Products Create/Edit; Inventory adjust stub
@@ -58,7 +58,7 @@ Legend: ✅ done · 🟨 partial · ⬜ missing (planned)
   - Inventory read flows visible on web; adjust planned on mobile
   - Smokes: full suite + 2 new CRUD flows (expected: 41/41 PASS)
 
-#### Sprint XXVIII — Close‑the‑loop surfaced (SO → BO → Suggest‑PO → Receive)
+#### Sprint XXVIII — Close‑the‑loop surfaced (SO → BO → Suggest‑PO → Receive) — NEXT
 - Scope:
   - Web: read‑only surfaces (SO detail shows BO links; PO detail shows receive history)
   - Mobile: ensure receive actions and backorder linkouts are consistent

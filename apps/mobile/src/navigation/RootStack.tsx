@@ -40,6 +40,8 @@ import EventDetailScreen from "../screens/EventDetailScreen";
 // Products (Sprint XIV)
 import ProductsListScreen from "../screens/ProductsListScreen";
 import ProductDetailScreen from "../screens/ProductDetailScreen";
+import CreateProductScreen from "../screens/CreateProductScreen";
+import EditProductScreen from "../screens/EditProductScreen";
 
 // Dev Tools (Sprint XIII)
 import DevToolsScreen from "../screens/DevToolsScreen";
@@ -118,6 +120,8 @@ export default function RootStack() {
     {/* Products (Sprint XIV) */}
     <Stack.Screen name="ProductsList" component={ProductsListScreen} options={{ title: "Products" }} />
     <Stack.Screen name="ProductDetail" component={ProductDetailScreen} options={{ title: "Product" }} />
+    <Stack.Screen name="CreateProduct" component={CreateProductScreen} options={{ title: "Create Product" }} />
+    <Stack.Screen name="EditProduct" component={EditProductScreen} options={{ title: "Edit Product" }} />
 
     {/* Dev Tools (Sprint XIII) */}
     <Stack.Screen name="DevTools" component={DevToolsScreen} options={{ title: "Dev Tools" }} />
