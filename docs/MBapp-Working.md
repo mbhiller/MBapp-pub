@@ -59,6 +59,23 @@ Sprint E is wrapped: backorder signals now drive purchasing via a worklist and P
 - Mobile: Backorders list sends `preferredVendorId` as a server filter, adds Apply/Clear for vendor input, and shows a skipped summary after convert.
 - Smokes: Added `smoke:purchasing:suggest-po-skips` to cover skipped reasons and vendor enforcement.
 
+### ✅ Sprint XXIII — Backorders Vendor UX + Copy QoL
+- **Backorders vendor filter:** VendorPicker autocomplete auto-applies on selection; Clear Vendor resets. Vendor search registry maps `vendor` → `party` to align with backend object search.
+- **Long-press copy IDs:** Added long-press copy + "Copied" toast on ID fields across detail screens (Party, SalesOrder, PurchaseOrder, Product, Inventory, Registration, Reservation).
+- **Toast kinds extended:** Toast now supports `info` and `warning` (in addition to `success`/`error`) to resolve typecheck and match UX needs.
+- **Search dropdown reliability:** AutoCompleteField dropdown overlay layering improved (e.g., Android elevation/zIndex).
+
+Files touched (high level):
+- apps/mobile/src/screens/BackordersListScreen.tsx
+- apps/mobile/src/features/_shared/searchRegistry.tsx
+- apps/mobile/src/features/_shared/AutoCompleteField.tsx
+- apps/mobile/src/features/_shared/Toast.tsx
+- apps/mobile/src/screens/*DetailScreen.tsx (copy ID)
+
+Tests:
+- Mobile typecheck + tests green
+- Manual smoke: vendor autocomplete suggestions visible + selectable; long-press copy works; toast kinds render
+
 ### ✅ Sprint A — Foundations & Objects
 - Project scaffolding; Objects CRUD; dev-login; base router/helpers.
 - Mobile: generic Objects list/detail.
