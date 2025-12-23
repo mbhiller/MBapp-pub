@@ -5,6 +5,7 @@ import { useObjects } from "../features/_shared/useObjects";
 import { FEATURE_PO_QUICK_RECEIVE } from "../features/_shared/flags";
 import { saveFromSuggestion, receiveAll, receiveLine, submit, approve, cancel, close } from "../features/purchasing/poActions";
 import { useToast } from "../features/_shared/Toast";
+import { copyText } from "../features/_shared/copy";
 import { ReceiveHistorySheet } from "../features/purchasing/ReceiveHistorySheet";
 import { VendorGuardBanner } from "../features/_shared/VendorGuardBanner";
 import PartySelectorModal from "../features/parties/PartySelectorModal";
@@ -20,7 +21,7 @@ export default function PurchaseOrderDetailScreen() {
   const po = data;
   const { data: vendorParty } = useObjects<any>({ type: "party", id: po?.vendorId });
   const lines = (po?.lines ?? []) as any[];
-  const toast = (useToast?.() as any) ?? ((t: string) => console.log("TOAST:", t));
+  const toast = useToast();
 
   const [modal, setModal] = React.useState<{ open: boolean; lineId?: string; itemId?: string }>({ open: false });
   const [qty, setQty] = React.useState<string>("1");
@@ -72,7 +73,19 @@ export default function PurchaseOrderDetailScreen() {
 
   return (
     <View style={{ flex: 1, padding: 12 }}>
-      <Text style={{ fontSize: 18, fontWeight: "700", marginBottom: 6 }}>Purchase Order {po?.id}</Text>
+      <View style={{ flexDirection: "row", alignItems: "baseline", marginBottom: 6 }}>
+        <Text style={{ fontSize: 18, fontWeight: "700" }}>Purchase Order </Text>
+        <Pressable
+          onLongPress={async () => {
+            if (po?.id) {
+              await copyText(String(po.id));
+              toast("Copied", "success");
+            }
+          }}
+        >
+          <Text style={{ fontSize: 18, fontWeight: "700" }}>{po?.id}</Text>
+        </Pressable>
+      </View>
       <Text>Status: {po?.status}</Text>
 
       {/* Vendor identity row */}

@@ -20,7 +20,9 @@ async function searchPerType(type: string, q: string, limit: number) {
     try {
       const page = await searchObjects<any>(type, body, { limit });
       if (Array.isArray(page?.items) && page.items.length) return mapToResultItems(type, page.items);
-    } catch {}
+    } catch (err) {
+      console.warn?.("AutoCompleteField: search failed", { type, body }, err);
+    }
   }
   return [];
 }
@@ -181,6 +183,7 @@ export function AutoCompleteField({
             borderWidth: 1, borderColor: t.colors.border, borderTopWidth: 0,
             borderBottomLeftRadius: 8, borderBottomRightRadius: 8,
             maxHeight: 220, zIndex: 30,
+            elevation: 10,
           }}
         >
           {loading ? (

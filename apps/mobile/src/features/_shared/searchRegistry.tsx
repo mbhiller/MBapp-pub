@@ -8,7 +8,8 @@ const registry: Record<SearchKey, string[]> = {
   salesLine: ["product", "inventory"],
   customer: ["employee","vendor","client","organization","contact","person","customer","patient"],
   purchaseLine: ["product","inventory"],
-  vendor: ["vendor","organization","supplier","contact","person"],
+  // Use unified party type for vendor search; backend supports party search
+  vendor: ["party"],
 };
 
 export function getSearchTypes(key: SearchKey) {
