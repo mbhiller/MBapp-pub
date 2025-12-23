@@ -13,6 +13,13 @@ type SuggestPoReq = {
   vendorId?: string | null;
 };
 
+type SkipReason = "ZERO_QTY" | "MISSING_VENDOR" | "IGNORED" | "NOT_FOUND";
+
+type SkippedEntry = {
+  backorderRequestId: string;
+  reason: SkipReason;
+};
+
 /**
  * Outbound PO line (draft)
  */
@@ -130,27 +137,43 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     return json(400, { message: "requests[] required" });
   }
 
+  const overrideVendorId =
+    typeof body.vendorId === "string" && body.vendorId.trim() ? body.vendorId.trim() : null;
+
   // Gather BO items with derived vendor + MOQ
   const gathered: {
     boId: string;
     itemId: string;
     qty: number;
-    preferredVendorId: string | null;
+    vendorId: string;
     minOrderQty: number | null;
   }[] = [];
+  const skipped: SkippedEntry[] = [];
 
   for (const r of body.requests) {
     const bo = await loadBackorder(tenantId, r.backorderRequestId);
-    if (!bo || bo.type !== "backorderRequest") continue;
+    if (!bo || bo.type !== "backorderRequest") {
+      skipped.push({ backorderRequestId: r.backorderRequestId, reason: "NOT_FOUND" });
+      continue;
+    }
 
     // Accept "open" or "converted" (bulk flow converts then suggests). Skip only explicit ignores.
-    if (bo.status === "ignored") continue;
+    if (bo.status === "ignored") {
+      skipped.push({ backorderRequestId: bo.id, reason: "IGNORED" });
+      continue;
+    }
 
-    let preferredVendorId: string | null = bo?.preferredVendorId ?? null;
+    const qty = Number(bo.qty ?? 0);
+    if (!(qty > 0)) {
+      skipped.push({ backorderRequestId: bo.id, reason: "ZERO_QTY" });
+      continue;
+    }
+
+    let vendorId: string | null = overrideVendorId ?? (bo?.preferredVendorId ? String(bo.preferredVendorId).trim() : null);
     let minOrderQty: number | null = null;
 
-    // Derive vendor & MOQ if not present on BO
-    if (!preferredVendorId) {
+    // Derive vendor & MOQ if not present on BO and no override
+    if (!vendorId) {
       const itemId = bo.itemId ? String(bo.itemId) : null;
       let productId: string | null = bo.productId ?? null;
 
@@ -159,34 +182,31 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
       }
 
       if (productId) {
-        const { vendorId, moq } = await loadProductVendorAndMoq(tenantId, productId);
-        preferredVendorId = vendorId;
+        const { vendorId: derivedVendorId, moq } = await loadProductVendorAndMoq(tenantId, productId);
+        vendorId = derivedVendorId ? String(derivedVendorId).trim() : null;
         minOrderQty = moq;
       }
+    }
+
+    if (!vendorId) {
+      skipped.push({ backorderRequestId: bo.id, reason: "MISSING_VENDOR" });
+      continue;
     }
 
     gathered.push({
       boId: bo.id,
       itemId: String(bo.itemId ?? bo.productId ?? ""),
-      qty: Number(bo.qty ?? 0),
-      preferredVendorId,
+      qty,
+      vendorId,
       minOrderQty,
     });
   }
 
-  if (gathered.length === 0) {
-    return json(200, { drafts: [] });
-  }
-
-  // Group lines by vendor. If request.vendorId is provided, force single-vendor grouping.
-  const V_UNKNOWN = "__unknown__";
-  const groupKey = (v?: string | null) => (v && v.trim() ? v : V_UNKNOWN);
-
+  // Group lines by vendor (override already applied per entry).
   const groups = new Map<string, PurchaseOrderLine[]>();
 
   for (const it of gathered) {
-    const forcedVendor = body.vendorId ?? null;
-    const key = groupKey(forcedVendor ?? it.preferredVendorId);
+    const key = it.vendorId;
 
     const baseQty = Math.max(0, Number(it.qty || 0));
     const bumpedQty =
@@ -216,14 +236,11 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
   const drafts: PurchaseOrderDraft[] = [];
 
   for (const [key, lines] of groups.entries()) {
-    const vendorId =
-      key === V_UNKNOWN ? (body.vendorId ?? "") : key; // empty string if unknown and no forced vendor
-
     drafts.push({
       id: poDraftId(),
       type: "purchaseOrder",
       status: "draft",
-      vendorId,
+      vendorId: key,
       currency: "USD",
       lines,
       createdAt: now,
@@ -231,9 +248,12 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     });
   }
 
+  const payload: any = { drafts, skipped };
+
   // If exactly one draft, return both the array and a single-draft alias for backward compatibility.
   if (drafts.length === 1) {
-    return json(200, { draft: drafts[0], drafts });
+    payload.draft = drafts[0];
   }
-  return json(200, { drafts });
+
+  return json(200, payload);
 }

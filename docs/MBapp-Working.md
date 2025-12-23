@@ -54,6 +54,11 @@ Sprint E is wrapped: backorder signals now drive purchasing via a worklist and P
 ---
 
 ## Status by Sprint (Summaries)
+### ✅ Sprint XXII — Suggest-PO Hardening
+- Backend: `POST /purchasing/suggest-po` now skips invalid backorders with `skipped[]` reasons (ZERO_QTY, MISSING_VENDOR/NOT_FOUND) and never emits vendor-less drafts.
+- Mobile: Backorders list sends `preferredVendorId` as a server filter, adds Apply/Clear for vendor input, and shows a skipped summary after convert.
+- Smokes: Added `smoke:purchasing:suggest-po-skips` to cover skipped reasons and vendor enforcement.
+
 ### ✅ Sprint A — Foundations & Objects
 - Project scaffolding; Objects CRUD; dev-login; base router/helpers.
 - Mobile: generic Objects list/detail.

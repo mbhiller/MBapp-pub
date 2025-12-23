@@ -2372,12 +2372,18 @@ export interface components {
             };
             lines?: components["schemas"]["PurchaseOrderLine"][];
         };
-        /** @description Single vendor returns `draft`; multi-vendor returns `drafts`. */
+        /** @description Single vendor returns `draft`; multi-vendor returns `drafts`. Always includes skipped entries for ignored/invalid requests. */
         SuggestPoResponse: {
+            skipped?: {
+                backorderRequestId: string;
+                /** @enum {string} */
+                reason: "ZERO_QTY" | "MISSING_VENDOR" | "IGNORED" | "NOT_FOUND";
+            }[];
+        } & ({
             draft: components["schemas"]["PurchaseOrder"];
         } | {
             drafts: components["schemas"]["PurchaseOrder"][];
-        };
+        });
         PurchaseOrderReceiveRequest: {
             /** @deprecated */
             idempotencyKey?: string;
@@ -3017,6 +3023,17 @@ export interface operations {
                 limit?: components["parameters"]["Limit"];
                 next?: components["parameters"]["Next"];
                 fields?: components["parameters"]["Fields"];
+                /** @description Optional structured filters using dot notation (e.g., filter.soId=SO123&filter.itemId=ITEM456).
+                 *     Supported fields depend on object type. For backorderRequest:
+                 *     - filter.soId: Sales Order ID
+                 *     - filter.itemId: Inventory Item ID
+                 *     - filter.status: Backorder status (open, ignored, converted)
+                 *     - filter.preferredVendorId: Vendor ID
+                 *     Filters are combined with AND logic; combined with q search (substring).
+                 *      */
+                filter?: {
+                    [key: string]: string;
+                };
             };
             header: {
                 "x-tenant-id": components["parameters"]["TenantHeader"];

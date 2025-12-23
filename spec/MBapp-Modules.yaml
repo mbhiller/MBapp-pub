@@ -1258,19 +1258,32 @@ components:
             type: array
             items: { $ref: '#/components/schemas/PurchaseOrderLine' }
     SuggestPoResponse:
-      description: Single vendor returns `draft`; multi-vendor returns `drafts`.
-      oneOf:
+      description: Single vendor returns `draft`; multi-vendor returns `drafts`. Always includes skipped entries for ignored/invalid requests.
+      allOf:
         - type: object
-          required: [draft]
           properties:
-            draft:
-              $ref: '#/components/schemas/PurchaseOrder'
-        - type: object
-          required: [drafts]
-          properties:
-            drafts:
+            skipped:
               type: array
-              items: { $ref: '#/components/schemas/PurchaseOrder' }
+              items:
+                type: object
+                required: [backorderRequestId, reason]
+                properties:
+                  backorderRequestId: { type: string }
+                  reason:
+                    type: string
+                    enum: [ZERO_QTY, MISSING_VENDOR, IGNORED, NOT_FOUND]
+        - oneOf:
+            - type: object
+              required: [draft]
+              properties:
+                draft:
+                  $ref: '#/components/schemas/PurchaseOrder'
+            - type: object
+              required: [drafts]
+              properties:
+                drafts:
+                  type: array
+                  items: { $ref: '#/components/schemas/PurchaseOrder' }
 
     PurchaseOrderReceiveRequest:
       type: object

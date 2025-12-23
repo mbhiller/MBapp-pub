@@ -24,6 +24,11 @@ export default function BackordersListScreen() {
   const [selected, setSelected] = React.useState<Record<string, boolean>>({});
   const [chooserOpen, setChooserOpen] = React.useState(false);
   const [chooserDrafts, setChooserDrafts] = React.useState<Draft[]>([]);
+
+  React.useEffect(() => {
+    setVendorFilter(preferredVendorId ?? "");
+  }, [preferredVendorId]);
+
   const filter = {
     status: status ?? "open",
     ...(soId ? { soId } : {}),
@@ -73,24 +78,47 @@ export default function BackordersListScreen() {
     if (action === "convert") {
       try {
         const reqs = picks.map((id) => ({ backorderRequestId: id }));
+        const vendorIdOverride = preferredVendorId ?? (vendorFilter.trim() || null);
         const res = await apiClient.post(`/purchasing/suggest-po`, {
           requests: reqs,
-          vendorId: vendorFilter || null,
+          vendorId: vendorIdOverride,
         });
         const j: any = (res as any)?.body ?? res;
+
+        const skipped = Array.isArray(j?.skipped) ? j.skipped : [];
+        if (skipped.length > 0) {
+          const reasons = skipped
+            .slice(0, 2)
+            .map((s: any) => s?.reason || "SKIPPED")
+            .join(", ");
+          const suffix = skipped.length > 2 ? "…" : "";
+          toast(`Skipped ${skipped.length} backorder(s): ${reasons}${suffix}`, "info");
+        }
+
+        const draftsFromArray: Draft[] = Array.isArray(j?.drafts) ? j.drafts : [];
+        const singleDraft: Draft | undefined = j?.draft;
+        const drafts: Draft[] = draftsFromArray.length > 0 ? draftsFromArray : singleDraft ? [singleDraft] : [];
+
+        if (drafts.length === 0) {
+          if (skipped.length === 0) {
+            toast("No drafts returned", "info");
+          }
+          setSelected({});
+          return;
+        }
         
         // Step 3: Handle single draft or multiple drafts
-        if (j?.draft) {
+        if (drafts.length === 1) {
           // Single draft: save and navigate immediately
-          const createRes: any = await saveFromSuggestion(j.draft);
+          const createRes: any = await saveFromSuggestion(drafts[0]);
           const createdId = createRes?.id ?? createRes?.ids?.[0];
           if (createdId) {
             toast("Draft PO created", "success");
             nav.navigate("PurchaseOrderDetail", { id: createdId });
           }
-        } else if (Array.isArray(j?.drafts) && j.drafts.length > 0) {
+        } else if (drafts.length > 1) {
           // Multiple drafts: show chooser modal
-          setChooserDrafts(j.drafts);
+          setChooserDrafts(drafts);
           setChooserOpen(true);
         }
       } catch (e: any) {
@@ -174,6 +202,23 @@ export default function BackordersListScreen() {
           placeholderTextColor={t.colors.textMuted}
           style={{ borderWidth: 1, borderColor: t.colors.border, borderRadius: 8, padding: 10, backgroundColor: t.colors.card, color: t.colors.text }}
         />
+        <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+          <Pressable
+            onPress={() => nav.setParams({ preferredVendorId: vendorFilter.trim() || undefined })}
+            style={{ paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, backgroundColor: t.colors.primary }}
+          >
+            <Text style={{ color: t.colors.buttonText || "#fff", fontWeight: "600", fontSize: 12 }}>Apply</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              nav.setParams({ preferredVendorId: undefined });
+              setVendorFilter("");
+            }}
+            style={{ paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, backgroundColor: t.colors.border }}
+          >
+            <Text style={{ color: t.colors.textMuted, fontWeight: "600", fontSize: 12 }}>Clear</Text>
+          </Pressable>
+        </View>
       </View>
 
       {/* Bulk action buttons */}

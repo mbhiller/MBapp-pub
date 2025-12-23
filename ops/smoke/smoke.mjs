@@ -415,6 +415,72 @@ const tests = {
     return { test: "purchasing-guards", result: pass ? "PASS" : "FAIL", approveEarly, over, cancel };
   },
 
+  "smoke:purchasing:suggest-po-skips": async () => {
+    await ensureBearer();
+
+    const validItem = await post(`/objects/${ITEM_TYPE}`, { productId: "prod-skip-valid" });
+    if (!validItem.ok) return { test: "purchasing-suggest-po-skips", result: "FAIL", reason: "item-create-failed", validItem };
+    const validItemId = validItem.body?.id;
+
+    const boZero = await post(`/objects/backorderRequest`, {
+      type: "backorderRequest",
+      soId: "SO_SKIP",
+      soLineId: "LZ",
+      itemId: validItemId,
+      qty: 0,
+      status: "open",
+    });
+
+    const boMissing = await post(`/objects/backorderRequest`, {
+      type: "backorderRequest",
+      soId: "SO_SKIP",
+      soLineId: "LM",
+      itemId: "item_missing_vendor_zz",
+      qty: 1,
+      status: "open",
+    });
+
+    if (!boZero.ok || !boMissing.ok) {
+      return { test: "purchasing-suggest-po-skips", result: "FAIL", reason: "backorder-create-failed", boZero, boMissing };
+    }
+
+    const sugg = await post(
+      `/purchasing/suggest-po`,
+      {
+        requests: [
+          { backorderRequestId: boZero.body?.id },
+          { backorderRequestId: boMissing.body?.id },
+        ],
+      },
+      { "Idempotency-Key": idem() }
+    );
+
+    const skipped = Array.isArray(sugg.body?.skipped) ? sugg.body.skipped : [];
+    const hasZero = skipped.some((s) => s.backorderRequestId === boZero.body?.id && s.reason === "ZERO_QTY");
+    const hasMissing = skipped.some(
+      (s) => s.backorderRequestId === boMissing.body?.id && (s.reason === "MISSING_VENDOR" || s.reason === "NOT_FOUND")
+    );
+
+    const drafts = Array.isArray(sugg.body?.drafts)
+      ? sugg.body.drafts
+      : sugg.body?.draft
+      ? [sugg.body.draft]
+      : [];
+    const draftsHaveVendor = drafts.every((d) => d && typeof d.vendorId === "string" && d.vendorId.trim().length > 0);
+
+    const pass = sugg.ok && hasZero && hasMissing && draftsHaveVendor;
+    return {
+      test: "purchasing-suggest-po-skips",
+      result: pass ? "PASS" : "FAIL",
+      hasZero,
+      hasMissing,
+      draftsCount: drafts.length,
+      draftsHaveVendor,
+      skipped,
+      sugg,
+    };
+  },
+
   "smoke:po:save-from-suggest": async ()=>{
     await ensureBearer();
     let draft;
