@@ -61,6 +61,7 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 | Flow | Steps | Assertions | Endpoints |
 |------|-------|-----------|-----------|
 | **smoke:objects:list-pagination** | 1. GET /objects/purchaseOrder?limit=2&sort=desc 2. If next cursor, fetch second page | pageInfo or legacy `next` present; cursor works | `/objects/purchaseOrder` |
+| **smoke:objects:list-filter-soId** | 1. Create SO with 2 lines, shortage qty 2. Commit to trigger backorder requests 3. GET /objects/backorderRequest?filter.soId={soId}&limit=1 4. If next cursor, fetch page 2 with same filter | All returned items have soId matching filter; pagination respects filter on both pages | `/objects/backorderRequest?filter.soId=...` |
 | **smoke:movements:filter-by-poLine** | 1. Create product + item, PO, submit, approve 2. Receive with lot/location 3. GET /inventory/{id}/movements?refId=poId&poLineId=lineId | Movements filtered by refId AND poLineId; lot/location captured | `/inventory/{id}/movements` |
 | **smoke:objects:pageInfo-present** | 1. GET /objects/purchaseOrder?limit=2 | Response has items array AND (pageInfo OR legacy `next`) | `/objects/purchaseOrder` |
 
@@ -87,13 +88,13 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 | **Sales Orders** | sales:happy, sales:guards | ✅ Complete | Lifecycle (draft→closed) + guards (reserve lock, oversell) |
 | **Purchase Orders** | purchasing:happy, purchasing:guards, po:save-from-suggest, po:quick-receive, po:receive-line*, po:receive-line-batch, po:receive-line-idem-* | ✅ Complete | Lifecycle, receipt variants, idempotency, vendor guard, events |
 | **Parties** | parties:happy | ✅ Complete | Create, search, update |
-| **Pagination & Filtering** | objects:list-pagination, objects:pageInfo-present, movements:filter-by-poLine | ✅ Complete | Cursor pagination, field filters |
+| **Pagination & Filtering** | objects:list-pagination, objects:list-filter-soId, objects:pageInfo-present, movements:filter-by-poLine | ✅ Complete | Cursor pagination, query param filters (filter.*) |
 | **Feature Flags** | po:vendor-guard:on, po:vendor-guard:off, po:emit-events | ✅ Complete | Header overrides, simulation |
 | **EPC** | epc:resolve | ✅ Complete | 404 case only |
 | **Registrations** | registrations:crud, registrations:filters | ✅ Complete (Sprint IV) | CRUD lifecycle + filters (eventId, partyId, status); feature-flagged (default OFF) |
 | **Views** | ❌ None | ⚠️ Gap | Spec defines /views (CRUD) — not tested |
 | **Workspaces** | ❌ None | ⚠️ Gap | Spec defines /workspaces (CRUD) — not tested |
-| **Backorders** | ❌ None | ⚠️ Gap | Spec defines backorderRequest (ignore, convert) — not tested |
+| **Backorders** | objects:list-filter-soId | ✅ Partial (Sprint XX) | filter.soId + pagination; ignore/convert actions not tested |
 | **Routing** | ❌ None | ⚠️ Gap | Spec defines /routing/graph, /routing/plan (deprecated in Sprint III?) — not tested |
 | **Scanner** | ❌ None | ⚠️ Gap | Spec defines sessions, actions, simulate — not tested |
 | **Audit** | ❌ None | ⚠️ Gap | Spec defines /admin/audit — not tested |

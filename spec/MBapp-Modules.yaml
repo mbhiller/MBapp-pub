@@ -2337,6 +2337,22 @@ paths:
       - $ref: '#/components/parameters/Limit'
       - $ref: '#/components/parameters/Next'
       - $ref: '#/components/parameters/Fields'
+      - name: filter
+        in: query
+        schema:
+          type: object
+          additionalProperties:
+            type: string
+        style: form
+        explode: true
+        description: |
+          Optional structured filters using dot notation (e.g., filter.soId=SO123&filter.itemId=ITEM456).
+          Supported fields depend on object type. For backorderRequest:
+          - filter.soId: Sales Order ID
+          - filter.itemId: Inventory Item ID
+          - filter.status: Backorder status (open, ignored, converted)
+          - filter.preferredVendorId: Vendor ID
+          Filters are combined with AND logic; combined with q search (substring).
       responses:
         '200':
           $ref: '#/components/responses/ListPage'

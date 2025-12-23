@@ -571,6 +571,122 @@ const tests = {
     return { test: "objects:list-pagination", result: "PASS", firstCount: items1.length, secondCount: items2.length };
   },
 
+  // === Sprint XX: filter.soId on backorderRequest list ===
+  "smoke:objects:list-filter-soId": async () => {
+    await ensureBearer();
+    const { partyId } = await seedParties(api);
+
+    // 1) Create a Sales Order with shortage to trigger backorder requests
+    const item1 = await post(`/objects/${ITEM_TYPE}`, { productId: "prod-FILTER_TEST_A" });
+    const item2 = await post(`/objects/${ITEM_TYPE}`, { productId: "prod-FILTER_TEST_B" });
+    if (!item1.ok || !item2.ok) return { test: "objects:list-filter-soId", result: "FAIL", reason: "item-creation-failed", item1, item2 };
+
+    const idA = item1.body?.id;
+    const idB = item2.body?.id;
+
+    // Ensure low on-hand to trigger backorder on reserve/commit
+    const recvA = await ensureOnHand(idA, 1);
+    const recvB = await ensureOnHand(idB, 1);
+    if (!recvA.ok || !recvB.ok) return { test: "objects:list-filter-soId", result: "FAIL", reason: "onhand-setup-failed", recvA, recvB };
+
+    // Create SO with lines that exceed on-hand
+    const create = await post(`/objects/salesOrder`, {
+      type: "salesOrder",
+      status: "draft",
+      partyId,
+      customerId: partyId,
+      lines: [
+        { id: "L1", itemId: idA, uom: "ea", qty: 5 },  // 5 needed, 1 on-hand -> 4 backorder
+        { id: "L2", itemId: idB, uom: "ea", qty: 3 }   // 3 needed, 1 on-hand -> 2 backorder
+      ]
+    });
+    if (!create.ok) return { test: "objects:list-filter-soId", result: "FAIL", reason: "so-creation-failed", create };
+    const soId = create.body?.id;
+
+    // 2) Submit SO to generate backorder requests
+    const submit = await post(`/sales/so/${encodeURIComponent(soId)}:submit`, {}, { "Idempotency-Key": idem() });
+    if (!submit.ok) return { test: "objects:list-filter-soId", result: "FAIL", reason: "so-submit-failed", submit };
+
+    // 3) Commit SO (which may create backorder requests if shortage exists)
+    const commit = await post(`/sales/so/${encodeURIComponent(soId)}:commit`, {}, { "Idempotency-Key": idem() });
+    if (!commit.ok) return { test: "objects:list-filter-soId", result: "FAIL", reason: "so-commit-failed", commit };
+
+    // 4) Fetch ALL backorderRequest items (no filter) to validate any exist
+    const allBackorders = await get(`/objects/backorderRequest`, { limit: 50 });
+    if (!allBackorders.ok) return { test: "objects:list-filter-soId", result: "FAIL", reason: "all-backorders-fetch-failed", allBackorders };
+    const allItems = Array.isArray(allBackorders.body?.items) ? allBackorders.body.items : [];
+
+    if (allItems.length === 0) {
+      // No backorders generated (might be okay if shortage handling is different)
+      // Create manual backorder entries to test filter
+      const bo1 = await post(`/objects/backorderRequest`, {
+        type: "backorderRequest",
+        soId,
+        soLineId: "L1",
+        itemId: idA,
+        qty: 2,
+        status: "open"
+      });
+      if (!bo1.ok) return { test: "objects:list-filter-soId", result: "FAIL", reason: "manual-backorder-creation-failed", bo1 };
+
+      const bo2 = await post(`/objects/backorderRequest`, {
+        type: "backorderRequest",
+        soId,
+        soLineId: "L2",
+        itemId: idB,
+        qty: 1,
+        status: "open"
+      });
+      if (!bo2.ok) return { test: "objects:list-filter-soId", result: "FAIL", reason: "second-backorder-creation-failed", bo2 };
+    }
+
+    // 5) Test filter.soId with limit=1 (first page)
+    const filtered = await get(`/objects/backorderRequest`, { "filter.soId": soId, limit: 1 });
+    if (!filtered.ok) return { test: "objects:list-filter-soId", result: "FAIL", reason: "filter-request-failed", filtered };
+
+    const filteredItems = Array.isArray(filtered.body?.items) ? filtered.body.items : [];
+    if (filteredItems.length === 0) {
+      return { test: "objects:list-filter-soId", result: "FAIL", reason: "filter-returned-no-items", filtered };
+    }
+
+    // 6) Verify all returned items match the soId filter
+    const allMatchSoId = filteredItems.every(bo => bo.soId === soId);
+    if (!allMatchSoId) {
+      return { test: "objects:list-filter-soId", result: "FAIL", reason: "filter-mismatch-soId", filteredItems };
+    }
+
+    // 7) Test pagination: if next cursor exists, fetch next page and verify filter still applies
+    const nextCursor = filtered.body?.pageInfo?.nextCursor ?? filtered.body?.next ?? null;
+    let paginationOk = true;
+    let secondPageCount = 0;
+
+    if (nextCursor) {
+      const page2 = await get(`/objects/backorderRequest`, { "filter.soId": soId, limit: 1, next: nextCursor });
+      if (!page2.ok) {
+        paginationOk = false;
+      } else {
+        const page2Items = Array.isArray(page2.body?.items) ? page2.body.items : [];
+        secondPageCount = page2Items.length;
+        // Verify page 2 items also match soId filter
+        const page2AllMatch = page2Items.every(bo => bo.soId === soId);
+        if (!page2AllMatch) {
+          paginationOk = false;
+        }
+      }
+    }
+
+    const pass = filtered.ok && allMatchSoId && paginationOk;
+    return {
+      test: "objects:list-filter-soId",
+      result: pass ? "PASS" : "FAIL",
+      soId,
+      page1Count: filteredItems.length,
+      page2Count: secondPageCount,
+      hasNextCursor: !!nextCursor,
+      artifacts: { create, submit, commit, filtered }
+    };
+  },
+
   // === Sprint I: movements filters (refId + poLineId) — strengthened ===
   "smoke:movements:filter-by-poLine": async () => {
     await ensureBearer();
