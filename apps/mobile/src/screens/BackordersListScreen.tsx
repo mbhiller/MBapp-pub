@@ -1,6 +1,6 @@
 // List "open" BackorderRequest rows with bulk Ignore/Convert, vendor filter, and drill to created POs.
 import * as React from "react";
-import { View, Text, Pressable, FlatList, ActivityIndicator, TextInput, Alert, InteractionManager } from "react-native";
+import { View, Text, Pressable, FlatList, ActivityIndicator, Alert, InteractionManager } from "react-native";
 import { useNavigation, useRoute, useFocusEffect } from "@react-navigation/native";
 import { useObjects } from "../features/_shared/useObjects";
 import { useColors } from "../features/_shared/useColors";
@@ -8,6 +8,8 @@ import { apiClient } from "../api/client";
 import DraftChooserModal, { PurchaseOrderDraft as Draft } from "../features/purchasing/DraftChooserModal";
 import { saveFromSuggestion } from "../features/purchasing/poActions";
 import { useToast } from "../features/_shared/Toast";
+import { copyText } from "../features/_shared/copy";
+import { VendorPicker } from "../features/_shared/fields";
 
 type Row = { id: string; itemId: string; qty: number; status: string; preferredVendorId?: string | null };
 
@@ -19,7 +21,7 @@ export default function BackordersListScreen() {
   const status = route.params?.status as "open" | "ignored" | "converted" | undefined;
   const preferredVendorId = route.params?.preferredVendorId as string | undefined;
   const t = useColors();
-  const toast = (useToast?.() as any) ?? ((msg: string) => console.log("TOAST:", msg));
+  const toast = useToast();
   const [vendorFilter, setVendorFilter] = React.useState<string>("");
   const [selected, setSelected] = React.useState<Record<string, boolean>>({});
   const [chooserOpen, setChooserOpen] = React.useState(false);
@@ -92,7 +94,7 @@ export default function BackordersListScreen() {
             .map((s: any) => s?.reason || "SKIPPED")
             .join(", ");
           const suffix = skipped.length > 2 ? "…" : "";
-          toast(`Skipped ${skipped.length} backorder(s): ${reasons}${suffix}`, "info");
+          toast(`Skipped ${skipped.length} backorder(s): ${reasons}${suffix}`, "success");
         }
 
         const draftsFromArray: Draft[] = Array.isArray(j?.drafts) ? j.drafts : [];
@@ -101,7 +103,7 @@ export default function BackordersListScreen() {
 
         if (drafts.length === 0) {
           if (skipped.length === 0) {
-            toast("No drafts returned", "info");
+            toast("No drafts returned", "success");
           }
           setSelected({});
           return;
@@ -155,17 +157,39 @@ export default function BackordersListScreen() {
 
   const hasActiveFilters = soId || itemId || (status !== "open") || preferredVendorId;
 
+  const copyAndToast = async (value?: string | null) => {
+    if (!value) return;
+    try {
+      await copyText(String(value));
+      toast("Copied", "success");
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   return (
     <View style={{ flex: 1, padding: 12, backgroundColor: t.colors.bg }}>
       {/* Multi-filter banner */}
       {hasActiveFilters && (
         <View style={{ marginBottom: 12, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: "#e3f2fd", borderRadius: 8, flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-          <Text style={{ fontSize: 12, color: "#1976d2", fontWeight: "500" }}>
-            Filters: status={status || "open"}
-            {soId && ` · soId=${soId}`}
-            {itemId && ` · itemId=${itemId}`}
-            {preferredVendorId && ` · vendor=${preferredVendorId}`}
-          </Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+            <Text style={{ fontSize: 12, color: "#1976d2", fontWeight: "500" }}>Filters: status={status || "open"}</Text>
+            {soId && (
+              <Pressable onPress={() => copyAndToast(soId)}>
+                <Text style={{ fontSize: 12, color: "#1976d2", fontWeight: "500" }}>· soId={soId}</Text>
+              </Pressable>
+            )}
+            {itemId && (
+              <Pressable onPress={() => copyAndToast(itemId)}>
+                <Text style={{ fontSize: 12, color: "#1976d2", fontWeight: "500" }}>· itemId={itemId}</Text>
+              </Pressable>
+            )}
+            {preferredVendorId && (
+              <Pressable onPress={() => copyAndToast(preferredVendorId)}>
+                <Text style={{ fontSize: 12, color: "#1976d2", fontWeight: "500" }}>· vendor={preferredVendorId}</Text>
+              </Pressable>
+            )}
+          </View>
           <Pressable onPress={() => nav.setParams({ soId: undefined, itemId: undefined, status: undefined, preferredVendorId: undefined })} style={{ paddingHorizontal: 6, paddingVertical: 4 }}>
             <Text style={{ fontSize: 12, color: "#1976d2", fontWeight: "600" }}>Clear All</Text>
           </Pressable>
@@ -195,20 +219,18 @@ export default function BackordersListScreen() {
       {/* Vendor filter */}
       <View style={{ marginBottom: 12 }}>
         <Text style={{ color: t.colors.textMuted, fontSize: 12, marginBottom: 6 }}>Vendor</Text>
-        <TextInput
-          value={vendorFilter}
-          onChangeText={setVendorFilter}
-          placeholder="vendorId (optional)"
-          placeholderTextColor={t.colors.textMuted}
-          style={{ borderWidth: 1, borderColor: t.colors.border, borderRadius: 8, padding: 10, backgroundColor: t.colors.card, color: t.colors.text }}
+        <VendorPicker
+          placeholder="Search vendors..."
+          initialText={vendorFilter}
+          debounceMs={220}
+          minChars={1}
+          onSelect={(r) => {
+            const id = String(r.id);
+            setVendorFilter(id);
+            nav.setParams({ preferredVendorId: id });
+          }}
         />
-        <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
-          <Pressable
-            onPress={() => nav.setParams({ preferredVendorId: vendorFilter.trim() || undefined })}
-            style={{ paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, backgroundColor: t.colors.primary }}
-          >
-            <Text style={{ color: t.colors.buttonText || "#fff", fontWeight: "600", fontSize: 12 }}>Apply</Text>
-          </Pressable>
+        <View style={{ flexDirection: "row", gap: 8, marginTop: 8, alignItems: "center" }}>
           <Pressable
             onPress={() => {
               nav.setParams({ preferredVendorId: undefined });
@@ -216,10 +238,12 @@ export default function BackordersListScreen() {
             }}
             style={{ paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, backgroundColor: t.colors.border }}
           >
-            <Text style={{ color: t.colors.textMuted, fontWeight: "600", fontSize: 12 }}>Clear</Text>
+            <Text style={{ color: t.colors.textMuted, fontWeight: "600", fontSize: 12 }}>Clear Vendor</Text>
           </Pressable>
         </View>
       </View>
+
+      {/* No modal; inline VendorPicker is used */}
 
       {/* Bulk action buttons */}
       <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>

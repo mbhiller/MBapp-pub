@@ -14,6 +14,8 @@ import { getReservation } from "../features/reservations/api";
 import { useTheme } from "../providers/ThemeProvider";
 import { FEATURE_RESERVATIONS_ENABLED } from "../features/_shared/flags";
 import type { RootStackParamList } from "../navigation/types";
+import { useToast } from "../features/_shared/Toast";
+import { copyText } from "../features/_shared/copy";
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 type RoutePropType = RouteProp<RootStackParamList, "ReservationDetail">;
@@ -22,6 +24,7 @@ export default function ReservationDetailScreen() {
   const t = useTheme();
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<RoutePropType>();
+  const toast = useToast();
   const [reservation, setReservation] = React.useState<any | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -138,16 +141,19 @@ export default function ReservationDetailScreen() {
           borderColor: t.colors.border,
         }}
       >
-        <Text
-          style={{
-            fontSize: 18,
-            fontWeight: "700",
-            color: t.colors.text,
-            marginBottom: 8,
-          }}
-        >
-          {reservation.id}
-        </Text>
+        <View style={{ flexDirection: "row", alignItems: "baseline", marginBottom: 8 }}>
+          <Text style={{ fontSize: 18, fontWeight: "700", color: t.colors.text }}>Reservation </Text>
+          <Pressable
+            onLongPress={async () => {
+              if (reservation?.id) {
+                await copyText(String(reservation.id));
+                toast("Copied", "success");
+              }
+            }}
+          >
+            <Text style={{ fontSize: 18, fontWeight: "700", color: t.colors.text }}>{reservation.id}</Text>
+          </Pressable>
+        </View>
         <View
           style={{
             paddingTop: 8,

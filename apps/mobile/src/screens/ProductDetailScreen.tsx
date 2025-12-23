@@ -8,6 +8,8 @@ import { getProduct } from "../features/products/api";
 import type { Product } from "../features/products/types";
 import type { RootStackParamList } from "../navigation/types";
 import { useTheme } from "../providers/ThemeProvider";
+import { useToast } from "../features/_shared/Toast";
+import { copyText } from "../features/_shared/copy";
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 type RoutePropType = RouteProp<RootStackParamList, "ProductDetail">;
@@ -17,6 +19,7 @@ export default function ProductDetailScreen() {
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<RoutePropType>();
   const productId = route.params?.id;
+  const toast = useToast();
 
   const [product, setProduct] = React.useState<Product | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -104,9 +107,19 @@ export default function ProductDetailScreen() {
         <Text style={{ fontSize: 20, fontWeight: "700", color: t.colors.text, marginBottom: 4 }}>
           {(product as any).name || "(no name)"}
         </Text>
-        <Text style={{ fontSize: 12, color: t.colors.textMuted }}>
-          ID: {product.id}
-        </Text>
+        <View style={{ flexDirection: "row", alignItems: "baseline" }}>
+          <Text style={{ fontSize: 12, color: t.colors.textMuted }}>ID: </Text>
+          <Pressable
+            onLongPress={async () => {
+              if (product?.id) {
+                await copyText(String(product.id));
+                toast("Copied", "success");
+              }
+            }}
+          >
+            <Text style={{ fontSize: 12, color: t.colors.textMuted }}>{product.id}</Text>
+          </Pressable>
+        </View>
       </View>
 
       {/* Product Details */}

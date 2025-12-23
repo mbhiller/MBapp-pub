@@ -14,6 +14,7 @@ import {
   closeSalesOrder,
 } from "../features/sales/api";
 import { useToast } from "../features/_shared/Toast";
+import { copyText } from "../features/_shared/copy";
 import { useSalesOrderAvailability } from "../features/salesOrders/useAvailabilityBatch";
 
 export default function SalesOrderDetailScreen() {
@@ -21,7 +22,7 @@ export default function SalesOrderDetailScreen() {
   const nav = useNavigation<any>();
   const id = route.params?.id as string | undefined;
   const { data, isLoading, refetch } = useObjects<any>({ type: "salesOrder", id });
-  const toast = (useToast?.() as any) ?? ((msg: string) => console.log("TOAST:", msg));
+  const toast = useToast();
 
   const [commitHint, setCommitHint] = React.useState<{ type: "success" | "error"; message: string } | null>(null);
 
@@ -185,7 +186,19 @@ export default function SalesOrderDetailScreen() {
 
   return (
     <View style={{ flex: 1, padding: 12 }}>
-      <Text style={{ fontSize: 18, fontWeight: "700", marginBottom: 6 }}>Sales Order {so?.id}</Text>
+      <View style={{ flexDirection: "row", alignItems: "baseline", marginBottom: 6 }}>
+        <Text style={{ fontSize: 18, fontWeight: "700", color: "#000" }}>Sales Order </Text>
+        <Pressable
+          onLongPress={async () => {
+            if (so?.id) {
+              await copyText(String(so.id));
+              toast("Copied", "success");
+            }
+          }}
+        >
+          <Text style={{ fontSize: 18, fontWeight: "700" }}>{so?.id}</Text>
+        </Pressable>
+      </View>
       <Text>Status: {so?.status}</Text>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
         {backorders.length > 0 ? (

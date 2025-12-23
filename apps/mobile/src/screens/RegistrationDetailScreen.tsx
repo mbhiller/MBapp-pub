@@ -7,6 +7,8 @@ import type { RouteProp } from "@react-navigation/native";
 import { getRegistration } from "../features/registrations/api";
 import type { RootStackParamList } from "../navigation/types";
 import { useTheme } from "../providers/ThemeProvider";
+import { useToast } from "../features/_shared/Toast";
+import { copyText } from "../features/_shared/copy";
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 type RoutePropType = RouteProp<RootStackParamList, "RegistrationDetail">;
@@ -15,6 +17,7 @@ export default function RegistrationDetailScreen() {
   const t = useTheme();
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<RoutePropType>();
+  const toast = useToast();
 
   const registrationId = route.params?.id;
   const [registration, setRegistration] = React.useState<any | null>(null);
@@ -118,9 +121,19 @@ export default function RegistrationDetailScreen() {
           marginBottom: 16,
         }}
       >
-        <Text style={{ fontSize: 18, fontWeight: "700", color: t.colors.text, marginBottom: 8 }}>
-          {registration.id || "Registration"}
-        </Text>
+        <View style={{ flexDirection: "row", alignItems: "baseline", marginBottom: 8 }}>
+          <Text style={{ fontSize: 18, fontWeight: "700", color: t.colors.text }}>Registration </Text>
+          <Pressable
+            onLongPress={async () => {
+              if (registration?.id) {
+                await copyText(String(registration.id));
+                toast("Copied", "success");
+              }
+            }}
+          >
+            <Text style={{ fontSize: 18, fontWeight: "700", color: t.colors.text }}>{registration.id}</Text>
+          </Pressable>
+        </View>
         <Text style={{ color: t.colors.textMuted, fontSize: 12 }}>
           Status: {registration.status || "—"}
         </Text>

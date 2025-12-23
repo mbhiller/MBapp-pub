@@ -1,6 +1,8 @@
 // apps/mobile/src/screens/PartyDetailScreen.tsx
 import * as React from "react";
 import { View, Text, ActivityIndicator, ScrollView, Pressable } from "react-native";
+import { useToast } from "../features/_shared/Toast";
+import { copyText } from "../features/_shared/copy";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
@@ -18,6 +20,7 @@ export default function PartyDetailScreen() {
   const t = useColors();
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<RoutePropType>();
+  const toast = useToast();
 
   const partyId = route.params?.id;
   const [party, setParty] = React.useState<any | null>(null);
@@ -73,10 +76,26 @@ export default function PartyDetailScreen() {
 
   const renderField = (label: string, value: any) => {
     const display = value === null || value === undefined || value === "" ? "—" : String(value);
+    const isId = label === "ID";
     return (
       <View style={{ marginBottom: 12 }}>
         <Text style={{ fontSize: 12, color: t.colors.textMuted, marginBottom: 4 }}>{label}</Text>
-        <Text style={{ fontSize: 14, color: t.colors.text, fontWeight: "500" }}>{display}</Text>
+        {isId && display !== "—" ? (
+          <Pressable
+            onLongPress={async () => {
+              try {
+                await copyText(display);
+                toast("Copied", "success");
+              } catch (err) {
+                // noop
+              }
+            }}
+          >
+            <Text style={{ fontSize: 14, color: t.colors.text, fontWeight: "500" }}>{display}</Text>
+          </Pressable>
+        ) : (
+          <Text style={{ fontSize: 14, color: t.colors.text, fontWeight: "500" }}>{display}</Text>
+        )}
       </View>
     );
   };
