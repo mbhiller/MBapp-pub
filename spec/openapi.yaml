@@ -38,6 +38,22 @@ paths:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Next'
         - $ref: '#/components/parameters/Fields'
+        - name: filter
+          in: query
+          schema:
+            type: object
+            additionalProperties:
+              type: string
+          style: form
+          explode: true
+          description: |
+            Optional structured filters using dot notation (e.g., filter.soId=SO123&filter.itemId=ITEM456).
+            Supported fields depend on object type. For backorderRequest:
+            - filter.soId: Sales Order ID
+            - filter.itemId: Inventory Item ID
+            - filter.status: Backorder status (open, ignored, converted)
+            - filter.preferredVendorId: Vendor ID
+            Filters are combined with AND logic; combined with q search (substring).
       responses:
         '200':
           $ref: '#/components/responses/ListPage'
@@ -3417,22 +3433,42 @@ components:
               items:
                 $ref: '#/components/schemas/PurchaseOrderLine'
     SuggestPoResponse:
-      description: Single vendor returns `draft`; multi-vendor returns `drafts`.
-      oneOf:
+      description: Single vendor returns `draft`; multi-vendor returns `drafts`. Always includes skipped entries for ignored/invalid requests.
+      allOf:
         - type: object
-          required:
-            - draft
           properties:
-            draft:
-              $ref: '#/components/schemas/PurchaseOrder'
-        - type: object
-          required:
-            - drafts
-          properties:
-            drafts:
+            skipped:
               type: array
               items:
-                $ref: '#/components/schemas/PurchaseOrder'
+                type: object
+                required:
+                  - backorderRequestId
+                  - reason
+                properties:
+                  backorderRequestId:
+                    type: string
+                  reason:
+                    type: string
+                    enum:
+                      - ZERO_QTY
+                      - MISSING_VENDOR
+                      - IGNORED
+                      - NOT_FOUND
+        - oneOf:
+            - type: object
+              required:
+                - draft
+              properties:
+                draft:
+                  $ref: '#/components/schemas/PurchaseOrder'
+            - type: object
+              required:
+                - drafts
+              properties:
+                drafts:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/PurchaseOrder'
     PurchaseOrderReceiveRequest:
       type: object
       required:
