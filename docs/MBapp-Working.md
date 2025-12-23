@@ -283,6 +283,52 @@ cd apps/mobile && npm run typecheck
 
 ---
 
+## ✅ Sprint XX — Server-Side filter.soId Support + Pagination-Aware Cursor (2025-12-23)
+
+**Theme:** Move soId filtering from mobile client to backend, enabling server-side efficiency and enabling pagination correctness when filtering causes mid-page early exit.
+
+**Backend**
+- **Filter parsing**: `/objects/{type}` GET endpoint now parses `filter.soId`, `filter.itemId`, `filter.status`, `filter.preferredVendorId` query parameters (any `filter.*` key-value pairs).
+- **Pagination-aware filtering loop**: Rewrote `listObjects()` in repo.ts to fetch paginated batches from DynamoDB, apply filters + q-search on each batch, and **use last-returned-item's PK/SK as next cursor** (not Dynamo's LastEvaluatedKey). This prevents skipping items when filtering causes early exit from a DynamoDB page.
+- **Cursor format**: Still base64-encoded JSON; now stores `{ tenantId, type#id }` to resume from correct position.
+- **Spec documentation**: OpenAPI spec updated to document filter.* parameters and pagination behavior.
+
+**Mobile**
+- **Integration**: BackordersListScreen now passes `filter: { soId }` directly to `useObjects()` hook (which already supported filter param via URLSearchParams).
+- **Removed client-side filter**: soId filtering loop in BackordersListScreen eliminated; all filtering now server-side.
+- **UX unchanged**: Filter banner, Clear button, vendor filter all preserved; only backend now handles soId filtering.
+
+**Files Modified**
+- Backend: `apps/api/src/objects/list.ts` (parse filter.* query params; lines 20–31)
+- Backend: `apps/api/src/objects/repo.ts` (rewrite listObjects pagination-aware loop; lines 145–245)
+- Mobile: `apps/mobile/src/screens/BackordersListScreen.tsx` (use filter param in useObjects; remove client-side filtering)
+- Spec: `spec/MBapp-Modules.yaml` (document filter.* params in /objects/{type} GET endpoint)
+
+**Key Design Decision: Pagination Cursor**
+When filtering causes `collected >= limit` before reaching DynamoDB's `LastEvaluatedKey`, we set the next cursor's `ExclusiveStartKey` to the last-returned-item's `{ tenantId, type#id }` rather than Dynamo's `LastEvaluatedKey`. On next request, DynamoDB resumes from `ExclusiveStartKey` (which is exclusive, so first item on next page is the one after our last returned item). This ensures:
+1. No duplicate items across pages
+2. No skipped items between pages
+3. Correct pagination with filters applied
+
+**Smoke Test Added**
+- New test `smoke:objects:list-filter-soId` validates:
+  1. Seeds Sales Order with 2 lines that exceed on-hand, triggering backorder requests
+  2. Fetches `/objects/backorderRequest?filter.soId={soId}&limit=1` (first page)
+  3. Verifies all returned items match soId filter
+  4. If pagination cursor exists, fetches page 2 and re-verifies filter applied
+  5. Ensures no mid-page skip or duplicate items
+
+**Definition of Done**
+- [x] Filter query params parsed and passed to repo
+- [x] listObjects rewritten with pagination-aware loop
+- [x] Cursor stores last-returned-item PK/SK, not Dynamo's LastEvaluatedKey
+- [x] Mobile integration updated (filter param passed, client-side loop removed)
+- [x] Spec updated to document filter.* params
+- [x] Smoke test added and passes
+- [x] Typecheck passes on all modified files
+
+---
+
 ## ✅ Sprint II — Results (2025-10-24)
 
 **Theme:** Vendor guardrails, receive idempotency, movement filters, and event stubs — with smoke coverage and DX flags.

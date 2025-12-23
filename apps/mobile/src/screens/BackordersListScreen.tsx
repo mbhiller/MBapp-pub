@@ -24,6 +24,7 @@ export default function BackordersListScreen() {
   const { data, isLoading, refetch } = useObjects<Row>({
     type: "backorderRequest",
     q: "open",
+    filter: soId ? { soId } : undefined,
     query: { sort: "desc", by: "updatedAt" },
     params: { limit: __DEV__ ? 200 : 50 },
   });
@@ -43,11 +44,8 @@ export default function BackordersListScreen() {
     if (vendorFilter.trim()) {
       result = result.filter((r) => (r as any)?.preferredVendorId === vendorFilter.trim());
     }
-    if (soId) {
-      result = result.filter((r) => (r as any)?.soId === soId);
-    }
     return result;
-  }, [items, vendorFilter, soId]);
+  }, [items, vendorFilter]);
 
   function toggle(id: string) {
     setSelected((s) => ({ ...s, [id]: !s[id] }));

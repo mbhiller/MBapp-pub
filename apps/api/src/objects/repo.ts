@@ -15,6 +15,7 @@ export type ListArgs = {
   tenantId?: string;
   type: string;
   q?: string;
+  filters?: Record<string, string>;
   eventId?: string;
   next?: string;
   limit?: number;
@@ -146,32 +147,99 @@ export async function listObjects({
   tenantId,
   type,
   q,
+  filters,
   next,
   limit = 20,
   fields,
 }: ListArgs) {
-  const ExclusiveStartKey = decodeNext(next);
+  // If no filters and no q, use simple path
+  const hasFilters = filters && Object.keys(filters).length > 0;
+  if (!hasFilters && !q) {
+    const ExclusiveStartKey = decodeNext(next);
+    const res = await ddb.send(
+      new QueryCommand({
+        TableName: TABLE,
+        KeyConditionExpression: `#pk = :t AND begins_with(#sk, :prefix)`,
+        ExpressionAttributeNames: { "#pk": PK_ATTR, "#sk": SK_ATTR },
+        ExpressionAttributeValues: { ":t": tenantId, ":prefix": `${type}#` },
+        ExclusiveStartKey,
+        Limit: limit,
+      })
+    );
+    const items = (res.Items || []) as AnyRecord[];
+    return {
+      items: items.map((o) => project(o, fields)),
+      next: encodeNext(res.LastEvaluatedKey),
+    };
+  }
 
-  const res = await ddb.send(
-    new QueryCommand({
-      TableName: TABLE,
-      KeyConditionExpression: `#pk = :t AND begins_with(#sk, :prefix)`,
-      ExpressionAttributeNames: { "#pk": PK_ATTR, "#sk": SK_ATTR },
-      ExpressionAttributeValues: { ":t": tenantId, ":prefix": `${type}#` },
-      ExclusiveStartKey,
-      Limit: limit,
-    })
-  );
+  // Pagination-aware filtering: loop through Dynamo pages until we collect `limit` matches
+  let collected: AnyRecord[] = [];
+  let lastReturnedItem: AnyRecord | undefined;
+  let ExclusiveStartKey = decodeNext(next);
+  let hasMorePages = true;
 
-  let items = (res.Items || []) as AnyRecord[];
-  if (q) {
-    const needle = q.toLowerCase();
-    items = items.filter((o) => JSON.stringify(o).toLowerCase().includes(needle));
+  while (collected.length < limit && hasMorePages) {
+    const res = await ddb.send(
+      new QueryCommand({
+        TableName: TABLE,
+        KeyConditionExpression: `#pk = :t AND begins_with(#sk, :prefix)`,
+        ExpressionAttributeNames: { "#pk": PK_ATTR, "#sk": SK_ATTR },
+        ExpressionAttributeValues: { ":t": tenantId, ":prefix": `${type}#` },
+        ExclusiveStartKey,
+        Limit: Math.max(limit * 2, 100), // Fetch extra to account for filtering
+      })
+    );
+
+    const rawItems = (res.Items || []) as AnyRecord[];
+
+    // Apply filters and q to each item
+    for (const item of rawItems) {
+      // Apply structured filters (exact match)
+      if (hasFilters) {
+        let matchesFilters = true;
+        for (const [key, value] of Object.entries(filters!)) {
+          if (item[key] !== value) {
+            matchesFilters = false;
+            break;
+          }
+        }
+        if (!matchesFilters) continue;
+      }
+
+      // Apply q search (substring)
+      if (q) {
+        const needle = q.toLowerCase();
+        if (!JSON.stringify(item).toLowerCase().includes(needle)) continue;
+      }
+
+      // Item matched all filters and q; add to results
+      collected.push(item);
+      lastReturnedItem = item;
+
+      // Stop if we've collected enough
+      if (collected.length >= limit) break;
+    }
+
+    // Check if we have more pages
+    if (!res.LastEvaluatedKey) {
+      hasMorePages = false;
+    } else if (collected.length >= limit) {
+      // We stopped mid-page; set next to resume AFTER the last returned item
+      ExclusiveStartKey = {
+        [PK_ATTR]: lastReturnedItem![PK_ATTR],
+        [SK_ATTR]: lastReturnedItem![SK_ATTR],
+      };
+      break;
+    } else {
+      // We exhausted the page but haven't collected enough; continue with Dynamo's cursor
+      ExclusiveStartKey = res.LastEvaluatedKey;
+    }
   }
 
   return {
-    items: items.map((o) => project(o, fields)),
-    next: encodeNext(res.LastEvaluatedKey),
+    items: collected.slice(0, limit).map((o) => project(o, fields)),
+    next: encodeNext(ExclusiveStartKey),
   };
 }
 
