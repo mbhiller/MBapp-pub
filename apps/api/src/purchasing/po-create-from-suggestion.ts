@@ -2,6 +2,7 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
 import { PutCommand } from "@aws-sdk/lib-dynamodb";
 import { ddb, tableObjects } from "../common/ddb";
+import { resolveTenantId } from "../common/tenant";
 
 const PK = process.env.MBAPP_TABLE_PK || "pk";
 const SK = process.env.MBAPP_TABLE_SK || "sk";
@@ -35,10 +36,13 @@ type PurchaseOrderDraft = {
 export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   if (event.requestContext?.http?.method !== "POST") return json(405, { message: "Method Not Allowed" });
 
-  const auth: any = (event as any).requestContext?.authorizer?.mbapp || {};
-  const tenantId: string | undefined =
-    auth.tenantId || (event.headers?.["x-tenant-id"] as string) || (event.headers?.["X-Tenant-Id"] as string);
-  if (!tenantId) return json(400, { message: "Missing tenant id" });
+  let tenantId: string;
+  try {
+    tenantId = resolveTenantId(event);
+  } catch (err: any) {
+    const status = err?.statusCode ?? 400;
+    return json(status, { error: err?.code ?? "TenantError", message: err?.message ?? "Tenant resolution failed" });
+  }
 
   let body: any = {};
   try { body = event.body ? JSON.parse(event.body) : {}; } catch { return json(400, { message: "Invalid JSON body" }); }

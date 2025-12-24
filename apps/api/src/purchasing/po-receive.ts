@@ -7,6 +7,7 @@ import { getPurchaseOrder, updatePurchaseOrder } from "../shared/db";
 import { featureVendorGuardEnabled, featureEventsSimulate } from "../flags";
 import { maybeDispatch } from "../events/dispatcher";
 import { conflictError, badRequest } from "../common/responses";
+import { resolveTenantId } from "../common/tenant";
 
 /** Utilities */
 const json = (statusCode: number, body: any): APIGatewayProxyResultV2 => ({
@@ -16,14 +17,6 @@ const json = (statusCode: number, body: any): APIGatewayProxyResultV2 => ({
 });
 const parse = <T = any>(e: APIGatewayProxyEventV2): T => { try { return JSON.parse(e.body || "{}"); } catch { return {} as any; } };
 function rid(prefix = "mv") { return `${prefix}_${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36).slice(-4)}`; }
-function tid(e: APIGatewayProxyEventV2): string | null {
-  const mb = (e as any)?.requestContext?.authorizer?.mbapp?.tenantId;
-  if (mb) return String(mb);
-  const claim = (e as any)?.requestContext?.authorizer?.jwt?.claims?.["custom:tenantId"];
-  const hdr = e.headers?.["x-tenant-id"] || e.headers?.["X-Tenant-Id"];
-  const t = mb || claim || hdr;
-  return t ? String(t) : null;
-}
 
 /** Safe numeric extraction from unknown values */
 const num = (v: unknown, fallback = 0): number => {
@@ -117,9 +110,16 @@ async function receivedSoFar(tenantId: string, poId: string): Promise<Record<str
 /** Handler */
 export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   try {
-    const tenantId = tid(event);
+    let tenantId: string;
+    try {
+      tenantId = resolveTenantId(event);
+    } catch (err: any) {
+      const status = err?.statusCode ?? 400;
+      return json(status, { error: err?.code ?? "TenantError", message: err?.message ?? "Tenant resolution failed" });
+    }
+    
     const id = event.pathParameters?.id;
-    if (!tenantId || !id) return json(400, { message: "Missing tenant or id" });
+    if (!id) return json(400, { message: "Missing id" });
 
     const idk = (event.headers?.["Idempotency-Key"] || event.headers?.["idempotency-key"] || null) as string | null;
 
