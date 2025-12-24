@@ -150,6 +150,7 @@ async function main(){
 
   const entries = Array.isArray(manifest?.entries) ? manifest.entries : [];
   const plan = [];
+  const seen = new Set(); // dedupe by endpoint (stable order; first occurrence wins)
   const skips = [];
   
   for (const e of entries) {
@@ -169,7 +170,11 @@ async function main(){
       continue;
     }
     
-    plan.push({ type, id, endpoint: ep });
+    const key = ep || `${String(type||"").trim()}:${String(id||"").trim()}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      plan.push({ type, id, endpoint: ep });
+    }
   }
 
   // Summary output
