@@ -47,6 +47,8 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 |------|-------|-----------|-----------|
 | **smoke:sales:happy** | 1. Create SO (draft) 2. Submit 3. Commit 4. Reserve L1 5. Fulfill L1(1) 6. Fulfill L1(1)+L2(1) 7. Close | Status flow: draft→submitted→committed→closed; onhand decrements | `/objects/salesOrder`, `/sales/so/{id}:submit`, `:commit`, `:reserve`, `:fulfill`, `:close` |
 | **smoke:sales:guards** | 1. Create SO qty 5, onhand 2 2. Submit 3. Reserve 2 4. Try cancel (blocked) 5. Release & cancel 6. Create SO qty 9999, strict:true commit (blocked) | Cancel blocked while reserved; strict commit rejects oversell | `/sales/so/{id}:cancel`, `:release`, `:commit` |
+| **smoke:salesOrders:commit-strict-shortage** | 1. Create product+item onHand=0 2. Create SO qty 5 3. Submit 4. Commit strict:true | Commit returns 409 with shortages[]; no backorderRequest created | `/sales/so/{id}:commit`, `/objects/backorderRequest/search` |
+| **smoke:salesOrders:commit-nonstrict-backorder** | 1. Create product+item onHand=0 2. Create SO qty 4 3. Submit 4. Commit (strict=false default) 5. Poll backorderRequest | Commit 200 with shortages[]; backorderRequest created (open) | `/sales/so/{id}:commit`, `/objects/backorderRequest/search` |
 
 ### Purchase Orders
 
@@ -101,7 +103,7 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 | Module | Smoke Tests | Status | Notes |
 |--------|------------|--------|-------|
 | **Inventory** | onhand, guards, onhand-batch, list-movements, inventory:crud | ✅ Complete | CRUD + guards + batch ops + filter + Sprint XXVII CRUD smoke (in CI) |
-| **Sales Orders** | sales:happy, sales:guards | ✅ Complete | Lifecycle (draft→closed) + guards (reserve lock, oversell) |
+| **Sales Orders** | sales:happy, sales:guards, salesOrders:commit-strict-shortage (CI), salesOrders:commit-nonstrict-backorder (CI) | ✅ Complete | Lifecycle + guardrails; strict shortage returns 409; non-strict shortage creates backorder (CI-covered) |
 | **Purchase Orders** | purchasing:happy, purchasing:guards, po:save-from-suggest, po:quick-receive, po:receive-line*, po:receive-line-batch, po:receive-line-idem-* | ✅ Complete | Lifecycle, receipt variants, idempotency, vendor guard, events |
 | **Parties** | parties:happy, parties:crud | ✅ Complete | CRUD lifecycle + search with idempotency + eventual consistency retry (in CI) |
 | **Products** | products:crud | ✅ Complete (Sprint XXVII) | CRUD lifecycle + search with idempotency + eventual consistency retry (in CI) |

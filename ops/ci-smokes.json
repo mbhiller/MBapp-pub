@@ -6,6 +6,8 @@
     "smoke:views:crud",
     "smoke:workspaces:list",
     "smoke:events:enabled-noop",
-    "smoke:close-the-loop"
+    "smoke:close-the-loop",
+    "smoke:salesOrders:commit-strict-shortage",
+    "smoke:salesOrders:commit-nonstrict-backorder"
   ]
 }

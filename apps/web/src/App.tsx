@@ -9,6 +9,10 @@ import CreateProductPage from "./pages/CreateProductPage";
 import EditProductPage from "./pages/EditProductPage";
 import ProductsListPage from "./pages/ProductsListPage";
 import ProductDetailPage from "./pages/ProductDetailPage";
+import SalesOrderDetailPage from "./pages/SalesOrderDetailPage";
+import SalesOrdersListPage from "./pages/SalesOrdersListPage";
+import CreateSalesOrderPage from "./pages/CreateSalesOrderPage";
+import EditSalesOrderPage from "./pages/EditSalesOrderPage";
 import InventoryListPage from "./pages/InventoryListPage";
 import InventoryDetailPage from "./pages/InventoryDetailPage";
 import ViewsListPage from "./pages/ViewsListPage";
@@ -26,6 +30,7 @@ function HomePage() {
       <div style={{ display: "flex", gap: 12 }}>
         <Link to="/parties">Parties</Link>
         <Link to="/products">Products</Link>
+        <Link to="/sales-orders">Sales Orders</Link>
         <Link to="/inventory">Inventory</Link>
         <Link to="/views">Views</Link>
         <Link to="/workspaces">Workspaces</Link>
@@ -48,6 +53,10 @@ export default function App() {
           <Route path="/products/new" element={<CreateProductPage />} />
           <Route path="/products/:id" element={<ProductDetailPage />} />
           <Route path="/products/:id/edit" element={<EditProductPage />} />
+          <Route path="/sales-orders" element={<SalesOrdersListPage />} />
+          <Route path="/sales-orders/new" element={<CreateSalesOrderPage />} />
+          <Route path="/sales-orders/:id" element={<SalesOrderDetailPage />} />
+          <Route path="/sales-orders/:id/edit" element={<EditSalesOrderPage />} />
           <Route path="/inventory" element={<InventoryListPage />} />
           <Route path="/inventory/:id" element={<InventoryDetailPage />} />
           <Route path="/views" element={<ViewsListPage />} />

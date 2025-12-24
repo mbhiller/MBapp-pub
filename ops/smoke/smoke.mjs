@@ -585,6 +585,106 @@ const tests = {
     return { test: "sales-guards", result: pass ? "PASS" : "FAIL", rec, cancelBlocked, release, cancel, strictCommit };
   },
 
+  "smoke:salesOrders:commit-strict-shortage": async () => {
+    await ensureBearer();
+
+    const { partyId } = await seedParties(api);
+    const product = await createProduct({ name: "Smoke SO Strict" });
+    if (!product.ok) return { test: "salesOrders:commit-strict-shortage", result: "FAIL", product };
+    const item = await createInventoryForProduct(product.body?.id, "SmokeSO-Strict");
+    if (!item.ok) return { test: "salesOrders:commit-strict-shortage", result: "FAIL", item };
+    const itemId = item.body?.id;
+
+    const current = await onhand(itemId);
+    const currentQty = current.body?.items?.[0]?.onHand ?? 0;
+    let adjust = null;
+    if (currentQty > 0) {
+      adjust = await post(`/objects/${MV_TYPE}`, { itemId, type: "adjust", qty: -currentQty });
+    }
+
+    const create = await post(
+      `/objects/salesOrder`,
+      {
+        type: "salesOrder",
+        status: "draft",
+        partyId,
+        lines: [{ id: "L1", itemId, uom: "ea", qty: 5 }],
+      },
+      { "Idempotency-Key": idem() }
+    );
+    if (!create.ok) return { test: "salesOrders:commit-strict-shortage", result: "FAIL", create, adjust };
+    const soId = create.body?.id;
+
+    const submit = await post(`/sales/so/${encodeURIComponent(soId)}:submit`, {}, { "Idempotency-Key": idem() });
+    const commit = await post(
+      `/sales/so/${encodeURIComponent(soId)}:commit`,
+      { strict: true },
+      { "Idempotency-Key": idem() }
+    );
+
+    let bo = null;
+    let backorderCount = 0;
+    for (let i = 0; i < 5; i++) {
+      bo = await post(`/objects/backorderRequest/search`, { soId: soId, status: "open" });
+      const items = Array.isArray(bo.body?.items) ? bo.body.items : [];
+      backorderCount = items.length;
+      if (bo.ok) break;
+      await sleep(200);
+    }
+
+    const shortage = !commit.ok && commit.status === 409 && Array.isArray(commit.body?.shortages) && commit.body.shortages.length > 0;
+    const noBackorders = bo?.ok && backorderCount === 0;
+    const pass = submit.ok && shortage && noBackorders;
+    return { test: "salesOrders:commit-strict-shortage", result: pass ? "PASS" : "FAIL", current, adjust, create, submit, commit, bo };
+  },
+
+  "smoke:salesOrders:commit-nonstrict-backorder": async () => {
+    await ensureBearer();
+
+    const { partyId } = await seedParties(api);
+    const product = await createProduct({ name: "Smoke SO NonStrict" });
+    if (!product.ok) return { test: "salesOrders:commit-nonstrict-backorder", result: "FAIL", product };
+    const item = await createInventoryForProduct(product.body?.id, "SmokeSO-NonStrict");
+    if (!item.ok) return { test: "salesOrders:commit-nonstrict-backorder", result: "FAIL", item };
+    const itemId = item.body?.id;
+
+    const current = await onhand(itemId);
+    const currentQty = current.body?.items?.[0]?.onHand ?? 0;
+    let adjust = null;
+    if (currentQty > 0) {
+      adjust = await post(`/objects/${MV_TYPE}`, { itemId, type: "adjust", qty: -currentQty });
+    }
+
+    const create = await post(
+      `/objects/salesOrder`,
+      {
+        type: "salesOrder",
+        status: "draft",
+        partyId,
+        lines: [{ id: "L1", itemId, uom: "ea", qty: 4 }],
+      },
+      { "Idempotency-Key": idem() }
+    );
+    if (!create.ok) return { test: "salesOrders:commit-nonstrict-backorder", result: "FAIL", create, adjust };
+    const soId = create.body?.id;
+
+    const submit = await post(`/sales/so/${encodeURIComponent(soId)}:submit`, {}, { "Idempotency-Key": idem() });
+    const commit = await post(`/sales/so/${encodeURIComponent(soId)}:commit`, {}, { "Idempotency-Key": idem() });
+
+    let bo = null;
+    let found = false;
+    for (let i = 0; i < 5 && !found; i++) {
+      bo = await post(`/objects/backorderRequest/search`, { soId: soId, status: "open" });
+      const items = Array.isArray(bo.body?.items) ? bo.body.items : [];
+      found = bo.ok && items.length > 0;
+      if (!found) await sleep(200);
+    }
+
+    const shortages = Array.isArray(commit.body?.shortages) ? commit.body.shortages : [];
+    const pass = submit.ok && commit.ok && shortages.length > 0 && found;
+    return { test: "salesOrders:commit-nonstrict-backorder", result: pass ? "PASS" : "FAIL", current, adjust, create, submit, commit, bo };
+  },
+
   /* ===================== Purchase Orders ===================== */
   "smoke:purchasing:happy": async ()=>{
     await ensureBearer();
