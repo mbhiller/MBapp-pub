@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import process from "node:process";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import { baseGraph } from "./seed/routing.ts";
 import { seedParties, seedVendor } from "./seed/parties.ts";
 
@@ -39,7 +41,29 @@ if (!API || typeof API !== "string" || !/^https?:\/\//.test(API)) {
   console.error(`[smokes] Expected a full URL like https://...  Check CI secrets/env wiring or local Set-MBEnv.ps1.`);
   process.exit(2);
 }
-console.log(JSON.stringify({ base: API, tenant: TENANT, smokeRunId: SMOKE_RUN_ID, tokenVar: "MBAPP_BEARER", hasToken: true }));
+// Helper: decode JWT payload (base64url) and return mbapp.tenantId if present
+function decodeJwtTenant(bearer){
+  try{
+    const tok = String(bearer||"").trim();
+    const parts = tok.split(".");
+    if(parts.length < 2) return null;
+    let b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    while (b64.length % 4) b64 += "=";
+    const json = Buffer.from(b64, "base64").toString("utf8");
+    const payload = JSON.parse(json);
+    const t = payload?.mbapp?.tenantId;
+    return t ? String(t) : null;
+  }catch{ return null; }
+}
+const jwtTenant = decodeJwtTenant(TOKEN);
+console.log(JSON.stringify({ base: API, tenant: TENANT, smokeRunId: SMOKE_RUN_ID, tokenVar: "MBAPP_BEARER", hasToken: true, jwtTenant }));
+
+// Guard: bearer tenant must match requested TENANT unless override
+const allowTenantMismatch = process.env.MBAPP_SMOKE_ALLOW_TENANT_MISMATCH === "1";
+if (!allowTenantMismatch && process.env.MBAPP_BEARER && jwtTenant && jwtTenant !== TENANT) {
+  console.error(`[smokes] Bearer token tenant ("${jwtTenant}") does not match requested tenant ("${TENANT}"). Set MBAPP_SMOKE_ALLOW_TENANT_MISMATCH=1 to override.`);
+  process.exit(2);
+}
 
 /* ---------- Auth & HTTP ---------- */
 async function ensureBearer(){ /* bearer must be provided via MBAPP_BEARER at startup */ }
@@ -86,6 +110,22 @@ async function post(p,body,h={},opts){
   const headers = buildHeaders({ ...baseHeaders(), ...h, ...((opts&&opts.headers)||{}) }, (opts&&opts.auth) ?? "default");
   const r=await fetch(API+p,{method:"POST",headers,body:JSON.stringify(body??{})});
   const j=await r.json().catch(()=>({}));
+  try{
+    const hasId = j && typeof j.id !== "undefined";
+    if (r.ok && hasId) {
+      const route = p;
+      const type = j?.type || body?.type || (route.startsWith('/objects/') ? (route.split('/')[2] || 'object')
+                    : route.startsWith('/views') ? 'view'
+                    : route.startsWith('/registrations') ? 'registration'
+                    : undefined);
+      const meta = {};
+      for (const k of ["name","sku","entityType"]) {
+        if (body && typeof body[k] !== "undefined") meta[k] = body[k];
+      }
+      meta.status = r.status;
+      recordCreated({ type, id: j.id, route, meta });
+    }
+  }catch{/* noop */}
   return {ok:r.ok,status:r.status,body:j};
 }
 async function put(p,body,h={},opts){
@@ -96,6 +136,48 @@ async function put(p,body,h={},opts){
 }
 
 /* ---------- Helpers ---------- */
+function smokeTag(value){
+  const rid = process.env.SMOKE_RUN_ID || SMOKE_RUN_ID;
+  return `${rid}-${String(value)}`;
+}
+
+/* ---------- Manifest Recorder ---------- */
+const manifestDir = path.resolve(process.cwd(), "ops", "smoke", ".manifests");
+const manifestPath = path.resolve(manifestDir, `${SMOKE_RUN_ID}.json`);
+let manifestWritten = false;
+const manifest = {
+  smokeRunId: SMOKE_RUN_ID,
+  base: API,
+  tenantHeader: TENANT,
+  jwtTenant,
+  startedAt: new Date().toISOString(),
+  finishedAt: null,
+  entries: []
+};
+
+function recordCreated({ type, id, route, meta }){
+  try{
+    if (!id) return;
+    manifest.entries.push({ type, id: String(id), route, meta, createdAt: new Date().toISOString() });
+  }catch{/* noop */}
+}
+
+function flushManifestSync(){
+  try{
+    manifest.finishedAt = new Date().toISOString();
+    fs.mkdirSync(manifestDir, { recursive: true });
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+    if (!manifestWritten) {
+      manifestWritten = true;
+      console.log(`[smokes] wrote manifest ${manifestPath}`);
+    }
+  }catch(err){
+    console.error(`[smokes] Failed to write manifest: ${String(err && err.message || err)}`);
+  }
+}
+
+process.on("SIGINT", ()=>{ flushManifestSync(); process.exit(130); });
+process.on("exit", ()=>{ flushManifestSync(); });
 async function onhand(itemId){
   return await get(`/inventory/${encodeURIComponent(itemId)}/onhand`);
 }
@@ -138,10 +220,13 @@ async function ensureOnHand(itemId, qty){
 /** objects helpers */
 const ITEM_TYPE=process.env.SMOKE_ITEM_TYPE??"inventory"; // safer default matches your endpoints
 async function createProduct(body) {
-  return await post(`/objects/product`, { type:"product", kind:"good", name:`${body?.name ?? "Prod"}-${Date.now()}`, sku:`SKU-${Math.random().toString(36).slice(2,7)}`, ...body });
+  const baseName = `${body?.name ?? "Prod"}-${Date.now()}`;
+  const baseSku = `SKU-${Math.random().toString(36).slice(2,7)}`;
+  return await post(`/objects/product`, { type:"product", kind:"good", name: smokeTag(baseName), sku: smokeTag(baseSku), ...body });
 }
 async function createInventoryForProduct(productId, name = "Item") {
-  return await post(`/objects/inventory`, { type:"inventory", name:`${name}-${Date.now()}`, productId, uom:"ea" });
+  const baseName = `${name}-${Date.now()}`;
+  return await post(`/objects/inventory`, { type:"inventory", name: smokeTag(baseName), productId, uom:"ea" });
 }
 /* minimal api wrapper so seeders can call /objects/<type> consistently */
 const api = {
@@ -266,7 +351,7 @@ const tests = {
 
   "smoke:parties:happy": async ()=>{
     await ensureBearer();
-    const create = await post(`/objects/${encodeURIComponent(PARTY_TYPE)}`, { kind:"person", name:"Smoke Test User", roles:["customer"] });
+    const create = await post(`/objects/${encodeURIComponent(PARTY_TYPE)}`, { kind:"person", name: smokeTag("Smoke Test User"), roles:["customer"] });
     const search = await post(`/objects/${encodeURIComponent(PARTY_TYPE)}/search`, { q:"Smoke Test User" });
     let update = { ok:true, status:200, body:{} };
     if (create.ok && create.body?.id) {
@@ -328,9 +413,11 @@ const tests = {
 
   "smoke:products:crud": async ()=>{
     await ensureBearer();
-    const sku = `SMOKE-SKU-${Date.now()}`;
-    const name = `SmokeProduct-${Date.now()}`;
-    const updatedName = `${name}-Updated`;
+    const baseSku = `SMOKE-SKU-${Date.now()}`;
+    const baseName = `SmokeProduct-${Date.now()}`;
+    const sku = smokeTag(baseSku);
+    const name = smokeTag(baseName);
+    const updatedName = smokeTag(`${baseName}-Updated`);
     const updatedPrice = 99.99;
 
     const create = await post(`/objects/product`,
@@ -386,11 +473,13 @@ const tests = {
 
   "smoke:inventory:crud": async ()=>{
     await ensureBearer();
-    const itemId = `smoke-item-${Date.now()}`;
-    const productId = `smoke-prod-${Date.now()}`;
+    const itemId = smokeTag(`smoke-item-${Date.now()}`);
+    const productId = smokeTag(`smoke-prod-${Date.now()}`);
+    const createName = smokeTag("Smoke Inventory Item");
+    const updatedName = smokeTag("Smoke Inventory Item Updated");
 
     const create = await post(`/objects/inventoryItem`,
-      { itemId, productId, name: "Smoke Inventory Item" },
+      { itemId, productId, name: createName },
       { "Idempotency-Key": idem() }
     );
     const id = create.body?.id;
@@ -399,12 +488,16 @@ const tests = {
     }
 
     const get1 = await get(`/objects/inventoryItem/${encodeURIComponent(id)}`);
-    if (!get1.ok || (get1.body?.itemId ?? "") !== itemId) {
-      return { test: "inventory-crud", result: "FAIL", step: "get1", get1 };
+    const body1 = get1.body ?? {};
+    const gotItemId1 = body1?.itemId ?? "";
+    const gotProductId1 = body1?.productId;
+    const hasRunId = (v) => typeof v === "string" && v.includes(SMOKE_RUN_ID);
+    if (!get1.ok || gotItemId1 !== itemId || !hasRunId(body1?.name) || (gotProductId1 && !hasRunId(gotProductId1))) {
+      return { test: "inventory-crud", result: "FAIL", step: "get1", get1, gotItemId1, gotProductId1 };
     }
 
     const update = await put(`/objects/inventoryItem/${encodeURIComponent(id)}`,
-      { name: "Smoke Inventory Item Updated" },
+      { name: updatedName },
       { "Idempotency-Key": idem() }
     );
     if (!update.ok) {
@@ -412,9 +505,17 @@ const tests = {
     }
 
     const get2 = await get(`/objects/inventoryItem/${encodeURIComponent(id)}`);
-    const gotUpdated = get2.ok && (get2.body?.name ?? "") === "Smoke Inventory Item Updated";
+    const body2 = get2.body ?? {};
+    const gotItemId2 = body2?.itemId ?? "";
+    const gotProductId2 = body2?.productId;
+    const gotUpdated = get2.ok
+      && (body2?.name ?? "") === updatedName
+      && hasRunId(body2?.name)
+      && gotItemId2 === itemId
+      && hasRunId(gotItemId2)
+      && (typeof gotProductId2 === "undefined" || hasRunId(gotProductId2));
     if (!gotUpdated) {
-      return { test: "inventory-crud", result: "FAIL", step: "get2", get2 };
+      return { test: "inventory-crud", result: "FAIL", step: "get2", get2, gotItemId2, gotProductId2 };
     }
 
     // Optional: check onhand endpoint returns an entry
@@ -1548,7 +1649,7 @@ const tests = {
     
     // Fixed: use consistent entityType + timestamped unique name for pagination/search robustness
     const entityType = "inventoryItem"; // Common in test environment
-    const uniqueName = `SmokeView-${Date.now()}`;
+    const uniqueName = smokeTag(`SmokeView-${Date.now()}`);
     let itemsScanned = 0;
     
     // 1) CREATE view
@@ -1629,7 +1730,8 @@ const tests = {
     }
 
     // 4) PUT (update) view
-    const updatedName = `${uniqueName}-updated`;
+    const baseUnique = `SmokeView-${Date.now()}`;
+    const updatedName = smokeTag(`${baseUnique}-updated`);
     const update = await put(`/views/${encodeURIComponent(viewId)}`, {
       name: updatedName,
       entityType,
@@ -1692,7 +1794,7 @@ const tests = {
       method: "POST",
       headers: listHdr,
       body: JSON.stringify({
-        name: "WS Test A",
+        name: smokeTag("WS Test A"),
         entityType: "purchaseOrder",
         filters: [{ field: "status", op: "eq", value: "submitted" }],
         columns: ["id", "vendorId", "total"]
@@ -1703,12 +1805,13 @@ const tests = {
       return { test:"workspaces:list", result:"FAIL", reason:"create-view-a-failed" };
     }
     const viewIdA = bodyA.id;
+    recordCreated({ type: 'view', id: viewIdA, route: '/views', meta: { name: bodyA?.name, entityType: bodyA?.entityType } });
     
     const createB = await fetch(`${API}/views`, {
       method: "POST",
       headers: listHdr,
       body: JSON.stringify({
-        name: "WS Sample B",
+        name: smokeTag("WS Sample B"),
         entityType: "salesOrder",
         filters: [{ field: "status", op: "eq", value: "committed" }],
         columns: ["id", "customerId", "total"]
@@ -1724,6 +1827,7 @@ const tests = {
       return { test:"workspaces:list", result:"FAIL", reason:"create-view-b-failed" };
     }
     const viewIdB = bodyB.id;
+    recordCreated({ type: 'view', id: viewIdB, route: '/views', meta: { name: bodyB?.name, entityType: bodyB?.entityType } });
     
     // 2) GET /workspaces (all) - baseline
     const listAll = await fetch(`${API}/workspaces?limit=50`, { headers: listHdr });
@@ -1892,6 +1996,7 @@ const tests = {
       return { test:"registrations:crud", result:"FAIL", reason:"create-failed", create:createBody };
     }
     const regId = createBody.id;
+    recordCreated({ type: 'registration', id: regId, route: '/registrations', meta: { status: createBody?.status } });
 
     // Validate created registration has required fields
     if (!createBody.createdAt || !createBody.updatedAt) {
@@ -1996,6 +2101,7 @@ const tests = {
       return { test:"registrations:filters", result:"FAIL", reason:"create-reg1-failed" };
     }
     const regId1 = reg1Body.id;
+    recordCreated({ type: 'registration', id: regId1, route: '/registrations', meta: { status: reg1Body?.status } });
 
     const reg2 = await fetch(`${API}/registrations`, {
       method: "POST",
@@ -2013,6 +2119,7 @@ const tests = {
       return { test:"registrations:filters", result:"FAIL", reason:"create-reg2-failed" };
     }
     const regId2 = reg2Body.id;
+    recordCreated({ type: 'registration', id: regId2, route: '/registrations', meta: { status: reg2Body?.status } });
 
     const reg3 = await fetch(`${API}/registrations`, {
       method: "POST",
@@ -2031,6 +2138,7 @@ const tests = {
       return { test:"registrations:filters", result:"FAIL", reason:"create-reg3-failed" };
     }
     const regId3 = reg3Body.id;
+    recordCreated({ type: 'registration', id: regId3, route: '/registrations', meta: { status: reg3Body?.status } });
 
     // 2) Test eventId filter
     const listByEvent = await fetch(`${API}/registrations?eventId=${encodeURIComponent(eventId1)}&limit=50`, {
@@ -2128,7 +2236,7 @@ const tests = {
     await ensureBearer();
 
     const resHeaders = { "X-Feature-Reservations-Enabled": "true" };
-    const name = `Resource-${Date.now()}`;
+    const name = smokeTag(`Resource-${Date.now()}`);
     const status = "available";
 
     // 1) CREATE resource
@@ -2142,6 +2250,7 @@ const tests = {
       return { test: "resources:crud", result: "FAIL", reason: "create-failed", createRes: { status: createRes.status, body: createBody } };
     }
     const resourceId = createBody.id;
+    recordCreated({ type: 'resource', id: resourceId, route: '/objects/resource', meta: { name } });
 
     // 2) GET resource
     const getRes = await fetch(`${API}/objects/resource/${encodeURIComponent(resourceId)}`, {
@@ -2154,7 +2263,7 @@ const tests = {
     }
 
     // 3) UPDATE resource (change name)
-    const updatedName = `Resource-Updated-${Date.now()}`;
+    const updatedName = smokeTag(`Resource-Updated-${Date.now()}`);
     const updateRes = await fetch(`${API}/objects/resource/${encodeURIComponent(resourceId)}`, {
       method: "PUT",
       headers: { ...baseHeaders(), ...resHeaders },
@@ -2201,13 +2310,14 @@ const tests = {
     const createResRes = await fetch(`${API}/objects/resource`, {
       method: "POST",
       headers: { ...baseHeaders(), ...resHeaders, "Idempotency-Key": idem() },
-      body: JSON.stringify({ type: "resource", name: `Resource-${Date.now()}`, status: "available" })
+      body: JSON.stringify({ type: "resource", name: smokeTag(`Resource-${Date.now()}`), status: "available" })
     });
     const createResBody = await createResRes.json().catch(() => ({}));
     if (!createResRes.ok || !createResBody?.id) {
       return { test: "reservations:crud", result: "FAIL", reason: "resource-creation-failed", createResRes: { status: createResRes.status, body: createResBody } };
     }
     const resourceId = createResBody.id;
+    recordCreated({ type: 'resource', id: resourceId, route: '/objects/resource', meta: { name: createResBody?.name } });
 
     // 2) CREATE reservation
     const now = new Date();
@@ -2226,6 +2336,7 @@ const tests = {
       return { test: "reservations:crud", result: "FAIL", reason: "create-reservation-failed", createRes: { status: createRes.status, body: createBody } };
     }
     const reservationId = createBody.id;
+    recordCreated({ type: 'reservation', id: reservationId, route: '/objects/reservation', meta: { resourceId, status } });
 
     // 3) GET reservation
     const getRes = await fetch(`${API}/objects/reservation/${encodeURIComponent(reservationId)}`, {
@@ -2460,19 +2571,19 @@ const tests = {
     // Seed at least 3 views to ensure we have enough data for pagination
     const view1 = await post(`/objects/view`, {
       type: "view",
-      name: `Pagination-Test-1-${Date.now()}`,
+      name: smokeTag(`Pagination-Test-1-${Date.now()}`),
       entityType: "inventoryItem",
       columns: [{ field: "id", label: "ID" }]
     });
     const view2 = await post(`/objects/view`, {
       type: "view",
-      name: `Pagination-Test-2-${Date.now()}`,
+      name: smokeTag(`Pagination-Test-2-${Date.now()}`),
       entityType: "inventoryItem",
       columns: [{ field: "name", label: "Name" }]
     });
     const view3 = await post(`/objects/view`, {
       type: "view",
-      name: `Pagination-Test-3-${Date.now()}`,
+      name: smokeTag(`Pagination-Test-3-${Date.now()}`),
       entityType: "inventoryItem",
       columns: [{ field: "status", label: "Status" }]
     });
@@ -2622,8 +2733,17 @@ const fn=tests[cmd];
 if(!fn){ console.error("Unknown command:",cmd); process.exit(1); }
 
 (async()=>{
-  await ensureBearer();
-  const r=await fn();
-  console.log(JSON.stringify(r,null,2));
-  process.exit(r?.result==="PASS"?0:1);
-})().catch((e)=>{ console.error(e); process.exit(1); });
+  let exitCode = 1;
+  try {
+    await ensureBearer();
+    const r=await fn();
+    console.log(JSON.stringify(r,null,2));
+    exitCode = r?.result==="PASS"?0:1;
+  } catch (e) {
+    console.error(e);
+    exitCode = 1;
+  } finally {
+    flushManifestSync();
+  }
+  process.exit(exitCode);
+})();

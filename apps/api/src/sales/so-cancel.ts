@@ -4,6 +4,7 @@ import { ddb, tableObjects } from "../common/ddb";
 import { GetCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import { assertSoCancelable } from "../shared/statusGuards";
 import { netReservationsForSO } from "../shared/reservationSummary";
+import { resolveTenantId } from "../common/tenant";
 
 type SalesOrder = {
   pk: string; sk: string; id: string; type: "salesOrder";
@@ -21,8 +22,7 @@ const json = (s: number, b: unknown): APIGatewayProxyResultV2 => ({
   },
   body: JSON.stringify(b)
 });
-const tid = (e: APIGatewayProxyEventV2) =>
-  (e as any)?.requestContext?.authorizer?.mbapp?.tenantId || (e.headers?.["X-Tenant-Id"] as string) || "";
+const tid = (e: APIGatewayProxyEventV2) => resolveTenantId(e);
 
 async function loadSO(tenantId: string, id: string): Promise<SalesOrder|null> {
   const res = await ddb.send(new GetCommand({ TableName: tableObjects, Key: { pk: tenantId, sk: `salesOrder#${id}` } }));
@@ -34,7 +34,11 @@ async function loadSO(tenantId: string, id: string): Promise<SalesOrder|null> {
 
 export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   try {
-    const tenantId = tid(event);
+    let tenantId: string;
+    try { tenantId = tid(event); } catch (err: any) {
+      const status = err?.statusCode ?? 400;
+      return json(status, { message: err?.message ?? "Tenant header mismatch" });
+    }
     const id = event.pathParameters?.id;
     if (!tenantId || !id) return json(400, { message: "Missing tenant or id" });
 

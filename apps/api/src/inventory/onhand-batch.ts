@@ -5,10 +5,10 @@ import { deriveCounters } from "./counters";
 function respond(status: number, body: unknown) {
   return { statusCode: status, headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
 }
-function getTenantId(event: any): string {
-  const h = event?.headers || {};
-  return h["X-Tenant-Id"] || h["x-tenant-id"] || h["X-tenant-id"] || h["x-Tenant-Id"] || "DemoTenant";
-}
+  import { resolveTenantId } from "../common/tenant";
+  function getTenantId(event: any): string {
+    return resolveTenantId(event);
+  }
 
 /** HTTP handler — POST /inventory/onhand:batch */
 export async function handle(event: any) {

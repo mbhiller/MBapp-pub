@@ -1,6 +1,7 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
 import { ddb, tableObjects } from "../common/ddb";
 import { GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
+import { resolveTenantId } from "../common/tenant";
 
 type LineReq = { lineId: string; deltaQty: number; reason?: string };
 type SOLine = { id: string; itemId: string; qty: number; uom?: string };
@@ -21,8 +22,7 @@ const json = (s: number, b: unknown): APIGatewayProxyResultV2 => ({
   },
   body: JSON.stringify(b)
 });
-const tid = (e: APIGatewayProxyEventV2) =>
-  (e as any)?.requestContext?.authorizer?.mbapp?.tenantId || (e.headers?.["X-Tenant-Id"] as string) || "";
+const tid = (e: APIGatewayProxyEventV2) => resolveTenantId(e);
 const parse = <T=any>(e: APIGatewayProxyEventV2): T => { try { return JSON.parse(e.body||"{}"); } catch { return {} as any; } };
 
 async function loadSO(tenantId: string, id: string): Promise<SalesOrder|null> {
@@ -34,7 +34,11 @@ function rid(prefix="imv") { return `${prefix}_${Math.random().toString(36).slic
 
 export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   try {
-    const tenantId = tid(event);
+    let tenantId: string;
+    try { tenantId = tid(event); } catch (err: any) {
+      const status = err?.statusCode ?? 400;
+      return json(status, { message: err?.message ?? "Tenant header mismatch" });
+    }
     const id = event.pathParameters?.id;
     if (!tenantId || !id) return json(400, { message: "Missing tenant or id" });
 

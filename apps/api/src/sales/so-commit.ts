@@ -4,6 +4,7 @@ import { ddb, tableObjects } from "../common/ddb";
 import { GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 import * as InvOnHandBatch from "../inventory/onhand-batch";
 import { getObjectById, createObject } from "../objects/repo";
+import { resolveTenantId } from "../common/tenant";
 
 type SOStatus =
   | "draft"
@@ -52,8 +53,7 @@ const json = (statusCode: number, body: unknown): APIGatewayProxyResultV2 => ({
 });
 
 function tenantIdOf(event: APIGatewayProxyEventV2): string {
-  const anyEvt: any = event;
-  return anyEvt?.requestContext?.authorizer?.mbapp?.tenantId ?? (event.headers?.["X-Tenant-Id"] as string) ?? "";
+  return resolveTenantId(event);
 }
 
 function isStrict(event: APIGatewayProxyEventV2): boolean {
@@ -190,7 +190,7 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
 
     // Create BackorderRequest rows for actionable shortages (reorderEnabled only)
     if (!strict && shortages.length > 0) {
-      const tenantId = (event as any)?.requestContext?.authorizer?.mbapp?.tenantId as string;
+      const tenantId = tenantIdOf(event);
       const now = new Date().toISOString();
       for (const s of shortages) {
         const product = await getProductForItem(tenantId, s.itemId);

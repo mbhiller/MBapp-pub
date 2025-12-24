@@ -99,6 +99,7 @@ jobs:
     needs: [ typecheck ]
     env:
       MBAPP_API_BASE: ${{ secrets.MBAPP_API_BASE }}
+      MBAPP_SMOKE_ALLOW_TENANT_MISMATCH: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
