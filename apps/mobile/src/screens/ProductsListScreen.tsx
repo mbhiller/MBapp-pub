@@ -189,6 +189,20 @@ export default function ProductsListScreen() {
         </View>
       )}
 
+      {/* Create Button */}
+      <Pressable
+        onPress={() => navigation.navigate("CreateProduct")}
+        style={{
+          padding: 12,
+          backgroundColor: t.colors.primary,
+          borderRadius: 8,
+          alignItems: "center",
+          marginBottom: 12,
+        }}
+      >
+        <Text style={{ color: "#fff", fontSize: 16, fontWeight: "700" }}>Create Product</Text>
+      </Pressable>
+
       {/* Search Input */}
       <TextInput
         placeholder="Search products (name, sku)"

@@ -28,6 +28,8 @@ export function Layout({ children }: { children: ReactNode }) {
         <nav style={{ marginTop: 8, display: "flex", gap: 12 }}>
           <Link to="/" style={{ color: "#fff", textDecoration: "underline" }}>Home</Link>
           <Link to="/parties" style={{ color: "#fff", textDecoration: "underline" }}>Parties</Link>
+          <Link to="/products" style={{ color: "#fff", textDecoration: "underline" }}>Products</Link>
+          <Link to="/inventory" style={{ color: "#fff", textDecoration: "underline" }}>Inventory</Link>
         </nav>
       </header>
       <main style={{ padding: "16px" }}>{children}</main>

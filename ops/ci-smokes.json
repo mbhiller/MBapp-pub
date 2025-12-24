@@ -1,6 +1,8 @@
 {
   "flows": [
     "smoke:parties:crud",
+    "smoke:products:crud",
+    "smoke:inventory:crud",
     "smoke:close-the-loop"
   ]
 }

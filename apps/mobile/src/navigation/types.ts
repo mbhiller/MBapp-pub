@@ -69,5 +69,7 @@ export type RootStackParamList = {
   // Products (Sprint XIV)
   ProductsList: undefined;
   ProductDetail: DetailParams;
+  CreateProduct: undefined;
+  EditProduct: { id: string };
   
 };
