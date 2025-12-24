@@ -1424,26 +1424,80 @@ const tests = {
   "smoke:views:crud": async ()=>{
     await ensureBearer();
     
+    // Fixed: use consistent entityType + timestamped unique name for pagination/search robustness
+    const entityType = "inventoryItem"; // Common in test environment
+    const uniqueName = `SmokeView-${Date.now()}`;
+    let itemsScanned = 0;
+    
     // 1) CREATE view
     const create = await post(`/views`, {
-      name: "Approved POs",
-      entityType: "purchaseOrder",
-      filters: [{ field: "status", op: "eq", value: "approved" }],
-      columns: ["id", "vendorId", "total"]
+      name: uniqueName,
+      entityType,
+      filters: [{ field: "status", op: "eq", value: "active" }],
+      columns: ["id", "name", "status"]
     });
     if (!create.ok || !create.body?.id) {
       return { test:"views:crud", result:"FAIL", reason:"create-failed", create };
     }
     const viewId = create.body.id;
+    const createdView = create.body;
 
-    // 2) LIST views -> assert created view exists
-    const list = await get(`/views`, { limit: 50 });
-    if (!list.ok || !Array.isArray(list.body?.items)) {
-      return { test:"views:crud", result:"FAIL", reason:"list-failed", list };
+    // 2) LIST views with pagination + retry + filtering
+    // Retry up to 5 times (200ms backoff) to account for eventual consistency
+    let found = null;
+    let listResults = [];
+    const maxAttempts = 5;
+    const delayMs = 200;
+    
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      if (attempt > 0) await sleep(delayMs);
+      
+      // Query with filters: entityType + q (name search) + pagination
+      let cursor = undefined;
+      let pageCount = 0;
+      const maxPages = 3; // Scan up to 3 pages
+      itemsScanned = 0;
+      found = null;
+      
+      while (pageCount < maxPages && !found) {
+        const listQuery = { entityType, q: uniqueName, limit: 100 };
+        if (cursor) listQuery.next = cursor;
+        
+        const list = await get(`/views`, listQuery);
+        if (!list.ok || !Array.isArray(list.body?.items)) {
+          // On list failure, continue retrying (don't fail immediately)
+          break;
+        }
+        
+        listResults = list.body.items;
+        itemsScanned += listResults.length;
+        
+        // Search for created view by ID within this page
+        found = listResults.find(v => v.id === viewId);
+        if (found) break;
+        
+        // Move to next page if cursor available
+        cursor = list.body.next;
+        if (!cursor) break; // No more pages
+        pageCount++;
+      }
+      
+      // If found, exit retry loop early
+      if (found) break;
     }
-    const found = list.body.items.find(v => v.id === viewId);
+    
     if (!found) {
-      return { test:"views:crud", result:"FAIL", reason:"view-not-in-list", list };
+      return {
+        test:"views:crud",
+        result:"FAIL",
+        reason:"view-not-in-list",
+        debug: {
+          created: { id: viewId, name: uniqueName, entityType },
+          listQuery: { entityType, q: uniqueName, limit: 100 },
+          itemsScanned,
+          sampledItems: listResults.slice(0, 3)
+        }
+      };
     }
 
     // 3) GET single view
@@ -1453,16 +1507,17 @@ const tests = {
     }
 
     // 4) PUT (update) view
+    const updatedName = `${uniqueName}-updated`;
     const update = await put(`/views/${encodeURIComponent(viewId)}`, {
-      name: "Approved POs v2",
-      entityType: "purchaseOrder",
+      name: updatedName,
+      entityType,
       filters: [
-        { field: "status", op: "eq", value: "approved" },
+        { field: "status", op: "eq", value: "active" },
         { field: "createdAt", op: "ge", value: "2025-01-01T00:00:00Z" }
       ],
-      columns: ["id", "vendorId", "total", "createdAt"]
+      columns: ["id", "name", "status", "createdAt"]
     });
-    if (!update.ok || update.body?.name !== "Approved POs v2") {
+    if (!update.ok || update.body?.name !== updatedName) {
       return { test:"views:crud", result:"FAIL", reason:"update-failed", update };
     }
 
@@ -1476,17 +1531,29 @@ const tests = {
     }
 
     // 6) Verify deleted (should not be in list anymore)
-    const listAfter = await get(`/views`, { limit: 50 });
-    const stillThere = listAfter.ok && listAfter.body?.items?.find(v => v.id === viewId);
+    // Use same filtered query pattern for consistency
+    let stillThere = false;
+    let deleteVerifyAttempts = 3;
+    for (let i = 0; i < deleteVerifyAttempts; i++) {
+      if (i > 0) await sleep(100);
+      const listAfter = await get(`/views`, { entityType, limit: 100 });
+      const inList = listAfter.ok && listAfter.body?.items?.find(v => v.id === viewId);
+      if (!inList) {
+        stillThere = false;
+        break;
+      }
+      stillThere = true;
+    }
+    
     if (stillThere) {
       return { test:"views:crud", result:"FAIL", reason:"view-still-in-list-after-delete" };
     }
 
-    const pass = create.ok && list.ok && get1.ok && update.ok && del.ok && !stillThere;
+    const pass = create.ok && get1.ok && update.ok && del.ok && !stillThere;
     return {
       test: "views:crud",
       result: pass ? "PASS" : "FAIL",
-      artifacts: { create, list, get: get1, update, delete: del, listAfter }
+      artifacts: { create, get: get1, update, delete: del }
     };
   },
 

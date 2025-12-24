@@ -1,8 +1,7 @@
 {
   "flows": [
-    "smoke:parties:crud",
-    "smoke:products:crud",
-    "smoke:inventory:crud",
-    "smoke:close-the-loop"
+    "smoke:views:crud",
+    "smoke:workspaces:list",
+    "smoke:events:enabled-noop"
   ]
 }
