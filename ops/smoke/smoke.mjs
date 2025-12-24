@@ -112,14 +112,17 @@ async function post(p,body,h={},opts){
   const j=await r.json().catch(()=>({}));
   try{
     const hasId = j && typeof j.id !== "undefined";
-    if (r.ok && hasId) {
+    if (r.ok && hasId && isSmokeArtifact(body, j, p)) {
       const route = p;
       const type = j?.type || body?.type || (route.startsWith('/objects/') ? (route.split('/')[2] || 'object')
                     : route.startsWith('/views') ? 'view'
+                    : route.startsWith('/workspaces') ? 'workspace'
                     : route.startsWith('/registrations') ? 'registration'
+                    : route.startsWith('/resources') ? 'resource'
+                    : route.startsWith('/reservations') ? 'reservation'
                     : undefined);
       const meta = {};
-      for (const k of ["name","sku","entityType"]) {
+      for (const k of ["name","sku","entityType","itemId","productId","title"]) {
         if (body && typeof body[k] !== "undefined") meta[k] = body[k];
       }
       meta.status = r.status;
@@ -132,6 +135,20 @@ async function put(p,body,h={},opts){
   const headers = buildHeaders({ ...baseHeaders(), ...h, ...((opts&&opts.headers)||{}) }, (opts&&opts.auth) ?? "default");
   const r=await fetch(API+p,{method:"PUT",headers,body:JSON.stringify(body??{})});
   const j=await r.json().catch(()=>({}));
+  // PUT typically updates, but if it returns a new id (upsert case), record it
+  try{
+    const hasId = j && typeof j.id !== "undefined";
+    const isNewId = hasId && body && (!body.id || body.id !== j.id);
+    if (r.ok && isNewId && isSmokeArtifact(body, j, p)) {
+      const route = p;
+      const type = j?.type || body?.type || 'object';
+      const meta = { action: 'upsert', status: r.status };
+      for (const k of ["name","sku","entityType","itemId","productId"]) {
+        if (body && typeof body[k] !== "undefined") meta[k] = body[k];
+      }
+      recordCreated({ type, id: j.id, route, meta });
+    }
+  }catch{/* noop */}
   return {ok:r.ok,status:r.status,body:j};
 }
 
@@ -139,6 +156,35 @@ async function put(p,body,h={},opts){
 function smokeTag(value){
   const rid = process.env.SMOKE_RUN_ID || SMOKE_RUN_ID;
   return `${rid}-${String(value)}`;
+}
+
+/** Validate if a value contains SMOKE_RUN_ID (proves it's a smoke artifact) */
+function containsSmokeRunId(val) {
+  if (!val) return false;
+  const rid = SMOKE_RUN_ID;
+  if (typeof val === 'string') return val.includes(rid);
+  if (typeof val === 'object' && !Array.isArray(val)) {
+    // Check common fields that might contain SMOKE_RUN_ID
+    const checkFields = ['name', 'sku', 'itemId', 'productId', 'title', 'description', 'label'];
+    return checkFields.some(f => val[f] && typeof val[f] === 'string' && val[f].includes(rid));
+  }
+  return false;
+}
+
+/** Determine if a create should be recorded based on SMOKE_RUN_ID presence */
+function isSmokeArtifact(reqBody, resBody, route) {
+  // Safety: only record if we can prove it's smoke-scoped
+  if (containsSmokeRunId(reqBody)) return true;
+  if (containsSmokeRunId(resBody)) return true;
+  
+  // Explicit allowlist for ephemeral operations (action endpoints that don't persist new top-level entities)
+  const actionEndpoints = [':submit', ':approve', ':commit', ':reserve', ':release', ':fulfill', ':cancel', ':close', ':receive'];
+  if (actionEndpoints.some(a => route.includes(a))) return false; // don't record action results
+  
+  // Search endpoints don't create artifacts
+  if (route.includes('/search')) return false;
+  
+  return false; // conservative: require explicit SMOKE_RUN_ID proof
 }
 
 /* ---------- Manifest Recorder ---------- */
@@ -162,6 +208,21 @@ function recordCreated({ type, id, route, meta }){
   }catch{/* noop */}
 }
 
+/** Record all persisted items from a list/search response */
+function recordFromListResult(items, type, route) {
+  if (!Array.isArray(items)) return;
+  for (const item of items) {
+    if (item && typeof item.id !== "undefined") {
+      const meta = { status: 200 };
+      // Capture identifying fields if present
+      for (const k of ["name", "sku", "status", "soId", "itemId", "productId", "qty", "vendorId"]) {
+        if (typeof item[k] !== "undefined") meta[k] = item[k];
+      }
+      recordCreated({ type: type || item.type, id: item.id, route, meta });
+    }
+  }
+}
+
 function flushManifestSync(){
   try{
     manifest.finishedAt = new Date().toISOString();
@@ -174,6 +235,17 @@ function flushManifestSync(){
   }catch(err){
     console.error(`[smokes] Failed to write manifest: ${String(err && err.message || err)}`);
   }
+}
+
+function printManifestSummary(){
+  try{
+    const types = [...new Set(manifest.entries.map(e => e.type))].sort();
+    console.log(JSON.stringify({
+      smokeRunId: manifest.smokeRunId,
+      entries: manifest.entries.length,
+      types
+    }));
+  }catch{/* noop */}
 }
 
 process.on("SIGINT", ()=>{ flushManifestSync(); process.exit(130); });
@@ -272,6 +344,8 @@ const tests = {
       if (!boRes.ok || !Array.isArray(boRes.body?.items) || boRes.body.items.length === 0)
         return { test: "close-the-loop", result: "FAIL", step: "backorderRequest-open", boRes };
       const boIds = boRes.body.items.map(b => b.id);
+      // Record discovered backorderRequests
+      recordFromListResult(boRes.body.items, "backorderRequest", `/objects/backorderRequest/search`);
       // 4) Call /purchasing/suggest-po
       const suggest = await post(`/purchasing/suggest-po`, { requests: boIds.map(id => ({ backorderRequestId: id })) });
       // Debug: if suggest skipped entries, fetch vendor fields from BO/inventory/product
@@ -312,8 +386,10 @@ const tests = {
       const onhandAfter = await onhand(itemId);
       // Assert backorderRequests status becomes "fulfilled"
       const boFulfilled = await post(`/objects/backorderRequest/search`, { soId, itemId, status: "fulfilled" });
+      recordFromListResult(boFulfilled.body?.items, "backorderRequest", `/objects/backorderRequest/search`);
       // Assert no backorderRequests with status="open"
       const boOpen = await post(`/objects/backorderRequest/search`, { soId, itemId, status: "open" });
+      recordFromListResult(boOpen.body?.items, "backorderRequest", `/objects/backorderRequest/search`);
       // Idempotency check: call receive again with SAME Idempotency-Key
       const receiveAgain = await post(`/purchasing/po/${encodeURIComponent(poId)}:receive`, { lines }, { "Idempotency-Key": idk });
       const onhandFinal = await onhand(itemId);
@@ -800,6 +876,7 @@ const tests = {
       bo = await post(`/objects/backorderRequest/search`, { soId: soId, status: "open" });
       const items = Array.isArray(bo.body?.items) ? bo.body.items : [];
       found = bo.ok && items.length > 0;
+      if (found) recordFromListResult(items, "backorderRequest", `/objects/backorderRequest/search`);
       if (!found) await sleep(200);
     }
 
@@ -1191,6 +1268,7 @@ const tests = {
     if (!filtered.ok) return { test: "objects:list-filter-soId", result: "FAIL", reason: "filter-request-failed", filtered };
 
     const filteredItems = Array.isArray(filtered.body?.items) ? filtered.body.items : [];
+    recordFromListResult(filteredItems, "backorderRequest", `/objects/backorderRequest`);
     if (filteredItems.length === 0) {
       return { test: "objects:list-filter-soId", result: "FAIL", reason: "filter-returned-no-items", filtered };
     }
@@ -1212,6 +1290,7 @@ const tests = {
         paginationOk = false;
       } else {
         const page2Items = Array.isArray(page2.body?.items) ? page2.body.items : [];
+        recordFromListResult(page2Items, "backorderRequest", `/objects/backorderRequest`);
         secondPageCount = page2Items.length;
         // Verify page 2 items also match soId filter
         const page2AllMatch = page2Items.every(bo => bo.soId === soId);
@@ -2744,6 +2823,7 @@ if(!fn){ console.error("Unknown command:",cmd); process.exit(1); }
     exitCode = 1;
   } finally {
     flushManifestSync();
+    printManifestSummary();
   }
   process.exit(exitCode);
 })();

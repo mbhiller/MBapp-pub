@@ -9,29 +9,381 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
   - The runner records a manifest per run in `ops/smoke/.manifests/<SMOKE_RUN_ID>.json` capturing created entities (type, id, route, meta).
   - Use the cleanup script to delete only artifacts from a specific `SMOKE_RUN_ID` via allowlisted single-delete endpoints.
 
-### Cleanup Controls
+---
+
+## Quick Start (TL;DR)
+
+### Run Full Smoke Suite (Local Dev)
+```powershell
+# Set smoke-specific tenant (leaves your normal MBAPP_TENANT_ID untouched)
+$env:MBAPP_SMOKE_TENANT_ID = "SmokeTenant"
+$env:MBAPP_SMOKE_ALLOW_TENANT_MISMATCH = "1"  # until SmokeTenant JWT available
+$env:MBAPP_API_BASE = "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com"
+./ops/ci/Emit-CIEnv.ps1 -ShowToken           # or set $env:MBAPP_BEARER manually
+npm run smokes:run:ci
+# Manifest written to: ops/smoke/.manifests/smk-{timestamp}-{random}.json
+```
+
+### Run Single Test
+```powershell
+# Set env from above, then:
+node ops/smoke/smoke.mjs smoke:inventory:crud
+node ops/smoke/smoke.mjs smoke:views:crud
+node ops/smoke/smoke.mjs smoke:close-the-loop
+```
+
+### Run Local CI-Equivalent (Exact CI Behavior)
+```powershell
+# Emulates CI environment exactly:
+$env:MBAPP_SMOKE_TENANT_ID = "SmokeTenant"
+$env:MBAPP_SMOKE_ALLOW_TENANT_MISMATCH = "1"
+$env:MBAPP_API_BASE = "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com"
+./ops/ci/Emit-CIEnv.ps1 -ShowToken
+npm run smokes:run:ci
+# Result: Tests run, manifest saved, no errors due to tenant mismatch
+```
+
+## How to Run Smokes & Cleanup (Canonical)
+
+**1) Run CI-style smokes locally (SmokeTenant header, DemoTenant JWT)**
+```powershell
+$env:MBAPP_TENANT_ID="DemoTenant"
+$env:MBAPP_SMOKE_TENANT_ID="SmokeTenant"
+$env:MBAPP_SMOKE_ALLOW_TENANT_MISMATCH="1"
+Remove-Item Env:SMOKE_RUN_ID -ErrorAction SilentlyContinue
+npm run smokes:run:ci
+```
+
+**2) Cleanup DRY RUN (latest manifest)**
+```powershell
+$env:MBAPP_TENANT_ID="DemoTenant"
+$env:DRY_RUN="1"
+Remove-Item Env:SMOKE_RUN_ID -ErrorAction SilentlyContinue
+npm run smokes:cleanup
+```
+
+**3) Cleanup DRY RUN (specific run id)**
+```powershell
+$env:MBAPP_TENANT_ID="DemoTenant"
+$env:DRY_RUN="1"
+$env:SMOKE_RUN_ID="smk-...."
+npm run smokes:cleanup
+```
+
+**4) REAL delete (explicitly armed)**
+```powershell
+$env:MBAPP_TENANT_ID="DemoTenant"
+Remove-Item Env:DRY_RUN -ErrorAction SilentlyContinue
+$env:MBAPP_SMOKE_CLEANUP="1"
+npm run smokes:cleanup
+```
+
+### Glossary (Env Vars)
+- MBAPP_TENANT_ID: Normal shell tenant (usually DemoTenant)
+- MBAPP_SMOKE_TENANT_ID: Tenant used by ci-smokes child processes (set to SmokeTenant for smokes)
+- MBAPP_SMOKE_ALLOW_TENANT_MISMATCH: Temporary override to allow DemoTenant JWT with SmokeTenant header
+- MBAPP_SMOKE_CLEANUP: Arming switch for real deletes (must be "1")
+- DRY_RUN: If truthy, forces planning-only mode
+
+## Smokes & Cleanup Cheat Sheet (PowerShell)
+
+**Run smokes (CI-style, SmokeTenant header, DemoTenant JWT)**
+```powershell
+$env:MBAPP_TENANT_ID="DemoTenant"
+$env:MBAPP_SMOKE_TENANT_ID="SmokeTenant"
+$env:MBAPP_SMOKE_ALLOW_TENANT_MISMATCH="1"
+Remove-Item Env:SMOKE_RUN_ID -ErrorAction SilentlyContinue
+npm run smokes:run:ci
+```
+
+**Cleanup dry-run (latest manifest)**
+```powershell
+$env:MBAPP_TENANT_ID="DemoTenant"
+$env:DRY_RUN="1"
+Remove-Item Env:SMOKE_RUN_ID -ErrorAction SilentlyContinue
+npm run smokes:cleanup
+```
+
+**Cleanup dry-run (specific run id)**
+```powershell
+$env:MBAPP_TENANT_ID="DemoTenant"
+$env:DRY_RUN="1"
+$env:SMOKE_RUN_ID="smk-...."
+npm run smokes:cleanup
+```
+
+**Cleanup real delete (explicitly armed)**
+```powershell
+$env:MBAPP_TENANT_ID="DemoTenant"
+Remove-Item Env:DRY_RUN -ErrorAction SilentlyContinue
+$env:MBAPP_SMOKE_CLEANUP="1"
+npm run smokes:cleanup
+```
+
+### Glossary (Env Vars)
+- MBAPP_TENANT_ID: Normal shell tenant (usually DemoTenant)
+- MBAPP_SMOKE_TENANT_ID: Tenant used by ci-smokes child processes (set to SmokeTenant for smokes)
+- MBAPP_SMOKE_ALLOW_TENANT_MISMATCH: Temporary override to allow DemoTenant JWT with SmokeTenant header
+- MBAPP_SMOKE_CLEANUP: Arming switch for real deletes (must be "1")
+- DRY_RUN: If truthy, forces planning-only mode
+
+### Cleanup (Dry Run - Always Start Here)
+```powershell
+$env:SMOKE_RUN_ID = "latest"                # Auto-picks most recent manifest
+$env:MBAPP_TENANT_ID = "DemoTenant"         # Must match jwtTenant from manifest
+$env:MBAPP_API_BASE = "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com"
+$env:MBAPP_BEARER = $env:MBAPP_BEARER       # Token from smoke run
+$env:DRY_RUN = "1"
+npm run smokes:cleanup
+# Output: Planned deletes printed, nothing deleted, exit 0
+```
+
+### Cleanup (Real Deletes - Explicit Opt-In)
+```powershell
+# Same as dry-run above, then:
+$env:DRY_RUN = ""                           # Unset DRY_RUN to allow real deletes
+$env:MBAPP_SMOKE_CLEANUP = "1"              # Explicit opt-in (required!)
+npm run smokes:cleanup
+# WARNING: Actually deletes artifacts from manifest
+# If MBAPP_SMOKE_CLEANUP not set: fails with error and exits non-zero
+```
+
+### Tenant Rules (Important!)
+- **MBAPP_TENANT_ID**: Your normal shell tenant (usually `DemoTenant`)
+- **MBAPP_SMOKE_TENANT_ID**: Tenant used by the smoke runner for spawned processes (set to `SmokeTenant` for smokes)
+- **MBAPP_SMOKE_ALLOW_TENANT_MISMATCH=1**: Allows DemoTenant JWT with SmokeTenant header (temporary until SmokeTenant JWT available)
+- **Smoke runner**: Uses `MBAPP_SMOKE_TENANT_ID` (if set) or falls back to `MBAPP_TENANT_ID` or `"SmokeTenant"`
+- **Requested tenant must start with `"SmokeTenant"`** (enforced in run-ci-smokes.mjs unless override)
+- **Ergonomic local runs**: Set `MBAPP_SMOKE_TENANT_ID="SmokeTenant"` while keeping `MBAPP_TENANT_ID="DemoTenant"` for other work
+- **Tenant mismatch**: If bearer token decodes to `DemoTenant` but you request `SmokeTenant`, set `MBAPP_SMOKE_ALLOW_TENANT_MISMATCH=1` (required until SmokeTenant JWT available)
+- **Cleanup gate**: Real deletes require **both** `DRY_RUN=""` (unset) **and** `MBAPP_SMOKE_CLEANUP=1` (explicit opt-in)
+- **Cleanup tenant**: Must match the `jwtTenant` recorded in the manifest (usually `DemoTenant`)
+- **Future**: Once `SmokeTenant` JWT available, set `MBAPP_BEARER_SMOKE` secret and remove mismatch override
+
+---
+
+## How to Run Smokes
+
+### 1. Normal Local Run (SmokeTenant)
+
+Run the full CI smoke suite with proper environment setup:
+
+```powershell
+# Windows (PowerShell) - automatically emits CI env + runs smokes
+npm run smokes:run:ci:win
+
+# Or manually set env then run
+./ops/ci/Emit-CIEnv.ps1 -ShowToken
+npm run smokes:run:ci
+```
+
+**What happens:**
+- Script reads `ops/ci-smokes.json` to determine which tests to run
+- Generates unique `SMOKE_RUN_ID` (e.g., `smk-1766548600885-75q3`)
+- Sets `MBAPP_TENANT_ID=SmokeTenant` and `MBAPP_API_BASE` from env
+- Acquires JWT bearer token via `ops/ci/Emit-CIEnv.ps1` (sets `MBAPP_BEARER`)
+- Runs each smoke test sequentially
+- Writes manifest to `ops/smoke/.manifests/<SMOKE_RUN_ID>.json`
+
+**Preflight check:**
+Before running tests, smoke runner logs:
+```json
+{
+  "base": "https://...",
+  "tenant": "SmokeTenant",
+  "smokeRunId": "smk-1766548600885-75q3",
+  "tokenVar": "MBAPP_BEARER",
+  "hasToken": true,
+  "jwtTenant": "DemoTenant"
+}
+```
+
+### 2. Tenant vs JWT Alignment
+
+**Default Behavior (strict mode):**
+- Smoke runner checks: `jwtTenant` (from token payload) **must equal** `MBAPP_TENANT_ID` (request header)
+- If mismatch detected, smoke exits with code 2:
+  ```
+  [smokes] Bearer token tenant ("DemoTenant") does not match requested tenant ("SmokeTenant"). 
+  Set MBAPP_SMOKE_ALLOW_TENANT_MISMATCH=1 to override.
+  ```
+
+**Override (CI mode or dev testing):**
+When you need to allow tenant mismatch (e.g., CI uses DemoTenant JWT but requests SmokeTenant):
+```powershell
+$env:MBAPP_SMOKE_ALLOW_TENANT_MISMATCH = "1"
+npm run smokes:run:ci
+```
+
+**SmokeTenant-specific JWT (future):**
+To eliminate tenant mismatch entirely, use a SmokeTenant-scoped token:
+```powershell
+# CI runner will prefer MBAPP_BEARER_SMOKE over default token when tenant starts with "SmokeTenant"
+$env:MBAPP_BEARER_SMOKE = "eyJhbG..."  # SmokeTenant-scoped JWT
+npm run smokes:run:ci
+# No mismatch override needed - jwtTenant will match MBAPP_TENANT_ID
+```
+
+**Why this guard exists:**
+- Production tokens are scoped to one tenant (enforced by API via canonical `resolveTenantId`)
+- Mismatch indicates configuration error or credential misuse
+- CI override is safe because AWS env allows `X-Tenant-Id` header overrides for smoke tenant only
+- Future: `MBAPP_BEARER_SMOKE` will allow clean tenant alignment without override
+
+### 3. Manifest & SMOKE_RUN_ID
+
+**Auto-generated run ID (default):**
+Runner generates unique ID like `smk-1766548600885-75q3` and writes manifest to:
+```
+ops/smoke/.manifests/smk-1766548600885-75q3.json
+```
+
+**Stable run ID (for cleanup):**
+Set `SMOKE_RUN_ID` explicitly to ensure consistent manifest naming:
+```powershell
+$env:SMOKE_RUN_ID = "smk-cleanup-test-001"
+npm run smokes:run:ci
+# Manifest written to: ops/smoke/.manifests/smk-cleanup-test-001.json
+```
+
+**Manifest structure:**
+```json
+{
+  "smokeRunId": "smk-1766548600885-75q3",
+  "base": "https://...",
+  "tenantHeader": "SmokeTenant",
+  "jwtTenant": "DemoTenant",
+  "startedAt": "2025-12-24T04:05:05.502Z",
+  "finishedAt": "2025-12-24T04:05:07.214Z",
+  "entries": [
+    {
+      "type": "party",
+      "id": "v9w295qrsmii0incdtfjzi",
+      "route": "/objects/party",
+      "meta": { "name": "smk-...-Seed Person", "status": 200 },
+      "createdAt": "2025-12-24T04:05:05.817Z"
+    },
+    { "type": "product", "id": "...", ... },
+    { "type": "salesOrder", "id": "...", ... }
+  ]
+}
+```
+
+### 4. Cleanup (DRY_RUN - Safe Preview)
+
+**Always start with DRY_RUN to verify what will be deleted:**
+
+```powershell
+# Set required env vars
+$env:SMOKE_RUN_ID = "smk-1766548600885-75q3"  # Match your manifest file
+$env:MBAPP_API_BASE = "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com"
+$env:MBAPP_TENANT_ID = "DemoTenant"  # MUST match jwtTenant from manifest (or set MBAPP_SMOKE_ALLOW_TENANT_MISMATCH=1)
+$env:MBAPP_BEARER = "eyJhbG..."  # Get from Emit-CIEnv.ps1
+
+# Preview deletions (safe - no actual deletes)
+$env:DRY_RUN = "1"
+npm run smokes:cleanup
+```
+
+**Output (DRY_RUN mode):**
+```json
+{"smokeRunId":"smk-1766548600885-75q3","tenant":"SmokeTenant","manifestEntries":7,"plannedDeletes":7,"plannedSkips":0,"dryRun":true}
+
+--- Planned Deletes (7) ---
+{"action":"DELETE","endpoint":"/objects/party/v9w295qrsmii0incdtfjzi","type":"party","id":"v9w295qrsmii0incdtfjzi"}
+{"action":"DELETE","endpoint":"/objects/product/4hcbo701b3lac08cg4a4eh","type":"product","id":"4hcbo701b3lac08cg4a4eh"}
+{"action":"DELETE","endpoint":"/objects/salesOrder/707921z6l64t7qey76czto","type":"salesOrder","id":"707921z6l64t7qey76czto"}
+...
+
+--- Planned Skips (0) ---
+```
+
+**Tenant mismatch handling:**
+If `jwtTenant` ≠ `tenantHeader` in manifest, cleanup aborts unless:
+```powershell
+$env:MBAPP_SMOKE_ALLOW_TENANT_MISMATCH = "1"
+```
+
+### 5. Cleanup (Real Deletes - Explicit Opt-In)
+
+**⚠️ DESTRUCTIVE: Only run after verifying DRY_RUN output**
+
+```powershell
+# Set required env (same as DRY_RUN above)
+$env:SMOKE_RUN_ID = "smk-1766548600885-75q3"
+$env:MBAPP_API_BASE = "https://..."
+$env:MBAPP_TENANT_ID = "DemoTenant"
+$env:MBAPP_BEARER = "eyJhbG..."
+
+# ENABLE REAL DELETES (requires both flags)
+$env:MBAPP_SMOKE_CLEANUP = "1"   # Explicit opt-in for deletions
+Remove-Item Env:\DRY_RUN          # Ensure DRY_RUN is NOT set
+
+npm run smokes:cleanup
+```
+
+**Output (real delete mode):**
+```json
+{"smokeRunId":"smk-1766548600885-75q3","tenant":"SmokeTenant","manifestEntries":7,"plannedDeletes":7,"plannedSkips":0,"dryRun":false}
+{"deleted":true,"endpoint":"/objects/party/v9w295qrsmii0incdtfjzi","type":"party","id":"v9w295qrsmii0incdtfjzi","status":204}
+{"deleted":true,"endpoint":"/objects/product/4hcbo701b3lac08cg4a4eh","type":"product","id":"4hcbo701b3lac08cg4a4eh","status":204}
+...
+{"smokeRunId":"smk-1766548600885-75q3","result":"done","deleted":7,"failed":0}
+```
+
+**Safety guarantees:**
+- Only deletes types in allowlist: `view`, `workspace`, `registration`, `product`, `inventory`, `inventoryItem`, `party`, `partyRole`, `resource`, `reservation`, `salesOrder`, `purchaseOrder`, `backorderRequest`
+- Uses single-record DELETE endpoints only (no bulk operations)
+- Refuses `/tools/gc/*` endpoints (hard stop)
+- Reads manifest to determine exactly what to delete (no wildcards or scans)
+
+### 6. Copy-Paste Commands Summary
+
+```powershell
+# ========== Run Smokes ==========
+./ops/ci/Emit-CIEnv.ps1 -ShowToken
+npm run smokes:run:ci
+
+# ========== Cleanup (DRY_RUN Preview) ==========
+$env:SMOKE_RUN_ID = "smk-1766548600885-75q3"
+$env:MBAPP_API_BASE = "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com"
+$env:MBAPP_TENANT_ID = "DemoTenant"  # Match jwtTenant
+$env:MBAPP_BEARER = "eyJhbG..."
+$env:DRY_RUN = "1"
+npm run smokes:cleanup
+
+# ========== Cleanup (REAL DELETES) ==========
+# Same env as DRY_RUN, plus:
+$env:MBAPP_SMOKE_CLEANUP = "1"
+Remove-Item Env:\DRY_RUN
+npm run smokes:cleanup
+```
+
+---
+
+### Cleanup Controls (Reference)
 
 - **Env: `SMOKE_RUN_ID`**: Required. Selects which manifest to use for cleanup.
-- **Env: `MBAPP_SMOKE_CLEANUP`**: Required (set to `1`) to perform deletions. Otherwise operates in dry-run mode.
-- **Env: `DRY_RUN`**: When `1`, prints planned deletes but does not call DELETE endpoints.
+- **Env: `MBAPP_SMOKE_CLEANUP`**: Required (set to `1`) to perform deletions. Without this, cleanup operates in dry-run mode regardless of `DRY_RUN` setting.
+- **Env: `DRY_RUN`**: When `1`, prints planned deletes but does not call DELETE endpoints (safer preview mode).
 - **Tenant Guard**: Cleanup reads `tenantHeader` and `jwtTenant` from the manifest. If they mismatch, cleanup aborts unless `MBAPP_SMOKE_ALLOW_TENANT_MISMATCH=1`.
 - **Allowlist (strict)**: Only deletes the following types via single-record endpoints:
-  - Views: `DELETE /views/{id}`
-  - Workspaces: `DELETE /workspaces/{id}`
-  - Registrations: `DELETE /registrations/{id}`
-  - Objects (single): `DELETE /objects/{type}/{id}` where type ∈ {`product`, `inventory`, `inventoryItem`, `party`, `resource`, `reservation`}
+  - Sprint III: `DELETE /views/{id}`, `DELETE /workspaces/{id}`, `DELETE /registrations/{id}`
+  - Objects: `DELETE /objects/{type}/{id}` where type ∈ {`product`, `inventory`, `inventoryItem`, `party`, `partyRole`, `resource`, `reservation`, `salesOrder`, `purchaseOrder`, `backorderRequest`}
 - **Hard Stops**:
   - Cleanup refuses any `/tools/gc/*` endpoints.
   - Bulk-delete or non-single endpoints are not used.
+  - Types not in allowlist are skipped with reason logged.
 
-### Commands
+### Commands (Reference)
 
 - Run cleanup (dry-run default):
   - `npm run smokes:cleanup`
-  - Set required env: `SMOKE_RUN_ID`, `MBAPP_API_BASE`, `MBAPP_TENANT_ID`, `MBAPP_BEARER`
+  - Required env: `SMOKE_RUN_ID`, `MBAPP_API_BASE`, `MBAPP_TENANT_ID`, `MBAPP_BEARER`
 - Real deletion (opt-in):
-  - `SMOKE_RUN_ID=... MBAPP_SMOKE_CLEANUP=1 npm run smokes:cleanup`
-  - Optional: `DRY_RUN=1` to preview
+  - `MBAPP_SMOKE_CLEANUP=1 npm run smokes:cleanup` (ensure `DRY_RUN` is NOT set)
+- Preview mode:
+  - `DRY_RUN=1 npm run smokes:cleanup`
 
 **Close-the-loop flow:** SO shortage → BO open (with preferredVendorId derived from product) → suggest-po (returns drafts with vendorId) → save draft PO → receive → onhand increases → BO fulfilled → idempotency replay (no double-apply). Vendor party is seeded at flow start; product.preferredVendorId set so so:commit populates backorderRequest.preferredVendorId and suggest-po avoids MISSING_VENDOR errors.
 
