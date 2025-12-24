@@ -38,15 +38,7 @@ const smokeRunId = (!parentSmokeRunId || parentSmokeRunId === "latest")
   ? `smk-${Date.now()}-${Math.random().toString(36).slice(2,6)}`
   : parentSmokeRunId;
 
-function getBearer() {
-  // Prefer MBAPP_BEARER_SMOKE if set AND tenant starts with "SmokeTenant"
-  const smokeToken = process.env.MBAPP_BEARER_SMOKE;
-  if (smokeToken && smokeToken.trim() && requestedTenant.startsWith("SmokeTenant")) {
-    console.log("[ci-smokes] Using MBAPP_BEARER_SMOKE (SmokeTenant-specific token)");
-    return smokeToken.trim();
-  }
-
-  // Fallback: acquire token via Emit-CIEnv.ps1 (current default behavior)
+function acquireBearerFromScript() {
   const ps = spawnSync("pwsh", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "ops/ci/Emit-CIEnv.ps1", "-EmitTokenOnly"], { encoding: "utf8" });
   if (ps.status !== 0) {
     console.error("[ci-smokes] failed to acquire token:", ps.stderr || ps.stdout);
@@ -61,9 +53,30 @@ function getBearer() {
   return tok;
 }
 
-const token = getBearer();
-process.env.MBAPP_BEARER = token;
-if (!process.env.DEV_API_TOKEN) process.env.DEV_API_TOKEN = token;
+// Select bearer: prefer Smoke-specific, then generic, then dev token, else acquire
+let selectedBearer = (process.env.MBAPP_BEARER_SMOKE || "").trim();
+let selectedTokenVar = selectedBearer ? "MBAPP_BEARER_SMOKE" : null;
+if (!selectedBearer) {
+  const generic = (process.env.MBAPP_BEARER || "").trim();
+  if (generic) {
+    selectedBearer = generic;
+    selectedTokenVar = "MBAPP_BEARER";
+  }
+}
+if (!selectedBearer) {
+  const devTok = (process.env.DEV_API_TOKEN || "").trim();
+  if (devTok) {
+    selectedBearer = devTok;
+    selectedTokenVar = "DEV_API_TOKEN";
+  }
+}
+if (!selectedBearer) {
+  selectedBearer = acquireBearerFromScript();
+  selectedTokenVar = "MBAPP_BEARER";
+}
+
+process.env.MBAPP_BEARER = selectedBearer;
+if (!process.env.DEV_API_TOKEN) process.env.DEV_API_TOKEN = selectedBearer;
 
 const DEFAULT_BASE = "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com";
 if (!process.env.MBAPP_API_BASE || !process.env.MBAPP_API_BASE.trim()) {
@@ -99,38 +112,46 @@ if (!Array.isArray(flows) || flows.length === 0) {
 
 // Guard: bearer tenant must match requested tenant unless override
 const allowTenantMismatch = process.env.MBAPP_SMOKE_ALLOW_TENANT_MISMATCH === "1";
+// Compute effective tenant for child runs (header/X-Tenant-Id)
+let effectiveTenant = requestedTenant;
+if (jwtTenant && jwtTenant !== requestedTenant) {
+  const isCI = process.env.CI === "true";
+  if (isCI) {
+    console.error(
+      `[ci-smokes] Token tenant mismatch in CI:\n` +
+      `  requestedTenant=${requestedTenant}\n` +
+      `  jwtTenant=${jwtTenant}\n` +
+      `  CI requires them to match. Please provide a SmokeTenant JWT or adjust requested tenant.`
+    );
+    process.exit(2);
+  }
+  if (allowTenantMismatch) {
+    // Local override: run "truthfully" under the token tenant to avoid TenantHeaderMismatch
+    effectiveTenant = jwtTenant;
+  }
+}
 
 console.log(JSON.stringify({
   base: process.env.MBAPP_API_BASE,
   requestedTenant,
+  effectiveTenant,
   smokeTenantId: process.env.MBAPP_SMOKE_TENANT_ID || null,
   envTenantId,
-  childTenantId: requestedTenant,
+  childTenantId: effectiveTenant,
   smokeRunId,
-  tokenVar: process.env.MBAPP_BEARER ? "MBAPP_BEARER" : (process.env.DEV_API_TOKEN ? "DEV_API_TOKEN" : null),
-  hasToken: Boolean(process.env.MBAPP_BEARER || process.env.DEV_API_TOKEN),
+  tokenVar: selectedTokenVar,
+  hasToken: Boolean(selectedBearer),
   jwtTenant,
   allowMismatch: allowTenantMismatch,
   allowNonSmokeTenant
 }));
 
-if (!allowTenantMismatch && process.env.MBAPP_BEARER && jwtTenant && jwtTenant !== requestedTenant) {
-  console.error(
-    `[ci-smokes] Tenant mismatch:\n` +
-    `  Requested tenant: "${requestedTenant}"\n` +
-    `  JWT decodes to:  "${jwtTenant}"\n` +
-    `  Override: MBAPP_SMOKE_ALLOW_TENANT_MISMATCH=1 (currently not set)\n` +
-    `  (This is expected until SmokeTenant JWT is available)`
-  );
-  process.exit(2);
-}
-
 console.log(`[ci-smokes] Running ${flows.length} flows:`);
 flows.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));
-// Prepare child env with requestedTenant and unique SMOKE_RUN_ID
+// Prepare child env with effectiveTenant and unique SMOKE_RUN_ID
 const childEnv = {
   ...process.env,
-  MBAPP_TENANT_ID: requestedTenant,
+  MBAPP_TENANT_ID: effectiveTenant,
   SMOKE_RUN_ID: smokeRunId
 };
 

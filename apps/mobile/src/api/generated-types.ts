@@ -2548,6 +2548,7 @@ export interface components {
             notes?: string | null;
             attachments?: string[];
         };
+        /** @description Sprint XXIX web UI uses /objects/salesOrder for draft create/edit with partyId, optional customerId/notes, and simple line {id,itemId,qty,uom} fields. */
         SalesOrder: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
             type: "salesOrder";
