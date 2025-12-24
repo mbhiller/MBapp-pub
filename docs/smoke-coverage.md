@@ -43,6 +43,40 @@ npm run smokes:run:ci
 # Result: Tests run, manifest saved, no errors due to tenant mismatch
 ```
 
+## Mint SmokeTenant Token
+
+To eliminate tenant mismatch and allow CI to run strictly, mint a SmokeTenant-scoped JWT and add it as a GitHub Actions secret.
+
+PowerShell (Windows):
+```powershell
+# 1) Point to your API base (nonprod or prod as appropriate)
+$env:MBAPP_API_BASE = "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com"
+
+# 2) Set the tenant to SmokeTenant for this shell
+$env:MBAPP_TENANT_ID = "SmokeTenant"
+
+# 3) Mint a dev-login token for SmokeTenant
+./ops/Set-MBEnv.ps1 -Login
+
+# 4) Copy the token (do not commit it)
+echo $env:MBAPP_BEARER
+```
+
+Alternative (one-shot emit using CI helper):
+```powershell
+$env:MBAPP_API_BASE = "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com"
+$env:MBAPP_TENANT_ID = "SmokeTenant"
+./ops/ci/Emit-CIEnv.ps1 -EmitTokenOnly
+# Copy the emitted token line (last line)
+```
+
+Add to GitHub Actions secrets:
+- Open GitHub → Repo → Settings → Secrets and variables → Actions → New secret
+- Name: `MBAPP_BEARER_SMOKE`
+- Value: paste the token captured above
+
+CI will prefer `MBAPP_BEARER_SMOKE` and run under `SmokeTenant` without mismatch overrides.
+
 ## How to Run Smokes & Cleanup (Canonical)
 
 **1) Run CI-style smokes locally (SmokeTenant header, DemoTenant JWT)**

@@ -110,34 +110,40 @@ if (!Array.isArray(flows) || flows.length === 0) {
   process.exit(1);
 }
 
-// Guard: bearer tenant must match requested tenant unless override
+// Guard: bearer tenant must match requested tenant unless explicit dual overrides
 const allowTenantMismatch = process.env.MBAPP_SMOKE_ALLOW_TENANT_MISMATCH === "1";
-// Compute effective tenant for child runs (header/X-Tenant-Id)
-let effectiveTenant = requestedTenant;
+const isCIStrict = process.env.CI === "true";
+const originalRequestedTenant = requestedTenant;
 if (jwtTenant && jwtTenant !== requestedTenant) {
-  const isCI = process.env.CI === "true";
-  if (isCI) {
+  if (isCIStrict) {
     console.error(
-      `[ci-smokes] Token tenant mismatch in CI:\n` +
-      `  requestedTenant=${requestedTenant}\n` +
-      `  jwtTenant=${jwtTenant}\n` +
-      `  CI requires them to match. Please provide a SmokeTenant JWT or adjust requested tenant.`
+      `[ci-smokes] Need SmokeTenant JWT (MBAPP_BEARER_SMOKE).\n` +
+      `  originalRequestedTenant=${originalRequestedTenant}\n` +
+      `  jwtTenant=${jwtTenant}`
     );
     process.exit(2);
   }
-  if (allowTenantMismatch) {
-    // Local override: run "truthfully" under the token tenant to avoid TenantHeaderMismatch
-    effectiveTenant = jwtTenant;
+  // Local runs: only allow running in non-Smoke tenant if BOTH overrides are set
+  if (allowNonSmokeTenant && allowTenantMismatch) {
+    requestedTenant = jwtTenant; // user explicitly opts to run under the token's tenant
+  } else {
+    console.error(
+      `[ci-smokes] Token tenant mismatch.\n` +
+      `  originalRequestedTenant=${originalRequestedTenant}\n` +
+      `  jwtTenant=${jwtTenant}\n` +
+      `  Set MBAPP_SMOKE_ALLOW_NON_SMOKE_TENANT=1 AND MBAPP_SMOKE_ALLOW_TENANT_MISMATCH=1 to run in "${jwtTenant}" locally.`
+    );
+    process.exit(2);
   }
 }
 
 console.log(JSON.stringify({
   base: process.env.MBAPP_API_BASE,
-  requestedTenant,
-  effectiveTenant,
+  originalRequestedTenant,
+  finalRequestedTenant: requestedTenant,
   smokeTenantId: process.env.MBAPP_SMOKE_TENANT_ID || null,
   envTenantId,
-  childTenantId: effectiveTenant,
+  childTenantId: requestedTenant,
   smokeRunId,
   tokenVar: selectedTokenVar,
   hasToken: Boolean(selectedBearer),
@@ -148,10 +154,10 @@ console.log(JSON.stringify({
 
 console.log(`[ci-smokes] Running ${flows.length} flows:`);
 flows.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));
-// Prepare child env with effectiveTenant and unique SMOKE_RUN_ID
+// Prepare child env with requestedTenant (final) and unique SMOKE_RUN_ID
 const childEnv = {
   ...process.env,
-  MBAPP_TENANT_ID: effectiveTenant,
+  MBAPP_TENANT_ID: requestedTenant,
   SMOKE_RUN_ID: smokeRunId
 };
 
