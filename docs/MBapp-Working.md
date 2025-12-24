@@ -1,3 +1,41 @@
+## Sprint XXIX — Sales Orders Web + Smokes (2025-12-24)
+
+**Date:** 2025-12-24  
+**Environment:** AWS API Gateway (https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com)  
+**Tenant:** DemoTenant  
+**Smoke Results:** Added 2 Sales Order flows; all CI smokes green ✅
+
+**Scope:**
+- Web Sales Orders v1: list/search/filter, detail with Submit/Commit (strict toggle), Reserve/Release/Fulfill/Close/Cancel, create/edit forms with partyId + line editor.
+- Smokes: strict shortage (409, no BO) and non-strict backorder creation; wired into CI after existing flows.
+- Docs: coverage updated for new Sales Orders smokes.
+
+**Key Deliverables:**
+- **Web pages:** SalesOrdersListPage (search + status filter + pagination), CreateSalesOrderPage, SalesOrderDetailPage (actions + refresh), EditSalesOrderPage, SalesOrderForm (reusable lines editor).
+- **Routing/Nav:** App routes for /sales-orders (list/detail/create/edit); Layout nav link; Home quick link.
+- **Smokes:** `smoke:salesOrders:commit-strict-shortage` (strict commit → 409, no backorder) and `smoke:salesOrders:commit-nonstrict-backorder` (non-strict commit → shortages[] + backorderRequest). Both added to ci-smokes.json.
+- **Spec note:** MBapp-Modules.yaml documents web UI usage of /objects/salesOrder draft fields.
+
+**Acceptance:**
+- ✅ Web Sales Orders flow works against AWS: create draft, submit, commit (strict/non-strict), reserve/release, fulfill, close/cancel with refetch.
+- ✅ New smokes pass locally and run in CI (AWS-only, bearer required, eventual-consistency retries baked in).
+- ✅ Typechecks: api/web/mobile pass after changes.
+
+**Runbook:**
+```bash
+# Web
+cd apps/web && npm run typecheck
+
+# Smokes (new ones)
+node ops/smoke/smoke.mjs smoke:salesOrders:commit-strict-shortage
+node ops/smoke/smoke.mjs smoke:salesOrders:commit-nonstrict-backorder
+
+# CI set (includes new flows)
+node ops/tools/run-ci-smokes.mjs
+```
+
+---
+
 ## Sprint XXVII — Products + Inventory Vertical Slice (2025-12-23)
 
 **Date:** 2025-12-23  

@@ -1583,6 +1583,7 @@ components:
             type: array
             items: { type: string }
     SalesOrder:
+      description: Sprint XXIX web UI uses /objects/salesOrder for draft create/edit with partyId, optional customerId/notes, and simple line {id,itemId,qty,uom} fields.
       allOf:
       - $ref: '#/components/schemas/ObjectBase'
       - type: object
