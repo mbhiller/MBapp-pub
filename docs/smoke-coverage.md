@@ -109,8 +109,9 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 | **Feature Flags** | po:vendor-guard:on, po:vendor-guard:off, po:emit-events | ✅ Complete | Header overrides, simulation |
 | **EPC** | epc:resolve | ✅ Complete | 404 case only |
 | **Registrations** | registrations:crud, registrations:filters | ✅ Complete (Sprint IV) | CRUD lifecycle + filters (eventId, partyId, status); feature-flagged (default OFF) |
-| **Views** | ❌ None | ⚠️ Gap | Spec defines /views (CRUD) — not tested |
-| **Workspaces** | ❌ None | ⚠️ Gap | Spec defines /workspaces (CRUD) — not tested |
+| **Views** | views:crud | ✅ Complete (Sprint XXVIII) | CRUD lifecycle + list pagination + q/entityType filters + eventual consistency retry (in CI) |
+| **Workspaces** | workspaces:list | ✅ Complete (Sprint XXVIII) | List + q/entityType filters + pagination (read-only v1) |
+| **Events** | events:enabled-noop | ✅ Complete (Sprint XXVIII) | Event dispatcher noop/simulate flag gating (in CI) |
 | **Backorders** | objects:list-filter-soId, objects:list-filter-itemId (planned), objects:list-filter-status (planned), objects:list-filter-soId+itemId (planned) | ✅ Partial (Sprint XX); 🔄 Planned (Sprint XXI) | soId + pagination working (Sprint XX); itemId, status, combo filters planned (Sprint XXI) |
 | **Routing** | ❌ None | ⚠️ Gap | Spec defines /routing/graph, /routing/plan (deprecated in Sprint III?) — not tested |
 | **Scanner** | ❌ None | ⚠️ Gap | Spec defines sessions, actions, simulate — not tested |
@@ -125,10 +126,13 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 - ✅ registrations:filters — Query filters (eventId, partyId, status)
 - ✅ Feature flag tested via X-Feature-Registrations-Enabled header
 
+**Sprint XXVIII Delivered** (Views + Workspaces v1):
+- ✅ smoke:views:crud — POST/GET/PUT/DELETE views + list pagination + q/entityType filters
+- ✅ smoke:workspaces:list — GET /workspaces + q/entityType filters + pagination
+- ✅ smoke:events:enabled-noop — Event dispatcher flag gating (noop/simulate modes)
+
 **Critical Gaps (Still Pending)**:
-1. **smoke:views:crud** — No test for create/read/update/delete views (Sprint III scope deferred)
-2. **smoke:workspaces:list** — No test for workspaces listing (Sprint III scope deferred)
-3. **smoke:events:enabled-noop** — Event dispatch flag gating NOT tested (featureEventsEnabled still noop stub)
+- None for Sprint XXVIII scope (Views/Workspaces v1 complete)
 
 **Out of Scope (Not Expected in Current Tier)**:
 - Registration actions (:cancel, :checkin, :checkout) — Tier 2
@@ -137,7 +141,108 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 - Routing (graph, plan)
 - Scanner (sessions, actions, simulate)
 - Audit log query
+Sprint XXVIII Flows (Views + Workspaces v1)
 
+### smoke:views:crud
+
+**Purpose**: Validate views CRUD operations with pagination and filters.
+
+**CI**: ✅ Yes (in ops/ci-smokes.json)
+
+**Exact Steps** (from ops/smoke/smoke.mjs lines 1424-1558):
+1. POST `/views` with `{ name: "SmokeView-{timestamp}", entityType: "inventoryItem", filters: [...], columns: [...] }`
+2. Assert 201/200; capture `viewId` from response.id
+3. GET `/views?entityType=inventoryItem&q={uniqueName}&limit=100` with retry (up to 5 attempts, 200ms backoff) and pagination (up to 3 pages)
+4. Assert created view appears in list within retry window (eventual consistency handling)
+5. GET `/views/{viewId}` (single view)
+6. Assert 200; body.id === viewId
+7. PUT `/views/{viewId}` with updated name + additional filters
+8. Assert 200; body.name === updatedName
+9. DELETE `/views/{viewId}`
+10. Assert 204 or success; verify view NOT in list after delete (3 retry attempts)
+
+**Expected Assertions**:
+- ✅ Create returns 200/201 with id + name + entityType + filters + columns
+- ✅ List pagination works (q, entityType filters, cursor)
+- ✅ List includes created view within 5×200ms retry window
+- ✅ Read returns full view object
+- ✅ Update persists; name/filters change
+- ✅ Delete succeeds; view no longer in list
+
+**Target Endpoints**: `/views`, `/views?q=...&entityType=...&limit=...&next=...`, `/views/{id}`
+
+**Feature Flags**: None (pure RBAC via view:read, view:write)
+
+---
+
+### smoke:workspaces:list
+
+**Purpose**: Validate workspaces list with query filters (q, entityType) and pagination.
+
+**CI**: ✅ Yes (in ops/ci-smokes.json)
+
+**Exact Steps** (from ops/smoke/smoke.mjs lines 1560-1659):
+1. POST `/views` (2 temp views: "WS Test A" entityType=purchaseOrder, "WS Sample B" entityType=salesOrder) with header `X-Feature-Views-Enabled: true`
+2. Assert both creates return 200/201 with id
+3. GET `/workspaces?limit=50` (all workspaces)
+4. Assert 200; response.items is array
+5. GET `/workspaces?q=Test&limit=50` (name filter)
+6. Assert at least one item with "Test" in name
+7. GET `/workspaces?entityType=purchaseOrder&limit=50` (entity type filter)
+8. Assert all returned items have entityType === "purchaseOrder"
+9. DELETE both temp views (cleanup)
+
+**Expected Assertions**:
+- ✅ Workspaces list returns items array
+- ✅ q filter (substring match on name) works
+- ✅ entityType filter (exact match) works
+- ✅ Pagination metadata present (next cursor if needed)
+- ✅ Items include name, entityType, timestamps
+
+**Target Endpoints**: `/workspaces`, `/workspaces?q=...&entityType=...&limit=...`
+
+**Feature Flags**: `X-Feature-Views-Enabled: true` (dev header override)
+
+**Note**: Sprint III v1 workspaces endpoint is a read-only wrapper around views (queries type="view" and filters in-memory).
+
+---
+
+### smoke:events:enabled-noop
+
+**Purpose**: Validate event dispatcher flag gating (noop vs. simulate modes).
+
+**CI**: ✅ Yes (in ops/ci-smokes.json)
+
+**Exact Steps** (from ops/smoke/smoke.mjs lines 1659+):
+1. Create PO (draft) with vendorId and line items
+2. POST `/purchasing/po/{id}:submit`
+3. POST `/purchasing/po/{id}:approve` → wait for status=approved
+4. POST `/purchasing/po/{id}:receive` with headers:
+   - `Future Flows (Deferred)abled: true`
+   - `X-Feature-Events-Simulate: true`
+5. Assert 200; response._dev.emitted === true (simulation signal)
+6. Repeat receive with `X-Feature-Events-Enabled: false` (flag OFF)
+7. Assert 200; dispatcher is noop regardless (no _dev metadata or always noop)
+8. Repeat receive with both flags ON
+9. Assert 200; response._dev.emitted === true (simulate path active)
+
+**Expected Assertions**:
+- ✅ With events enabled=OFF: dispatch is noop, no _dev.emitted
+- ✅ With events enabled=ON, simulate=OFF: dispatch is noop (stub), no _dev.emitted
+- ✅ With events enabled=ON, simulate=ON: response._dev.emitted === true
+- ✅ PO status updates correctly in all cases (events don't block actions)
+
+**Target Endpoints**: `/purchasing/po/{id}:receive`
+
+**Feature Flags**:
+- `X-Feature-Events-Enabled: true` (env: FEATURE_EVENT_DISPATCH_ENABLED)
+- `X-Feature-Events-Simulate: true` (env: FEATURE_EVENT_DISPATCH_SIMULATE)
+
+**Note**: Events are noop in Sprint XXVIII; dispatchEvent() returns stub. Simulation mode adds _dev.emitted signal for testing flag logic.
+
+---
+
+## 5. 
 ---
 
 ## 4. Proposed New Flows (Sprint III)
@@ -192,7 +297,7 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 
 **Purpose**: Validate event dispatcher flag gating (featureEventsEnabled) and noop behavior.
 
-**Exact Steps**:
+**ExacRunning Smoke Test
 1. Create PO, submit, approve as in smoke:po:emit-events
 2. GET `/objects/purchaseOrder/{id}`; capture lines
 3. POST `/purchasing/po/{id}:receive` with header `X-Feature-Events-Enabled: 1` (flag ON) + `X-Feature-Events-Simulate: 0` (simulation OFF)
@@ -205,7 +310,7 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 **Expected Assertions**:
 - ✅ With events enabled=OFF: dispatch is noop, no _dev metadata
 - ✅ With events enabled=ON, simulate=OFF: dispatch is noop (stub), no _dev metadata
-- ✅ With events enabled=ON, simulate=ON: response includes _dev.emitted === true
+- ✅7. Known Limitationnts enabled=ON, simulate=ON: response includes _dev.emitted === true
 - ✅ Simulation path overrides both flags; always signals "emitted"
 - ✅ PO status updated correctly in all cases (events don't block receipt)
 
@@ -217,6 +322,7 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 
 ---
 
+## 8. References
 ## 5. Running Smoke Tests
 
 ### Prerequisites
@@ -306,15 +412,17 @@ Exit code: 0 (PASS), 1 (FAIL)
 
 ---
 
-## References
+## 8. References
 
-- **Smoke Test File**: [ops/smoke/smoke.mjs](ops/smoke/smoke.mjs) (724 lines, 20 flows)
+- **Smoke Test File**: [ops/smoke/smoke.mjs](ops/smoke/smoke.mjs) (2508 lines, 25+ flows)
 - **Smoke Seeds**: [ops/smoke/seed/](ops/smoke/seed/) (routing.ts, parties.ts, vendor seeding)
 - **Feature Flags Docs**: [docs/flags-and-events.md](flags-and-events.md)
 - **Spec**: [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml)
 - **CORS/Feature Headers**: [apps/api/src/index.ts](../apps/api/src/index.ts) line ~103
+- **CI Smokes Config**: [ops/ci-smokes.json](../ops/ci-smokes.json)
+- **CI Runner**: [ops/tools/run-ci-smokes.mjs](../ops/tools/run-ci-smokes.mjs)
 
 ---
 
-**Last Updated**: Dec 20, 2025 (Sprint IV)  
-**Status**: 22 test flows implemented (includes Registrations v1); Views/Workspaces CRUD deferred
+**Last Updated**: Dec 23, 2025 (Sprint XXVIII)  
+**Status**: 25 test flows implemented (includes Views/Workspaces v1 + Events noop testing)

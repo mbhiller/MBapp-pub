@@ -11,6 +11,12 @@ import ProductsListPage from "./pages/ProductsListPage";
 import ProductDetailPage from "./pages/ProductDetailPage";
 import InventoryListPage from "./pages/InventoryListPage";
 import InventoryDetailPage from "./pages/InventoryDetailPage";
+import ViewsListPage from "./pages/ViewsListPage";
+import CreateViewPage from "./pages/CreateViewPage";
+import ViewDetailPage from "./pages/ViewDetailPage";
+import EditViewPage from "./pages/EditViewPage";
+import WorkspacesListPage from "./pages/WorkspacesListPage";
+import WorkspaceDetailPage from "./pages/WorkspaceDetailPage";
 
 function HomePage() {
   return (
@@ -21,6 +27,8 @@ function HomePage() {
         <Link to="/parties">Parties</Link>
         <Link to="/products">Products</Link>
         <Link to="/inventory">Inventory</Link>
+        <Link to="/views">Views</Link>
+        <Link to="/workspaces">Workspaces</Link>
       </div>
     </div>
   );
@@ -42,6 +50,12 @@ export default function App() {
           <Route path="/products/:id/edit" element={<EditProductPage />} />
           <Route path="/inventory" element={<InventoryListPage />} />
           <Route path="/inventory/:id" element={<InventoryDetailPage />} />
+          <Route path="/views" element={<ViewsListPage />} />
+          <Route path="/views/new" element={<CreateViewPage />} />
+          <Route path="/views/:id" element={<ViewDetailPage />} />
+          <Route path="/views/:id/edit" element={<EditViewPage />} />
+          <Route path="/workspaces" element={<WorkspacesListPage />} />
+          <Route path="/workspaces/:id" element={<WorkspaceDetailPage />} />
         </Routes>
       </Layout>
     </ErrorBoundary>

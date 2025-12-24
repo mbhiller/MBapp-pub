@@ -30,6 +30,8 @@ export function Layout({ children }: { children: ReactNode }) {
           <Link to="/parties" style={{ color: "#fff", textDecoration: "underline" }}>Parties</Link>
           <Link to="/products" style={{ color: "#fff", textDecoration: "underline" }}>Products</Link>
           <Link to="/inventory" style={{ color: "#fff", textDecoration: "underline" }}>Inventory</Link>
+          <Link to="/views" style={{ color: "#fff", textDecoration: "underline" }}>Views</Link>
+          <Link to="/workspaces" style={{ color: "#fff", textDecoration: "underline" }}>Workspaces</Link>
         </nav>
       </header>
       <main style={{ padding: "16px" }}>{children}</main>
