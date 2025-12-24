@@ -43,7 +43,59 @@ npm run smokes:run:ci
 # Result: Tests run, manifest saved, no errors due to tenant mismatch
 ```
 
+## Mint SmokeTenant Token
+
+To eliminate tenant mismatch and allow CI to run strictly, mint a SmokeTenant-scoped JWT and add it as a GitHub Actions secret.
+
+PowerShell (Windows):
+```powershell
+# 1) Point to your API base (nonprod or prod as appropriate)
+$env:MBAPP_API_BASE = "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com"
+
+# 2) Set the tenant to SmokeTenant for this shell
+$env:MBAPP_TENANT_ID = "SmokeTenant"
+
+# 3) Mint a dev-login token for SmokeTenant
+./ops/Set-MBEnv.ps1 -Login
+
+# 4) Copy the token (do not commit it)
+echo $env:MBAPP_BEARER
+```
+
+Alternative (one-shot emit using CI helper):
+```powershell
+$env:MBAPP_API_BASE = "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com"
+$env:MBAPP_TENANT_ID = "SmokeTenant"
+./ops/ci/Emit-CIEnv.ps1 -EmitTokenOnly
+# Copy the emitted token line (last line)
+```
+
+Add to GitHub Actions secrets:
+- Open GitHub → Repo → Settings → Secrets and variables → Actions → New secret
+- Name: `MBAPP_BEARER_SMOKE`
+- Value: paste the token captured above
+
+CI will prefer `MBAPP_BEARER_SMOKE` and run under `SmokeTenant` without mismatch overrides.
+
 ## How to Run Smokes & Cleanup (Canonical)
+
+### Local-Friendly Run (Current Tenant)
+Run a single smoke flow using your currently logged-in tenant (no SmokeTenant guard). Pass the flow name after `--`.
+
+```powershell
+# Example: run inventory CRUD against current tenant
+npm run smokes:run -- smoke:inventory:crud
+
+# Or any other flow:
+npm run smokes:run -- smoke:views:crud
+npm run smokes:run -- smoke:workspaces:list
+```
+
+Notes:
+- This path uses whatever is in `MBAPP_TENANT_ID` and your current bearer.
+- If your bearer decodes to a different tenant than `MBAPP_TENANT_ID`, you must explicitly opt in:
+  - Set `MBAPP_SMOKE_ALLOW_TENANT_MISMATCH=1` to allow running with mismatched token/header.
+- Prefer `smokes:run:ci` for strict `SmokeTenant` runs; it enforces tenant alignment and fails fast if a `SmokeTenant` JWT is not supplied.
 
 **1) Run CI-style smokes locally (SmokeTenant header, DemoTenant JWT)**
 ```powershell

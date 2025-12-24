@@ -91,9 +91,10 @@ async function repoListMovementsByItem(
     }));
 
     const raw = (out.Items ?? []) as any[];
+    const wantItemId = String(itemId); // normalize to avoid number/string mismatches
 
     const pageItems: InventoryMovement[] = raw
-      .filter((m) => m?.itemId === itemId)
+      .filter((m) => String(m?.itemId) === wantItemId)
       .map((m) => {
         const action =
           asAction(m?.action) ??

@@ -227,6 +227,7 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
       const line = linesById.get(r.lineId);
       if (line) line.receivedQty = (Number(line.receivedQty ?? 0) + Number(r.deltaQty ?? 0));
       const mvId = rid("mv");
+      const rawItemId = linesById.get(r.lineId)?.itemId;
       const mv = {
         pk: tenantId,
         sk: `inventoryMovement#${mvId}`,
@@ -238,7 +239,7 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
         qty: Number(r.deltaQty ?? 0),
         refId: po.id,
         poLineId: r.lineId,
-        itemId: linesById.get(r.lineId)?.itemId,
+        itemId: rawItemId == null ? undefined : String(rawItemId),
         uom: linesById.get(r.lineId)?.uom ?? "ea",
         lot: r.lot ?? undefined,
         locationId: (r as any).location ?? r.locationId ?? undefined,

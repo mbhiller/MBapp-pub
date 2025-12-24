@@ -99,11 +99,9 @@ jobs:
     needs: [ typecheck ]
     env:
       MBAPP_API_BASE: ${{ secrets.MBAPP_API_BASE }}
+      MBAPP_TENANT_ID: "SmokeTenant"
       MBAPP_SMOKE_TENANT_ID: "SmokeTenant"
-      MBAPP_SMOKE_ALLOW_TENANT_MISMATCH: "1"
-      # Optional: Use SmokeTenant-specific JWT to avoid mismatch (future)
-      # Uncomment when secrets.MBAPP_BEARER_SMOKE is available:
-      # MBAPP_BEARER_SMOKE: ${{ secrets.MBAPP_BEARER_SMOKE }}
+      MBAPP_BEARER_SMOKE: ${{ secrets.MBAPP_BEARER_SMOKE }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -116,10 +114,6 @@ jobs:
 
       - name: Install deps
         run: npm ci
-
-      - name: Check API base present
-        run: |
-          node -e "console.log(JSON.stringify({ baseSet: Boolean(process.env.MBAPP_API_BASE) }))"
 
       - name: Run curated smokes
         run: npm run smokes:run:ci

@@ -384,6 +384,20 @@ const tests = {
       if (!receive.ok) return { test: "close-the-loop", result: "FAIL", step: "po-receive", receive };
       // 7) Assert inventory onHand increased
       const onhandAfter = await onhand(itemId);
+      const expectedReceived = lines.reduce((sum, l) => sum + Number(l.deltaQty ?? 0), 0);
+      const afterItem = onhandAfter.body?.items?.[0] ?? {};
+      const onHandAfter = Number(afterItem.onHand ?? 0);
+      const availableAfter = Number(afterItem.available ?? (onHandAfter - Number(afterItem.reserved ?? 0)));
+      if (!(onHandAfter >= expectedReceived && availableAfter >= 0)) {
+        throw new Error(JSON.stringify({
+          message: "onhand check after receive failed",
+          itemId,
+          expectedReceived,
+          onHandAfter,
+          availableAfter,
+          onhandResponse: onhandAfter.body
+        }, null, 2));
+      }
       // Assert backorderRequests status becomes "fulfilled"
       const boFulfilled = await post(`/objects/backorderRequest/search`, { soId, itemId, status: "fulfilled" });
       recordFromListResult(boFulfilled.body?.items, "backorderRequest", `/objects/backorderRequest/search`);
