@@ -4,6 +4,9 @@
 
 Smoke tests are integration tests for critical API flows. All tests use idempotency keys for safe retry and include party/vendor seeding. Run with `node ops/smoke/smoke.mjs <test-name>`.
 
+- Default tenant: any tenant starting with **SmokeTenant** (e.g., SmokeTenant, SmokeTenant-qa). Override only by setting `MBAPP_SMOKE_ALLOW_NON_SMOKE_TENANT=1` (dangerous).
+- `SMOKE_RUN_ID` is emitted in the preflight log; set `SMOKE_RUN_ID` explicitly to tag runs or let the runner generate one.
+
 **Close-the-loop flow:** SO shortage → BO open (with preferredVendorId derived from product) → suggest-po (returns drafts with vendorId) → save draft PO → receive → onhand increases → BO fulfilled → idempotency replay (no double-apply). Vendor party is seeded at flow start; product.preferredVendorId set so so:commit populates backorderRequest.preferredVendorId and suggest-po avoids MISSING_VENDOR errors.
 
 **Feature flag testing:** Tests explicitly set feature flag headers (e.g., `X-Feature-Registrations-Enabled: 0`) to ensure deterministic behavior regardless of AWS environment defaults.

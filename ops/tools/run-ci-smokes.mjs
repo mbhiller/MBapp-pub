@@ -1,6 +1,20 @@
 import fs from "fs";
 import { spawnSync } from "child_process";
 
+const DEFAULT_TENANT = "SmokeTenant";
+const allowNonSmokeTenant = process.env.MBAPP_SMOKE_ALLOW_NON_SMOKE_TENANT === "1";
+if (!process.env.MBAPP_TENANT_ID || !process.env.MBAPP_TENANT_ID.trim()) {
+  process.env.MBAPP_TENANT_ID = DEFAULT_TENANT;
+}
+if (!allowNonSmokeTenant && !process.env.MBAPP_TENANT_ID.startsWith(DEFAULT_TENANT)) {
+  console.error(
+    `[ci-smokes] MBAPP_TENANT_ID is "${process.env.MBAPP_TENANT_ID}" but must start with "${DEFAULT_TENANT}". Set MBAPP_SMOKE_ALLOW_NON_SMOKE_TENANT=1 to override.`
+  );
+  process.exit(2);
+}
+
+process.env.SMOKE_RUN_ID ||= `smk-${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
+
 function getBearer() {
   const ps = spawnSync("pwsh", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "ops/ci/Emit-CIEnv.ps1", "-EmitTokenOnly"], { encoding: "utf8" });
   if (ps.status !== 0) {
@@ -38,6 +52,8 @@ if (!Array.isArray(flows) || flows.length === 0) {
 
 console.log(JSON.stringify({
   base: process.env.MBAPP_API_BASE,
+  tenant: process.env.MBAPP_TENANT_ID,
+  smokeRunId: process.env.SMOKE_RUN_ID,
   tokenVar: process.env.MBAPP_BEARER ? "MBAPP_BEARER" : (process.env.DEV_API_TOKEN ? "DEV_API_TOKEN" : null),
   hasToken: Boolean(process.env.MBAPP_BEARER || process.env.DEV_API_TOKEN)
 }));
