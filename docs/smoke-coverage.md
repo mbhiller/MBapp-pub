@@ -79,6 +79,24 @@ CI will prefer `MBAPP_BEARER_SMOKE` and run under `SmokeTenant` without mismatch
 
 ## How to Run Smokes & Cleanup (Canonical)
 
+### Local-Friendly Run (Current Tenant)
+Run a single smoke flow using your currently logged-in tenant (no SmokeTenant guard). Pass the flow name after `--`.
+
+```powershell
+# Example: run inventory CRUD against current tenant
+npm run smokes:run -- smoke:inventory:crud
+
+# Or any other flow:
+npm run smokes:run -- smoke:views:crud
+npm run smokes:run -- smoke:workspaces:list
+```
+
+Notes:
+- This path uses whatever is in `MBAPP_TENANT_ID` and your current bearer.
+- If your bearer decodes to a different tenant than `MBAPP_TENANT_ID`, you must explicitly opt in:
+  - Set `MBAPP_SMOKE_ALLOW_TENANT_MISMATCH=1` to allow running with mismatched token/header.
+- Prefer `smokes:run:ci` for strict `SmokeTenant` runs; it enforces tenant alignment and fails fast if a `SmokeTenant` JWT is not supplied.
+
 **1) Run CI-style smokes locally (SmokeTenant header, DemoTenant JWT)**
 ```powershell
 $env:MBAPP_TENANT_ID="DemoTenant"
