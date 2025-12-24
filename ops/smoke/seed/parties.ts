@@ -15,10 +15,12 @@ async function must(ok: boolean, err: () => string) {
 }
 
 async function createParty(api: Api, kind: "person" | "organization", name: string): Promise<string> {
+  const rid = process.env.SMOKE_RUN_ID || `smk-${Date.now()}`;
+  const taggedName = `${rid}-${name}`;
   const res = await api.post(`/objects/party`, {
     type: "party",
     kind,
-    name,
+    name: taggedName,
   });
   await must(!!res?.ok, () => `createParty failed ${res?.status}: ${JSON.stringify(res?.body)}`);
   const id = res.body?.id ?? res.body?.partyId;

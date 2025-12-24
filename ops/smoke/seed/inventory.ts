@@ -1,10 +1,11 @@
 // ops/smoke/seed/inventory.ts
 // Seeds a product + inventory item + a small receive movement.
 export async function seedInventory(api: { post: Function }) {
+  const rid = process.env.SMOKE_RUN_ID || `smk-${Date.now()}`;
   const prod = await api.post(`/objects/product`, {
     type: "product",
-    name: "Seed Product",
-    sku: `SEED-${Math.random().toString(36).slice(2, 7)}`,
+    name: `${rid}-Seed Product`,
+    sku: `${rid}-SEED-${Math.random().toString(36).slice(2, 7)}`,
   });
   if (!prod.ok) return { ok: false, step: "product", res: prod };
 
@@ -12,7 +13,7 @@ export async function seedInventory(api: { post: Function }) {
 
   const item = await api.post(`/objects/inventory`, {
     type: "inventory",
-    name: "Seed Item",
+    name: `${rid}-Seed Item`,
     productId,
     uom: "ea",
   });

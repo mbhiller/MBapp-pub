@@ -39,6 +39,22 @@ if (!process.env.MBAPP_API_BASE || !process.env.MBAPP_API_BASE.trim()) {
   process.env.MBAPP_API_BASE = DEFAULT_BASE;
 }
 
+// Helper: decode JWT payload (base64url) and return mbapp.tenantId if present
+function decodeJwtTenant(bearer){
+  try{
+    const tok = String(bearer||"").trim();
+    const parts = tok.split(".");
+    if(parts.length < 2) return null;
+    let b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    while (b64.length % 4) b64 += "=";
+    const json = Buffer.from(b64, "base64").toString("utf8");
+    const payload = JSON.parse(json);
+    const t = payload?.mbapp?.tenantId;
+    return t ? String(t) : null;
+  }catch{ return null; }
+}
+const jwtTenant = decodeJwtTenant(process.env.MBAPP_BEARER);
+
 const cfgPath = "ops/ci-smokes.json";
 if (!fs.existsSync(cfgPath)) {
   console.error(`[ci-smokes] Missing ${cfgPath}`);
@@ -55,8 +71,16 @@ console.log(JSON.stringify({
   tenant: process.env.MBAPP_TENANT_ID,
   smokeRunId: process.env.SMOKE_RUN_ID,
   tokenVar: process.env.MBAPP_BEARER ? "MBAPP_BEARER" : (process.env.DEV_API_TOKEN ? "DEV_API_TOKEN" : null),
-  hasToken: Boolean(process.env.MBAPP_BEARER || process.env.DEV_API_TOKEN)
+  hasToken: Boolean(process.env.MBAPP_BEARER || process.env.DEV_API_TOKEN),
+  jwtTenant
 }));
+
+// Guard: bearer tenant must match requested tenant unless override
+const allowTenantMismatch = process.env.MBAPP_SMOKE_ALLOW_TENANT_MISMATCH === "1";
+if (!allowTenantMismatch && process.env.MBAPP_BEARER && jwtTenant && jwtTenant !== process.env.MBAPP_TENANT_ID) {
+  console.error(`[ci-smokes] Bearer token tenant ("${jwtTenant}") does not match requested tenant ("${process.env.MBAPP_TENANT_ID}"). Set MBAPP_SMOKE_ALLOW_TENANT_MISMATCH=1 to override.`);
+  process.exit(2);
+}
 
 console.log(`[ci-smokes] Running ${flows.length} flows:`);
 flows.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));

@@ -3,6 +3,7 @@
 
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, QueryCommand } from "@aws-sdk/lib-dynamodb";
+import { resolveTenantId } from "../common/tenant";
 
 type SortDir = "asc" | "desc";
 
@@ -45,12 +46,7 @@ function respond(status: number, body: unknown) {
 }
 
 function getTenantId(event: any): string {
-  // Prefer authorizer if present, then headers, finally default
-  const auth = event?.requestContext?.authorizer?.mbapp?.tenantId
-           ||  event?.requestContext?.authorizer?.jwt?.claims?.["custom:tenantId"];
-  if (auth) return String(auth);
-  const h = event?.headers || {};
-  return h["X-Tenant-Id"] || h["x-tenant-id"] || h["X-tenant-id"] || h["x-Tenant-Id"] || "DemoTenant";
+  return resolveTenantId(event);
 }
 
 function encodeCursor(key: any | undefined): string | null {
@@ -181,7 +177,13 @@ export async function handle(event: any) {
   const id: string | undefined = event?.pathParameters?.id;
   if (!id) return respond(400, { error: "BadRequest", message: "Missing id" });
 
-  const tenantId = getTenantId(event);
+  let tenantId: string;
+  try {
+    tenantId = getTenantId(event);
+  } catch (err: any) {
+    const status = err?.statusCode ?? 400;
+    return respond(status, { error: err?.code ?? "TenantError", message: err?.message ?? "Tenant resolution failed" });
+  }
   const qs = event?.queryStringParameters ?? {};
   const limit = Number.isFinite(+qs.limit) ? Math.max(1, Math.min(1000, +qs.limit)) : 50;
   const sort: SortDir = String(qs.sort ?? "desc").toLowerCase() === "asc" ? "asc" : "desc";

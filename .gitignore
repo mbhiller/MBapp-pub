@@ -57,3 +57,6 @@ apps/api/artifacts/
 Thumbs.db
 .vscode/
 "@
+# Smoke manifests (local-only)
+ops/smoke/.manifests/
+

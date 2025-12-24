@@ -56,7 +56,8 @@
     "smoke:common:error-shapes": "node ops/smoke/smoke.mjs smoke:common:error-shapes",
     "smoke:sync": "node ops/tools/sync-smokes.mjs",
     "smokes:run:ci:win": "pwsh -NoProfile -Command \"& { ./ops/ci/Emit-CIEnv.ps1 -ShowToken; node ./ops/tools/run-ci-smokes.mjs }\"",
-    "smokes:run:ci": "node ops/tools/run-ci-smokes.mjs"
+    "smokes:run:ci": "node ops/tools/run-ci-smokes.mjs",
+    "smokes:cleanup": "node ops/smoke/cleanup.mjs"
   },
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "^3.882.0",

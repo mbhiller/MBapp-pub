@@ -6,6 +6,32 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 
 - Default tenant: any tenant starting with **SmokeTenant** (e.g., SmokeTenant, SmokeTenant-qa). Override only by setting `MBAPP_SMOKE_ALLOW_NON_SMOKE_TENANT=1` (dangerous).
 - `SMOKE_RUN_ID` is emitted in the preflight log; set `SMOKE_RUN_ID` explicitly to tag runs or let the runner generate one.
+  - The runner records a manifest per run in `ops/smoke/.manifests/<SMOKE_RUN_ID>.json` capturing created entities (type, id, route, meta).
+  - Use the cleanup script to delete only artifacts from a specific `SMOKE_RUN_ID` via allowlisted single-delete endpoints.
+
+### Cleanup Controls
+
+- **Env: `SMOKE_RUN_ID`**: Required. Selects which manifest to use for cleanup.
+- **Env: `MBAPP_SMOKE_CLEANUP`**: Required (set to `1`) to perform deletions. Otherwise operates in dry-run mode.
+- **Env: `DRY_RUN`**: When `1`, prints planned deletes but does not call DELETE endpoints.
+- **Tenant Guard**: Cleanup reads `tenantHeader` and `jwtTenant` from the manifest. If they mismatch, cleanup aborts unless `MBAPP_SMOKE_ALLOW_TENANT_MISMATCH=1`.
+- **Allowlist (strict)**: Only deletes the following types via single-record endpoints:
+  - Views: `DELETE /views/{id}`
+  - Workspaces: `DELETE /workspaces/{id}`
+  - Registrations: `DELETE /registrations/{id}`
+  - Objects (single): `DELETE /objects/{type}/{id}` where type ∈ {`product`, `inventory`, `inventoryItem`, `party`, `resource`, `reservation`}
+- **Hard Stops**:
+  - Cleanup refuses any `/tools/gc/*` endpoints.
+  - Bulk-delete or non-single endpoints are not used.
+
+### Commands
+
+- Run cleanup (dry-run default):
+  - `npm run smokes:cleanup`
+  - Set required env: `SMOKE_RUN_ID`, `MBAPP_API_BASE`, `MBAPP_TENANT_ID`, `MBAPP_BEARER`
+- Real deletion (opt-in):
+  - `SMOKE_RUN_ID=... MBAPP_SMOKE_CLEANUP=1 npm run smokes:cleanup`
+  - Optional: `DRY_RUN=1` to preview
 
 **Close-the-loop flow:** SO shortage → BO open (with preferredVendorId derived from product) → suggest-po (returns drafts with vendorId) → save draft PO → receive → onhand increases → BO fulfilled → idempotency replay (no double-apply). Vendor party is seeded at flow start; product.preferredVendorId set so so:commit populates backorderRequest.preferredVendorId and suggest-po avoids MISSING_VENDOR errors.
 
