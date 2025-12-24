@@ -99,8 +99,8 @@ jobs:
     needs: [ typecheck ]
     env:
       MBAPP_API_BASE: ${{ secrets.MBAPP_API_BASE }}
+      MBAPP_TENANT_ID: "SmokeTenant"
       MBAPP_SMOKE_TENANT_ID: "SmokeTenant"
-      MBAPP_BEARER_SMOKE: ${{ secrets.MBAPP_BEARER_SMOKE }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -113,31 +113,6 @@ jobs:
 
       - name: Install deps
         run: npm ci
-
-      - name: Check API base present
-        run: |
-          node -e "console.log(JSON.stringify({ baseSet: Boolean(process.env.MBAPP_API_BASE) }))"
-
-      - name: Classify env vars (diagnostic)
-        env:
-          MBAPP_API_BASE: ${{ secrets.MBAPP_API_BASE }}
-          MBAPP_BEARER: ${{ secrets.MBAPP_BEARER }}
-          MBAPP_BEARER_SMOKE: ${{ secrets.MBAPP_BEARER_SMOKE }}
-        run: |
-          node -e "
-          const vars = {
-            MBAPP_API_BASE: process.env.MBAPP_API_BASE,
-            MBAPP_BEARER: process.env.MBAPP_BEARER,
-            MBAPP_BEARER_SMOKE: process.env.MBAPP_BEARER_SMOKE
-          };
-          const looksLikeUrl = (s) => !!(s && /^https?:\/\//.test(s));
-          const looksLikeJwt = (s) => !!(s && s.split('.').length === 3);
-          const result = {};
-          for (const [k, v] of Object.entries(vars)) {
-            result[k] = { looksLikeUrl: looksLikeUrl(v), looksLikeJwt: looksLikeJwt(v), len: v ? v.length : 0 };
-          }
-          console.log(JSON.stringify(result, null, 2));
-          "
 
       - name: Run curated smokes
         run: npm run smokes:run:ci
