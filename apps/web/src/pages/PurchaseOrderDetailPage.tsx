@@ -1,0 +1,358 @@
+import { useCallback, useEffect, useState } from "react";
+import { useParams, Link } from "react-router-dom";
+import { apiFetch } from "../lib/http";
+import { useAuth } from "../providers/AuthProvider";
+import {
+  submitPurchaseOrder,
+  approvePurchaseOrder,
+  receivePurchaseOrder,
+  cancelPurchaseOrder,
+  closePurchaseOrder,
+} from "../lib/purchasing";
+
+type PurchaseOrder = {
+  id: string;
+  status?: string;
+  vendorId?: string;
+  vendorName?: string;
+  created?: string;
+  updated?: string;
+  lines?: PurchaseLine[];
+};
+
+type PurchaseLine = {
+  id?: string;
+  lineId?: string;
+  itemId?: string;
+  productId?: string;
+  qty?: number;
+  orderedQty?: number;
+  receivedQty?: number;
+};
+
+function formatError(err: unknown): string {
+  const e = err as any;
+  const parts = [] as string[];
+  if (e?.status) parts.push(`status ${e.status}`);
+  if (e?.code) parts.push(`code ${e.code}`);
+  if (e?.message) parts.push(e.message);
+  return parts.join(" · ") || "Request failed";
+}
+
+export default function PurchaseOrderDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const { token, tenantId } = useAuth();
+  const [po, setPo] = useState<PurchaseOrder | null>(null);
+  const [vendorName, setVendorName] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [deltaQty, setDeltaQty] = useState<Record<string, number>>({});
+
+  const fetchPo = useCallback(async () => {
+    if (!id) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await apiFetch<PurchaseOrder>(`/objects/purchaseOrder/${id}`, {
+        token: token || undefined,
+        tenantId,
+      });
+      setPo(res);
+
+      // Fetch vendor name if vendorId exists
+      if (res.vendorId) {
+        try {
+          const vendorRes = await apiFetch<{ name?: string; displayName?: string }>(
+            `/objects/party/${res.vendorId}`,
+            { token: token || undefined, tenantId }
+          );
+          setVendorName(vendorRes?.name ?? vendorRes?.displayName ?? res.vendorId);
+        } catch {
+          setVendorName(res.vendorId);
+        }
+      }
+    } catch (err) {
+      setError(formatError(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [id, tenantId, token]);
+
+  useEffect(() => {
+    fetchPo();
+  }, [fetchPo]);
+
+  const handleSubmit = async () => {
+    if (!id) return;
+    setActionLoading(true);
+    setActionError(null);
+    try {
+      await submitPurchaseOrder(id, { token: token || undefined, tenantId });
+      await fetchPo();
+    } catch (err) {
+      setActionError(formatError(err));
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleApprove = async () => {
+    if (!id) return;
+    setActionLoading(true);
+    setActionError(null);
+    try {
+      await approvePurchaseOrder(id, { token: token || undefined, tenantId });
+      await fetchPo();
+    } catch (err) {
+      setActionError(formatError(err));
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleReceive = async () => {
+    if (!id || !po?.lines) return;
+
+    const linesToReceive = Object.entries(deltaQty)
+      .filter(([_, qty]) => qty > 0)
+      .map(([lineId, qty]) => ({ lineId, deltaQty: qty }));
+
+    if (linesToReceive.length === 0) {
+      setActionError("No quantities to receive. Set deltaQty > 0 for at least one line.");
+      return;
+    }
+
+    setActionLoading(true);
+    setActionError(null);
+    try {
+      const idempotencyKey = `web-receive-${id}-${Date.now()}`;
+      await receivePurchaseOrder(
+        id,
+        { lines: linesToReceive },
+        { token: token || undefined, tenantId, idempotencyKey }
+      );
+      setDeltaQty({});
+      await fetchPo();
+    } catch (err: any) {
+      if (err?.status === 409 && err?.details?.code === "RECEIVE_EXCEEDS_REMAINING") {
+        setActionError(
+          `${formatError(err)} — Cannot receive more than remaining quantity. Check ordered vs. received.`
+        );
+      } else {
+        setActionError(formatError(err));
+      }
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleCancel = async () => {
+    if (!id) return;
+    setActionLoading(true);
+    setActionError(null);
+    try {
+      await cancelPurchaseOrder(id, { token: token || undefined, tenantId });
+      await fetchPo();
+    } catch (err) {
+      setActionError(formatError(err));
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleClose = async () => {
+    if (!id) return;
+    setActionLoading(true);
+    setActionError(null);
+    try {
+      await closePurchaseOrder(id, { token: token || undefined, tenantId });
+      await fetchPo();
+    } catch (err) {
+      setActionError(formatError(err));
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleReceiveRemaining = (lineId: string, remaining: number) => {
+    setDeltaQty((prev) => ({ ...prev, [lineId]: remaining }));
+  };
+
+  const handleReceiveAllRemaining = () => {
+    if (!po?.lines) return;
+    const newDelta: Record<string, number> = {};
+    po.lines.forEach((line) => {
+      const lineId = line.id ?? line.lineId ?? "";
+      const ordered = line.qty ?? line.orderedQty ?? 0;
+      const received = line.receivedQty ?? 0;
+      const remaining = ordered - received;
+      if (remaining > 0) {
+        newDelta[lineId] = remaining;
+      }
+    });
+    setDeltaQty(newDelta);
+  };
+
+  if (loading) return <div>Loading...</div>;
+  if (error) {
+    return (
+      <div style={{ display: "grid", gap: 16 }}>
+        <h1>Purchase Order</h1>
+        <div style={{ padding: 12, background: "#fee", color: "#c00", borderRadius: 4 }}>{error}</div>
+        <Link to="/purchase-orders">Back to Purchase Orders</Link>
+      </div>
+    );
+  }
+  if (!po) return <div>Purchase order not found.</div>;
+
+  const status = po.status ?? "unknown";
+  const lines = po.lines ?? [];
+
+  // Status gates (matching mobile patterns)
+  const canSubmit = status === "draft";
+  const canApprove = status === "submitted";
+  const canReceive = ["approved", "partially_fulfilled"].includes(status);
+  const canCancel = ["draft", "submitted"].includes(status);
+  const canClose = ["approved", "partially_fulfilled", "fulfilled"].includes(status);
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <h1>Purchase Order {po.id}</h1>
+        <Link to="/purchase-orders">Back to list</Link>
+      </div>
+
+      <div style={{ display: "grid", gap: 8, padding: 16, background: "#f9f9f9", borderRadius: 4 }}>
+        <div>
+          <strong>Status:</strong> {status}
+        </div>
+        <div>
+          <strong>Vendor:</strong> {vendorName ?? po.vendorId ?? "Unassigned"}
+        </div>
+        {po.created && (
+          <div>
+            <strong>Created:</strong> {po.created}
+          </div>
+        )}
+        {po.updated && (
+          <div>
+            <strong>Updated:</strong> {po.updated}
+          </div>
+        )}
+      </div>
+
+      {actionError && (
+        <div style={{ padding: 12, background: "#fff4e5", color: "#8a3c00", borderRadius: 4 }}>
+          {actionError}
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {canSubmit && (
+          <button onClick={handleSubmit} disabled={actionLoading}>
+            {actionLoading ? "Submitting..." : "Submit"}
+          </button>
+        )}
+        {canApprove && (
+          <button onClick={handleApprove} disabled={actionLoading}>
+            {actionLoading ? "Approving..." : "Approve"}
+          </button>
+        )}
+        {canReceive && (
+          <>
+            <button onClick={handleReceive} disabled={actionLoading}>
+              {actionLoading ? "Receiving..." : "Receive"}
+            </button>
+            <button onClick={handleReceiveAllRemaining} disabled={actionLoading}>
+              Receive All Remaining
+            </button>
+          </>
+        )}
+        {canCancel && (
+          <button onClick={handleCancel} disabled={actionLoading}>
+            {actionLoading ? "Cancelling..." : "Cancel"}
+          </button>
+        )}
+        {canClose && (
+          <button onClick={handleClose} disabled={actionLoading}>
+            {actionLoading ? "Closing..." : "Close"}
+          </button>
+        )}
+      </div>
+
+      <h2>Lines</h2>
+      {lines.length === 0 ? (
+        <div>No lines.</div>
+      ) : (
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ textAlign: "left", background: "#eee" }}>
+              <th style={{ padding: 8, border: "1px solid #ccc" }}>Line ID</th>
+              <th style={{ padding: 8, border: "1px solid #ccc" }}>Item</th>
+              <th style={{ padding: 8, border: "1px solid #ccc" }}>Ordered</th>
+              <th style={{ padding: 8, border: "1px solid #ccc" }}>Received</th>
+              <th style={{ padding: 8, border: "1px solid #ccc" }}>Remaining</th>
+              {canReceive && (
+                <>
+                  <th style={{ padding: 8, border: "1px solid #ccc" }}>Delta Qty</th>
+                  <th style={{ padding: 8, border: "1px solid #ccc" }}>Actions</th>
+                </>
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map((line) => {
+              const lineId = line.id ?? line.lineId ?? "";
+              const itemId = line.itemId ?? line.productId ?? "—";
+              const ordered = line.qty ?? line.orderedQty ?? 0;
+              const received = line.receivedQty ?? 0;
+              const remaining = ordered - received;
+
+              return (
+                <tr key={lineId}>
+                  <td style={{ padding: 8, border: "1px solid #ccc" }}>{lineId}</td>
+                  <td style={{ padding: 8, border: "1px solid #ccc" }}>{itemId}</td>
+                  <td style={{ padding: 8, border: "1px solid #ccc" }}>{ordered}</td>
+                  <td style={{ padding: 8, border: "1px solid #ccc" }}>{received}</td>
+                  <td style={{ padding: 8, border: "1px solid #ccc" }}>{remaining}</td>
+                  {canReceive && (
+                    <>
+                      <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                        <input
+                          type="number"
+                          min="0"
+                          value={deltaQty[lineId] ?? 0}
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            setDeltaQty((prev) => ({
+                              ...prev,
+                              [lineId]: val >= 0 ? val : 0,
+                            }));
+                          }}
+                          style={{ width: 80 }}
+                        />
+                      </td>
+                      <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                        {remaining > 0 && (
+                          <button
+                            onClick={() => handleReceiveRemaining(lineId, remaining)}
+                            disabled={actionLoading}
+                            style={{ fontSize: 12, padding: "4px 8px" }}
+                          >
+                            Receive Remaining
+                          </button>
+                        )}
+                      </td>
+                    </>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}

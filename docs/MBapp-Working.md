@@ -1,3 +1,67 @@
+## Sprint XXXIII — Web Backorders + Suggest PO + Purchase Orders (2025-12-25)
+
+**Date:** 2025-12-25  
+**Environment:** AWS API Gateway (https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com)  
+**Tenant:** DemoTenant  
+**Smoke Results:** Existing `smoke:close-the-loop` validates full BO→PO→receive cycle ✅
+
+**Scope:**
+- Web Backorders: List/filter open backorders with bulk ignore and suggest-po workflow.
+- Web Purchase Orders: List POs, detail view with status-gated actions (submit/approve/receive/cancel/close).
+- Suggest-PO modal: Multi-vendor draft chooser for when suggest-po returns drafts[].
+- Full vertical slice: SO shortage → backorders → suggest-po → create PO → approve → receive → inventory increase.
+
+**Key Deliverables:**
+- **New web routes:**
+  - `/backorders` — BackordersListPage with status filter (open/ignored/converted), vendor filter, bulk actions (Ignore, Suggest PO), checkbox selection
+  - `/purchase-orders` — PurchaseOrdersListPage with GET /objects/purchaseOrder, vendor name resolution, pagination
+  - `/purchase-orders/:id` — PurchaseOrderDetailPage with status-gated actions, lines table with per-line deltaQty inputs, "Receive remaining" + "Receive all remaining" buttons
+- **Components:**
+  - `SuggestPoChooserModal.tsx` — Modal for multi-vendor draft selection (displays vendor name, line count, total qty)
+  - API helpers: `lib/backorders.ts` (search, ignore, convert) and `lib/purchasing.ts` (suggestPo, create-from-suggestion, submit, approve, receive, cancel, close)
+- **Workflow:**
+  1. Backorders page: filter status=open → select backorders → Bulk "Suggest PO"
+  2. If single vendor: create PO draft → navigate to /purchase-orders/:id
+  3. If multi-vendor: open SuggestPoChooserModal → user picks draft → create PO → navigate to detail
+  4. PO detail: Submit (draft→submitted) → Approve (submitted→approved) → Receive (set deltaQty per line) → inventory updated
+  5. Receive uses idempotency key (`web-receive-${poId}-${Date.now()}`) to prevent accidental doubles
+  6. 409 RECEIVE_EXCEEDS_REMAINING errors show helpful inline message
+- **Skipped[] behavior:**
+  - When suggest-po returns `skipped: [{backorderRequestId, reason}]`, display yellow warning banner with list of skipped backorders and reasons (ZERO_QTY, MISSING_VENDOR, IGNORED, NOT_FOUND)
+  - Workflow continues for non-skipped backorders (draft/drafts created normally)
+
+**Files Changed:**
+- **Web (new):**
+  - Pages: `BackordersListPage.tsx`, `PurchaseOrdersListPage.tsx`, `PurchaseOrderDetailPage.tsx`
+  - Components: `SuggestPoChooserModal.tsx`
+  - Libs: `lib/backorders.ts`, `lib/purchasing.ts`
+- **Web (modified):**
+  - `App.tsx` (added routes /backorders, /purchase-orders, /purchase-orders/:id)
+  - `Layout.tsx` (added nav links for Backorders, Purchase Orders)
+
+**Acceptance:**
+- ✅ Can browse backorders list, filter by status/vendor, ignore individual or bulk
+- ✅ Bulk "Suggest PO" handles single-vendor (auto-create + navigate) and multi-vendor (modal chooser)
+- ✅ Skipped backorders display in warning banner with reasons
+- ✅ Purchase Orders list shows ID, status, vendor name (resolved), created timestamp
+- ✅ PO detail shows status-gated actions:
+  - Draft: Submit
+  - Submitted: Approve
+  - Approved/Partially Fulfilled: Receive (with deltaQty inputs per line, "Receive remaining", "Receive all remaining")
+  - Draft/Submitted: Cancel
+  - Approved/Partially Fulfilled/Fulfilled: Close
+- ✅ Receive action refetches PO and updates receivedQty, resets deltaQty inputs
+- ✅ TypeScript: Web app passes typecheck (apps/web ✅)
+- ✅ Vendor name resolution consistent across all pages (apiFetch /objects/party/{id})
+
+**What's Next (Sprint XXXIV):**
+- Polish: Add "Create PO" flow (seed with vendor/items, manual entry) on /purchase-orders page
+- VendorGuardBanner on web PO detail (warn if vendor missing or lacks "vendor" role)
+- Backorders auto-refresh after PO receive (detect fulfillment, remove from open list)
+- Mobile: Sync PO receive history display with web patterns
+
+---
+
 ## Sprint XXIX — Sales Orders Web + Smokes (2025-12-24)
 
 **Date:** 2025-12-24  
