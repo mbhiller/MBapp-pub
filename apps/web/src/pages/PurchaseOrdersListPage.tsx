@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
 
@@ -25,6 +25,7 @@ function formatError(err: unknown): string {
 }
 
 export default function PurchaseOrdersListPage() {
+  const [searchParams] = useSearchParams();
   const { token, tenantId } = useAuth();
   const [items, setItems] = useState<PurchaseOrder[]>([]);
   const [vendorNameById, setVendorNameById] = useState<Record<string, string>>({});
@@ -33,6 +34,8 @@ export default function PurchaseOrdersListPage() {
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [vendorFilter, setVendorFilter] = useState<string>("");
+  const [vendorMode, setVendorMode] = useState<boolean>(false);
+  const [vendorIdLocked, setVendorIdLocked] = useState<boolean>(false);
 
   const fetchPage = useCallback(
     async (cursor?: string) => {
@@ -60,8 +63,20 @@ export default function PurchaseOrdersListPage() {
         setLoading(false);
       }
     },
-    [tenantId, token, statusFilter, vendorFilter]
+    [tenantId, token, statusFilter, vendorFilter, vendorMode]
   );
+
+  // Initialize from URL params: vendorId and vendorMode
+  useEffect(() => {
+    const urlVendor = searchParams.get("vendorId") || "";
+    const urlVendorModeRaw = searchParams.get("vendorMode") || "";
+    const urlVendorMode = urlVendorModeRaw === "1" || urlVendorModeRaw.toLowerCase() === "true";
+    if (urlVendor) {
+      setVendorFilter(urlVendor);
+      setVendorIdLocked(true);
+    }
+    if (urlVendorMode) setVendorMode(true);
+  }, [searchParams]);
 
   useEffect(() => {
     fetchPage();
@@ -126,12 +141,26 @@ export default function PurchaseOrdersListPage() {
             onChange={(e) => setVendorFilter(e.target.value)}
             placeholder="Optional: filter by vendor ID"
             style={{ flex: 1 }}
+            disabled={vendorMode && vendorIdLocked}
           />
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <input
+            type="checkbox"
+            checked={vendorMode}
+            onChange={(e) => {
+              setVendorMode(e.target.checked);
+              if (!e.target.checked) setVendorIdLocked(false);
+            }}
+          />
+          Vendor Portal mode
         </label>
         <button
           onClick={() => {
             setStatusFilter("");
             setVendorFilter("");
+            setVendorMode(false);
+            setVendorIdLocked(false);
             fetchPage();
           }}
           disabled={loading}
@@ -139,6 +168,14 @@ export default function PurchaseOrdersListPage() {
           Clear filters
         </button>
       </div>
+
+      {vendorMode && (
+        <div style={{ fontSize: 13, color: vendorFilter.trim() ? "#444" : "#b3261e" }}>
+          {vendorFilter.trim()
+            ? "Showing POs for this vendor only."
+            : "Vendor Portal mode requires a vendorId."}
+        </div>
+      )}
 
       {error && (
         <div style={{ padding: 12, background: "#fee", color: "#c00", borderRadius: 4 }}>

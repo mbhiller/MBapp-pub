@@ -10,6 +10,7 @@ import {
   closePurchaseOrder,
 } from "../lib/purchasing";
 import { listInventoryMovements, type InventoryMovement } from "../lib/inventoryMovements";
+import { friendlyPurchasingError } from "../lib/purchasingErrors";
 
 type PurchaseOrder = {
   id: string;
@@ -48,6 +49,11 @@ function formatConflict(err: unknown): string {
   if (code) parts.push(String(code));
   if (message) parts.push(String(message));
   return parts.join(" · ") || formatError(err);
+}
+
+function renderFriendly(err: unknown): string {
+  const f = friendlyPurchasingError(err);
+  return f.hint ? `${f.title}: ${f.message} (${f.hint})` : `${f.title}: ${f.message}`;
 }
 
 /**
@@ -180,8 +186,8 @@ export default function PurchaseOrderDetailPage() {
       await fetchPo();
     } catch (err) {
       const e = err as any;
-      if (e?.status === 409) setActionError(formatConflict(e));
-      else setActionError(formatError(e));
+      if (e?.status === 409) setActionError(renderFriendly(e));
+      else setActionError(renderFriendly(e));
     } finally {
       setActionLoading(false);
     }
@@ -195,9 +201,7 @@ export default function PurchaseOrderDetailPage() {
       await approvePurchaseOrder(id, { token: token || undefined, tenantId });
       await fetchPo();
     } catch (err) {
-      const e = err as any;
-      if (e?.status === 409) setActionError(formatConflict(e));
-      else setActionError(formatError(e));
+      setActionError(renderFriendly(err));
     } finally {
       setActionLoading(false);
     }
@@ -253,14 +257,7 @@ export default function PurchaseOrderDetailPage() {
       setLineErrors({});
       await fetchPo();
     } catch (err: any) {
-      if (err?.status === 409 && err?.details?.code === "RECEIVE_EXCEEDS_REMAINING") {
-        const details = err.details;
-        setActionError(
-          `${formatError(err)} — Attempted: ${details.attemptedDelta}, Remaining: ${details.remaining} (Ordered: ${details.ordered}, Already received: ${details.received})`
-        );
-      } else {
-        setActionError(formatError(err));
-      }
+      setActionError(renderFriendly(err));
     } finally {
       setActionLoading(false);
     }
@@ -274,9 +271,7 @@ export default function PurchaseOrderDetailPage() {
       await cancelPurchaseOrder(id, { token: token || undefined, tenantId });
       await fetchPo();
     } catch (err) {
-      const e = err as any;
-      if (e?.status === 409) setActionError(formatConflict(e));
-      else setActionError(formatError(e));
+      setActionError(renderFriendly(err));
     } finally {
       setActionLoading(false);
     }
@@ -290,9 +285,7 @@ export default function PurchaseOrderDetailPage() {
       await closePurchaseOrder(id, { token: token || undefined, tenantId });
       await fetchPo();
     } catch (err) {
-      const e = err as any;
-      if (e?.status === 409) setActionError(formatConflict(e));
-      else setActionError(formatError(e));
+      setActionError(renderFriendly(err));
     } finally {
       setActionLoading(false);
     }

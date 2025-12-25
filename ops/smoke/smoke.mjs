@@ -858,6 +858,106 @@ const tests = {
       };
     },
 
+    "smoke:vendor-guard-enforced": async () => {
+      await ensureBearer();
+      const guardHeaders = { "X-Feature-Enforce-Vendor": "1" };
+
+      // Non-vendor party for guard checks
+      const party = await post(`/objects/party`, { kind: "org", name: smokeTag("Guard Party"), roles: ["customer"] });
+      if (!party.ok) return { test: "vendor-guard-enforced", result: "FAIL", step: "create-party", party };
+      const nonVendorPartyId = party.body?.id;
+      const rolesBefore = party.body?.roles ?? ["customer"];
+
+      // Customer party for SO
+      const { partyId: customerId } = await seedParties(api);
+
+      // Product + inventory with preferredVendorId pointing to the non-vendor party
+      const prod = await createProduct({ name: "GuardProd", preferredVendorId: nonVendorPartyId });
+      if (!prod.ok) return { test: "vendor-guard-enforced", result: "FAIL", step: "create-product", prod };
+      const item = await createInventoryForProduct(prod.body?.id, "GuardItem");
+      if (!item.ok) return { test: "vendor-guard-enforced", result: "FAIL", step: "create-item", item };
+      const itemId = item.body?.id;
+
+      // Create SO shortage to generate backorder
+      const so = await post(`/objects/salesOrder`, {
+        type: "salesOrder",
+        status: "draft",
+        partyId: customerId,
+        lines: [{ itemId, qty: 2, uom: "ea" }]
+      });
+      if (!so.ok) return { test: "vendor-guard-enforced", result: "FAIL", step: "create-so", so };
+      const soId = so.body?.id;
+      await post(`/sales/so/${encodeURIComponent(soId)}:submit`, {}, { "Idempotency-Key": idem() });
+      await post(`/sales/so/${encodeURIComponent(soId)}:commit`, {}, { "Idempotency-Key": idem() });
+
+      // Backorder + suggest-po
+      const boRes = await post(`/objects/backorderRequest/search`, { soId, status: "open" });
+      if (!boRes.ok || !Array.isArray(boRes.body?.items) || boRes.body.items.length === 0)
+        return { test: "vendor-guard-enforced", result: "FAIL", step: "bo-open", boRes };
+      const boIds = boRes.body.items.map((b) => b.id);
+
+      const suggest = await post(`/purchasing/suggest-po`, { requests: boIds.map((id) => ({ backorderRequestId: id })) });
+      const baseDraft = suggest.body?.draft ?? (suggest.body?.drafts?.[0]);
+      if (!suggest.ok || !baseDraft)
+        return { test: "vendor-guard-enforced", result: "FAIL", step: "suggest-po", suggest };
+
+      // Case: vendorId present but party lacks vendor role -> expect VENDOR_ROLE_MISSING
+      const draftBadRole = { ...baseDraft, vendorId: nonVendorPartyId };
+      const poRoleMissing = await post(`/purchasing/po:create-from-suggestion`, { drafts: [draftBadRole] }, { "Idempotency-Key": idem() });
+      if (!poRoleMissing.ok || !Array.isArray(poRoleMissing.body?.ids) || poRoleMissing.body.ids.length === 0)
+        return { test: "vendor-guard-enforced", result: "FAIL", step: "po-create-role-missing", poRoleMissing };
+      const poRoleMissingId = poRoleMissing.body.ids[0];
+
+      // Try to submit with guard headers - expect VENDOR_ROLE_MISSING
+      const submitBlocked = await post(`/purchasing/po/${encodeURIComponent(poRoleMissingId)}:submit`, {}, { "Idempotency-Key": idem() }, { headers: guardHeaders });
+      const submitBlockedOk = submitBlocked.status === 400 && submitBlocked.body?.code === "VENDOR_ROLE_MISSING";
+      if (!submitBlockedOk) return { test: "vendor-guard-enforced", result: "FAIL", step: "guard-submit-blocked", submitBlocked };
+      const guardFailureCode = submitBlocked.body?.code;
+
+      // Fix party roles to include vendor
+      const partyUpdate = await put(`/objects/party/${encodeURIComponent(nonVendorPartyId)}`, { roles: ["customer", "vendor"] });
+      if (!partyUpdate.ok) return { test: "vendor-guard-enforced", result: "FAIL", step: "party-add-vendor-role", partyUpdate };
+      const partyAfter = await get(`/objects/party/${encodeURIComponent(nonVendorPartyId)}`);
+      const rolesAfter = partyAfter.body?.roles ?? [];
+
+      // Retry submit with guard headers (should pass)
+      const submitFixed = await post(`/purchasing/po/${encodeURIComponent(poRoleMissingId)}:submit`, {}, { "Idempotency-Key": idem() }, { headers: guardHeaders });
+      if (!submitFixed.ok) return { test: "vendor-guard-enforced", result: "FAIL", step: "submit-after-fix", submitFixed };
+
+      // Retry approve with guard headers (should pass)
+      const approveFixed = await post(`/purchasing/po/${encodeURIComponent(poRoleMissingId)}:approve`, {}, {}, { headers: guardHeaders });
+      if (!approveFixed.ok) return { test: "vendor-guard-enforced", result: "FAIL", step: "approve-after-fix", approveFixed };
+
+      // Receive should succeed under guard
+      const poGet = await get(`/objects/purchaseOrder/${encodeURIComponent(poRoleMissingId)}`);
+      const lineId = poGet.body?.lines?.[0]?.id ?? poGet.body?.lines?.[0]?.lineId;
+      const receiveFixed = await post(
+        `/purchasing/po/${encodeURIComponent(poRoleMissingId)}:receive`,
+        { lines: [{ lineId, deltaQty: 2 }] },
+        {},
+        { headers: guardHeaders }
+      );
+      if (!receiveFixed.ok) return { test: "vendor-guard-enforced", result: "FAIL", step: "receive-after-fix", receiveFixed };
+
+      return {
+        test: "vendor-guard-enforced",
+        result: "PASS",
+        steps: {
+          nonVendorPartyId,
+          rolesBefore,
+          rolesAfter,
+          customerId,
+          boIds,
+          poRoleMissingId,
+          submitBlocked,
+          guardFailureCode,
+          submitFixed,
+          approveFixed,
+          receiveFixed
+        }
+      };
+    },
+
   "list": async ()=>Object.keys(tests),
 
   "smoke:ping": async ()=>{
