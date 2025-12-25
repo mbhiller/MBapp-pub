@@ -966,6 +966,82 @@ const tests = {
     return { test:"ping", result:r.ok?"PASS":"FAIL", status:r.status, text:t };
   },
 
+  "smoke:po-receive-lot-location-assertions": async () => {
+    await ensureBearer();
+
+    // Step 0: create shortage → backorderRequest
+    const { vendorId } = await seedVendor(api);
+    const prod = await createProduct({ name: "LotLocAssert", preferredVendorId: vendorId });
+    if (!prod.ok) return { test: "po-receive-lot-location-assertions", result: "FAIL", step: "createProduct", prod };
+    const inv = await createInventoryForProduct(prod.body.id, "LotLocAssertItem");
+    if (!inv.ok) return { test: "po-receive-lot-location-assertions", result: "FAIL", step: "createInventory", inv };
+
+    const { partyId } = await seedParties(api);
+    const so = await post(`/objects/salesOrder`, {
+      type: "salesOrder",
+      partyId,
+      status: "draft",
+      strict: false,
+      lines: [{ itemId: inv.body.id, qty: 2, uom: "ea" }],
+    });
+    if (!so.ok) return { test: "po-receive-lot-location-assertions", result: "FAIL", step: "createSO", so };
+    const soId = so.body?.id;
+
+    const soSubmit = await post(`/sales/so/${encodeURIComponent(soId)}:submit`, {}, { "Idempotency-Key": idem() });
+    if (!soSubmit.ok) return { test: "po-receive-lot-location-assertions", result: "FAIL", step: "submitSO", soSubmit };
+
+    const commit = await post(`/sales/so/${encodeURIComponent(soId)}:commit`, {}, { "Idempotency-Key": idem() });
+    if (!commit.ok) return { test: "po-receive-lot-location-assertions", result: "FAIL", step: "commitSO", commit };
+
+    const boList = await get(`/objects/backorderRequest?filter.soId=${encodeURIComponent(soId)}&limit=10&status=open`);
+    const boItems = boList.body?.items ?? [];
+    const boIds = boItems.map((b) => b.id).filter(Boolean);
+    if (!boIds.length) return { test: "po-receive-lot-location-assertions", result: "FAIL", step: "noBackorders", boList };
+
+    // Step 1: Suggest, create-from-suggestion, submit, approve
+    const suggest = await post(`/purchasing/suggest-po`, { requests: boIds.map((id) => ({ backorderRequestId: id })) }, { "Idempotency-Key": idem() });
+    if (!suggest.ok) return { test: "po-receive-lot-location-assertions", result: "FAIL", step: "suggestPO", suggest };
+    const draft = suggest.body?.draft ?? suggest.body?.drafts?.[0];
+    if (!draft) return { test: "po-receive-lot-location-assertions", result: "FAIL", step: "draftMissing", suggest };
+
+    const createPo = await post(`/purchasing/po:create-from-suggestion`, { draft }, { "Idempotency-Key": idem() });
+    if (!createPo.ok) return { test: "po-receive-lot-location-assertions", result: "FAIL", step: "createPO", createPo };
+    const poId = createPo?.body?.id ?? (Array.isArray(createPo?.body?.ids) ? createPo.body.ids[0] : null);
+    if (!poId) return { test: "po-receive-lot-location-assertions", result: "FAIL", step: "missingPoId", createPo };
+
+    const submit = await post(`/purchasing/po/${encodeURIComponent(poId)}:submit`, {}, { "Idempotency-Key": idem() });
+    if (!submit.ok) return { test: "po-receive-lot-location-assertions", result: "FAIL", step: "submitPO", submit };
+
+    const approve = await post(`/purchasing/po/${encodeURIComponent(poId)}:approve`, {}, { "Idempotency-Key": idem() });
+    if (!approve.ok) return { test: "po-receive-lot-location-assertions", result: "FAIL", step: "approvePO", approve };
+
+    const approved = await waitForStatus("purchaseOrder", poId, ["approved"]);
+    if (!approved.ok) return { test: "po-receive-lot-location-assertions", result: "FAIL", step: "waitApproved", approved };
+
+    const poGet = await get(`/objects/purchaseOrder/${encodeURIComponent(poId)}`);
+    if (!poGet.ok) return { test: "po-receive-lot-location-assertions", result: "FAIL", step: "getPO", poGet };
+    const firstLine = poGet.body?.lines?.[0];
+    const lineId = firstLine?.id ?? firstLine?.lineId ?? null;
+    const itemId = firstLine?.itemId ?? null;
+    if (!lineId || !itemId) return { test: "po-receive-lot-location-assertions", result: "FAIL", step: "missingLineOrItemId", createPo, poGet };
+
+    // Step 2: Receive with explicit lot/locationId
+    const payload = { lines: [{ lineId, deltaQty: 1, lot: "LOT-XYZ", locationId: "LOC-ABC" }] };
+    const recv = await post(`/purchasing/po/${encodeURIComponent(poId)}:receive`, payload, { "Idempotency-Key": idem() });
+    if (!recv.ok) return { test: "po-receive-lot-location-assertions", result: "FAIL", step: "receive", recv };
+
+    // Step 3: Query inventory movements
+    const movements = await get(`/inventory/${encodeURIComponent(itemId)}/movements?refId=${encodeURIComponent(poId)}&poLineId=${encodeURIComponent(lineId)}&limit=50&sort=desc`);
+    if (!movements.ok) return { test: "po-receive-lot-location-assertions", result: "FAIL", step: "movements", movements };
+
+    const match = (movements.body?.items ?? []).find((mv) =>
+      mv?.action === "receive" && Number(mv?.qty) === 1 && mv?.lot === "LOT-XYZ" && mv?.locationId === "LOC-ABC"
+    );
+
+    const pass = Boolean(match);
+    return { test: "po-receive-lot-location-assertions", result: pass ? "PASS" : "FAIL", poId, recv, movements, match };
+  },
+
   "smoke:parties:happy": async ()=>{
     await ensureBearer();
     const create = await post(`/objects/${encodeURIComponent(PARTY_TYPE)}`, { kind:"person", name: smokeTag("Smoke Test User"), roles:["customer"] });

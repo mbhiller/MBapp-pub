@@ -1,3 +1,9 @@
+## Sprint XXXIX — Receive Defaults + Opt-in Smoke (2025-12-25)
+
+- Web receive defaults (per tenant, localStorage) store last-used lot and locationId.
+- UI controls: apply defaults to all lines, per-line "Use defaults", and clear buttons for lot/locationId.
+- New opt-in smoke: `node ops/smoke/smoke.mjs smoke:po-receive-lot-location-assertions` (verifies lot/locationId persist to inventory movements).
+
 ## Sprint XXXVI — PO Activity + Partial Receive Smoke (2025-12-25)
 
 - **PO Activity Feed (Web):**
