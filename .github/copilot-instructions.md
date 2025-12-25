@@ -1,4 +1,4 @@
-# MBapp – Repo Instructions
+# MBapp – Repository Instructions
 
 ## How we work
 - Follow the cadence:
