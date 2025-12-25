@@ -12,6 +12,40 @@ import {
 import { listInventoryMovements, type InventoryMovement } from "../lib/inventoryMovements";
 import { friendlyPurchasingError } from "../lib/purchasingErrors";
 
+const RECEIVE_DEFAULTS_PREFIX = "mbapp_receive_defaults_";
+
+function loadReceiveDefaults(tenantId?: string | null): { lot?: string; locationId?: string } {
+  if (!tenantId) return {};
+  if (typeof localStorage === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(`${RECEIVE_DEFAULTS_PREFIX}${tenantId}`);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as { lot?: string; locationId?: string };
+    const lot = parsed?.lot || undefined;
+    const locationId = parsed?.locationId || undefined;
+    return { lot, locationId };
+  } catch {
+    return {};
+  }
+}
+
+function saveReceiveDefaults(tenantId?: string | null, value?: { lot?: string; locationId?: string }) {
+  if (!tenantId) return;
+  if (typeof localStorage === "undefined") return;
+  const lot = value?.lot || undefined;
+  const locationId = value?.locationId || undefined;
+  const key = `${RECEIVE_DEFAULTS_PREFIX}${tenantId}`;
+  if (!lot && !locationId) {
+    localStorage.removeItem(key);
+    return;
+  }
+  try {
+    localStorage.setItem(key, JSON.stringify({ lot, locationId }));
+  } catch {
+    // ignore storage failures
+  }
+}
+
 type PurchaseOrder = {
   id: string;
   status?: string;
@@ -89,6 +123,12 @@ export default function PurchaseOrderDetailPage() {
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityCollapsed, setActivityCollapsed] = useState(true);
   const [selectedActivityLineId, setSelectedActivityLineId] = useState<string>("all");
+  const [receiveDefaults, setReceiveDefaults] = useState<{ lot?: string; locationId?: string }>({});
+
+  useEffect(() => {
+    const defaults = loadReceiveDefaults(tenantId);
+    setReceiveDefaults(defaults);
+  }, [tenantId]);
 
   const fetchPo = useCallback(async () => {
     if (!id) return;
@@ -214,31 +254,39 @@ export default function PurchaseOrderDetailPage() {
     // Client-side validation
     const newErrors: Record<string, string> = {};
     const linesToReceive = Object.entries(lineState)
-      .filter(([_, state]) => state.deltaQty > 0)
       .map(([lineId, state]) => {
-        // Find the line to check remaining
+        const qty = Number(state.deltaQty ?? 0);
+        const lot = (state.lot ?? "").trim();
+        const locationId = (state.locationId ?? "").trim();
+
+        if (!Number.isFinite(qty) || qty <= 0) {
+          newErrors[lineId] = "Enter a positive quantity.";
+          return null;
+        }
+
         const line = po.lines?.find((l) => (l.id ?? l.lineId) === lineId);
         const orderedQty = line?.qty ?? line?.orderedQty ?? 0;
         const receivedQty = line?.receivedQty ?? 0;
         const remaining = Math.max(0, orderedQty - receivedQty);
 
-        if (state.deltaQty > remaining) {
-          newErrors[lineId] = `Cannot receive ${state.deltaQty} (only ${remaining} remaining)`;
+        if (qty > remaining) {
+          newErrors[lineId] = `Cannot receive ${qty} (only ${remaining} remaining)`;
           return null;
         }
-        return { lineId, deltaQty: state.deltaQty, lot: state.lot || undefined, locationId: state.locationId || undefined };
+
+        return {
+          lineId,
+          deltaQty: qty,
+          ...(lot ? { lot } : {}),
+          ...(locationId ? { locationId } : {}),
+        };
       })
       .filter((l): l is any => l !== null);
 
     setLineErrors(newErrors);
 
-    if (Object.keys(newErrors).length > 0) {
-      setActionError("Fix validation errors before submitting");
-      return;
-    }
-
-    if (linesToReceive.length === 0) {
-      setActionError("No quantities to receive. Set deltaQty > 0 for at least one line.");
+    if (Object.keys(newErrors).length > 0 || linesToReceive.length === 0) {
+      setActionError("Enter a positive receive quantity for at least one line.");
       return;
     }
 
@@ -254,6 +302,19 @@ export default function PurchaseOrderDetailPage() {
         { lines: linesToReceive },
         { token: token || undefined, tenantId, idempotencyKey }
       );
+
+      // Persist latest non-empty lot/locationId from this submission
+      const latestLot = [...linesToReceive.map((l) => l.lot).filter(Boolean)].pop();
+      const latestLocationId = [...linesToReceive.map((l) => l.locationId).filter(Boolean)].pop();
+      if ((latestLot || latestLocationId) && tenantId) {
+        const nextDefaults = {
+          lot: latestLot ?? receiveDefaults.lot,
+          locationId: latestLocationId ?? receiveDefaults.locationId,
+        };
+        setReceiveDefaults(nextDefaults);
+        saveReceiveDefaults(tenantId, nextDefaults);
+      }
+
       setLineState({});
       setLineErrors({});
       await fetchPo();
@@ -314,6 +375,65 @@ export default function PurchaseOrderDetailPage() {
     });
     setLineState(newState);
     setLineErrors({});
+  };
+
+  const handleDefaultChange = (field: "lot" | "locationId", value: string) => {
+    const cleaned = value.trim();
+    setReceiveDefaults((prev) => {
+      const next = { ...prev, [field]: cleaned || undefined };
+      saveReceiveDefaults(tenantId, next);
+      return next;
+    });
+  };
+
+  const handleClearDefaults = () => {
+    setReceiveDefaults({});
+    saveReceiveDefaults(tenantId, {});
+  };
+
+  const handleApplyDefaults = () => {
+    if (!po?.lines) return;
+    const { lot, locationId } = receiveDefaults;
+    if (!lot && !locationId) return;
+    setLineState((prev) => {
+      const next = { ...prev } as typeof prev;
+      po.lines?.forEach((line) => {
+        const lineId = line.id ?? line.lineId ?? "";
+        if (!lineId) return;
+        const current = next[lineId] ?? {};
+        const needsLot = !current.lot && lot;
+        const needsLocation = !current.locationId && locationId;
+        if (needsLot || needsLocation) {
+          next[lineId] = {
+            ...current,
+            ...(needsLot ? { lot } : {}),
+            ...(needsLocation ? { locationId } : {}),
+          };
+        }
+      });
+      return next;
+    });
+  };
+
+  const handleUseDefaultsForLine = (lineId: string) => {
+    setLineState((prev) => ({
+      ...prev,
+      [lineId]: {
+        ...prev[lineId],
+        lot: receiveDefaults.lot ?? undefined,
+        locationId: receiveDefaults.locationId ?? undefined,
+      },
+    }));
+  };
+
+  const handleClearLineField = (lineId: string, field: "lot" | "locationId") => {
+    setLineState((prev) => ({
+      ...prev,
+      [lineId]: {
+        ...prev[lineId],
+        [field]: undefined,
+      },
+    }));
   };
 
   if (loading) return <div>Loading...</div>;
@@ -471,6 +591,39 @@ export default function PurchaseOrderDetailPage() {
         )}
       </div>
 
+      {canReceive && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}>
+          <div style={{ display: "grid", gap: 4 }}>
+            <label style={{ fontWeight: 600 }}>Default Lot</label>
+            <input
+              type="text"
+              value={receiveDefaults.lot ?? ""}
+              onChange={(e) => handleDefaultChange("lot", e.target.value)}
+              placeholder="Lot/Batch"
+              style={{ width: 160 }}
+            />
+          </div>
+          <div style={{ display: "grid", gap: 4 }}>
+            <label style={{ fontWeight: 600 }}>Default LocationId</label>
+            <input
+              type="text"
+              value={receiveDefaults.locationId ?? ""}
+              onChange={(e) => handleDefaultChange("locationId", e.target.value)}
+              placeholder="Location"
+              style={{ width: 160 }}
+            />
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={handleApplyDefaults} disabled={actionLoading}>
+              Apply defaults to all lines
+            </button>
+            <button onClick={handleClearDefaults} disabled={actionLoading}>
+              Clear defaults
+            </button>
+          </div>
+        </div>
+      )}
+
       <h2>Lines</h2>
       {lines.length === 0 ? (
         <div>No lines.</div>
@@ -559,32 +712,63 @@ export default function PurchaseOrderDetailPage() {
                           {error && <div style={{ fontSize: 11, color: "#d32f2f", marginTop: 2 }}>{error}</div>}
                         </td>
                         <td style={{ padding: 8, border: "1px solid #ccc" }}>
-                          <input
-                            type="text"
-                            placeholder="Lot/Batch"
-                            value={state.lot ?? ""}
-                            onChange={(e) => {
-                              setLineState((prev) => ({
-                                ...prev,
-                                [lineId]: { ...prev[lineId], lot: e.target.value || undefined },
-                              }));
-                            }}
-                            style={{ width: 70 }}
-                          />
+                          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                            <input
+                              type="text"
+                              placeholder="Lot/Batch"
+                              value={state.lot ?? ""}
+                              onChange={(e) => {
+                                setLineState((prev) => ({
+                                  ...prev,
+                                  [lineId]: { ...prev[lineId], lot: e.target.value || undefined },
+                                }));
+                              }}
+                              style={{ width: 90 }}
+                            />
+                            {(state.lot ?? "") !== "" && (
+                              <button
+                                onClick={() => handleClearLineField(lineId, "lot")}
+                                style={{ padding: "2px 6px", fontSize: 12 }}
+                                aria-label="Clear lot"
+                              >
+                                ×
+                              </button>
+                            )}
+                          </div>
                         </td>
                         <td style={{ padding: 8, border: "1px solid #ccc" }}>
-                          <input
-                            type="text"
-                            placeholder="Location"
-                            value={state.locationId ?? ""}
-                            onChange={(e) => {
-                              setLineState((prev) => ({
-                                ...prev,
-                                [lineId]: { ...prev[lineId], locationId: e.target.value || undefined },
-                              }));
-                            }}
-                            style={{ width: 70 }}
-                          />
+                          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                            <input
+                              type="text"
+                              placeholder="Location"
+                              value={state.locationId ?? ""}
+                              onChange={(e) => {
+                                setLineState((prev) => ({
+                                  ...prev,
+                                  [lineId]: { ...prev[lineId], locationId: e.target.value || undefined },
+                                }));
+                              }}
+                              style={{ width: 90 }}
+                            />
+                            {(state.locationId ?? "") !== "" && (
+                              <button
+                                onClick={() => handleClearLineField(lineId, "locationId")}
+                                style={{ padding: "2px 6px", fontSize: 12 }}
+                                aria-label="Clear location"
+                              >
+                                ×
+                              </button>
+                            )}
+                          </div>
+                          <div style={{ marginTop: 4 }}>
+                            <button
+                              onClick={() => handleUseDefaultsForLine(lineId)}
+                              disabled={actionLoading}
+                              style={{ fontSize: 12, padding: "2px 6px" }}
+                            >
+                              Use defaults
+                            </button>
+                          </div>
                         </td>
                         <td style={{ padding: 8, border: "1px solid #ccc" }}>
                           {remaining > 0 && (
