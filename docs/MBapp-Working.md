@@ -1,8 +1,28 @@
-## Sprint XXXVI — PO Activity + Partial Receive Notes (2025-12-25)
+## Sprint XXXVI — PO Activity + Partial Receive Smoke (2025-12-25)
 
-- PO Activity on web pulls Inventory Movements via GET /inventory/{itemId}/movements?refId={poId}&poLineId={lineId}.
-- After a partial receive, API sets PO.status = "partially-received" (hyphen); web normalizes for gating but should expect the hyphenated server value.
-- New smoke (manual/local): node ops/smoke/smoke.mjs smoke:close-the-loop-partial-receive.
+- **PO Activity Feed (Web):**
+  - PO Detail "Activity" is sourced from inventory movements.
+  - Endpoint: GET /inventory/{itemId}/movements with query support: refId (poId), poLineId, limit, sort, next (cursor; cursor/pageToken aliases accepted).
+  - Renders receive events with action, qty, lot, locationId, timestamps.
+- **Partial Receipt Status:**
+  - API sets PO.status = "partially-received" (hyphenated) after partial receive.
+  - Web normalizes for gating but should expect hyphenated status from server.
+- **Runbook:**
+  - node ops/smoke/smoke.mjs smoke:close-the-loop-partial-receive
+
+## Sprint XXXVII — Vendor Guard Enforcement + Vendor Portal Notes (2025-12-25)
+
+- **Vendor guard flag:**
+  - FEATURE_ENFORCE_VENDOR_ROLE (env)
+  - Non-prod override header: X-Feature-Enforce-Vendor: 1 (ignored in prod)
+- **Guard behavior:**
+  - Enforced on :submit, :approve, :receive
+  - Requires po.vendorId exists and vendor party roles includes "vendor"
+  - Error codes: VENDOR_ROLE_MISSING (400), VENDOR_REQUIRED (400; defensive—create-from-suggestion requires vendorId)
+- **Lifecycle reminder:**
+  - submit → approve → receive (approve returns 409 if not submitted)
+- **Runbook:**
+  - node ops/smoke/smoke.mjs smoke:vendor-guard-enforced
 
 ## Sprint XXXV — Web Purchasing Workflow Notes (2025-12-25)
 
@@ -31,7 +51,7 @@
 **Runbook Snippets:**
 ```bash
 # Typecheck web (apps/web)
-cd apps/web && npx tsc --noEmit
+cd apps/web && npm run typecheck
 
 # Multi-vendor smoke (opt-in)
 node ops/smoke/smoke.mjs smoke:close-the-loop-multi-vendor
