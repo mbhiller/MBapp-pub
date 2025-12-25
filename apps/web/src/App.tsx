@@ -21,6 +21,9 @@ import ViewDetailPage from "./pages/ViewDetailPage";
 import EditViewPage from "./pages/EditViewPage";
 import WorkspacesListPage from "./pages/WorkspacesListPage";
 import WorkspaceDetailPage from "./pages/WorkspaceDetailPage";
+import BackordersListPage from "./pages/BackordersListPage";
+import PurchaseOrdersListPage from "./pages/PurchaseOrdersListPage";
+import PurchaseOrderDetailPage from "./pages/PurchaseOrderDetailPage";
 
 function HomePage() {
   return (
@@ -31,6 +34,8 @@ function HomePage() {
         <Link to="/parties">Parties</Link>
         <Link to="/products">Products</Link>
         <Link to="/sales-orders">Sales Orders</Link>
+        <Link to="/backorders">Backorders</Link>
+        <Link to="/purchase-orders">Purchase Orders</Link>
         <Link to="/inventory">Inventory</Link>
         <Link to="/views">Views</Link>
         <Link to="/workspaces">Workspaces</Link>
@@ -65,6 +70,9 @@ export default function App() {
           <Route path="/views/:id/edit" element={<EditViewPage />} />
           <Route path="/workspaces" element={<WorkspacesListPage />} />
           <Route path="/workspaces/:id" element={<WorkspaceDetailPage />} />
+          <Route path="/backorders" element={<BackordersListPage />} />
+          <Route path="/purchase-orders" element={<PurchaseOrdersListPage />} />
+          <Route path="/purchase-orders/:id" element={<PurchaseOrderDetailPage />} />
         </Routes>
       </Layout>
     </ErrorBoundary>
