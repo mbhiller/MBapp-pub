@@ -1,3 +1,9 @@
+## Sprint XXXVI — PO Activity + Partial Receive Notes (2025-12-25)
+
+- PO Activity on web pulls Inventory Movements via GET /inventory/{itemId}/movements?refId={poId}&poLineId={lineId}.
+- After a partial receive, API sets PO.status = "partially-received" (hyphen); web normalizes for gating but should expect the hyphenated server value.
+- New smoke (manual/local): node ops/smoke/smoke.mjs smoke:close-the-loop-partial-receive.
+
 ## Sprint XXXV — Web Purchasing Workflow Notes (2025-12-25)
 
 **Scope:** Operator-friendly summary of web purchasing and status behavior.

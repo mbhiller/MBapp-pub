@@ -9,6 +9,7 @@ import {
   cancelPurchaseOrder,
   closePurchaseOrder,
 } from "../lib/purchasing";
+import { listInventoryMovements, type InventoryMovement } from "../lib/inventoryMovements";
 
 type PurchaseOrder = {
   id: string;
@@ -60,6 +61,7 @@ function normalizeStatus(s: string | undefined): string {
   if (!s) return "unknown";
   let norm = s.toLowerCase().replace(/-/g, "_");
   // Ensure common variants are mapped
+  if (norm === "partially-received") norm = "partially_received";
   if (norm === "partially_received" || norm === "partially-received") norm = "partially_received";
   if (norm === "partially_fulfilled" || norm === "partially-fulfilled") norm = "partially_fulfilled";
   return norm;
@@ -76,6 +78,10 @@ export default function PurchaseOrderDetailPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [lineState, setLineState] = useState<Record<string, { deltaQty: number; lot?: string; locationId?: string; editQty?: number }>>({});
   const [lineErrors, setLineErrors] = useState<Record<string, string>>({});
+  const [activity, setActivity] = useState<Array<InventoryMovement & { lineId?: string }>>([]);
+  const [activityError, setActivityError] = useState<string | null>(null);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityCollapsed, setActivityCollapsed] = useState(true);
 
   const fetchPo = useCallback(async () => {
     if (!id) return;
@@ -110,6 +116,60 @@ export default function PurchaseOrderDetailPage() {
   useEffect(() => {
     fetchPo();
   }, [fetchPo]);
+
+  // Load inventory movements for PO lines
+  useEffect(() => {
+    const loadActivity = async () => {
+      if (!po || !po.lines) {
+        setActivity([]);
+        setActivityError(null);
+        return;
+      }
+
+      const lines = po.lines
+        .map((ln) => ({
+          itemId: ln.itemId ?? ln.productId,
+          lineId: ln.id ?? ln.lineId,
+        }))
+        .filter((l) => l.itemId && l.lineId) as Array<{ itemId: string; lineId: string }>;
+
+      if (lines.length === 0) {
+        setActivity([]);
+        setActivityError(null);
+        return;
+      }
+
+      setActivityLoading(true);
+      setActivityError(null);
+      try {
+        const results = await Promise.all(
+          lines.map(async (l) => {
+            const page = await listInventoryMovements(
+              { itemId: l.itemId, refId: po.id, poLineId: l.lineId, limit: 50, sort: "desc" },
+              { token: token || undefined, tenantId }
+            );
+            return (page.items ?? []).map((m) => ({ ...m, lineId: m.poLineId ?? l.lineId }));
+          })
+        );
+        const merged = results.flat();
+        merged.sort((a, b) => {
+          const ta = Date.parse((a.createdAt as string) || (a as any).at || "");
+          const tb = Date.parse((b.createdAt as string) || (b as any).at || "");
+          if (Number.isNaN(ta) && Number.isNaN(tb)) return 0;
+          if (Number.isNaN(ta)) return 1;
+          if (Number.isNaN(tb)) return -1;
+          return tb - ta;
+        });
+        setActivity(merged);
+      } catch (err) {
+        setActivityError(formatError(err));
+      } finally {
+        setActivityLoading(false);
+      }
+    };
+
+    loadActivity();
+  }, [po, tenantId, token]);
 
   const handleSubmit = async () => {
     if (!id) return;
@@ -351,6 +411,7 @@ export default function PurchaseOrderDetailPage() {
       <div style={{ display: "grid", gap: 8, padding: 16, background: "#f9f9f9", borderRadius: 4 }}>
         <div>
           <strong>Status:</strong> {status}
+          <div style={{ fontSize: 12, color: "#666" }}>Server status: {rawStatus}</div>
         </div>
         <div>
           <strong>Vendor:</strong> {vendorName ?? po.vendorId ?? "Unassigned"}
@@ -546,6 +607,52 @@ export default function PurchaseOrderDetailPage() {
           </table>
         </div>
       )}
+
+      <div style={{ display: "grid", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <h2 style={{ margin: 0 }}>Activity</h2>
+          <button onClick={() => setActivityCollapsed((c) => !c)} style={{ padding: "4px 8px" }}>
+            {activityCollapsed ? "Expand" : "Collapse"}
+          </button>
+          {activityLoading && <span style={{ fontSize: 12, color: "#666" }}>Loading…</span>}
+          {activityError && (
+            <span style={{ fontSize: 12, color: "#c00" }}>Activity unavailable — {activityError}</span>
+          )}
+        </div>
+
+        {!activityCollapsed && (
+          <div style={{ overflowX: "auto" }}>
+            {activity.length === 0 && !activityLoading ? (
+              <div style={{ color: "#666", padding: 8 }}>No activity yet.</div>
+            ) : (
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 700 }}>
+                <thead>
+                  <tr style={{ textAlign: "left", background: "#f6f6f6" }}>
+                    <th style={{ padding: 8, border: "1px solid #ccc" }}>Timestamp</th>
+                    <th style={{ padding: 8, border: "1px solid #ccc" }}>Action</th>
+                    <th style={{ padding: 8, border: "1px solid #ccc" }}>Qty</th>
+                    <th style={{ padding: 8, border: "1px solid #ccc" }}>Line</th>
+                    <th style={{ padding: 8, border: "1px solid #ccc" }}>Lot</th>
+                    <th style={{ padding: 8, border: "1px solid #ccc" }}>Location</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activity.map((mv, idx) => (
+                    <tr key={`${mv.id ?? idx}-${mv.lineId ?? "line"}`}>
+                      <td style={{ padding: 8, border: "1px solid #ccc" }}>{mv.createdAt ?? (mv as any).at ?? "—"}</td>
+                      <td style={{ padding: 8, border: "1px solid #ccc" }}>{mv.action ?? ""}</td>
+                      <td style={{ padding: 8, border: "1px solid #ccc" }}>{mv.qty ?? ""}</td>
+                      <td style={{ padding: 8, border: "1px solid #ccc" }}>{mv.lineId ?? mv.poLineId ?? ""}</td>
+                      <td style={{ padding: 8, border: "1px solid #ccc" }}>{mv.lot ?? ""}</td>
+                      <td style={{ padding: 8, border: "1px solid #ccc" }}>{mv.locationId ?? ""}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
