@@ -88,6 +88,7 @@ export default function PurchaseOrderDetailPage() {
   const [activityError, setActivityError] = useState<string | null>(null);
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityCollapsed, setActivityCollapsed] = useState(true);
+  const [selectedActivityLineId, setSelectedActivityLineId] = useState<string>("all");
 
   const fetchPo = useCallback(async () => {
     if (!id) return;
@@ -337,10 +338,10 @@ export default function PurchaseOrderDetailPage() {
   const canSubmit = ["draft", "open"].includes(status);
   const canApprove = status === "submitted";
   const canReceive = ["open", "approved", "partially_received", "partially_fulfilled"].includes(status);
-  // Hide cancel/close only for final states; server enforces exact gate
-  const hideSet = ["closed", "cancelled", "canceled"] as const;
-  const canCancel = !hideSet.includes(status as any);
-  const canClose = !hideSet.includes(status as any);
+  // Cancel only allowed for draft/submitted (API: po-cancel.ts)
+  const canCancel = ["draft", "submitted"].includes(status);
+  // Close only allowed for fulfilled (API: po-close.ts)
+  const canClose = status === "fulfilled";
   const canEditLines = ["draft", "open"].includes(status);
 
   const hasEdits = Object.values(lineState).some((s) => typeof s.editQty === "number");
@@ -462,6 +463,11 @@ export default function PurchaseOrderDetailPage() {
           <button onClick={handleClose} disabled={actionLoading}>
             {actionLoading ? "Closing..." : "Close"}
           </button>
+        )}
+        {!canClose && !["closed", "cancelled", "canceled"].includes(status) && (
+          <div style={{ fontSize: 12, color: "#666", alignSelf: "center" }}>
+            Close is available once PO is fulfilled.
+          </div>
         )}
       </div>
 
@@ -614,35 +620,67 @@ export default function PurchaseOrderDetailPage() {
         </div>
 
         {!activityCollapsed && (
-          <div style={{ overflowX: "auto" }}>
-            {activity.length === 0 && !activityLoading ? (
-              <div style={{ color: "#666", padding: 8 }}>No activity yet.</div>
-            ) : (
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 700 }}>
-                <thead>
-                  <tr style={{ textAlign: "left", background: "#f6f6f6" }}>
-                    <th style={{ padding: 8, border: "1px solid #ccc" }}>Timestamp</th>
-                    <th style={{ padding: 8, border: "1px solid #ccc" }}>Action</th>
-                    <th style={{ padding: 8, border: "1px solid #ccc" }}>Qty</th>
-                    <th style={{ padding: 8, border: "1px solid #ccc" }}>Line</th>
-                    <th style={{ padding: 8, border: "1px solid #ccc" }}>Lot</th>
-                    <th style={{ padding: 8, border: "1px solid #ccc" }}>Location</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {activity.map((mv, idx) => (
-                    <tr key={`${mv.id ?? idx}-${mv.lineId ?? "line"}`}>
-                      <td style={{ padding: 8, border: "1px solid #ccc" }}>{mv.createdAt ?? (mv as any).at ?? "—"}</td>
-                      <td style={{ padding: 8, border: "1px solid #ccc" }}>{mv.action ?? ""}</td>
-                      <td style={{ padding: 8, border: "1px solid #ccc" }}>{mv.qty ?? ""}</td>
-                      <td style={{ padding: 8, border: "1px solid #ccc" }}>{mv.lineId ?? mv.poLineId ?? ""}</td>
-                      <td style={{ padding: 8, border: "1px solid #ccc" }}>{mv.lot ?? ""}</td>
-                      <td style={{ padding: 8, border: "1px solid #ccc" }}>{mv.locationId ?? ""}</td>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <label style={{ fontSize: 14, fontWeight: 500 }}>Filter by line:</label>
+              <select
+                value={selectedActivityLineId}
+                onChange={(e) => setSelectedActivityLineId(e.target.value)}
+                style={{ padding: "4px 8px", fontSize: 14 }}
+              >
+                <option value="all">All lines</option>
+                {po?.lines?.map((line) => {
+                  const lineId = line.id ?? line.lineId ?? "";
+                  const itemId = line.itemId ?? line.productId ?? "";
+                  const itemLabel = itemId.length > 20 ? itemId.slice(0, 17) + "..." : itemId;
+                  return (
+                    <option key={lineId} value={lineId}>
+                      {lineId} ({itemLabel})
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+
+            <div style={{ overflowX: "auto" }}>
+              {activity.length === 0 && !activityLoading ? (
+                <div style={{ color: "#666", padding: 8 }}>No activity yet.</div>
+              ) : (
+                <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 700 }}>
+                  <thead>
+                    <tr style={{ textAlign: "left", background: "#f6f6f6" }}>
+                      <th style={{ padding: 8, border: "1px solid #ccc" }}>Timestamp</th>
+                      <th style={{ padding: 8, border: "1px solid #ccc" }}>Action</th>
+                      <th style={{ padding: 8, border: "1px solid #ccc" }}>Qty</th>
+                      <th style={{ padding: 8, border: "1px solid #ccc" }}>Line</th>
+                      <th style={{ padding: 8, border: "1px solid #ccc" }}>Lot</th>
+                      <th style={{ padding: 8, border: "1px solid #ccc" }}>Location</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+                  </thead>
+                  <tbody>
+                    {activity
+                      .filter((mv) =>
+                        selectedActivityLineId === "all"
+                          ? true
+                          : (mv.lineId ?? mv.poLineId) === selectedActivityLineId
+                      )
+                      .map((mv, idx) => {
+                        const timestamp = mv.createdAt || (mv as any).at || "(no timestamp)";
+                        return (
+                          <tr key={`${mv.id ?? idx}-${mv.lineId ?? "line"}`}>
+                            <td style={{ padding: 8, border: "1px solid #ccc" }}>{timestamp}</td>
+                            <td style={{ padding: 8, border: "1px solid #ccc" }}>{mv.action ?? ""}</td>
+                            <td style={{ padding: 8, border: "1px solid #ccc" }}>{mv.qty ?? ""}</td>
+                            <td style={{ padding: 8, border: "1px solid #ccc" }}>{mv.lineId ?? mv.poLineId ?? ""}</td>
+                            <td style={{ padding: 8, border: "1px solid #ccc" }}>{mv.lot ?? ""}</td>
+                            <td style={{ padding: 8, border: "1px solid #ccc" }}>{mv.locationId ?? ""}</td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              )}
+            </div>
           </div>
         )}
       </div>

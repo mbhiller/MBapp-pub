@@ -113,6 +113,8 @@ if (!Array.isArray(flows) || flows.length === 0) {
 // Extended/opt-in smokes (manual only; keep out of CI):
 //   - smoke:close-the-loop-multi-vendor (excluded below)
 //   - smoke:close-the-loop-partial-receive (run manually via ops/smoke/smoke.mjs)
+//   - smoke:po-receive-after-close-guard (run manually via ops/smoke/smoke.mjs)
+//   - smoke:po-receive-after-cancel-guard (run manually via ops/smoke/smoke.mjs)
 // Prevent churn: exclude multi-vendor flow from CI by default
 const filteredFlows = flows.filter((f) => f !== "smoke:close-the-loop-multi-vendor");
 if (filteredFlows.length !== flows.length) {

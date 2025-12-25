@@ -24,6 +24,29 @@
 - **Runbook:**
   - node ops/smoke/smoke.mjs smoke:vendor-guard-enforced
 
+## Sprint XXXVIII — PO Close/Cancel Gates + Receive Blocked Status Guards (2025-12-25)
+
+- **Close gate:**
+  - Only status "fulfilled" can close
+  - Non-fulfilled PO: 409 "Only fulfilled can close"
+  - After close: status becomes "closed"
+  - Web UI: Close button hidden until PO is fulfilled; hint: "Close is available once PO is fulfilled."
+- **Cancel gate:**
+  - Only statuses "draft" or "submitted" can cancel
+  - Other statuses: 409 "Only draft/submitted can cancel"
+  - After cancel: status becomes "cancelled"
+  - Web UI: Cancel button only visible for draft/submitted
+- **Receive blocked statuses:**
+  - Denied: ["cancelled", "closed", "canceled"]
+  - Error code: PO_STATUS_NOT_RECEIVABLE (409)
+  - Error shape: `{ code: "PO_STATUS_NOT_RECEIVABLE", status: poStatus }`
+- **Web improvements:**
+  - Activity tab now filterable by line via dropdown selector
+  - Timestamp rendering: prefers createdAt, falls back to at, shows "(no timestamp)" if missing
+- **New smokes:**
+  - `node ops/smoke/smoke.mjs smoke:po-receive-after-close-guard` — validates receive blocked (409) after close
+  - `node ops/smoke/smoke.mjs smoke:po-receive-after-cancel-guard` — validates receive blocked (409) after cancel
+
 ## Sprint XXXV — Web Purchasing Workflow Notes (2025-12-25)
 
 **Scope:** Operator-friendly summary of web purchasing and status behavior.
