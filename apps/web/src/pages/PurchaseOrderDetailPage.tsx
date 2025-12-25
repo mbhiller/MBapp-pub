@@ -39,6 +39,22 @@ function formatError(err: unknown): string {
   return parts.join(" · ") || "Request failed";
 }
 
+/**
+ * Normalize status string: lowercase, convert hyphens to underscores, map variants
+ * Examples:
+ *   "DRAFT" -> "draft"
+ *   "Partially-Received" -> "partially_received"
+ *   "Partially_Fulfilled" -> "partially_fulfilled"
+ */
+function normalizeStatus(s: string | undefined): string {
+  if (!s) return "unknown";
+  let norm = s.toLowerCase().replace(/-/g, "_");
+  // Ensure common variants are mapped
+  if (norm === "partially_received" || norm === "partially-received") norm = "partially_received";
+  if (norm === "partially_fulfilled" || norm === "partially-fulfilled") norm = "partially_fulfilled";
+  return norm;
+}
+
 export default function PurchaseOrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { token, tenantId } = useAuth();
@@ -48,7 +64,8 @@ export default function PurchaseOrderDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [deltaQty, setDeltaQty] = useState<Record<string, number>>({});
+  const [lineState, setLineState] = useState<Record<string, { deltaQty: number; lot?: string; locationId?: string }>>({});
+  const [lineErrors, setLineErrors] = useState<Record<string, string>>({});
 
   const fetchPo = useCallback(async () => {
     if (!id) return;
@@ -115,9 +132,31 @@ export default function PurchaseOrderDetailPage() {
   const handleReceive = async () => {
     if (!id || !po?.lines) return;
 
-    const linesToReceive = Object.entries(deltaQty)
-      .filter(([_, qty]) => qty > 0)
-      .map(([lineId, qty]) => ({ lineId, deltaQty: qty }));
+    // Client-side validation
+    const newErrors: Record<string, string> = {};
+    const linesToReceive = Object.entries(lineState)
+      .filter(([_, state]) => state.deltaQty > 0)
+      .map(([lineId, state]) => {
+        // Find the line to check remaining
+        const line = po.lines?.find((l) => (l.id ?? l.lineId) === lineId);
+        const orderedQty = line?.qty ?? line?.orderedQty ?? 0;
+        const receivedQty = line?.receivedQty ?? 0;
+        const remaining = Math.max(0, orderedQty - receivedQty);
+
+        if (state.deltaQty > remaining) {
+          newErrors[lineId] = `Cannot receive ${state.deltaQty} (only ${remaining} remaining)`;
+          return null;
+        }
+        return { lineId, deltaQty: state.deltaQty, lot: state.lot || undefined, locationId: state.locationId || undefined };
+      })
+      .filter((l): l is any => l !== null);
+
+    setLineErrors(newErrors);
+
+    if (Object.keys(newErrors).length > 0) {
+      setActionError("Fix validation errors before submitting");
+      return;
+    }
 
     if (linesToReceive.length === 0) {
       setActionError("No quantities to receive. Set deltaQty > 0 for at least one line.");
@@ -127,18 +166,23 @@ export default function PurchaseOrderDetailPage() {
     setActionLoading(true);
     setActionError(null);
     try {
-      const idempotencyKey = `web-receive-${id}-${Date.now()}`;
+      // Generate idempotency key
+      const uuid = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      const idempotencyKey = `web-receive-${id}-${uuid}`;
+
       await receivePurchaseOrder(
         id,
         { lines: linesToReceive },
         { token: token || undefined, tenantId, idempotencyKey }
       );
-      setDeltaQty({});
+      setLineState({});
+      setLineErrors({});
       await fetchPo();
     } catch (err: any) {
       if (err?.status === 409 && err?.details?.code === "RECEIVE_EXCEEDS_REMAINING") {
+        const details = err.details;
         setActionError(
-          `${formatError(err)} — Cannot receive more than remaining quantity. Check ordered vs. received.`
+          `${formatError(err)} — Attempted: ${details.attemptedDelta}, Remaining: ${details.remaining} (Ordered: ${details.ordered}, Already received: ${details.received})`
         );
       } else {
         setActionError(formatError(err));
@@ -177,22 +221,27 @@ export default function PurchaseOrderDetailPage() {
   };
 
   const handleReceiveRemaining = (lineId: string, remaining: number) => {
-    setDeltaQty((prev) => ({ ...prev, [lineId]: remaining }));
+    setLineState((prev) => ({
+      ...prev,
+      [lineId]: { ...prev[lineId], deltaQty: remaining },
+    }));
+    setLineErrors((prev) => ({ ...prev, [lineId]: "" }));
   };
 
   const handleReceiveAllRemaining = () => {
     if (!po?.lines) return;
-    const newDelta: Record<string, number> = {};
+    const newState: typeof lineState = {};
     po.lines.forEach((line) => {
       const lineId = line.id ?? line.lineId ?? "";
-      const ordered = line.qty ?? line.orderedQty ?? 0;
-      const received = line.receivedQty ?? 0;
-      const remaining = ordered - received;
+      const orderedQty = line.qty ?? line.orderedQty ?? 0;
+      const receivedQty = line.receivedQty ?? 0;
+      const remaining = Math.max(0, orderedQty - receivedQty);
       if (remaining > 0) {
-        newDelta[lineId] = remaining;
+        newState[lineId] = { deltaQty: remaining };
       }
     });
-    setDeltaQty(newDelta);
+    setLineState(newState);
+    setLineErrors({});
   };
 
   if (loading) return <div>Loading...</div>;
@@ -207,15 +256,18 @@ export default function PurchaseOrderDetailPage() {
   }
   if (!po) return <div>Purchase order not found.</div>;
 
-  const status = po.status ?? "unknown";
+  const rawStatus = po.status ?? "unknown";
+  const status = normalizeStatus(rawStatus);
   const lines = po.lines ?? [];
 
-  // Status gates (matching mobile patterns)
-  const canSubmit = status === "draft";
+  // Status gates aligned with API handler rules:
+  // - Receive handler allows: ["open","approved","partially-received","partially_fulfilled"]
+  // - Denies: ["cancelled","closed","canceled"]
+  const canSubmit = ["draft", "open"].includes(status);
   const canApprove = status === "submitted";
-  const canReceive = ["approved", "partially_fulfilled"].includes(status);
-  const canCancel = ["draft", "submitted"].includes(status);
-  const canClose = ["approved", "partially_fulfilled", "fulfilled"].includes(status);
+  const canReceive = ["open", "approved", "partially_received", "partially_fulfilled"].includes(status);
+  const canCancel = ["draft", "submitted", "open"].includes(status);
+  const canClose = ["fulfilled", "partially_fulfilled", "partially_received", "approved", "open"].includes(status);
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -286,72 +338,110 @@ export default function PurchaseOrderDetailPage() {
       {lines.length === 0 ? (
         <div>No lines.</div>
       ) : (
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr style={{ textAlign: "left", background: "#eee" }}>
-              <th style={{ padding: 8, border: "1px solid #ccc" }}>Line ID</th>
-              <th style={{ padding: 8, border: "1px solid #ccc" }}>Item</th>
-              <th style={{ padding: 8, border: "1px solid #ccc" }}>Ordered</th>
-              <th style={{ padding: 8, border: "1px solid #ccc" }}>Received</th>
-              <th style={{ padding: 8, border: "1px solid #ccc" }}>Remaining</th>
-              {canReceive && (
-                <>
-                  <th style={{ padding: 8, border: "1px solid #ccc" }}>Delta Qty</th>
-                  <th style={{ padding: 8, border: "1px solid #ccc" }}>Actions</th>
-                </>
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {lines.map((line) => {
-              const lineId = line.id ?? line.lineId ?? "";
-              const itemId = line.itemId ?? line.productId ?? "—";
-              const ordered = line.qty ?? line.orderedQty ?? 0;
-              const received = line.receivedQty ?? 0;
-              const remaining = ordered - received;
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 800 }}>
+            <thead>
+              <tr style={{ textAlign: "left", background: "#eee" }}>
+                <th style={{ padding: 8, border: "1px solid #ccc" }}>Line ID</th>
+                <th style={{ padding: 8, border: "1px solid #ccc" }}>Item</th>
+                <th style={{ padding: 8, border: "1px solid #ccc" }}>Ordered</th>
+                <th style={{ padding: 8, border: "1px solid #ccc" }}>Received</th>
+                <th style={{ padding: 8, border: "1px solid #ccc" }}>Remaining</th>
+                {canReceive && (
+                  <>
+                    <th style={{ padding: 8, border: "1px solid #ccc" }}>Delta Qty</th>
+                    <th style={{ padding: 8, border: "1px solid #ccc" }}>Lot</th>
+                    <th style={{ padding: 8, border: "1px solid #ccc" }}>Location</th>
+                    <th style={{ padding: 8, border: "1px solid #ccc" }}>Actions</th>
+                  </>
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {lines.map((line) => {
+                const lineId = line.id ?? line.lineId ?? "";
+                const itemId = line.itemId ?? line.productId ?? "—";
+                const orderedQty = line.qty ?? line.orderedQty ?? 0;
+                const receivedQty = line.receivedQty ?? 0;
+                const remaining = Math.max(0, orderedQty - receivedQty);
+                const state = lineState[lineId] ?? { deltaQty: 0 };
+                const error = lineErrors[lineId];
 
-              return (
-                <tr key={lineId}>
-                  <td style={{ padding: 8, border: "1px solid #ccc" }}>{lineId}</td>
-                  <td style={{ padding: 8, border: "1px solid #ccc" }}>{itemId}</td>
-                  <td style={{ padding: 8, border: "1px solid #ccc" }}>{ordered}</td>
-                  <td style={{ padding: 8, border: "1px solid #ccc" }}>{received}</td>
-                  <td style={{ padding: 8, border: "1px solid #ccc" }}>{remaining}</td>
-                  {canReceive && (
-                    <>
-                      <td style={{ padding: 8, border: "1px solid #ccc" }}>
-                        <input
-                          type="number"
-                          min="0"
-                          value={deltaQty[lineId] ?? 0}
-                          onChange={(e) => {
-                            const val = Number(e.target.value);
-                            setDeltaQty((prev) => ({
-                              ...prev,
-                              [lineId]: val >= 0 ? val : 0,
-                            }));
-                          }}
-                          style={{ width: 80 }}
-                        />
-                      </td>
-                      <td style={{ padding: 8, border: "1px solid #ccc" }}>
-                        {remaining > 0 && (
-                          <button
-                            onClick={() => handleReceiveRemaining(lineId, remaining)}
-                            disabled={actionLoading}
-                            style={{ fontSize: 12, padding: "4px 8px" }}
-                          >
-                            Receive Remaining
-                          </button>
-                        )}
-                      </td>
-                    </>
-                  )}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                return (
+                  <tr key={lineId}>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }}>{lineId}</td>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }}>{itemId}</td>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }}>{orderedQty}</td>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }}>{receivedQty}</td>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }}>{remaining}</td>
+                    {canReceive && (
+                      <>
+                        <td style={{ padding: 8, border: `1px solid ${error ? "#d32f2f" : "#ccc"}`, background: error ? "#ffebee" : "transparent" }}>
+                          <div>
+                            <input
+                              type="number"
+                              min="0"
+                              value={state.deltaQty ?? 0}
+                              onChange={(e) => {
+                                const val = Number(e.target.value);
+                                setLineState((prev) => ({
+                                  ...prev,
+                                  [lineId]: { ...prev[lineId], deltaQty: val >= 0 ? val : 0 },
+                                }));
+                                setLineErrors((prev) => ({ ...prev, [lineId]: "" }));
+                              }}
+                              style={{ width: 70 }}
+                            />
+                          </div>
+                          {error && <div style={{ fontSize: 11, color: "#d32f2f", marginTop: 2 }}>{error}</div>}
+                        </td>
+                        <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                          <input
+                            type="text"
+                            placeholder="Lot/Batch"
+                            value={state.lot ?? ""}
+                            onChange={(e) => {
+                              setLineState((prev) => ({
+                                ...prev,
+                                [lineId]: { ...prev[lineId], lot: e.target.value || undefined },
+                              }));
+                            }}
+                            style={{ width: 70 }}
+                          />
+                        </td>
+                        <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                          <input
+                            type="text"
+                            placeholder="Location"
+                            value={state.locationId ?? ""}
+                            onChange={(e) => {
+                              setLineState((prev) => ({
+                                ...prev,
+                                [lineId]: { ...prev[lineId], locationId: e.target.value || undefined },
+                              }));
+                            }}
+                            style={{ width: 70 }}
+                          />
+                        </td>
+                        <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                          {remaining > 0 && (
+                            <button
+                              onClick={() => handleReceiveRemaining(lineId, remaining)}
+                              disabled={actionLoading}
+                              style={{ fontSize: 12, padding: "4px 8px", whiteSpace: "nowrap" }}
+                            >
+                              Receive Remaining
+                            </button>
+                          )}
+                        </td>
+                      </>
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

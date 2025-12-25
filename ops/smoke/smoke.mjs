@@ -431,6 +431,286 @@ const tests = {
         }
       };
     },
+
+    "smoke:close-the-loop-multi-vendor": async () => {
+      await ensureBearer();
+      
+      // 1) Create TWO vendors with different names
+      const vendor1Raw = await seedVendor(api);
+      const vendor1Id = vendor1Raw.vendorId;
+      if (!vendor1Id) return { test: "close-the-loop-multi-vendor", result: "FAIL", step: "seedVendor1", vendor1Raw };
+      
+      const vendor2Raw = await seedVendor(api);
+      const vendor2Id = vendor2Raw.vendorId;
+      if (!vendor2Id) return { test: "close-the-loop-multi-vendor", result: "FAIL", step: "seedVendor2", vendor2Raw };
+      
+      // 2) Create TWO products with different preferred vendors
+      const prod1 = await createProduct({ 
+        name: "MultiVendorProd1", 
+        preferredVendorId: vendor1Id 
+      });
+      if (!prod1.ok) return { test: "close-the-loop-multi-vendor", result: "FAIL", step: "createProduct1", prod1 };
+      
+      const prod2 = await createProduct({ 
+        name: "MultiVendorProd2", 
+        preferredVendorId: vendor2Id 
+      });
+      if (!prod2.ok) return { test: "close-the-loop-multi-vendor", result: "FAIL", step: "createProduct2", prod2 };
+      
+      const prod1Id = prod1.body?.id;
+      const prod2Id = prod2.body?.id;
+      
+      // 3) Create inventory for both products
+      const item1 = await createInventoryForProduct(prod1Id, "MultiVendorItem1");
+      if (!item1.ok) return { test: "close-the-loop-multi-vendor", result: "FAIL", step: "createInventory1", item1 };
+      
+      const item2 = await createInventoryForProduct(prod2Id, "MultiVendorItem2");
+      if (!item2.ok) return { test: "close-the-loop-multi-vendor", result: "FAIL", step: "createInventory2", item2 };
+      
+      const item1Id = item1.body?.id;
+      const item2Id = item2.body?.id;
+      
+      // 4) Ensure low/zero onHand for both items
+      const onhand1Pre = await onhand(item1Id);
+      const currentOnHand1 = onhand1Pre.body?.items?.[0]?.onHand ?? 0;
+      if (currentOnHand1 !== 0) {
+        await post(`/objects/inventoryMovement`, { itemId: item1Id, type: "adjust", qty: -currentOnHand1 });
+      }
+      
+      const onhand2Pre = await onhand(item2Id);
+      const currentOnHand2 = onhand2Pre.body?.items?.[0]?.onHand ?? 0;
+      if (currentOnHand2 !== 0) {
+        await post(`/objects/inventoryMovement`, { itemId: item2Id, type: "adjust", qty: -currentOnHand2 });
+      }
+      
+      // 5) Create a customer party
+      const { partyId } = await seedParties(api);
+      
+      // 6) Create ONE sales order with TWO lines (one per item)
+      const so = await post(`/objects/salesOrder`, {
+        type: "salesOrder",
+        status: "draft",
+        partyId,
+        lines: [
+          { itemId: item1Id, qty: 3, uom: "ea" },
+          { itemId: item2Id, qty: 2, uom: "ea" }
+        ]
+      });
+      if (!so.ok) return { test: "close-the-loop-multi-vendor", result: "FAIL", step: "createSO", so };
+      
+      const soId = so.body?.id;
+      
+      // 7) Commit SO to generate backorders for both items
+      await post(`/sales/so/${encodeURIComponent(soId)}:submit`, {}, { "Idempotency-Key": idem() });
+      await post(`/sales/so/${encodeURIComponent(soId)}:commit`, {}, { "Idempotency-Key": idem() });
+      
+      // Assert backorderRequests exist with status="open"
+      const boRes = await post(`/objects/backorderRequest/search`, { soId, status: "open" });
+      if (!boRes.ok || !Array.isArray(boRes.body?.items) || boRes.body.items.length < 2)
+        return { test: "close-the-loop-multi-vendor", result: "FAIL", step: "backorderRequest-count", boRes };
+      
+      const boIds = boRes.body.items.map(b => b.id);
+      recordFromListResult(boRes.body.items, "backorderRequest", `/objects/backorderRequest/search`);
+      
+      // 8) Call suggest-po with all backorderRequestIds
+      const suggest = await post(`/purchasing/suggest-po`, { 
+        requests: boIds.map(id => ({ backorderRequestId: id })) 
+      });
+      
+      if (!suggest.ok || !Array.isArray(suggest.body?.drafts))
+        return { test: "close-the-loop-multi-vendor", result: "FAIL", step: "suggest-po", suggest };
+      
+      const drafts = suggest.body.drafts;
+      
+      // 9) Assert drafts[] has length == 2 (one per vendor)
+      if (drafts.length !== 2) {
+        return { 
+          test: "close-the-loop-multi-vendor", 
+          result: "FAIL", 
+          step: "drafts-count", 
+          expected: 2, 
+          got: drafts.length,
+          drafts 
+        };
+      }
+      
+      // 10) Create both POs via POST /purchasing/po:create-from-suggestion with { drafts }
+      const poCreate = await post(`/purchasing/po:create-from-suggestion`, { 
+        drafts 
+      }, { "Idempotency-Key": idem() });
+      
+      if (!poCreate.ok || !Array.isArray(poCreate.body?.ids) || poCreate.body.ids.length !== 2) {
+        return { 
+          test: "close-the-loop-multi-vendor", 
+          result: "FAIL", 
+          step: "create-from-suggestion", 
+          poCreate 
+        };
+      }
+      
+      const poIds = poCreate.body.ids;
+      recordFromListResult(
+        poIds.map((id, idx) => ({ id, type: "purchaseOrder", status: "draft", vendorId: drafts[idx]?.vendorId })),
+        "purchaseOrder",
+        `/purchasing/po:create-from-suggestion`
+      );
+      
+      // 11) For each PO: approve (if needed) and receive all remaining qty
+      const receiveResults = [];
+      const finalOnhands = [];
+      
+      for (let idx = 0; idx < poIds.length; idx++) {
+        const poId = poIds[idx];
+        
+        // Submit PO
+        const submit = await post(`/purchasing/po/${encodeURIComponent(poId)}:submit`, {}, { "Idempotency-Key": idem() });
+        if (!submit.ok) {
+          return { 
+            test: "close-the-loop-multi-vendor", 
+            result: "FAIL", 
+            step: `po${idx+1}-submit`, 
+            submit 
+          };
+        }
+        
+        // Approve PO
+        const approve = await post(`/purchasing/po/${encodeURIComponent(poId)}:approve`, {}, { "Idempotency-Key": idem() });
+        if (!approve.ok) {
+          return { 
+            test: "close-the-loop-multi-vendor", 
+            result: "FAIL", 
+            step: `po${idx+1}-approve`, 
+            approve 
+          };
+        }
+        
+        // Wait for approval status
+        const approved = await waitForStatus("purchaseOrder", poId, ["approved"]);
+        if (!approved.ok) {
+          return { 
+            test: "close-the-loop-multi-vendor", 
+            result: "FAIL", 
+            step: `po${idx+1}-not-approved`, 
+            approved 
+          };
+        }
+        
+        // Get PO to extract lines
+        const po = await get(`/objects/purchaseOrder/${encodeURIComponent(poId)}`);
+        const lines = (po.body?.lines ?? [])
+          .map(ln => ({ 
+            lineId: ln.id ?? ln.lineId, 
+            deltaQty: Math.max(0, (ln.qty ?? 0) - (ln.receivedQty ?? 0)) 
+          }))
+          .filter(l => l.deltaQty > 0);
+        
+        // Receive all remaining qty
+        const recv = await post(`/purchasing/po/${encodeURIComponent(poId)}:receive`, 
+          { lines }, 
+          { "Idempotency-Key": idem() }
+        );
+        
+        if (!recv.ok) {
+          return { 
+            test: "close-the-loop-multi-vendor", 
+            result: "FAIL", 
+            step: `po${idx+1}-receive`, 
+            recv 
+          };
+        }
+        
+        receiveResults.push(recv);
+        
+        // Record final onhand for this item
+        const itemIdForPo = idx === 0 ? item1Id : item2Id;
+        const ohAfter = await onhand(itemIdForPo);
+        finalOnhands.push(ohAfter);
+      }
+      
+      // 12) Validate PO line receivedQty matches qty in receive responses + status
+      const lineReceivedValid = receiveResults.every((recv, idx) => {
+        const lines = recv.body?.lines ?? [];
+        // Check that each line has receivedQty === qty (after receiving)
+        return lines.every(l => {
+          const receivedAfter = l.receivedQty ?? 0;
+          const ordered = l.qty ?? 0;
+          return receivedAfter === ordered;
+        });
+      });
+      
+      // Validate PO status is fulfilled after receive
+      const poStatusValid = receiveResults.every((recv, idx) => {
+        const status = recv.body?.status;
+        return status === "fulfilled";
+      });
+      
+      // 13) Fetch inventory onhand (informational; don't fail on stale values)
+      // Retry up to 3 times with 300ms delay to work around eventual consistency
+      const getOnhandWithRetry = async (itemId) => {
+        for (let i = 0; i < 3; i++) {
+          const oh = await onhand(itemId);
+          if (oh.ok) return oh;
+          if (i < 2) await sleep(300);
+        }
+        return { ok: false, body: {} };
+      };
+      
+      const onhand1AfterRetry = await getOnhandWithRetry(item1Id);
+      const onhand2AfterRetry = await getOnhandWithRetry(item2Id);
+      
+      const onHand1Final = (onhand1AfterRetry.body?.items?.[0]?.onHand ?? 0);
+      const onHand2Final = (onhand2AfterRetry.body?.items?.[0]?.onHand ?? 0);
+      
+      // 14) Assert backorder status transitions (most reliable indicator of success)
+      const boFulfilled = await post(`/objects/backorderRequest/search`, { soId, status: "fulfilled" });
+      const boOpen = await post(`/objects/backorderRequest/search`, { soId, status: "open" });
+      
+      recordFromListResult(boFulfilled.body?.items, "backorderRequest", `/objects/backorderRequest/search`);
+      recordFromListResult(boOpen.body?.items, "backorderRequest", `/objects/backorderRequest/search`);
+      
+      const boStatusValid = 
+        (boFulfilled.body?.items?.length ?? 0) >= 2
+        && (boOpen.body?.items?.length ?? 0) === 0;
+      
+      // Pass if: receipts confirmed success + lines fully received + POs fulfilled + no open backorders
+      // Inventory checks are logged but not required to pass (due to allocation/projection lag)
+      const pass = 
+        poCreate.ok 
+        && poIds.length === 2 
+        && receiveResults.every(r => r.ok)
+        && lineReceivedValid
+        && poStatusValid
+        && boStatusValid;
+      
+      return {
+        test: "close-the-loop-multi-vendor",
+        result: pass ? "PASS" : "FAIL",
+        steps: {
+          vendors: { vendor1Id, vendor2Id },
+          products: { prod1Id, prod2Id },
+          items: { item1Id, item2Id },
+          so: { soId },
+          backorders: { count: boIds.length, ids: boIds },
+          suggest: { draftCount: drafts.length, drafts },
+          pos: { ids: poIds },
+          receives: receiveResults,
+          lineReceiveValidation: {
+            allLinesFullyReceived: lineReceivedValid,
+            poStatusFulfilled: poStatusValid
+          },
+          inventory: { 
+            item1Final: onHand1Final, 
+            item2Final: onHand2Final,
+            note: "Informational only; may be 0 if allocated to backorder/SO"
+          },
+          backorderStatus: {
+            fulfilled: boFulfilled.body?.items?.length ?? 0,
+            open: boOpen.body?.items?.length ?? 0
+          }
+        }
+      };
+    },
+
   "list": async ()=>Object.keys(tests),
 
   "smoke:ping": async ()=>{

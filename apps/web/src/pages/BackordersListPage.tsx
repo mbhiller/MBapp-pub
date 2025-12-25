@@ -172,12 +172,12 @@ export default function BackordersListPage() {
       if (drafts.length === 0) {
         if (res.skipped && res.skipped.length > 0) {
           setActionError(
-            `All backorders skipped: ${res.skipped.map((s) => s.reason).join(", ")}`
+            `No PO drafts created: all ${res.skipped.length} backorder(s) were skipped (see details below)`
           );
         } else {
           setActionError("No drafts returned from suggest-po");
         }
-        setSelected({});
+        // Do NOT clear selection here - let user retry after reviewing skipped reasons
         await fetchPage();
         return;
       }
@@ -231,11 +231,11 @@ export default function BackordersListPage() {
             </select>
           </label>
           <label style={{ display: "flex", alignItems: "center", gap: 4, flex: 1 }}>
-            Vendor:
+            Preferred Vendor ID:
             <input
               value={vendorFilter}
               onChange={(e) => setVendorFilter(e.target.value)}
-              placeholder="Filter by vendor ID (optional)"
+              placeholder="Optional: filter by preferred vendor ID"
               style={{ flex: 1 }}
             />
           </label>
@@ -247,10 +247,10 @@ export default function BackordersListPage() {
         {selectedIds.length > 0 && (
           <div style={{ display: "flex", gap: 8, padding: 8, background: "#e3f2fd", borderRadius: 4 }}>
             <span style={{ fontWeight: 600 }}>{selectedIds.length} selected</span>
-            <button onClick={handleBulkIgnore} disabled={actionLoading}>
+            <button onClick={handleBulkIgnore} disabled={actionLoading || selectedIds.length === 0}>
               {actionLoading ? "Ignoring..." : "Bulk Ignore"}
             </button>
-            <button onClick={handleSuggestPo} disabled={actionLoading}>
+            <button onClick={handleSuggestPo} disabled={actionLoading || selectedIds.length === 0}>
               {actionLoading ? "Processing..." : "Suggest PO"}
             </button>
           </div>
@@ -267,14 +267,32 @@ export default function BackordersListPage() {
 
       {suggestResult?.skipped && suggestResult.skipped.length > 0 && (
         <div style={{ padding: 12, background: "#fff9c4", color: "#6d4c00", borderRadius: 4 }}>
-          <strong>Skipped {suggestResult.skipped.length} backorder(s):</strong>
-          <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
-            {suggestResult.skipped.map((s, idx) => (
-              <li key={idx}>
-                {s.backorderRequestId}: {s.reason}
-              </li>
-            ))}
-          </ul>
+          <div style={{ marginBottom: 8 }}>
+            <strong>⚠ Skipped {suggestResult.skipped.length} backorder request(s)</strong>
+            <p style={{ margin: "4px 0 0", fontSize: 12, fontStyle: "italic" }}>
+              These could not be converted to PO draft. Review reasons below and retry if needed.
+            </p>
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: "#ffe082" }}>
+                  <th style={{ padding: 6, border: "1px solid #fbc02d", textAlign: "left" }}>Backorder ID</th>
+                  <th style={{ padding: 6, border: "1px solid #fbc02d", textAlign: "left" }}>Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {suggestResult.skipped.map((s, idx) => (
+                  <tr key={idx}>
+                    <td style={{ padding: 6, border: "1px solid #fbc02d" }}>{s.backorderRequestId}</td>
+                    <td style={{ padding: 6, border: "1px solid #fbc02d" }}>
+                      {s.reason || "Unknown reason"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
