@@ -1,3 +1,36 @@
+## Sprint XXXV — Web Purchasing Workflow Notes (2025-12-25)
+
+**Scope:** Operator-friendly summary of web purchasing and status behavior.
+
+- **PO Detail Actions & Gating:**
+  - Submit: visible for statuses `draft` and `open`; server enforces exact gate.
+  - Approve: visible for `submitted`.
+  - Receive: visible for `open`, `approved`, `partially_received`, `partially_fulfilled`.
+  - Cancel: hidden only for `closed`, `cancelled`, `canceled` (server still validates).
+  - Close: hidden only for `closed`, `cancelled`, `canceled` (server still validates).
+  - Status normalization: UI maps hyphens/uppercase to underscored lowercase; fully received POs surface as `fulfilled` before `close`.
+
+- **Receive Behavior:**
+  - Per-line `deltaQty` input; remaining math uses `remaining = max(0, orderedQty - receivedQty)`.
+  - Client-side validation prevents over-receive; server returns 409 `RECEIVE_EXCEEDS_REMAINING` with details when attempted.
+  - Optional fields: `lot` and `locationId` per line; included only if provided.
+  - Idempotency: requests include a unique idempotency key to prevent accidental double-receive.
+  - Shortcuts: "Receive Remaining" per line and "Receive All Remaining" convenience button.
+
+- **Backorders Workbench:**
+  - Filters: quick filters for `soId` and `itemId` to narrow scope.
+  - Grouped View: toggle groups by vendor with header showing vendor name, count, and total quantity; selection persists across groups.
+  - Suggest PO Flow: bulk action calls `suggest-po`; if multi-vendor, the UI handles `drafts[]` and proceeds via `create-from-suggestion { drafts }`. Skipped requests show reasons (e.g., ZERO_QTY, MISSING_VENDOR).
+
+**Runbook Snippets:**
+```bash
+# Typecheck web (apps/web)
+cd apps/web && npx tsc --noEmit
+
+# Multi-vendor smoke (opt-in)
+node ops/smoke/smoke.mjs smoke:close-the-loop-multi-vendor
+```
+
 ## Sprint XXXIII — Web Backorders + Suggest PO + Purchase Orders (2025-12-25)
 
 **Date:** 2025-12-25  
@@ -61,6 +94,17 @@
 - Mobile: Sync PO receive history display with web patterns
 
 ---
+
+### Multi-vendor smoke (opt-in)
+
+- How to run:
+  - `node ops/smoke/smoke.mjs smoke:close-the-loop-multi-vendor`
+- What it validates:
+  - `suggest-po` returns `drafts[]` for multiple vendors
+  - `create-from-suggestion` with `{ drafts }` produces multiple POs
+  - `receive` fully processes lines with correct quantities
+
+Note: This flow is excluded from CI by default to avoid churn; run locally when needed.
 
 ## Sprint XXIX — Sales Orders Web + Smokes (2025-12-24)
 

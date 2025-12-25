@@ -31,19 +31,26 @@ export default function PurchaseOrdersListPage() {
   const [next, setNext] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string>("");
+  const [vendorFilter, setVendorFilter] = useState<string>("");
 
   const fetchPage = useCallback(
     async (cursor?: string) => {
       setLoading(true);
       setError(null);
       try {
+        const query: Record<string, string | number | undefined> = {
+          limit: 50,
+          next: cursor ?? undefined,
+          sort: "desc",
+        };
+        if (statusFilter) query["filter.status"] = statusFilter;
+        if (vendorFilter.trim()) query["filter.vendorId"] = vendorFilter.trim();
+
         const res = await apiFetch<PurchaseOrderPage>("/objects/purchaseOrder", {
           token: token || undefined,
           tenantId,
-          query: {
-            limit: 50,
-            next: cursor ?? undefined,
-          },
+          query,
         });
         setItems((prev) => (cursor ? [...prev, ...(res.items ?? [])] : res.items ?? []));
         setNext(res.next ?? null);
@@ -53,7 +60,7 @@ export default function PurchaseOrdersListPage() {
         setLoading(false);
       }
     },
-    [tenantId, token]
+    [tenantId, token, statusFilter, vendorFilter]
   );
 
   useEffect(() => {
@@ -92,6 +99,45 @@ export default function PurchaseOrdersListPage() {
     <div style={{ display: "grid", gap: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h1>Purchase Orders</h1>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          Status:
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            style={{ minWidth: 180 }}
+          >
+            <option value="">All</option>
+            <option value="draft">draft</option>
+            <option value="submitted">submitted</option>
+            <option value="approved">approved</option>
+            <option value="partially_fulfilled">partially_fulfilled</option>
+            <option value="fulfilled">fulfilled</option>
+            <option value="closed">closed</option>
+            <option value="cancelled">cancelled</option>
+          </select>
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 4, flex: 1 }}>
+          Vendor ID:
+          <input
+            value={vendorFilter}
+            onChange={(e) => setVendorFilter(e.target.value)}
+            placeholder="Optional: filter by vendor ID"
+            style={{ flex: 1 }}
+          />
+        </label>
+        <button
+          onClick={() => {
+            setStatusFilter("");
+            setVendorFilter("");
+            fetchPage();
+          }}
+          disabled={loading}
+        >
+          Clear filters
+        </button>
       </div>
 
       {error && (
