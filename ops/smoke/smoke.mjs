@@ -711,6 +711,153 @@ const tests = {
       };
     },
 
+    "smoke:close-the-loop-partial-receive": async () => {
+      await ensureBearer();
+
+      // 1) Seed vendor + product (with preferredVendorId) + inventory item
+      const { vendorId } = await seedVendor(api);
+      const prod = await createProduct({ name: "PartialReceiveProd", preferredVendorId: vendorId });
+      if (!prod.ok) return { test: "close-the-loop-partial-receive", result: "FAIL", step: "createProduct", prod };
+
+      const item = await createInventoryForProduct(prod.body?.id, "PartialReceiveItem");
+      if (!item.ok) return { test: "close-the-loop-partial-receive", result: "FAIL", step: "createInventory", item };
+      const itemId = item.body?.id;
+
+      // Ensure onHand is 0
+      const onhandPre = await onhand(itemId);
+      const currentOnHand = onhandPre.body?.items?.[0]?.onHand ?? 0;
+      if (currentOnHand !== 0) {
+        await post(`/objects/inventoryMovement`, { itemId, type: "adjust", qty: -currentOnHand });
+      }
+
+      // 2) Create SO qty=5 and commit to create backorder
+      const { partyId } = await seedParties(api);
+      const so = await post(`/objects/salesOrder`, {
+        type: "salesOrder",
+        status: "draft",
+        partyId,
+        lines: [{ itemId, qty: 5, uom: "ea" }]
+      });
+      if (!so.ok) return { test: "close-the-loop-partial-receive", result: "FAIL", step: "createSO", so };
+      const soId = so.body?.id;
+      await post(`/sales/so/${encodeURIComponent(soId)}:submit`, {}, { "Idempotency-Key": idem() });
+      await post(`/sales/so/${encodeURIComponent(soId)}:commit`, {}, { "Idempotency-Key": idem() });
+
+      // 3) suggest-po and create PO from suggestion
+      const boRes = await post(`/objects/backorderRequest/search`, { soId, status: "open" });
+      if (!boRes.ok || !Array.isArray(boRes.body?.items) || boRes.body.items.length === 0)
+        return { test: "close-the-loop-partial-receive", result: "FAIL", step: "backorderRequest-open", boRes };
+      const boIds = boRes.body.items.map((b) => b.id);
+
+      const suggest = await post(`/purchasing/suggest-po`, { requests: boIds.map((id) => ({ backorderRequestId: id })) });
+      if (!suggest.ok || !Array.isArray(suggest.body?.drafts) || suggest.body.drafts.length === 0)
+        return { test: "close-the-loop-partial-receive", result: "FAIL", step: "suggest-po", suggest };
+
+      const draft = suggest.body.drafts[0];
+      const createPo = await post(`/purchasing/po:create-from-suggestion`, { drafts: [draft] }, { "Idempotency-Key": idem() });
+      if (!createPo.ok || !Array.isArray(createPo.body?.ids) || createPo.body.ids.length !== 1)
+        return { test: "close-the-loop-partial-receive", result: "FAIL", step: "create-from-suggestion", createPo };
+
+      const poId = createPo.body.ids[0];
+
+      // 4) Approve PO if required
+      await post(`/purchasing/po/${encodeURIComponent(poId)}:submit`, {}, { "Idempotency-Key": idem() });
+      await post(`/purchasing/po/${encodeURIComponent(poId)}:approve`, {}, { "Idempotency-Key": idem() });
+      const approved = await waitForStatus("purchaseOrder", poId, ["approved", "open"]);
+      if (!approved.ok) return { test: "close-the-loop-partial-receive", result: "FAIL", step: "po-approved", approved };
+
+      // 5) Partial receive delta=2
+      const poGet1 = await get(`/objects/purchaseOrder/${encodeURIComponent(poId)}`);
+      const poLines = poGet1.body?.lines ?? [];
+      if (poLines.length === 0) return { test: "close-the-loop-partial-receive", result: "FAIL", step: "po-lines-empty", poGet1 };
+      const lineId = poLines[0].id ?? poLines[0].lineId;
+      const ordered = poLines[0].qty ?? 0;
+
+      const receive1 = await post(
+        `/purchasing/po/${encodeURIComponent(poId)}:receive`,
+        { lines: [{ lineId, deltaQty: 2 }] },
+        { "Idempotency-Key": idem() }
+      );
+      if (!receive1.ok) return { test: "close-the-loop-partial-receive", result: "FAIL", step: "receive-partial", receive1 };
+
+      const lineAfter1 = (receive1.body?.lines ?? []).find((l) => (l.id ?? l.lineId) === lineId) || {};
+      const statusAfter1 = receive1.body?.status;
+      const okPartial = (lineAfter1.receivedQty ?? 0) === 2 && statusAfter1 === "partially-received";
+      if (!okPartial) {
+        return {
+          test: "close-the-loop-partial-receive",
+          result: "FAIL",
+          step: "assert-partial",
+          lineAfter1,
+          statusAfter1,
+        };
+      }
+
+      // 6) Receive remainder
+      const remaining = Math.max(0, (lineAfter1.qty ?? ordered) - (lineAfter1.receivedQty ?? 2));
+      const receive2 = await post(
+        `/purchasing/po/${encodeURIComponent(poId)}:receive`,
+        { lines: [{ lineId, deltaQty: remaining }] },
+        { "Idempotency-Key": idem() }
+      );
+      if (!receive2.ok) return { test: "close-the-loop-partial-receive", result: "FAIL", step: "receive-final", receive2 };
+
+      const lineAfter2 = (receive2.body?.lines ?? []).find((l) => (l.id ?? l.lineId) === lineId) || {};
+      const statusAfter2 = receive2.body?.status;
+      const okFinal = (lineAfter2.receivedQty ?? 0) === (lineAfter2.qty ?? ordered) && statusAfter2 === "fulfilled";
+      if (!okFinal) {
+        return {
+          test: "close-the-loop-partial-receive",
+          result: "FAIL",
+          step: "assert-final",
+          lineAfter2,
+          statusAfter2,
+        };
+      }
+
+      // 7) Backorder assertions
+      const boFulfilled = await post(`/objects/backorderRequest/search`, { soId, status: "fulfilled" });
+      const boOpen = await post(`/objects/backorderRequest/search`, { soId, status: "open" });
+      const boOk = (boFulfilled.body?.items?.length ?? 0) >= 1 && (boOpen.body?.items?.length ?? 0) === 0;
+
+      // 8) Optional movements check
+      let movementCheck = null;
+      try {
+        const mv = await get(`/inventory/${encodeURIComponent(itemId)}/movements`, {
+          refId: poId,
+          poLineId: lineId,
+          sort: "desc",
+          limit: 20
+        });
+        if (mv.ok && Array.isArray(mv.body?.items)) {
+          const recvs = mv.body.items.filter((m) => m.action === "receive" && m.poLineId === lineId && m.refId === poId);
+          const qtys = recvs.map((m) => Number(m.qty ?? 0)).sort((a, b) => a - b);
+          const hasTwo = recvs.length >= 2 && qtys.includes(2) && qtys.includes(remaining);
+          movementCheck = { ok: hasTwo, count: recvs.length, qtys };
+        } else {
+          movementCheck = { ok: false, reason: "no-items" };
+        }
+      } catch (e) {
+        movementCheck = { ok: false, error: e?.message ?? String(e) };
+      }
+
+      const pass = okPartial && okFinal && boOk && (movementCheck?.ok !== false || movementCheck === null);
+
+      return {
+        test: "close-the-loop-partial-receive",
+        result: pass ? "PASS" : "FAIL",
+        steps: {
+          poId,
+          lineId,
+          firstReceive: receive1,
+          secondReceive: receive2,
+          boFulfilled: boFulfilled.body?.items?.length ?? 0,
+          boOpen: boOpen.body?.items?.length ?? 0,
+          movementCheck,
+        }
+      };
+    },
+
   "list": async ()=>Object.keys(tests),
 
   "smoke:ping": async ()=>{
