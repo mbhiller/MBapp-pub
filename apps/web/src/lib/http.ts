@@ -18,6 +18,11 @@ type ApiError = Error & { status?: number; code?: string; details?: unknown };
 export async function apiFetch<T>(path: string, opts: ApiFetchOptions = {}): Promise<T> {
   const { method = "GET", body, headers, token, tenantId, query } = opts;
 
+  // CRITICAL: Enforce tenantId is always provided to prevent silent defaults
+  if (!tenantId) {
+    throw new Error("apiFetch: tenantId is required. Ensure AuthProvider context is available.");
+  }
+
   const search = new URLSearchParams();
   if (query) {
     for (const [key, value] of Object.entries(query)) {
@@ -33,7 +38,7 @@ export async function apiFetch<T>(path: string, opts: ApiFetchOptions = {}): Pro
     method,
     headers: {
       ...(hasBody ? { "content-type": "application/json" } : {}),
-      ...(tenantId ? { "x-tenant-id": tenantId } : {}),
+      "x-tenant-id": tenantId,
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...headers,
     },

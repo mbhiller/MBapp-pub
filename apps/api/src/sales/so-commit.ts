@@ -85,12 +85,6 @@ async function saveSO(order: SalesOrder): Promise<void> {
   await ddb.send(new PutCommand({ TableName: tableObjects, Item: out }));
 }
 
-async function getProductForItem(tenantId: string, itemId: string) {
-  const inv = await getObjectById({ tenantId, type: "inventory", id: itemId }).catch(() => null);
-  const productId = (inv as any)?.productId;
-  if (!productId) return null;
-  return await getObjectById({ tenantId, type: "product", id: productId }).catch(() => null);
-}
 function boId() { return "bo_" + Math.random().toString(36).slice(2, 10); }
 
 export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
@@ -98,6 +92,30 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     const tenantId = tenantIdOf(event);
     const id = event.pathParameters?.id;
     if (!tenantId || !id) return json(400, { message: "Missing tenant or id" });
+
+    const inventoryCache = new Map<string, any>();
+    const productCache = new Map<string, any>();
+
+    const loadInventory = async (itemId: string) => {
+      if (inventoryCache.has(itemId)) return inventoryCache.get(itemId);
+      const inv = await getObjectById({ tenantId, type: "inventory", id: itemId }).catch(() => null);
+      inventoryCache.set(itemId, inv);
+      return inv;
+    };
+
+    const loadProduct = async (productId: string) => {
+      if (productCache.has(productId)) return productCache.get(productId);
+      const prod = await getObjectById({ tenantId, type: "product", id: productId }).catch(() => null);
+      productCache.set(productId, prod);
+      return prod;
+    };
+
+    const productForItem = async (itemId: string) => {
+      const inv = await loadInventory(itemId);
+      const productId = (inv as any)?.productId;
+      if (!productId) return null;
+      return loadProduct(productId);
+    };
 
     const strict = isStrict(event);
 
@@ -193,14 +211,14 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
       const tenantId = tenantIdOf(event);
       const now = new Date().toISOString();
       for (const s of shortages) {
-        const product = await getProductForItem(tenantId, s.itemId);
+        const product = await productForItem(s.itemId);
         const reorderEnabled = product == null ? true : (product as any).reorderEnabled !== false;
         if (!reorderEnabled) continue;
         
         // Derive preferredVendorId from inventory item or product
         let preferredVendorId: string | undefined;
         try {
-          const inv = await getObjectById({ tenantId, type: "inventory", id: s.itemId }).catch(() => null);
+          const inv = await loadInventory(s.itemId);
           preferredVendorId = (inv as any)?.preferredVendorId ?? (inv as any)?.vendorId;
           if (!preferredVendorId && product) {
             preferredVendorId = (product as any)?.preferredVendorId ?? (product as any)?.vendorId ?? (product as any)?.defaultVendorId;

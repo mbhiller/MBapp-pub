@@ -9,15 +9,32 @@ export type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 const STORAGE_KEY = "mbapp_bearer";
+const TENANT_STORAGE_KEY = "mbapp_tenant";
 
 const apiBase = import.meta.env.VITE_API_BASE;
-const tenantId = import.meta.env.VITE_TENANT;
+const fallbackTenantId = import.meta.env.VITE_TENANT;
 
 if (!apiBase) {
   throw new Error("Missing VITE_API_BASE. Set it in apps/web/.env (no localhost fallback).");
 }
-if (!tenantId) {
+if (!fallbackTenantId) {
   throw new Error("Missing VITE_TENANT. Set it in apps/web/.env.");
+}
+
+/**
+ * Decode JWT payload and extract mbapp.tenantId if present.
+ * Returns null if token is invalid or tenant field is missing.
+ */
+function decodeJwtTenant(token: string | null): string | null {
+  if (!token) return null;
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return payload?.mbapp?.tenantId ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function readInitialToken(): string | null {
@@ -29,26 +46,73 @@ function readInitialToken(): string | null {
   return envToken || null;
 }
 
+function deriveTenantId(token: string | null): string {
+  // 1. Prefer tenant from token
+  const tokenTenant = decodeJwtTenant(token);
+  if (tokenTenant) return tokenTenant;
+
+  // 2. Fall back to stored tenant
+  try {
+    const storedTenant = typeof localStorage !== "undefined" ? localStorage.getItem(TENANT_STORAGE_KEY) : null;
+    if (storedTenant) return storedTenant;
+  } catch {}
+
+  // 3. Fall back to env
+  return fallbackTenantId;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setTokenState] = useState<string | null>(() => readInitialToken());
+  const initialToken = readInitialToken();
+  const [token, setTokenState] = useState<string | null>(initialToken);
+  const [tenantId, setTenantId] = useState<string>(() => deriveTenantId(initialToken));
+  const jwtTenant = useMemo(() => decodeJwtTenant(token), [token]);
 
   const setToken = (value: string | null) => {
     setTokenState(value);
+    const newTenantId = deriveTenantId(value);
+    setTenantId(newTenantId);
+
     try {
       if (value) {
         localStorage.setItem(STORAGE_KEY, value);
       } else {
         localStorage.removeItem(STORAGE_KEY);
       }
+      // Sync tenant to localStorage to keep aligned
+      localStorage.setItem(TENANT_STORAGE_KEY, newTenantId);
     } catch {}
   };
 
   const value = useMemo<AuthContextValue>(
     () => ({ token, tenantId, apiBase, setToken }),
-    [token]
+    [token, tenantId]
   );
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  const showTenantMismatch = Boolean(
+    import.meta.env.DEV && token && jwtTenant && jwtTenant !== tenantId
+  );
+
+  return (
+    <AuthContext.Provider value={value}>
+      {showTenantMismatch ? (
+        <div
+          style={{
+            background: "#fff3cd",
+            color: "#664d03",
+            padding: "8px 12px",
+            borderBottom: "1px solid #ffe69c",
+            fontSize: 13,
+          }}
+        >
+          <strong>Tenant mismatch</strong> — JWT tenant: {jwtTenant} · Request tenant: {tenantId}
+          <div style={{ marginTop: 4 }}>
+            Clear localStorage or set mbapp_tenant / mbapp_bearer
+          </div>
+        </div>
+      ) : null}
+      {children}
+    </AuthContext.Provider>
+  );
 }
 
 export function useAuth(): AuthContextValue {
@@ -56,3 +120,4 @@ export function useAuth(): AuthContextValue {
   if (!ctx) throw new Error("useAuth must be used within AuthProvider");
   return ctx;
 }
+
