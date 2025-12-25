@@ -1719,6 +1719,158 @@ const tests = {
     };
   },
 
+  // === Sprint XXXVIII: Guard PO_STATUS_NOT_RECEIVABLE on closed PO ===
+  "smoke:po-receive-after-close-guard": async () => {
+    await ensureBearer();
+    
+    // Step 1: Create PO via close-the-loop pattern
+    const { vendorId } = await seedVendor(api);
+    
+    const prod = await createProduct({ name: "CloseGuardProd", preferredVendorId: vendorId });
+    if (!prod.ok) return { test: "po-receive-after-close-guard", result: "FAIL", step: "createProduct", prod };
+    const prodId = prod.body?.id;
+
+    const item = await post(`/objects/${ITEM_TYPE}`, { productId: prodId });
+    if (!item.ok) return { test: "po-receive-after-close-guard", result: "FAIL", step: "createItem", item };
+    const itemId = item.body?.id;
+
+    // Create customer party for the sales order
+    const { partyId } = await seedParties(api);
+
+    // Create SO shortage to trigger backorder
+    const so = await post(`/objects/salesOrder`, {
+      type: "salesOrder",
+      partyId,
+      status: "draft",
+      strict: false,
+      lines: [{ itemId, qty: 5, uom: "ea" }],
+    });
+    if (!so.ok) return { test: "po-receive-after-close-guard", result: "FAIL", step: "createSO", so };
+    const soId = so.body?.id;
+
+    // Submit SO (required before commit)
+    const soSubmit = await post(`/sales/so/${encodeURIComponent(soId)}:submit`, {}, { "Idempotency-Key": idem() });
+    if (!soSubmit.ok) return { test: "po-receive-after-close-guard", result: "FAIL", step: "submitSO", soSubmit };
+
+    // Commit SO to create backorder
+    const commit = await post(`/sales/so/${encodeURIComponent(soId)}:commit`, {}, { "Idempotency-Key": idem() });
+    if (!commit.ok) return { test: "po-receive-after-close-guard", result: "FAIL", step: "commitSO", commit };
+
+    // Get backorder request
+    const boList = await get(`/objects/backorderRequest?filter.soId=${encodeURIComponent(soId)}&limit=10`);
+    const boReq = (boList.body?.items ?? [])[0];
+    if (!boReq) return { test: "po-receive-after-close-guard", result: "FAIL", step: "getBackorder", boList };
+
+    // Suggest PO
+    const suggest = await post(`/purchasing/suggest-po`, { requests: [{ backorderRequestId: boReq.id }] }, { "Idempotency-Key": idem() });
+    if (!suggest.ok) return { test: "po-receive-after-close-guard", result: "FAIL", step: "suggestPO", suggest };
+    const draft = suggest.body?.draft ?? suggest.body?.drafts?.[0];
+    if (!draft) return { test: "po-receive-after-close-guard", result: "FAIL", step: "noDraft", suggest };
+
+    // Create PO from suggestion
+    const createPo = await post(`/purchasing/po:create-from-suggestion`, { draft }, { "Idempotency-Key": idem() });
+    if (!createPo.ok) return { test: "po-receive-after-close-guard", result: "FAIL", step: "createPO", createPo };
+    const poId = createPo.body?.id ?? createPo.body?.ids?.[0];
+    if (!poId) return { test: "po-receive-after-close-guard", result: "FAIL", step: "noPOId", createPo };
+
+    // Get PO to extract line info
+    const poGet = await get(`/objects/purchaseOrder/${encodeURIComponent(poId)}`);
+    if (!poGet.ok) return { test: "po-receive-after-close-guard", result: "FAIL", step: "getPO", poGet };
+    const poLines = poGet.body?.lines ?? [];
+    if (poLines.length === 0) return { test: "po-receive-after-close-guard", result: "FAIL", step: "noLines", poGet };
+    const lineId = String(poLines[0].id ?? poLines[0].lineId);
+
+    // Submit
+    const submit = await post(`/purchasing/po/${encodeURIComponent(poId)}:submit`, {}, { "Idempotency-Key": idem() });
+    if (!submit.ok) return { test: "po-receive-after-close-guard", result: "FAIL", step: "submit", submit };
+
+    // Approve
+    const approve = await post(`/purchasing/po/${encodeURIComponent(poId)}:approve`, {}, { "Idempotency-Key": idem() });
+    if (!approve.ok) return { test: "po-receive-after-close-guard", result: "FAIL", step: "approve", approve };
+
+    // Wait for approved status
+    const approved = await waitForStatus("purchaseOrder", poId, ["approved"]);
+    if (!approved.ok) return { test: "po-receive-after-close-guard", result: "FAIL", step: "approveWait", approved };
+
+    // Receive full quantity
+    const orderedQty = Number(poLines[0].qty ?? 1);
+    const receive = await post(`/purchasing/po/${encodeURIComponent(poId)}:receive`, {
+      lines: [{ lineId, deltaQty: orderedQty }]
+    }, { "Idempotency-Key": idem() });
+    if (!receive.ok) return { test: "po-receive-after-close-guard", result: "FAIL", step: "receive", receive };
+
+    // Wait for fulfilled status
+    const fulfilled = await waitForStatus("purchaseOrder", poId, ["fulfilled"]);
+    if (!fulfilled.ok) return { test: "po-receive-after-close-guard", result: "FAIL", step: "fulfilledWait", fulfilled };
+
+    // Step 2: Close the PO
+    const close = await post(`/purchasing/po/${encodeURIComponent(poId)}:close`, {}, { "Idempotency-Key": idem() });
+    const closeOk = close.ok && close.body?.status === "closed";
+    if (!closeOk) return { test: "po-receive-after-close-guard", result: "FAIL", step: "close", close };
+
+    // Step 3: Attempt receive on closed PO
+    const receiveAfterClose = await post(`/purchasing/po/${encodeURIComponent(poId)}:receive`, {
+      lines: [{ lineId, deltaQty: 1 }]
+    }, { "Idempotency-Key": idem() });
+
+    // Assert 409 with PO_STATUS_NOT_RECEIVABLE
+    const guardOk = !receiveAfterClose.ok
+      && receiveAfterClose.status === 409
+      && receiveAfterClose.body?.code === "PO_STATUS_NOT_RECEIVABLE"
+      && receiveAfterClose.body?.status === "closed";
+
+    return {
+      test: "po-receive-after-close-guard",
+      result: guardOk ? "PASS" : "FAIL",
+      poId,
+      lineId,
+      close,
+      receiveAfterClose,
+    };
+  },
+
+  // === Sprint XXXVIII: Guard PO_STATUS_NOT_RECEIVABLE on cancelled PO ===
+  "smoke:po-receive-after-cancel-guard": async () => {
+    await ensureBearer();
+    
+    // Step 1: Create PO in draft status
+    const { vendorId } = await seedVendor(api);
+    const create = await post(`/objects/purchaseOrder`, {
+      type: "purchaseOrder",
+      status: "draft",
+      vendorId,
+      lines: [{ id: "C1", itemId: "ITEM_CANCEL_GUARD", uom: "ea", qty: 5 }]
+    });
+    if (!create.ok) return { test: "po-receive-after-cancel-guard", result: "FAIL", step: "create", create };
+    const poId = create.body?.id;
+    const lineId = "C1";
+
+    // Step 2: Cancel the PO
+    const cancel = await post(`/purchasing/po/${encodeURIComponent(poId)}:cancel`, {}, { "Idempotency-Key": idem() });
+    const cancelOk = cancel.ok && cancel.body?.status === "cancelled";
+    if (!cancelOk) return { test: "po-receive-after-cancel-guard", result: "FAIL", step: "cancel", cancel };
+
+    // Step 3: Attempt receive on cancelled PO
+    const receiveAfterCancel = await post(`/purchasing/po/${encodeURIComponent(poId)}:receive`, {
+      lines: [{ lineId, deltaQty: 1 }]
+    }, { "Idempotency-Key": idem() });
+
+    // Assert 409 with PO_STATUS_NOT_RECEIVABLE
+    const guardOk = !receiveAfterCancel.ok
+      && receiveAfterCancel.status === 409
+      && receiveAfterCancel.body?.code === "PO_STATUS_NOT_RECEIVABLE"
+      && receiveAfterCancel.body?.status === "cancelled";
+
+    return {
+      test: "po-receive-after-cancel-guard",
+      result: guardOk ? "PASS" : "FAIL",
+      poId,
+      lineId,
+      cancel,
+      receiveAfterCancel,
+    };
+  },
+
   // === Sprint I: cursor pagination on objects list ===
   "smoke:objects:list-pagination": async () => {
     await ensureBearer();
