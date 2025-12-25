@@ -31,6 +31,8 @@ export default function BackordersListPage() {
   const navigate = useNavigate();
   const [status, setStatus] = useState<"open" | "ignored" | "converted">("open");
   const [vendorFilter, setVendorFilter] = useState("");
+  const [soIdFilter, setSoIdFilter] = useState("");
+  const [itemIdFilter, setItemIdFilter] = useState("");
   const [items, setItems] = useState<BackorderRequest[]>([]);
   const [vendorNameById, setVendorNameById] = useState<Record<string, string>>({});
   const [next, setNext] = useState<string | null>(null);
@@ -42,6 +44,7 @@ export default function BackordersListPage() {
   const [suggestResult, setSuggestResult] = useState<SuggestPoResponse | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalDrafts, setModalDrafts] = useState<PurchaseOrderDraft[]>([]);
+  const [groupedView, setGroupedView] = useState(false);
 
   const fetchPage = useCallback(
     async (cursor?: string) => {
@@ -50,6 +53,8 @@ export default function BackordersListPage() {
       try {
         const filter: any = { status };
         if (vendorFilter.trim()) filter.preferredVendorId = vendorFilter.trim();
+        if (soIdFilter.trim()) filter.soId = soIdFilter.trim();
+        if (itemIdFilter.trim()) filter.itemId = itemIdFilter.trim();
 
         const res = await searchBackorderRequests(filter, {
           token: token || undefined,
@@ -65,7 +70,7 @@ export default function BackordersListPage() {
         setLoading(false);
       }
     },
-    [status, vendorFilter, tenantId, token]
+    [status, vendorFilter, soIdFilter, itemIdFilter, tenantId, token]
   );
 
   useEffect(() => {
@@ -217,7 +222,7 @@ export default function BackordersListPage() {
       </div>
 
       <div style={{ display: "grid", gap: 8 }}>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
             Status:
             <select
@@ -238,6 +243,32 @@ export default function BackordersListPage() {
               placeholder="Optional: filter by preferred vendor ID"
               style={{ flex: 1 }}
             />
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            SO ID:
+            <input
+              value={soIdFilter}
+              onChange={(e) => setSoIdFilter(e.target.value)}
+              placeholder="Optional: filter by SO ID"
+              style={{ minWidth: 160 }}
+            />
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            Item ID:
+            <input
+              value={itemIdFilter}
+              onChange={(e) => setItemIdFilter(e.target.value)}
+              placeholder="Optional: filter by item ID"
+              style={{ minWidth: 160 }}
+            />
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <input
+              type="checkbox"
+              checked={groupedView}
+              onChange={(e) => setGroupedView(e.target.checked)}
+            />
+            Grouped view
           </label>
           <button onClick={() => fetchPage()} disabled={loading}>
             {loading ? "Loading..." : "Refresh"}
@@ -315,43 +346,100 @@ export default function BackordersListPage() {
             </tr>
           </thead>
           <tbody>
-            {items.map((bo) => (
-              <tr key={bo.id}>
-                <td style={{ padding: 8, border: "1px solid #ccc" }}>
-                  <input
-                    type="checkbox"
-                    checked={!!selected[bo.id]}
-                    onChange={() => toggleSelect(bo.id)}
-                  />
-                </td>
-                <td style={{ padding: 8, border: "1px solid #ccc" }}>{bo.itemId ?? "—"}</td>
-                <td style={{ padding: 8, border: "1px solid #ccc" }}>{bo.qty ?? 0}</td>
-                <td style={{ padding: 8, border: "1px solid #ccc" }}>
-                  {bo.soId ? (
-                    <Link to={`/sales-orders/${bo.soId}`}>{bo.soId}</Link>
-                  ) : (
-                    "—"
-                  )}
-                </td>
-                <td style={{ padding: 8, border: "1px solid #ccc" }}>{bo.status ?? "—"}</td>
-                <td style={{ padding: 8, border: "1px solid #ccc" }}>
-                  {bo.preferredVendorId
-                    ? vendorNameById[bo.preferredVendorId] ?? bo.preferredVendorId
-                    : "Unassigned"}
-                </td>
-                <td style={{ padding: 8, border: "1px solid #ccc" }}>
-                  {bo.status === "open" && (
-                    <button
-                      onClick={() => handleIgnore(bo.id)}
-                      disabled={actionLoading}
-                      style={{ fontSize: 12, padding: "4px 8px" }}
-                    >
-                      Ignore
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
+            {groupedView
+              ? Object.entries(
+                  items.reduce<Record<string, BackorderRequest[]>>((acc, bo) => {
+                    const key = bo.preferredVendorId || "__UNASSIGNED__";
+                    (acc[key] ||= []).push(bo);
+                    return acc;
+                  }, {})
+                ).map(([vendorId, rows]) => {
+                  const headerName = vendorId === "__UNASSIGNED__" ? "Unassigned" : (vendorNameById[vendorId] ?? vendorId);
+                  const totalQty = rows.reduce((sum, r) => sum + Number(r.qty ?? 0), 0);
+                  return (
+                    <>
+                      <tr key={`h-${vendorId}`} style={{ background: "#f5f5f5" }}>
+                        <td colSpan={7} style={{ padding: 8, border: "1px solid #ccc", fontWeight: 600 }}>
+                          {headerName} — {rows.length} backorder(s), total qty {totalQty}
+                        </td>
+                      </tr>
+                      {rows.map((bo) => (
+                        <tr key={bo.id}>
+                          <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                            <input
+                              type="checkbox"
+                              checked={!!selected[bo.id]}
+                              onChange={() => toggleSelect(bo.id)}
+                            />
+                          </td>
+                          <td style={{ padding: 8, border: "1px solid #ccc" }}>{bo.itemId ?? "—"}</td>
+                          <td style={{ padding: 8, border: "1px solid #ccc" }}>{bo.qty ?? 0}</td>
+                          <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                            {bo.soId ? (
+                              <Link to={`/sales-orders/${bo.soId}`}>{bo.soId}</Link>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                          <td style={{ padding: 8, border: "1px solid #ccc" }}>{bo.status ?? "—"}</td>
+                          <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                            {bo.preferredVendorId
+                              ? vendorNameById[bo.preferredVendorId] ?? bo.preferredVendorId
+                              : "Unassigned"}
+                          </td>
+                          <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                            {bo.status === "open" && (
+                              <button
+                                onClick={() => handleIgnore(bo.id)}
+                                disabled={actionLoading}
+                                style={{ fontSize: 12, padding: "4px 8px" }}
+                              >
+                                Ignore
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </>
+                  );
+                })
+              : items.map((bo) => (
+                  <tr key={bo.id}>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                      <input
+                        type="checkbox"
+                        checked={!!selected[bo.id]}
+                        onChange={() => toggleSelect(bo.id)}
+                      />
+                    </td>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }}>{bo.itemId ?? "—"}</td>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }}>{bo.qty ?? 0}</td>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                      {bo.soId ? (
+                        <Link to={`/sales-orders/${bo.soId}`}>{bo.soId}</Link>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }}>{bo.status ?? "—"}</td>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                      {bo.preferredVendorId
+                        ? vendorNameById[bo.preferredVendorId] ?? bo.preferredVendorId
+                        : "Unassigned"}
+                    </td>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                      {bo.status === "open" && (
+                        <button
+                          onClick={() => handleIgnore(bo.id)}
+                          disabled={actionLoading}
+                          style={{ fontSize: 12, padding: "4px 8px" }}
+                        >
+                          Ignore
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
           </tbody>
         </table>
       ) : null}

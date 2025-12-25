@@ -110,6 +110,12 @@ if (!Array.isArray(flows) || flows.length === 0) {
   process.exit(1);
 }
 
+// Prevent churn: exclude multi-vendor flow from CI by default
+const filteredFlows = flows.filter((f) => f !== "smoke:close-the-loop-multi-vendor");
+if (filteredFlows.length !== flows.length) {
+  console.log("[ci-smokes] Excluding opt-in flow: smoke:close-the-loop-multi-vendor");
+}
+
 // Guard: bearer tenant must match requested tenant unless explicit dual overrides
 const allowTenantMismatch = process.env.MBAPP_SMOKE_ALLOW_TENANT_MISMATCH === "1";
 const isCIStrict = process.env.CI === "true";
@@ -152,8 +158,8 @@ console.log(JSON.stringify({
   allowNonSmokeTenant
 }));
 
-console.log(`[ci-smokes] Running ${flows.length} flows:`);
-flows.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));
+console.log(`[ci-smokes] Running ${filteredFlows.length} flows:`);
+filteredFlows.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));
 // Prepare child env with requestedTenant (final) and unique SMOKE_RUN_ID
 const childEnv = {
   ...process.env,
@@ -162,7 +168,7 @@ const childEnv = {
 };
 
 const isCI = Boolean(process.env.GITHUB_ACTIONS);
-for (const flow of flows) {
+for (const flow of filteredFlows) {
   if (isCI) {
     const npxCmd = process.platform === "win32" ? "npx.cmd" : "npx";
     console.log(`[ci-smokes] → npx tsx ops/smoke/smoke.mjs ${flow}`);

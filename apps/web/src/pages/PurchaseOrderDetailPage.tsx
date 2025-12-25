@@ -39,6 +39,16 @@ function formatError(err: unknown): string {
   return parts.join(" · ") || "Request failed";
 }
 
+function formatConflict(err: unknown): string {
+  const e = err as any;
+  const code = e?.code ?? e?.details?.code;
+  const message = e?.details?.message ?? e?.message;
+  const parts = [] as string[];
+  if (code) parts.push(String(code));
+  if (message) parts.push(String(message));
+  return parts.join(" · ") || formatError(err);
+}
+
 /**
  * Normalize status string: lowercase, convert hyphens to underscores, map variants
  * Examples:
@@ -64,7 +74,7 @@ export default function PurchaseOrderDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [lineState, setLineState] = useState<Record<string, { deltaQty: number; lot?: string; locationId?: string }>>({});
+  const [lineState, setLineState] = useState<Record<string, { deltaQty: number; lot?: string; locationId?: string; editQty?: number }>>({});
   const [lineErrors, setLineErrors] = useState<Record<string, string>>({});
 
   const fetchPo = useCallback(async () => {
@@ -109,7 +119,9 @@ export default function PurchaseOrderDetailPage() {
       await submitPurchaseOrder(id, { token: token || undefined, tenantId });
       await fetchPo();
     } catch (err) {
-      setActionError(formatError(err));
+      const e = err as any;
+      if (e?.status === 409) setActionError(formatConflict(e));
+      else setActionError(formatError(e));
     } finally {
       setActionLoading(false);
     }
@@ -123,7 +135,9 @@ export default function PurchaseOrderDetailPage() {
       await approvePurchaseOrder(id, { token: token || undefined, tenantId });
       await fetchPo();
     } catch (err) {
-      setActionError(formatError(err));
+      const e = err as any;
+      if (e?.status === 409) setActionError(formatConflict(e));
+      else setActionError(formatError(e));
     } finally {
       setActionLoading(false);
     }
@@ -200,7 +214,9 @@ export default function PurchaseOrderDetailPage() {
       await cancelPurchaseOrder(id, { token: token || undefined, tenantId });
       await fetchPo();
     } catch (err) {
-      setActionError(formatError(err));
+      const e = err as any;
+      if (e?.status === 409) setActionError(formatConflict(e));
+      else setActionError(formatError(e));
     } finally {
       setActionLoading(false);
     }
@@ -214,7 +230,9 @@ export default function PurchaseOrderDetailPage() {
       await closePurchaseOrder(id, { token: token || undefined, tenantId });
       await fetchPo();
     } catch (err) {
-      setActionError(formatError(err));
+      const e = err as any;
+      if (e?.status === 409) setActionError(formatConflict(e));
+      else setActionError(formatError(e));
     } finally {
       setActionLoading(false);
     }
@@ -266,8 +284,62 @@ export default function PurchaseOrderDetailPage() {
   const canSubmit = ["draft", "open"].includes(status);
   const canApprove = status === "submitted";
   const canReceive = ["open", "approved", "partially_received", "partially_fulfilled"].includes(status);
-  const canCancel = ["draft", "submitted", "open"].includes(status);
-  const canClose = ["fulfilled", "partially_fulfilled", "partially_received", "approved", "open"].includes(status);
+  // Hide cancel/close only for final states; server enforces exact gate
+  const hideSet = ["closed", "cancelled", "canceled"] as const;
+  const canCancel = !hideSet.includes(status as any);
+  const canClose = !hideSet.includes(status as any);
+  const canEditLines = ["draft", "open"].includes(status);
+
+  const hasEdits = Object.values(lineState).some((s) => typeof s.editQty === "number");
+
+  const handleSaveEdits = async () => {
+    if (!id || !po?.lines) return;
+
+    const newErrors: Record<string, string> = {};
+    // Build updated lines array based on current PO lines and any edits
+    const updatedLines = po.lines.map((line) => {
+      const lineId = line.id ?? line.lineId ?? "";
+      const receivedQty = line.receivedQty ?? 0;
+      const currentOrdered = line.qty ?? line.orderedQty ?? 0;
+      const editQty = lineState[lineId]?.editQty;
+      if (typeof editQty === "number") {
+        if (editQty < receivedQty) {
+          newErrors[lineId] = `Ordered qty (${editQty}) cannot be less than already received (${receivedQty}).`;
+          return line;
+        }
+        return { ...line, qty: editQty } as PurchaseLine;
+      }
+      return line;
+    });
+
+    setLineErrors(newErrors);
+    if (Object.keys(newErrors).length > 0) {
+      setActionError("Fix validation errors before saving edits");
+      return;
+    }
+
+    // If no edits, do nothing
+    if (!hasEdits) {
+      setActionError("No line edits to save.");
+      return;
+    }
+
+    setActionLoading(true);
+    setActionError(null);
+    try {
+      await apiFetch<PurchaseOrder>(`/objects/purchaseOrder/${id}`,
+        { method: "PUT", body: { lines: updatedLines }, token: token || undefined, tenantId }
+      );
+      // Clear edit state and refresh
+      setLineState({});
+      setLineErrors({});
+      await fetchPo();
+    } catch (err) {
+      setActionError(formatError(err));
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -310,6 +382,11 @@ export default function PurchaseOrderDetailPage() {
         {canApprove && (
           <button onClick={handleApprove} disabled={actionLoading}>
             {actionLoading ? "Approving..." : "Approve"}
+          </button>
+        )}
+        {canEditLines && (
+          <button onClick={handleSaveEdits} disabled={actionLoading || !hasEdits}>
+            {actionLoading ? "Saving..." : "Save Changes"}
           </button>
         )}
         {canReceive && (
@@ -371,7 +448,33 @@ export default function PurchaseOrderDetailPage() {
                   <tr key={lineId}>
                     <td style={{ padding: 8, border: "1px solid #ccc" }}>{lineId}</td>
                     <td style={{ padding: 8, border: "1px solid #ccc" }}>{itemId}</td>
-                    <td style={{ padding: 8, border: "1px solid #ccc" }}>{orderedQty}</td>
+                    <td style={{ padding: 8, border: `1px solid ${error ? "#d32f2f" : "#ccc"}`, background: error ? "#ffebee" : "transparent" }}>
+                      {canEditLines ? (
+                        <div>
+                          <input
+                            type="number"
+                            min={receivedQty}
+                            value={typeof state.editQty === "number" ? state.editQty : orderedQty}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              setLineState((prev) => ({
+                                ...prev,
+                                [lineId]: { ...prev[lineId], editQty: isNaN(val) ? undefined : Math.max(val, receivedQty) },
+                              }));
+                              setLineErrors((prev) => ({ ...prev, [lineId]: "" }));
+                            }}
+                            style={{ width: 70 }}
+                          />
+                          {typeof state.editQty === "number" && state.editQty < receivedQty && (
+                            <div style={{ fontSize: 11, color: "#d32f2f", marginTop: 2 }}>
+                              Ordered cannot be less than received ({receivedQty}).
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span>{orderedQty}</span>
+                      )}
+                    </td>
                     <td style={{ padding: 8, border: "1px solid #ccc" }}>{receivedQty}</td>
                     <td style={{ padding: 8, border: "1px solid #ccc" }}>{remaining}</td>
                     {canReceive && (
