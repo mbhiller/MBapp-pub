@@ -1,3 +1,9 @@
+## Warehouse Ops / Sales Outbound
+
+- Sales reserve/release now optionally accept locationId (v1). When present, movements record locationId and onhand:by-location reserved reflects it.
+- If locationId is omitted, behavior remains legacy "unassigned".
+- Future Tier 2: add multi-location allocations[] per SO line (pick list) and a GSI for inventoryMovement by (tenantId,itemId) for scale.
+
 ## Sprint XLIII: Location-Aware Fulfill + Per-Location Counters (2025-12-26)
 
 - **New endpoint:**

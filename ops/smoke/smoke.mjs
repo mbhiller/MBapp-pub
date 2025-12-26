@@ -1932,6 +1932,155 @@ const tests = {
     };
   },
 
+  "smoke:sales:reserve-with-location": async () => {
+    await ensureBearer();
+
+    // 1) Create locations A and B
+    const locA = await post(`/objects/location`,
+      { type: "location", name: smokeTag("LocA-ReserveSrc"), code: "LOC-A-RSV", status: "active" },
+      { "Idempotency-Key": idem() }
+    );
+    const locB = await post(`/objects/location`,
+      { type: "location", name: smokeTag("LocB-ReserveDst"), code: "LOC-B-RSV", status: "active" },
+      { "Idempotency-Key": idem() }
+    );
+    if (!locA.ok || !locB.ok) {
+      return { test: "sales:reserve-with-location", result: "FAIL", step: "createLocations", locA, locB };
+    }
+    const locAId = locA.body?.id;
+    const locBId = locB.body?.id;
+    recordCreated({ type: 'location', id: locAId, route: '/objects/location', meta: { name: 'LocA-ReserveSrc', code: 'LOC-A-RSV' } });
+    recordCreated({ type: 'location', id: locBId, route: '/objects/location', meta: { name: 'LocB-ReserveDst', code: 'LOC-B-RSV' } });
+
+    // 2) Create product + inventory item
+    const prod = await createProduct({ name: "ReserveLocationTest" });
+    if (!prod.ok) {
+      return { test: "sales:reserve-with-location", result: "FAIL", step: "createProduct", prod };
+    }
+    const prodId = prod.body?.id;
+    recordCreated({ type: 'product', id: prodId, route: '/objects/product', meta: { name: 'ReserveLocationTest' } });
+
+    const item = await createInventoryForProduct(prodId, "ReserveLocationItem");
+    if (!item.ok) {
+      return { test: "sales:reserve-with-location", result: "FAIL", step: "createInventory", item };
+    }
+    const itemId = item.body?.id;
+    recordCreated({ type: 'inventory', id: itemId, route: '/objects/inventory', meta: { name: 'ReserveLocationItem', productId: prodId } });
+
+    // 3) Ensure onHand is 0, then add stock at locB only
+    const ohPre = await onhand(itemId);
+    const currentOnHand = ohPre.body?.items?.[0]?.onHand ?? 0;
+    if (currentOnHand !== 0) {
+      await post(`/objects/${MV_TYPE}`, { itemId, action: "adjust", qty: -currentOnHand });
+    }
+
+    // Receive 5 units (unassigned), then putaway to locB
+    const receive = await post(`/objects/${MV_TYPE}`, { itemId, action: "receive", qty: 5 }, { "Idempotency-Key": idem() });
+    if (!receive.ok) {
+      return { test: "sales:reserve-with-location", result: "FAIL", step: "receive", receive };
+    }
+    const putaway = await post(`/inventory/${itemId}:putaway`, {
+      qty: 5,
+      toLocationId: locBId,
+      lot: "LOT-RSV-PRE",
+      note: "smoke reserve-with-location setup"
+    }, { "Idempotency-Key": idem() });
+    if (!putaway.ok) {
+      return { test: "sales:reserve-with-location", result: "FAIL", step: "putaway", putaway };
+    }
+
+    // Verify by-location counters: locB onHand >= 5, locA onHand == 0
+    const ohByLocPre = await get(`/inventory/${encodeURIComponent(itemId)}/onhand:by-location`);
+    if (!ohByLocPre.ok) {
+      return { test: "sales:reserve-with-location", result: "FAIL", step: "onhand-by-location-pre", ohByLocPre };
+    }
+    const countersPre = (ohByLocPre.body?.items ?? []);
+    const locACounterPre = countersPre.find(it => it.locationId === locAId);
+    const locBCounterPre = countersPre.find(it => it.locationId === locBId);
+    const onHandAtLocAPre = locACounterPre?.onHand ?? 0;
+    const onHandAtLocBPre = locBCounterPre?.onHand ?? 0;
+    if (onHandAtLocBPre < 5 || onHandAtLocAPre !== 0) {
+      return { test: "sales:reserve-with-location", result: "FAIL", step: "stock-setup-mismatch", onHandAtLocAPre, onHandAtLocBPre };
+    }
+
+    // 4) Create SO with line qty 2 and commit
+    const { partyId } = await seedParties(api);
+    const so = await post(`/objects/salesOrder`, {
+      type: "salesOrder",
+      status: "draft",
+      partyId,
+      customerId: partyId,
+      lines: [{ id: "RL1", itemId, uom: "ea", qty: 2 }]
+    });
+    if (!so.ok) {
+      return { test: "sales:reserve-with-location", result: "FAIL", step: "createSO", so };
+    }
+    const soId = so.body?.id;
+    const submit = await post(`/sales/so/${encodeURIComponent(soId)}:submit`, {}, { "Idempotency-Key": idem() });
+    if (!submit.ok) {
+      return { test: "sales:reserve-with-location", result: "FAIL", step: "submit", submit };
+    }
+    const commit = await post(`/sales/so/${encodeURIComponent(soId)}:commit`, {}, { "Idempotency-Key": idem() });
+    if (!commit.ok) {
+      return { test: "sales:reserve-with-location", result: "FAIL", step: "commit", commit };
+    }
+
+    // 5) Reserve with locationId (locB) and lot
+    const reserve = await post(`/sales/so/${encodeURIComponent(soId)}:reserve`, {
+      lines: [{ lineId: "RL1", deltaQty: 2, locationId: locBId, lot: "LOT-RSV" }]
+    }, { "Idempotency-Key": idem() });
+    if (!reserve.ok) {
+      return { test: "sales:reserve-with-location", result: "FAIL", step: "reserve", reserve };
+    }
+
+    // 6) Assert movements include action=reserve with locationId=locBId
+    const movements = await get(`/inventory/${encodeURIComponent(itemId)}/movements`, { limit: 50, sort: "desc" });
+    if (!movements.ok) {
+      return { test: "sales:reserve-with-location", result: "FAIL", step: "getMovements", movements };
+    }
+    const mvList = movements.body?.items ?? [];
+    const reserveMovement = mvList.find(m => (m.action ?? "") === "reserve" && (m.locationId ?? "") === locBId);
+    if (!reserveMovement) {
+      return { test: "sales:reserve-with-location", result: "FAIL", step: "assertReserveMovement", mvList, expected: { action: "reserve", locationId: locBId } };
+    }
+
+    // 7) Assert by-location shows reserved increased at locB (reserved=2)
+    const ohByLocPost = await get(`/inventory/${encodeURIComponent(itemId)}/onhand:by-location`);
+    if (!ohByLocPost.ok) {
+      return { test: "sales:reserve-with-location", result: "FAIL", step: "onhand-by-location-post", ohByLocPost };
+    }
+    const countersPost = (ohByLocPost.body?.items ?? []);
+    const locBCounterPost = countersPost.find(it => it.locationId === locBId);
+    const reservedAtLocBPost = locBCounterPost?.reserved ?? 0;
+    if (reservedAtLocBPost !== 2) {
+      return { test: "sales:reserve-with-location", result: "FAIL", step: "assertReservedAtLocB", reservedAtLocBPost, expected: 2, countersPost };
+    }
+
+    // 8) Attempt reserve from locA (insufficient) -> expect 409 shortage
+    const reserveBad = await post(`/sales/so/${encodeURIComponent(soId)}:reserve`, {
+      lines: [{ lineId: "RL1", deltaQty: 1, locationId: locAId, lot: "LOT-BAD" }]
+    }, { "Idempotency-Key": idem() });
+    const shortage = !reserveBad.ok && reserveBad.status === 409;
+    if (!shortage) {
+      return { test: "sales:reserve-with-location", result: "FAIL", step: "reserveFromLocA-should-fail", reserveBad };
+    }
+
+    const pass = reserve.ok && !!reserveMovement && reservedAtLocBPost === 2 && shortage;
+    return {
+      test: "sales:reserve-with-location",
+      result: pass ? "PASS" : "FAIL",
+      steps: {
+        locations: { locAId, locBId },
+        product: { prodId },
+        item: { itemId },
+        so: { soId },
+        pre: { onHandAtLocAPre, onHandAtLocBPre },
+        post: { reservedAtLocBPost },
+        reserveMovement: reserveMovement ? { action: reserveMovement.action, locationId: reserveMovement.locationId, qty: reserveMovement.qty } : null
+      }
+    };
+  },
+
   "smoke:salesOrders:commit-strict-shortage": async () => {
     await ensureBearer();
 
