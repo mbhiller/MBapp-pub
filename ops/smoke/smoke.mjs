@@ -1432,17 +1432,23 @@ const tests = {
     const mvId = putaway.body?.id;
     if (mvId) recordCreated({ type: 'inventoryMovement', id: mvId, route: '/inventory/:id:putaway', meta: { action: 'putaway', qty: 1, locationId: locBId, lot: 'LOT-PUT' } });
 
-    // Check movements list for putaway action
-    const movements = await get(`/inventory/${itemId}/movements`, { limit: 10 });
-    if (!movements.ok) {
-      return { test: "inventory-putaway", result: "FAIL", step: "getMovements", movements };
+    // Check movements list for putaway action (retry for consistency)
+    let putawayFound = false;
+    let mvList = [];
+    for (let attempt = 1; attempt <= 10; attempt++) {
+      const movements = await get(`/inventory/${itemId}/movements`, { limit: 50 });
+      if (!movements.ok) {
+        return { test: "inventory-putaway", result: "FAIL", step: "getMovements", movements };
+      }
+      mvList = movements.body?.items ?? [];
+      putawayFound = mvList.some(m => 
+        (m.action ?? "") === "putaway" && 
+        (m.locationId ?? "") === locBId &&
+        (m.lot ?? "") === "LOT-PUT"
+      );
+      if (putawayFound) break;
+      if (attempt < 10) await sleep(500);
     }
-    const mvList = movements.body?.items ?? [];
-    const putawayFound = mvList.some(m => 
-      (m.action ?? "") === "putaway" && 
-      (m.locationId ?? "") === locBId &&
-      (m.lot ?? "") === "LOT-PUT"
-    );
     if (!putawayFound) {
       return { test: "inventory-putaway", result: "FAIL", step: "assertMovement", mvList, expected: { action: "putaway", locationId: locBId, lot: "LOT-PUT" } };
     }
@@ -1511,17 +1517,23 @@ const tests = {
       return { test: "inventory-cycle-count", result: "FAIL", step: "assertOnHand2", onHandAfter, expected: 2 };
     }
 
-    // Check movements list for cycle_count action with correct qty
-    const movements = await get(`/inventory/${itemId}/movements`, { limit: 10 });
-    if (!movements.ok) {
-      return { test: "inventory-cycle-count", result: "FAIL", step: "getMovements", movements };
+    // Check movements list for cycle_count action with correct qty (retry for consistency)
+    let ccFound = false;
+    let mvList = [];
+    for (let attempt = 1; attempt <= 10; attempt++) {
+      const movements = await get(`/inventory/${itemId}/movements`, { limit: 50 });
+      if (!movements.ok) {
+        return { test: "inventory-cycle-count", result: "FAIL", step: "getMovements", movements };
+      }
+      mvList = movements.body?.items ?? [];
+      ccFound = mvList.some(m => 
+        (m.action ?? "") === "cycle_count" && 
+        m.qty === expectedDelta &&
+        (m.note ?? "").includes("counted=2")
+      );
+      if (ccFound) break;
+      if (attempt < 10) await sleep(500);
     }
-    const mvList = movements.body?.items ?? [];
-    const ccFound = mvList.some(m => 
-      (m.action ?? "") === "cycle_count" && 
-      m.qty === expectedDelta &&
-      (m.note ?? "").includes("counted=2")
-    );
     if (!ccFound) {
       return { test: "inventory-cycle-count", result: "FAIL", step: "assertMovement", mvList, expected: { action: "cycle_count", qty: expectedDelta, noteContains: "counted=2" } };
     }
@@ -1750,6 +1762,174 @@ const tests = {
 
     const pass = cancelGuard && release.ok && cancelled && (strictGuard || strictCommit.body?.message);
     return { test: "sales-guards", result: pass ? "PASS" : "FAIL", rec, cancelBlocked, release, cancel, strictCommit };
+  },
+
+  "smoke:sales:fulfill-with-location": async () => {
+    await ensureBearer();
+
+    // 1) Create locations A and B
+    const locA = await post(`/objects/location`,
+      { type: "location", name: smokeTag("LocA-FulfillSrc"), code: "LOC-A-FUL", status: "active" },
+      { "Idempotency-Key": idem() }
+    );
+    const locB = await post(`/objects/location`,
+      { type: "location", name: smokeTag("LocB-FulfillDst"), code: "LOC-B-FUL", status: "active" },
+      { "Idempotency-Key": idem() }
+    );
+    if (!locA.ok || !locB.ok) {
+      return { test: "sales:fulfill-with-location", result: "FAIL", step: "createLocations", locA, locB };
+    }
+    const locAId = locA.body?.id;
+    const locBId = locB.body?.id;
+    recordCreated({ type: 'location', id: locAId, route: '/objects/location', meta: { name: 'LocA-FulfillSrc', code: 'LOC-A-FUL' } });
+    recordCreated({ type: 'location', id: locBId, route: '/objects/location', meta: { name: 'LocB-FulfillDst', code: 'LOC-B-FUL' } });
+
+    // 2) Create product + inventory item
+    const prod = await createProduct({ name: "FulfillLocationTest" });
+    if (!prod.ok) {
+      return { test: "sales:fulfill-with-location", result: "FAIL", step: "createProduct", prod };
+    }
+    const prodId = prod.body?.id;
+    recordCreated({ type: 'product', id: prodId, route: '/objects/product', meta: { name: 'FulfillLocationTest' } });
+
+    const item = await createInventoryForProduct(prodId, "FulfillLocationItem");
+    if (!item.ok) {
+      return { test: "sales:fulfill-with-location", result: "FAIL", step: "createInventory", item };
+    }
+    const itemId = item.body?.id;
+    recordCreated({ type: 'inventory', id: itemId, route: '/objects/inventory', meta: { name: 'FulfillLocationItem', productId: prodId } });
+
+    // 3) Ensure onHand is 0, then add stock at locB
+    const ohPre = await onhand(itemId);
+    const currentOnHand = ohPre.body?.items?.[0]?.onHand ?? 0;
+    if (currentOnHand !== 0) {
+      await post(`/objects/${MV_TYPE}`, { itemId, action: "adjust", qty: -currentOnHand });
+    }
+
+    // Receive 5 units (initially unassigned)
+    const receive = await post(`/objects/${MV_TYPE}`, { 
+      itemId, 
+      action: "receive", 
+      qty: 5 
+    }, { "Idempotency-Key": idem() });
+    if (!receive.ok) {
+      return { test: "sales:fulfill-with-location", result: "FAIL", step: "receive", receive };
+    }
+
+    // Putaway to locB
+    const putaway = await post(`/inventory/${itemId}:putaway`, {
+      qty: 5,
+      toLocationId: locBId,
+      lot: "LOT-PRE",
+      note: "smoke fulfill-with-location setup"
+    }, { "Idempotency-Key": idem() });
+    if (!putaway.ok) {
+      return { test: "sales:fulfill-with-location", result: "FAIL", step: "putaway", putaway };
+    }
+
+    // Verify onhand:by-location shows stock at locB
+    const ohByLocPre = await get(`/inventory/${encodeURIComponent(itemId)}/onhand:by-location`);
+    if (!ohByLocPre.ok) {
+      return { test: "sales:fulfill-with-location", result: "FAIL", step: "onhand-by-location-pre", ohByLocPre };
+    }
+    const locBCounterPre = (ohByLocPre.body?.items ?? []).find(it => it.locationId === locBId);
+    const onHandAtLocBPre = locBCounterPre?.onHand ?? 0;
+    if (onHandAtLocBPre < 2) {
+      return { test: "sales:fulfill-with-location", result: "FAIL", step: "insufficient-stock-at-locB", onHandAtLocBPre, expected: 5, ohByLocPre };
+    }
+
+    // 4) Create SO for qty 2
+    const { partyId } = await seedParties(api);
+    const so = await post(`/objects/salesOrder`, {
+      type: "salesOrder",
+      status: "draft",
+      partyId,
+      customerId: partyId,
+      lines: [{ id: "FL1", itemId, uom: "ea", qty: 2 }]
+    });
+    if (!so.ok) {
+      return { test: "sales:fulfill-with-location", result: "FAIL", step: "createSO", so };
+    }
+    const soId = so.body?.id;
+
+    // Submit and commit
+    const submit = await post(`/sales/so/${encodeURIComponent(soId)}:submit`, {}, { "Idempotency-Key": idem() });
+    if (!submit.ok) {
+      return { test: "sales:fulfill-with-location", result: "FAIL", step: "submit", submit };
+    }
+
+    const commit = await post(`/sales/so/${encodeURIComponent(soId)}:commit`, {}, { "Idempotency-Key": idem() });
+    if (!commit.ok) {
+      return { test: "sales:fulfill-with-location", result: "FAIL", step: "commit", commit };
+    }
+
+    // 5) Fulfill with locationId and lot
+    const fulfill = await post(`/sales/so/${encodeURIComponent(soId)}:fulfill`, {
+      lines: [{ lineId: "FL1", deltaQty: 2, locationId: locBId, lot: "LOT-SO" }]
+    }, { "Idempotency-Key": idem() });
+    if (!fulfill.ok) {
+      return { test: "sales:fulfill-with-location", result: "FAIL", step: "fulfill", fulfill };
+    }
+
+    // 6) Assert: fulfill PASS
+    const fulfillPass = fulfill.ok && fulfill.status === 200;
+
+    // Assert: recent movements include action=fulfill with locationId=locBId and lot=LOT-SO
+    const movements = await get(`/inventory/${encodeURIComponent(itemId)}/movements`, { limit: 20 });
+    if (!movements.ok) {
+      return { test: "sales:fulfill-with-location", result: "FAIL", step: "getMovements", movements };
+    }
+    const mvList = movements.body?.items ?? [];
+    const fulfillMovement = mvList.find(m => 
+      (m.action ?? "") === "fulfill" && 
+      (m.locationId ?? "") === locBId &&
+      (m.lot ?? "") === "LOT-SO"
+    );
+    if (!fulfillMovement) {
+      return { 
+        test: "sales:fulfill-with-location", 
+        result: "FAIL", 
+        step: "assertFulfillMovement", 
+        mvList, 
+        expected: { action: "fulfill", locationId: locBId, lot: "LOT-SO" } 
+      };
+    }
+
+    // Assert: GET /inventory/{id}/onhand:by-location shows available/onHand at locB decreased by 2
+    const ohByLocPost = await get(`/inventory/${encodeURIComponent(itemId)}/onhand:by-location`);
+    if (!ohByLocPost.ok) {
+      return { test: "sales:fulfill-with-location", result: "FAIL", step: "onhand-by-location-post", ohByLocPost };
+    }
+    const locBCounterPost = (ohByLocPost.body?.items ?? []).find(it => it.locationId === locBId);
+    const onHandAtLocBPost = locBCounterPost?.onHand ?? 0;
+    const expectedOnHandPost = onHandAtLocBPre - 2;
+    if (onHandAtLocBPost !== expectedOnHandPost) {
+      return { 
+        test: "sales:fulfill-with-location", 
+        result: "FAIL", 
+        step: "assertOnHandDecreased", 
+        onHandAtLocBPre, 
+        onHandAtLocBPost, 
+        expectedOnHandPost,
+        delta: onHandAtLocBPre - onHandAtLocBPost
+      };
+    }
+
+    const pass = fulfillPass && fulfillMovement && (onHandAtLocBPost === expectedOnHandPost);
+    return {
+      test: "sales:fulfill-with-location",
+      result: pass ? "PASS" : "FAIL",
+      steps: {
+        locations: { locAId, locBId },
+        product: { prodId },
+        item: { itemId },
+        so: { soId },
+        onHandAtLocBPre,
+        onHandAtLocBPost,
+        expectedOnHandPost,
+        fulfillMovement: fulfillMovement ? { action: fulfillMovement.action, locationId: fulfillMovement.locationId, lot: fulfillMovement.lot } : null
+      }
+    };
   },
 
   "smoke:salesOrders:commit-strict-shortage": async () => {

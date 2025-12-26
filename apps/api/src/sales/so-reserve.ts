@@ -111,6 +111,7 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
         sk: `inventoryMovement#${rid()}`,
         id: rid(),
         type: "inventoryMovement",
+        docType: "inventoryMovement",
         action: "reserve",
         itemId: line.itemId,
         qty: Number(r.deltaQty),

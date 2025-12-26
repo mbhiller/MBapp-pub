@@ -2142,6 +2142,28 @@ components:
         asOf:
           type: string
           format: date-time
+    InventoryOnHandByLocationItem:
+      type: object
+      required:
+      - itemId
+      - onHand
+      - reserved
+      - available
+      properties:
+        itemId:
+          type: string
+        locationId:
+          type: string
+          nullable: true
+        onHand:
+          type: number
+        reserved:
+          type: number
+        available:
+          type: number
+        asOf:
+          type: string
+          format: date-time
     Location:
       allOf:
       - $ref: '#/components/schemas/ObjectBase'
@@ -3492,6 +3514,37 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/InventoryCounters'
+  /inventory/{id}/onhand:by-location:
+    get:
+      tags:
+      - Inventory
+      summary: Get computed counters for an inventory item grouped by location
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Computed counters grouped by location
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/InventoryOnHandByLocationItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /inventory/onhand:batch:
     post:
       tags:

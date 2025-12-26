@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
+import LocationPicker from "../components/LocationPicker";
+import { getOnHandByLocation, type InventoryOnHandByLocationItem } from "../lib/inventory";
+import { listLocations, type Location } from "../lib/locations";
 
 type SalesOrderLine = {
   id: string;
@@ -74,8 +77,14 @@ export default function SalesOrderDetailPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [strictCommit, setStrictCommit] = useState(false);
   const [lineQtys, setLineQtys] = useState<Record<string, number>>({});
+  const [lineLocationIds, setLineLocationIds] = useState<Record<string, string>>({});
+  const [lineLots, setLineLots] = useState<Record<string, string>>({});
   const [releaseReason, setReleaseReason] = useState("UI release");
   const [shortageInfo, setShortageInfo] = useState<ShortageInfo | null>(null);
+  const [expandedAvailability, setExpandedAvailability] = useState<Record<string, boolean>>({});
+  const [lineAvailability, setLineAvailability] = useState<Record<string, InventoryOnHandByLocationItem[]>>({});
+  const [availabilityLoading, setAvailabilityLoading] = useState<Record<string, boolean>>({});
+  const [locationsCache, setLocationsCache] = useState<Record<string, string>>({});
   const [backorders, setBackorders] = useState<BackorderRequest[]>([]);
   const [backordersLoading, setBackordersLoading] = useState(false);
   const [backordersError, setBackordersError] = useState<string | null>(null);
@@ -178,15 +187,58 @@ export default function SalesOrderDetailPage() {
     fetchOrder();
   }, [fetchOrder]);
 
+  const loadLocationsCache = useCallback(async () => {
+    if (Object.keys(locationsCache).length > 0) return;
+    try {
+      const res = await listLocations({ limit: 200 }, { token: token || undefined, tenantId });
+      const cache: Record<string, string> = {};
+      (res.items ?? []).forEach((loc) => {
+        if (loc.id) {
+          cache[String(loc.id)] = loc.displayName ?? loc.name ?? loc.label ?? String(loc.id);
+        }
+      });
+      setLocationsCache(cache);
+    } catch (err) {
+      console.error("Failed to load locations cache:", err);
+    }
+  }, [locationsCache, tenantId, token]);
+
+  const toggleAvailability = useCallback(async (lineId: string, itemId?: string) => {
+    if (!itemId) return;
+    const isExpanded = expandedAvailability[lineId];
+    if (isExpanded) {
+      setExpandedAvailability((prev) => ({ ...prev, [lineId]: false }));
+      return;
+    }
+    setExpandedAvailability((prev) => ({ ...prev, [lineId]: true }));
+    if (lineAvailability[lineId]) return;
+    setAvailabilityLoading((prev) => ({ ...prev, [lineId]: true }));
+    try {
+      await loadLocationsCache();
+      const items = await getOnHandByLocation(itemId, { token: token || undefined, tenantId });
+      setLineAvailability((prev) => ({ ...prev, [lineId]: items }));
+    } catch (err) {
+      console.error("Failed to load availability:", err);
+      setLineAvailability((prev) => ({ ...prev, [lineId]: [] }));
+    } finally {
+      setAvailabilityLoading((prev) => ({ ...prev, [lineId]: false }));
+    }
+  }, [expandedAvailability, lineAvailability, loadLocationsCache, tenantId, token]);
+
   const linesPayload = useCallback(
     () =>
       (order?.lines ?? [])
-        .map((ln) => ({
-          lineId: ln.id,
-          deltaQty: Math.max(0, Number(lineQtys[ln.id] ?? 0)),
-        }))
+        .map((ln) => {
+          const payload: { lineId: string; deltaQty: number; locationId?: string; lot?: string } = {
+            lineId: ln.id,
+            deltaQty: Math.max(0, Number(lineQtys[ln.id] ?? 0)),
+          };
+          if (lineLocationIds[ln.id]) payload.locationId = lineLocationIds[ln.id];
+          if (lineLots[ln.id]) payload.lot = lineLots[ln.id];
+          return payload;
+        })
         .filter((ln) => ln.deltaQty > 0),
-    [lineQtys, order?.lines]
+    [lineQtys, lineLocationIds, lineLots, order?.lines]
   );
 
   const performAction = useCallback(
@@ -412,27 +464,103 @@ export default function SalesOrderDetailPage() {
                 <th style={{ padding: 8, border: "1px solid #ccc" }}>Committed</th>
                 <th style={{ padding: 8, border: "1px solid #ccc" }}>Fulfilled</th>
                 <th style={{ padding: 8, border: "1px solid #ccc" }}>Delta</th>
+                {canFulfill ? <th style={{ padding: 8, border: "1px solid #ccc" }}>Location</th> : null}
+                {canFulfill ? <th style={{ padding: 8, border: "1px solid #ccc" }}>Lot</th> : null}
               </tr>
             </thead>
             <tbody>
               {lines.map((ln) => (
-                <tr key={ln.id}>
-                  <td style={{ padding: 8, border: "1px solid #ccc" }}>{ln.id}</td>
-                  <td style={{ padding: 8, border: "1px solid #ccc" }}>{ln.itemId}</td>
-                  <td style={{ padding: 8, border: "1px solid #ccc" }}>{ln.qty ?? ""} {ln.uom ?? ""}</td>
-                  <td style={{ padding: 8, border: "1px solid #ccc" }}>{ln.qtyCommitted ?? 0}</td>
-                  <td style={{ padding: 8, border: "1px solid #ccc" }}>{ln.qtyFulfilled ?? 0}</td>
-                  <td style={{ padding: 8, border: "1px solid #ccc" }}>
-                    <input
-                      type="number"
-                      min={0}
-                      step={1}
-                      value={lineQtys[ln.id] ?? 1}
-                      onChange={(e) => setLineQtys((prev) => ({ ...prev, [ln.id]: Number(e.target.value) }))}
-                      style={{ width: 100 }}
-                    />
-                  </td>
-                </tr>
+                <>
+                  <tr key={ln.id}>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                      {ln.id}
+                      {canFulfill && ln.itemId ? (
+                        <div style={{ marginTop: 4 }}>
+                          <button
+                            onClick={() => toggleAvailability(ln.id, ln.itemId)}
+                            style={{ fontSize: 11, padding: "2px 6px" }}
+                          >
+                            {expandedAvailability[ln.id] ? "Hide" : "Show"} availability
+                          </button>
+                        </div>
+                      ) : null}
+                    </td>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }}>{ln.itemId}</td>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }}>{ln.qty ?? ""} {ln.uom ?? ""}</td>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }}>{ln.qtyCommitted ?? 0}</td>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }}>{ln.qtyFulfilled ?? 0}</td>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                      <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={lineQtys[ln.id] ?? 1}
+                        onChange={(e) => setLineQtys((prev) => ({ ...prev, [ln.id]: Number(e.target.value) }))}
+                        style={{ width: 100 }}
+                      />
+                    </td>
+                    {canFulfill ? (
+                      <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                        <LocationPicker
+                          value={lineLocationIds[ln.id] ?? ""}
+                          onChange={(locId) => setLineLocationIds((prev) => ({ ...prev, [ln.id]: locId }))}
+                        />
+                      </td>
+                    ) : null}
+                    {canFulfill ? (
+                      <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                        <input
+                          type="text"
+                          placeholder="Lot (optional)"
+                          value={lineLots[ln.id] ?? ""}
+                          onChange={(e) => setLineLots((prev) => ({ ...prev, [ln.id]: e.target.value }))}
+                          style={{ width: 120 }}
+                        />
+                      </td>
+                    ) : null}
+                  </tr>
+                  {expandedAvailability[ln.id] ? (
+                    <tr key={`${ln.id}-availability`}>
+                      <td colSpan={canFulfill ? 8 : 6} style={{ padding: 8, border: "1px solid #ccc", background: "#f9f9f9" }}>
+                        {availabilityLoading[ln.id] ? (
+                          <div style={{ fontSize: 12, color: "#666" }}>Loading availability...</div>
+                        ) : (
+                          <div>
+                            <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 4 }}>Available by location:</div>
+                            {(lineAvailability[ln.id] ?? []).length === 0 ? (
+                              <div style={{ fontSize: 12, color: "#999" }}>No availability data</div>
+                            ) : (
+                              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                                <thead>
+                                  <tr style={{ background: "#eee" }}>
+                                    <th style={{ padding: 4, border: "1px solid #ddd", textAlign: "left" }}>Location</th>
+                                    <th style={{ padding: 4, border: "1px solid #ddd", textAlign: "right" }}>On Hand</th>
+                                    <th style={{ padding: 4, border: "1px solid #ddd", textAlign: "right" }}>Reserved</th>
+                                    <th style={{ padding: 4, border: "1px solid #ddd", textAlign: "right" }}>Available</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {lineAvailability[ln.id].map((item, idx) => (
+                                    <tr key={idx}>
+                                      <td style={{ padding: 4, border: "1px solid #ddd" }}>
+                                        {item.locationId ? (locationsCache[item.locationId] ?? item.locationId) : "Unassigned"}
+                                      </td>
+                                      <td style={{ padding: 4, border: "1px solid #ddd", textAlign: "right" }}>{item.onHand}</td>
+                                      <td style={{ padding: 4, border: "1px solid #ddd", textAlign: "right" }}>{item.reserved}</td>
+                                      <td style={{ padding: 4, border: "1px solid #ddd", textAlign: "right" }}>
+                                        {item.available}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ) : null}
+                </>
               ))}
             </tbody>
           </table>

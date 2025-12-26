@@ -30,6 +30,8 @@ npm run smokes:run:ci
 node ops/smoke/smoke.mjs smoke:inventory:crud
 node ops/smoke/smoke.mjs smoke:views:crud
 node ops/smoke/smoke.mjs smoke:close-the-loop
+
+> Note: Inventory movement smokes call `GET /inventory/{id}/movements` with `limit=50` to reduce paging pressure in tenant-partition scans and improve read-after-write stability.
 ```
 
 ### Run Local CI-Equivalent (Exact CI Behavior)
@@ -486,6 +488,7 @@ npm run smokes:cleanup
 |------|-------|-----------|-----------|
 | **smoke:sales:happy** | 1. Create SO (draft) 2. Submit 3. Commit 4. Reserve L1 5. Fulfill L1(1) 6. Fulfill L1(1)+L2(1) 7. Close | Status flow: draft→submitted→committed→closed; onhand decrements | `/objects/salesOrder`, `/sales/so/{id}:submit`, `:commit`, `:reserve`, `:fulfill`, `:close` |
 | **smoke:sales:guards** | 1. Create SO qty 5, onhand 2 2. Submit 3. Reserve 2 4. Try cancel (blocked) 5. Release & cancel 6. Create SO qty 9999, strict:true commit (blocked) | Cancel blocked while reserved; strict commit rejects oversell | `/sales/so/{id}:cancel`, `:release`, `:commit` |
+| **smoke:sales:fulfill-with-location** | 1. Create locations A+B 2. Create product+item, receive 5, putaway to locB 3. Create SO qty 2, submit, commit 4. Fulfill with `{ locationId: locBId, lot: \"LOT-SO\" }` 5. Assert fulfill OK, movement has locationId+lot, GET `/inventory/{id}/onhand:by-location` shows locB onHand decreased by 2 | Fulfill with location/lot succeeds; movement recorded; per-location counters accurate | `/objects/location`, `/inventory/{id}:putaway`, `/sales/so/{id}:fulfill`, `/inventory/{id}/onhand:by-location` |
 | **smoke:salesOrders:commit-strict-shortage** | 1. Create product+item onHand=0 2. Create SO qty 5 3. Submit 4. Commit strict:true | Commit returns 409 with shortages[]; no backorderRequest created | `/sales/so/{id}:commit`, `/objects/backorderRequest/search` |
 | **smoke:salesOrders:commit-nonstrict-backorder** | 1. Create product+item onHand=0 2. Create SO qty 4 3. Submit 4. Commit (strict=false default) 5. Poll backorderRequest | Commit 200 with shortages[]; backorderRequest created (open) | `/sales/so/{id}:commit`, `/objects/backorderRequest/search` |
 

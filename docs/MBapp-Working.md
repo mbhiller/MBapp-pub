@@ -1,3 +1,34 @@
+## Sprint XLIII: Location-Aware Fulfill + Per-Location Counters (2025-12-26)
+
+- **New endpoint:**
+  - GET `/inventory/{id}/onhand:by-location` – Returns array of location-specific counters (`{ itemId, locationId, onHand, reserved, available, asOf }`). Supports null locationId for unassigned stock.
+- **Sales fulfill enhancements:**
+  - API: POST `/sales/so/{id}:fulfill` now accepts optional `locationId` and `lot` per line: `{ lines: [{ lineId, deltaQty, locationId?, lot? }] }`.
+  - Web UI (SalesOrderDetailPage): When order status allows fulfill, table shows:
+    - Location column with LocationPicker per line.
+    - Lot column with text input per line.
+    - "Show/Hide availability" toggle per line → displays nested table of per-location counters (Location, On Hand, Reserved, Available) fetched from `/inventory/{id}/onhand:by-location`.
+    - Location names resolved from cached `/objects/location` fetch (limit 200).
+  - Fulfill payload includes `locationId` and `lot` when set; server records these in inventory movements.
+- **Backend: Location-aware counter derivation:**
+  - New function `deriveCountersByLocation(movements)` in `apps/api/src/inventory/counters.ts` groups movements by locationId.
+  - Action semantics:
+    - `receive`, `adjust`, `cycle_count`: increment onHand at locationId (or "unassigned" if null).
+    - `putaway`: moves qty from `fromLocationId` (parsed from note field "from=..." or explicit field) to `toLocationId`; conservative (only credits destination if source unknown).
+    - `reserve`, `commit`, `release`: apply to "unassigned" bucket (location-awareness not yet implemented for reservation).
+    - `fulfill`: decrements onHand at locationId (or "unassigned").
+  - **Important v1 limitations:**
+    - Reserve/commit remain aggregate; no location-specific reservation yet.
+    - Putaway `fromLocationId` parsing is conservative (regex `/from\s*=\s*([^\s,;]+)/i` on note field); may not deduct from source if note is missing or unparseable.
+    - Location counters are best-effort; edge cases (e.g., manual adjustments without locationId) default to "unassigned".
+- **Opt-in smoke test:**
+  - `smoke:sales:fulfill-with-location` – Creates locations A+B; receives 5 units; putaways to locB; creates SO qty 2; submits/commits; fulfills with `{ locationId: locBId, lot: "LOT-SO" }`; asserts: (1) fulfill succeeds, (2) movement has locationId+lot, (3) `/inventory/{id}/onhand:by-location` shows locB onHand decreased by 2.
+  - **Command:** `node ops/smoke/smoke.mjs smoke:sales:fulfill-with-location` (not in CI list; opt-in only).
+- **How to verify locally:**
+  - Web: Navigate to SO detail page with committed order → see Location and Lot columns in lines table → click "Show availability" → verify per-location counters display → select location and lot → click Fulfill → verify movement recorded with locationId+lot.
+  - API: `GET /inventory/{itemId}/onhand:by-location` → returns `{ items: [{ itemId, locationId, onHand, reserved, available, asOf }] }`.
+  - Smoke: Set env vars, run `node ops/smoke/smoke.mjs smoke:sales:fulfill-with-location`.
+
 ## Sprint XLI: Inventory Putaway + Cycle Count Operations (2025-12-25)
 
 - **New endpoints:**
@@ -774,6 +805,10 @@ When filtering causes `collected >= limit` before reaching DynamoDB's `LastEvalu
   - **Movements shape:** writes `docType:"inventoryMovement"`, `action:"receive"`, `refId` (po id), `poLineId`, optional `lot`/`locationId`, `at`, `createdAt`/`updatedAt`.
   - **Events:** integrated `maybeDispatch` with **simulate** header (`X-Feature-Events-Simulate`) returning `_dev.emitted: true` in responses when exercised by smokes.
 - **Movements list:** `GET /inventory/{id}/movements` now supports additive query filters `refId` and `poLineId` (filtered after the pk/sk query), returns optional `pageInfo` alongside legacy `next`.
+  - Query scans tenant-partitioned movement rows and paginates internally until it collects N matches for the requested `itemId` (tenants may have many movements for other items).
+  - Smokes request a larger limit (e.g., `limit=50`) to reduce paging pressure and flakiness.
+  - Future ideal: add a DynamoDB GSI keyed by `(tenantId, itemId)` for `inventoryMovement` rows to make item movement queries O(1) without paging.
+  - Tier 2 hardening: add DynamoDB GSI keyed by `(tenantId, itemId)` for `inventoryMovement` to enable direct item movement queries (avoid tenant scan/pagination); include a backfill strategy for existing movement rows.
 
 **Mobile**
 - **PO list/detail** wired to unified `useObjects` hook; fixed `reset()` optionality on list search.
