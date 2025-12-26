@@ -1,6 +1,6 @@
 // apps/mobile/src/features/parties/api.ts
 // Generic objects client for Parties using /objects/party endpoints.
-import { listObjects, getObject, createObject } from "../../api/client";
+import { listObjects, getObject, createObject, apiClient } from "../../api/client";
 import type { components } from "../../api/generated-types";
 
 export type Party = components["schemas"]["Party"];
@@ -79,15 +79,17 @@ export async function createParty(input: {
 }
 
 /**
- * Add a role to a party by creating a PartyRole object.
+ * Add a role to a party by updating Party.roles[].
+ * Returns the updated party object.
  */
 export async function addPartyRole(
   partyId: string,
   role: "customer" | "vendor"
-): Promise<any> {
-  return createObject("partyRole", {
-    type: "partyRole",
-    partyId,
-    role,
-  } as any);
+): Promise<Party> {
+  // GET party, union roles, PUT updated party
+  const party = await getObject<Party>(TYPE, partyId);
+  const existingRoles = Array.isArray(party.roles) ? party.roles : [];
+  const nextRoles = Array.from(new Set([...existingRoles, role]));
+  const updated = await apiClient.put<Party>(`/objects/${TYPE}/${encodeURIComponent(partyId)}`, { roles: nextRoles });
+  return updated;
 }

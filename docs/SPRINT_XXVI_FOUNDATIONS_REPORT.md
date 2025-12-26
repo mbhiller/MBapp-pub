@@ -1,3 +1,26 @@
+## Sprint XLI: Inventory Putaway + Cycle Count Operations (2025-12-25)
+
+- **New endpoints:**
+  - POST `/inventory/{id}:putaway` – Move inventory to a location with optional source location audit trail.
+  - POST `/inventory/{id}:cycle-count` – Reconcile inventory by physical count with delta computation.
+- **New movement actions:** Extended InventoryMovement action enum from 6 to 8:
+  - `putaway` – Location transfer (counter no-op; audit trail only).
+  - `cycle_count` – Physical count with delta (like adjust; updates onHand if delta ≠ 0).
+- **Web UI enhancements:**
+  - InventoryDetailPage now displays Putaway and Cycle Count action buttons.
+  - Putaway modal: qty, toLocationId (required), fromLocationId (optional audit), lot, note; uses LocationPicker.
+  - Cycle Count modal: countedQty (required), locationId (optional), lot, note; uses LocationPicker.
+  - Both modals include idempotency keys; success reloads inventory data.
+- **Opt-in smoke tests:**
+  - `smoke:inventory:putaway` – Creates locations A+B, product, inventory; ensures onHand ≥ 1; calls putaway (A→B, qty=1); asserts movement and onHand unchanged.
+  - `smoke:inventory:cycle-count` – Creates product, inventory; ensures onHand = 5; calls cycle-count (countedQty=2, delta=-3); asserts onHand = 2 and movement with delta.
+  - **Command:** `node ops/smoke/smoke.mjs smoke:inventory:putaway` or `smoke:inventory:cycle-count` (not in CI list).
+
+**Inventory actions (canonical):**
+- POST `/inventory/{id}:adjust` — stock delta (may be negative), supports lot/locationId/note.
+- Movement action union: receive, reserve, commit, fulfill, adjust, release, putaway, cycle_count.
+- Counters: putaway is a no-op; cycle_count behaves like adjust (onHand += delta).
+
 ## Sprint XL: Locations Updates
 
 - Location is now a first-class object (SSOT) exposed via `/objects/location`.
@@ -9,6 +32,59 @@
 Note: Historical sections below reflect state as of 2025-12-23; later sprints are captured in addenda above.
 **Generated:** 2025-12-23  
 **Scope:** Mobile + Web client foundations for production-ready MVP
+
+---
+
+## Addendum — Purchasing + Locations + Inventory (2025-12-25 to 2025-12-26)
+
+**What Shipped:**
+
+- **Partial Receive Transitions:**
+  - PO lines track `receivedQty` vs `qty` to allow incremental receiving.
+  - Status transitions: `approved` → first receive (partial if receivedQty < qty) → `received` when all lines fully received.
+  - API guards prevent receive-after-cancel and receive-after-close; relevant error codes returned.
+
+- **Vendor Guard Enforcement Codes:**
+  - `ensurePartyRole()` in `apps/api/src/common/validators.ts` now validates vendor/customer roles via `Party.roles[]` only (no partyRole object dependency).
+  - Error response for missing role: `party_missing_required_role:vendor` with details `{ code: "PARTY_ROLE_MISSING", partyId, requiredRole, roles }`.
+  - Feature flag `FEATURE_ENFORCE_VENDOR_ROLE` supported; dev header `X-Feature-Enforce-Vendor` allows bypass in non-prod.
+
+- **Locations Schema + Objects Permission Fallback:**
+  - Location is now a first-class object exposed via `/objects/location` with SSOT schema.
+  - Web `/locations` page added for listing, creating, editing, and pagination.
+  - Generic `objects:read` / `objects:write` permissions act as fallback for new types (e.g., location) when specific permissions (e.g., `location:read`) are not granted.
+
+- **LocationPicker Integration:**
+  - PO receive UI uses `LocationPicker` for lot + location selection with manual override fallback retained.
+  - Movements persisted with `lot` and `locationId` fields; queryable via `refId` + `poLineId`.
+
+- **Inventory Putaway + Cycle-Count Endpoints:**
+  - **POST `/inventory/{id}:putaway`** — Move inventory to a location; accepts `qty`, `toLocationId` (required), `fromLocationId` (optional audit), `lot`, `note`. Creates movement with action `putaway` (counter no-op; audit trail only).
+  - **POST `/inventory/{id}:cycle-count`** — Reconcile inventory by physical count; accepts `countedQty` (required), `locationId` (optional), `lot`, `note`. Computes delta, writes `cycle_count` movement (like adjust; updates onHand if delta ≠ 0).
+  - Movement action union extended from 6 to 8: receive, reserve, commit, fulfill, adjust, release, putaway, cycle_count.
+  - Shared movement writer in `apps/api/src/inventory/movements.ts` ensures consistent PK/SK and field persistence.
+
+- **Lot/Location End-to-End:**
+  - Web InventoryDetailPage displays Putaway and Cycle Count action buttons with modals using LocationPicker.
+  - Movements list includes lot/location/refId/poLineId; movements queryable by these fields.
+
+**Smoke Coverage:**
+
+- `smoke:close-the-loop-partial-receive` — Validates incremental receive transitions and status updates.
+- `smoke:po-receive-after-cancel-guard` — Ensures API rejects receive on cancelled POs.
+- `smoke:po-receive-after-close-guard` — Ensures API rejects receive on closed POs.
+- `smoke:vendor-guard-enforced` — Validates party role enforcement with `party_missing_required_role:vendor` error path.
+- `smoke:po-receive-lot-location-assertions` — Verifies lot + locationId persist to movements and are queryable.
+- `smoke:locations:crud` — Tests Location CRUD via `/objects/location`.
+- `smoke:inventory:putaway` — Creates locations, product, inventory; ensures onHand ≥ 1; calls putaway; asserts movement created and onHand unchanged.
+- `smoke:inventory:cycle-count` — Creates product, inventory; ensures onHand = 5; calls cycle-count (countedQty=2, delta=-3); asserts onHand = 2 and movement includes delta.
+
+**Seeding Robustness:**
+
+- `ops/smoke/seed/parties.ts` now implements `ensurePartyRole(api, partyId, role)` with retry logic (up to 8 attempts with 150ms sleep) to handle eventual consistency when roles are set via GET → union → PUT.
+- `seedVendor()` and `seedCustomer()` create parties with roles at creation time and verify via `ensurePartyRole()`, returning party object for debug output.
+- Smokes include `steps.vendorDebug` and `steps.customerDebug` with exact partyId + roles to diagnose intermittent `party_missing_required_role:*` failures.
+- Debug output includes the party object returned after role ensure, proving the partyId and roles[] used at the failing step.
 
 ---
 

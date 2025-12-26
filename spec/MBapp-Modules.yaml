@@ -692,6 +692,53 @@ components:
         notes:
           type: string
           nullable: true
+    PutawayRequest:
+      type: object
+      required:
+      - qty
+      - toLocationId
+      properties:
+        qty:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          description: Quantity to putaway (must be > 0)
+        toLocationId:
+          type: string
+          description: Target location id
+        fromLocationId:
+          type: string
+          nullable: true
+          description: Source location id (optional audit trail)
+        lot:
+          type: string
+          nullable: true
+          description: Lot identifier (optional)
+        note:
+          type: string
+          nullable: true
+          description: Optional note for the putaway movement
+    CycleCountRequest:
+      type: object
+      required:
+      - countedQty
+      properties:
+        countedQty:
+          type: number
+          minimum: 0
+          description: Physical count quantity (non-negative)
+        locationId:
+          type: string
+          nullable: true
+          description: Location where count was performed (optional)
+        lot:
+          type: string
+          nullable: true
+          description: Lot identifier (optional)
+        note:
+          type: string
+          nullable: true
+          description: Optional note for the cycle count movement
     InventoryItem:
       allOf:
       - $ref: '#/components/schemas/ObjectBase'
@@ -769,6 +816,8 @@ components:
           - fulfill
           - adjust
           - release
+          - putaway
+          - cycle_count
         qty:
           type: number
         at:
@@ -1020,16 +1069,11 @@ components:
             default: active
           notes:
             type: string
-          roleFlags:
-            type: object
-            additionalProperties:
-              type: boolean
-            description: Denormalized role membership for fast gates.
           roles:
             type: array
             items:
               type: string
-            description: Optional array for UI; roleFlags is the source of truth.
+            description: Canonical role membership (customer, vendor, employee, etc.). Used for party role enforcement.
     PartyLink:
       allOf:
       - $ref: '#/components/schemas/ObjectBase'
@@ -1063,36 +1107,6 @@ components:
           endsAt:
             type: string
             format: date-time
-          notes:
-            type: string
-    PartyRole:
-      allOf:
-      - $ref: '#/components/schemas/ObjectBase'
-      - type: object
-        required:
-        - type
-        - partyId
-        - role
-        properties:
-          type:
-            type: string
-            enum:
-            - partyRole
-          partyId:
-            type: string
-          role:
-            type: string
-            enum:
-            - customer
-            - vendor
-            - employee
-            - event_staff
-            - rider
-            - owner
-            - judge
-          active:
-            type: boolean
-            default: true
           notes:
             type: string
     Policy:
@@ -3569,6 +3583,97 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/InventoryMovement'
+  /inventory/{id}:putaway:
+    post:
+      summary: Putaway inventory to location
+      description: Creates a putaway movement; location trace only (no-op for onHand counters).
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+        description: Inventory item id
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutawayRequest'
+      responses:
+        '200':
+          description: Putaway movement recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InventoryMovement'
+        '400':
+          description: BadRequest (e.g., qty <= 0 or missing toLocationId)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /inventory/{id}:cycle-count:
+    post:
+      summary: Reconcile on-hand via physical count
+      description: |
+        Performs a cycle count reconciliation. Computes delta = countedQty - currentOnHand.
+        If delta = 0, returns early without writing a movement.
+        Otherwise, creates a cycle_count movement with qty=delta to correct the onHand.
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+        description: Inventory item id
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CycleCountRequest'
+      responses:
+        '200':
+          description: |
+            Cycle count completed. If delta=0, no movement is written and message='no change'.
+            Otherwise, a cycle_count movement with qty=delta is recorded.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  priorOnHand:
+                    type: number
+                    description: OnHand before count
+                  countedQty:
+                    type: number
+                    description: Physical count quantity
+                  delta:
+                    type: number
+                    description: Difference (countedQty - priorOnHand)
+                  message:
+                    type: string
+                    nullable: true
+                    description: 'If delta=0: "no change", else null'
+                  movementId:
+                    type: string
+                    nullable: true
+                    description: Movement id (null if delta=0)
+                  movement:
+                    $ref: '#/components/schemas/InventoryMovement'
+                    nullable: true
+                    description: Created movement (null if delta=0)
+        '400':
+          description: BadRequest (e.g., countedQty < 0)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /purchasing/po/{id}:submit:
     post:
       summary: Submit purchase order

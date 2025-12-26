@@ -4,7 +4,6 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 
 import { ok, bad, notFound, error } from "../common/responses";
 import { getObjectById, updateObject, buildSkuLock } from "./repo";
-import { markPartyRole } from "../common/party";
 import { getAuth, requirePerm } from "../auth/middleware";
 import { ensurePartyRole } from "../common/validators";
 import { featureReservationsEnabled } from "../flags";
@@ -152,19 +151,6 @@ export async function handle(event: APIGatewayProxyEventV2) {
     
     const updated = await updateObject({ tenantId: auth.tenantId, type, id, body: patch });
     
-    // 4) If we updated a partyRole, keep Party.roleFlags in sync
-    if (String(type).toLowerCase() === "partyrole") {
-      const partyId: string | undefined =
-        patch?.partyId ?? (updated as any)?.partyId ?? (existing as any)?.partyId;
-      const role: string | undefined =
-        patch?.role    ?? (updated as any)?.role    ?? (existing as any)?.role;
-      const active: boolean =
-        (patch?.active ?? (updated as any)?.active ?? (existing as any)?.active ?? true) === true;
-      if (partyId && role) {
-        await markPartyRole({ tenantId: auth.tenantId, partyId, role, active });
-      }
-    }
-
     return ok(updated);
   } catch (e: any) {
     return error(e);

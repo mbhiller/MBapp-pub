@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { baseGraph } from "./seed/routing.ts";
-import { seedParties, seedVendor } from "./seed/parties.ts";
+import { seedParties, seedVendor, seedCustomer } from "./seed/parties.ts";
 
 const DEFAULT_TENANT = "SmokeTenant";
 const allowNonSmokeTenant = process.env.MBAPP_SMOKE_ALLOW_NON_SMOKE_TENANT === "1";
@@ -268,25 +268,33 @@ async function waitForStatus(type, id, wanted, { tries=10, delayMs=120 } = {}) {
 /** Try multiple movement payload shapes until on-hand increases. */
 const MV_TYPE=process.env.SMOKE_MOVEMENT_TYPE??"inventoryMovement";
 async function ensureOnHand(itemId, qty){
-  // 1) { type: 'receive' }
-  let r1 = await post(`/objects/${MV_TYPE}`, { itemId, type:"receive", qty });
-  let oh1 = await onhand(itemId);
-  if (r1.ok && oh1.ok && (oh1.body?.items?.[0]?.onHand ?? 0) >= qty) {
-    return { ok:true, variant:"type", receive:r1, onhand:oh1 };
+  // Check current onHand
+  let ohCurrent = await onhand(itemId);
+  const currentQty = ohCurrent.ok ? (ohCurrent.body?.items?.[0]?.onHand ?? 0) : 0;
+  
+  // If already at or above target, we're done
+  if (currentQty >= qty) {
+    return { ok:true, reason:"already_sufficient", currentQty, onhand:ohCurrent };
   }
-  // 2) { action: 'receive' }
-  let r2 = await post(`/objects/${MV_TYPE}`, { itemId, action:"receive", qty });
-  let oh2 = await onhand(itemId);
-  if (r2.ok && oh2.ok && (oh2.body?.items?.[0]?.onHand ?? 0) >= qty) {
-    return { ok:true, variant:"action", receive:r2, onhand:oh2 };
+  
+  // Calculate delta needed to reach target
+  const needed = qty - currentQty;
+  
+  // Use canonical POST /inventory/{id}:adjust endpoint (colon action)
+  let adjResp = await post(`/inventory/${encodeURIComponent(itemId)}:adjust`, {
+    deltaQty: needed,
+  }, { "Idempotency-Key": idem() });
+  
+  // Check if adjustment succeeded and onHand is now sufficient
+  let ohAfter = await onhand(itemId);
+  const afterQty = ohAfter.ok ? (ohAfter.body?.items?.[0]?.onHand ?? 0) : 0;
+  
+  if (adjResp.ok && ohAfter.ok && afterQty >= qty) {
+    return { ok:true, reason:"adjust_success", adjustment:adjResp, onhand:ohAfter, deltaApplied:needed };
   }
-  // 3) both keys
-  let r3 = await post(`/objects/${MV_TYPE}`, { itemId, type:"receive", action:"receive", qty });
-  let oh3 = await onhand(itemId);
-  if (r3.ok && oh3.ok && (oh3.body?.items?.[0]?.onHand ?? 0) >= qty) {
-    return { ok:true, variant:"both", receive:r3, onhand:oh3 };
-  }
-  return { ok:false, attempts:[{r1,oh1},{r2,oh2},{r3,oh3}] };
+  
+  // If first attempt failed, return details
+  return { ok:false, reason:"adjust_failed", adjustment:adjResp, ohBefore:currentQty, ohAfter:afterQty, needed };
 }
 
 /** objects helpers */
@@ -314,7 +322,10 @@ const tests = {
     "smoke:close-the-loop": async () => {
       await ensureBearer();
       // Seed vendor first so product/inventory can reference it
-      const { vendorId } = await seedVendor(api);
+      const { vendorId, vendorParty } = await seedVendor(api);
+      // Immediate debug: GET vendor party and capture roles
+      const vendCheck = await get(`/objects/party/${encodeURIComponent(vendorId)}`);
+      const vendorDebug = { vendorId, roles: vendCheck.body?.roles ?? vendorParty?.roles ?? [], party: vendCheck.body ?? vendorParty };
       // 1) Create item with low/zero onHand
       const prod = await createProduct({ name: "LoopTest", preferredVendorId: vendorId });
       if (!prod.ok) return { test: "close-the-loop", result: "FAIL", step: "createProduct", prod };
@@ -322,7 +333,10 @@ const tests = {
       if (!item.ok) return { test: "close-the-loop", result: "FAIL", step: "createInventory", item };
       const itemId = item.body?.id;
       // Create a customer party for the SO
-      const { partyId } = await seedParties(api);
+      const { customerId, customerParty } = await seedCustomer(api);
+      // Immediate debug: GET customer party and capture roles
+      const custCheck = await get(`/objects/party/${encodeURIComponent(customerId)}`);
+      const customerDebug = { customerId, roles: custCheck.body?.roles ?? customerParty?.roles ?? [], party: custCheck.body ?? customerParty };
       // Ensure onHand is 0 by adjusting based on current onHand
       const onhandPre = await onhand(itemId);
       const currentOnHand = onhandPre.body?.items?.[0]?.onHand ?? 0;
@@ -332,7 +346,7 @@ const tests = {
       const onhand0 = await onhand(itemId);
       // 2) Create Sales Order where qty > available
       const so = await post(`/objects/salesOrder`, {
-        type: "salesOrder", status: "draft", partyId, lines: [{ itemId, qty: 5, uom: "ea" }]
+        type: "salesOrder", status: "draft", partyId: customerId, lines: [{ itemId, qty: 5, uom: "ea" }]
       });
       if (!so.ok) return { test: "close-the-loop", result: "FAIL", step: "createSO", so };
       const soId = so.body?.id;
@@ -428,6 +442,7 @@ const tests = {
         result: pass ? "PASS" : "FAIL",
         steps: {
           prod, item, onhand0, so, boRes, suggest, draft, poSave, receive, onhandAfter, boFulfilled, boOpen, receiveAgain, onhandFinal, boFulfilledFinal, boOpenFinal
+          , vendorDebug, customerDebug
         }
       };
     },
@@ -1175,13 +1190,23 @@ const tests = {
 
   "smoke:inventory:crud": async ()=>{
     await ensureBearer();
-    const itemId = smokeTag(`smoke-item-${Date.now()}`);
     const productId = smokeTag(`smoke-prod-${Date.now()}`);
     const createName = smokeTag("Smoke Inventory Item");
     const updatedName = smokeTag("Smoke Inventory Item Updated");
 
-    const create = await post(`/objects/inventoryItem`,
-      { itemId, productId, name: createName },
+    // Create product first
+    const prod = await post(`/objects/product`,
+      { type: "product", kind: "good", name: productId, sku: productId },
+      { "Idempotency-Key": idem() }
+    );
+    const prodId = prod.body?.id;
+    if (!prod.ok || !prodId) {
+      return { test: "inventory-crud", result: "FAIL", step: "createProduct", prod };
+    }
+
+    // Create inventory item using canonical /objects/inventory endpoint
+    const create = await post(`/objects/inventory`,
+      { type: "inventory", name: createName, productId: prodId, uom: "ea" },
       { "Idempotency-Key": idem() }
     );
     const id = create.body?.id;
@@ -1189,16 +1214,16 @@ const tests = {
       return { test: "inventory-crud", result: "FAIL", step: "create", create };
     }
 
-    const get1 = await get(`/objects/inventoryItem/${encodeURIComponent(id)}`);
+    const get1 = await get(`/objects/inventory/${encodeURIComponent(id)}`);
     const body1 = get1.body ?? {};
-    const gotItemId1 = body1?.itemId ?? "";
+    const gotName1 = body1?.name ?? "";
     const gotProductId1 = body1?.productId;
     const hasRunId = (v) => typeof v === "string" && v.includes(SMOKE_RUN_ID);
-    if (!get1.ok || gotItemId1 !== itemId || !hasRunId(body1?.name) || (gotProductId1 && !hasRunId(gotProductId1))) {
-      return { test: "inventory-crud", result: "FAIL", step: "get1", get1, gotItemId1, gotProductId1 };
+    if (!get1.ok || !hasRunId(gotName1) || gotProductId1 !== prodId) {
+      return { test: "inventory-crud", result: "FAIL", step: "get1", get1, gotName1, gotProductId1 };
     }
 
-    const update = await put(`/objects/inventoryItem/${encodeURIComponent(id)}`,
+    const update = await put(`/objects/inventory/${encodeURIComponent(id)}`,
       { name: updatedName },
       { "Idempotency-Key": idem() }
     );
@@ -1206,26 +1231,24 @@ const tests = {
       return { test: "inventory-crud", result: "FAIL", step: "update", update };
     }
 
-    const get2 = await get(`/objects/inventoryItem/${encodeURIComponent(id)}`);
+    const get2 = await get(`/objects/inventory/${encodeURIComponent(id)}`);
     const body2 = get2.body ?? {};
-    const gotItemId2 = body2?.itemId ?? "";
+    const gotName2 = body2?.name ?? "";
     const gotProductId2 = body2?.productId;
     const gotUpdated = get2.ok
-      && (body2?.name ?? "") === updatedName
-      && hasRunId(body2?.name)
-      && gotItemId2 === itemId
-      && hasRunId(gotItemId2)
-      && (typeof gotProductId2 === "undefined" || hasRunId(gotProductId2));
+      && gotName2 === updatedName
+      && hasRunId(gotName2)
+      && gotProductId2 === prodId;
     if (!gotUpdated) {
-      return { test: "inventory-crud", result: "FAIL", step: "get2", get2, gotItemId2, gotProductId2 };
+      return { test: "inventory-crud", result: "FAIL", step: "get2", get2, gotName2, gotProductId2 };
     }
 
     // Optional: check onhand endpoint returns an entry
     const onhandRes = await get(`/inventory/${encodeURIComponent(id)}/onhand`);
     const onhandOk = onhandRes.ok; // Don't enforce structure, just that it doesn't error
 
-    const pass = create.ok && get1.ok && update.ok && gotUpdated && onhandOk;
-    return { test: "inventory-crud", result: pass ? "PASS" : "FAIL", create, get1, update, get2, onhandRes };
+    const pass = prod.ok && create.ok && get1.ok && update.ok && gotUpdated && onhandOk;
+    return { test: "inventory-crud", result: pass ? "PASS" : "FAIL", product: prod, create, get1, update, get2, onhandRes };
   },
 
   "smoke:inventory:onhand": async ()=>{
@@ -1348,6 +1371,162 @@ const tests = {
 
     const pass = create.ok && got1 && update.ok && gotUpdated && searchOrList?.ok && found;
     return { test: "locations-crud", result: pass ? "PASS" : "FAIL", create, get1, update, get2, searchOrList, found };
+  },
+
+  "smoke:inventory:putaway": async () => {
+    await ensureBearer();
+
+    // Create two locations
+    const locA = await post(`/objects/location`,
+      { type: "location", name: smokeTag("LocA-PutawaySrc"), code: "LOC-A", status: "active" },
+      { "Idempotency-Key": idem() }
+    );
+    const locB = await post(`/objects/location`,
+      { type: "location", name: smokeTag("LocB-PutawayDst"), code: "LOC-B", status: "active" },
+      { "Idempotency-Key": idem() }
+    );
+    if (!locA.ok || !locB.ok) {
+      return { test: "inventory-putaway", result: "FAIL", step: "createLocations", locA, locB };
+    }
+    const locAId = locA.body?.id;
+    const locBId = locB.body?.id;
+    recordCreated({ type: 'location', id: locAId, route: '/objects/location', meta: { name: 'LocA-PutawaySrc', code: 'LOC-A' } });
+    recordCreated({ type: 'location', id: locBId, route: '/objects/location', meta: { name: 'LocB-PutawayDst', code: 'LOC-B' } });
+
+    // Create product and inventory
+    const prod = await createProduct({ name: "PutawayTest" });
+    if (!prod.ok) {
+      return { test: "inventory-putaway", result: "FAIL", step: "createProduct", prod };
+    }
+    const prodId = prod.body?.id;
+    recordCreated({ type: 'product', id: prodId, route: '/objects/product', meta: { name: 'PutawayTest' } });
+
+    const item = await createInventoryForProduct(prodId, "PutawayItem");
+    if (!item.ok) {
+      return { test: "inventory-putaway", result: "FAIL", step: "createInventory", item };
+    }
+    const itemId = item.body?.id;
+    recordCreated({ type: 'inventory', id: itemId, route: '/objects/inventory', meta: { name: 'PutawayItem', productId: prodId } });
+
+    // Ensure onHand >= 1
+    const ensure = await ensureOnHand(itemId, 1);
+    if (!ensure.ok) {
+      return { test: "inventory-putaway", result: "FAIL", step: "ensureOnHand", ensure };
+    }
+
+    // Check onHand before putaway
+    const ohBefore = await onhand(itemId);
+    const onHandBefore = ohBefore.body?.items?.[0]?.onHand ?? 0;
+
+    // Call putaway
+    const putaway = await post(`/inventory/${itemId}:putaway`, {
+      qty: 1,
+      toLocationId: locBId,
+      fromLocationId: locAId,
+      lot: "LOT-PUT",
+      note: "smoke putaway test"
+    }, { "Idempotency-Key": idem() });
+    if (!putaway.ok) {
+      return { test: "inventory-putaway", result: "FAIL", step: "putaway", putaway };
+    }
+    const mvId = putaway.body?.id;
+    if (mvId) recordCreated({ type: 'inventoryMovement', id: mvId, route: '/inventory/:id:putaway', meta: { action: 'putaway', qty: 1, locationId: locBId, lot: 'LOT-PUT' } });
+
+    // Check movements list for putaway action
+    const movements = await get(`/inventory/${itemId}/movements`, { limit: 10 });
+    if (!movements.ok) {
+      return { test: "inventory-putaway", result: "FAIL", step: "getMovements", movements };
+    }
+    const mvList = movements.body?.items ?? [];
+    const putawayFound = mvList.some(m => 
+      (m.action ?? "") === "putaway" && 
+      (m.locationId ?? "") === locBId &&
+      (m.lot ?? "") === "LOT-PUT"
+    );
+    if (!putawayFound) {
+      return { test: "inventory-putaway", result: "FAIL", step: "assertMovement", mvList, expected: { action: "putaway", locationId: locBId, lot: "LOT-PUT" } };
+    }
+
+    // Verify onHand unchanged (putaway is no-op for counters)
+    const ohAfter = await onhand(itemId);
+    const onHandAfter = ohAfter.body?.items?.[0]?.onHand ?? 0;
+    if (onHandAfter !== onHandBefore) {
+      return { test: "inventory-putaway", result: "FAIL", step: "assertOnHandUnchanged", onHandBefore, onHandAfter };
+    }
+
+    return { test: "inventory-putaway", result: "PASS", locA: locAId, locB: locBId, item: itemId, mvId, putawayFound: true };
+  },
+
+  "smoke:inventory:cycle-count": async () => {
+    await ensureBearer();
+
+    // Create product and inventory
+    const prod = await createProduct({ name: "CycleCountTest" });
+    if (!prod.ok) {
+      return { test: "inventory-cycle-count", result: "FAIL", step: "createProduct", prod };
+    }
+    const prodId = prod.body?.id;
+    recordCreated({ type: 'product', id: prodId, route: '/objects/product', meta: { name: 'CycleCountTest' } });
+
+    const item = await createInventoryForProduct(prodId, "CycleCountItem");
+    if (!item.ok) {
+      return { test: "inventory-cycle-count", result: "FAIL", step: "createInventory", item };
+    }
+    const itemId = item.body?.id;
+    recordCreated({ type: 'inventory', id: itemId, route: '/objects/inventory', meta: { name: 'CycleCountItem', productId: prodId } });
+
+    // Ensure onHand == 5
+    const ensure = await ensureOnHand(itemId, 5);
+    if (!ensure.ok) {
+      return { test: "inventory-cycle-count", result: "FAIL", step: "ensureOnHand", ensure };
+    }
+
+    // Verify onHand is 5
+    const ohCheck = await onhand(itemId);
+    const onHandCheck = ohCheck.body?.items?.[0]?.onHand ?? 0;
+    if (onHandCheck !== 5) {
+      return { test: "inventory-cycle-count", result: "FAIL", step: "verifyOnHand5", onHandCheck };
+    }
+
+    // Call cycle-count with countedQty=2 (expect delta=-3)
+    const cycleCount = await post(`/inventory/${itemId}:cycle-count`, {
+      countedQty: 2,
+      note: "smoke cycle count test"
+    }, { "Idempotency-Key": idem() });
+    if (!cycleCount.ok) {
+      return { test: "inventory-cycle-count", result: "FAIL", step: "cycleCount", cycleCount };
+    }
+    const ccResp = cycleCount.body;
+    const expectedDelta = 2 - 5; // -3
+    if (ccResp?.delta !== expectedDelta) {
+      return { test: "inventory-cycle-count", result: "FAIL", step: "assertDelta", delta: ccResp?.delta, expectedDelta };
+    }
+    const mvId = ccResp?.movementId;
+    if (mvId) recordCreated({ type: 'inventoryMovement', id: mvId, route: '/inventory/:id:cycle-count', meta: { action: 'cycle_count', qty: expectedDelta, countedQty: 2, priorOnHand: 5 } });
+
+    // Verify onHand is now 2
+    const ohAfter = await onhand(itemId);
+    const onHandAfter = ohAfter.body?.items?.[0]?.onHand ?? 0;
+    if (onHandAfter !== 2) {
+      return { test: "inventory-cycle-count", result: "FAIL", step: "assertOnHand2", onHandAfter, expected: 2 };
+    }
+
+    // Check movements list for cycle_count action with correct qty
+    const movements = await get(`/inventory/${itemId}/movements`, { limit: 10 });
+    if (!movements.ok) {
+      return { test: "inventory-cycle-count", result: "FAIL", step: "getMovements", movements };
+    }
+    const mvList = movements.body?.items ?? [];
+    const ccFound = mvList.some(m => 
+      (m.action ?? "") === "cycle_count" && 
+      m.qty === expectedDelta &&
+      (m.note ?? "").includes("counted=2")
+    );
+    if (!ccFound) {
+      return { test: "inventory-cycle-count", result: "FAIL", step: "assertMovement", mvList, expected: { action: "cycle_count", qty: expectedDelta, noteContains: "counted=2" } };
+    }
+
+    return { test: "inventory-cycle-count", result: "PASS", item: itemId, mvId, delta: expectedDelta, ccFound: true };
   },
 
   /* ===================== Sales Orders ===================== */
@@ -2840,7 +3019,9 @@ const tests = {
     
     // Alternative: Test via PO receive (the real emitter)
     // Create minimal PO -> receive -> check for _dev.emitted signal
-    const { vendorId } = await seedVendor({ post, get, put });
+    const { vendorId, vendorParty } = await seedVendor({ post, get, put });
+    const vendCheck = await get(`/objects/party/${encodeURIComponent(vendorId)}`);
+    const vendorDebug = { vendorId, roles: vendCheck.body?.roles ?? vendorParty?.roles ?? [], party: vendCheck.body ?? vendorParty };
     
     const poDraft = await post(`/objects/purchaseOrder`, {
       type: "purchaseOrder",
@@ -2891,7 +3072,8 @@ const tests = {
       hasEmitSignal,
       hasProvider,
       devMeta: recvBody?._dev || null,
-      recvBody
+      recvBody,
+      steps: { vendorDebug }
     };
   },
 

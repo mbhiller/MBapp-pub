@@ -3,12 +3,13 @@
 
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, QueryCommand } from "@aws-sdk/lib-dynamodb";
+import { PutCommand } from "@aws-sdk/lib-dynamodb";
 import { resolveTenantId } from "../common/tenant";
 
 type SortDir = "asc" | "desc";
 
 // --- Canonical action union + guard ---
-const ACTIONS = ["receive","reserve","commit","fulfill","adjust","release"] as const;
+const ACTIONS = ["receive","reserve","commit","fulfill","adjust","release","putaway","cycle_count"] as const;
 export type Action = typeof ACTIONS[number];
 function asAction(v: unknown): Action | undefined {
   const s = String(v ?? "").toLowerCase();
@@ -174,6 +175,76 @@ export async function listMovementsByItem(
 }
 
 // ===== HTTP handler for GET /inventory/{id}/movements =====
+
+// ===== Shared movement writer for consistency across putaway, cycle-count, adjust, etc. =====
+function generateMovementId(prefix = "mv"): string {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export interface CreateMovementRequest {
+  tenantId: string;
+  itemId: string;
+  action: Action;
+  qty: number;
+  locationId?: string;
+  lot?: string;
+  note?: string;
+  refId?: string;
+  poLineId?: string;
+  actorId?: string;
+}
+
+export async function createMovement(req: CreateMovementRequest): Promise<InventoryMovement> {
+  const PK = process.env.MBAPP_TABLE_PK || "pk";
+  const SK = process.env.MBAPP_TABLE_SK || "sk";
+
+  const now = new Date().toISOString();
+  const movementId = generateMovementId("mv");
+
+  const movement = {
+    [PK]: req.tenantId,
+    [SK]: `inventoryMovement#${movementId}`,
+    id: movementId,
+    type: "inventoryMovement",
+    docType: "inventoryMovement",
+    itemId: req.itemId,
+    action: req.action,
+    qty: req.qty,
+    at: now,
+    createdAt: now,
+    updatedAt: now,
+    ...(req.locationId && { locationId: req.locationId }),
+    ...(req.lot && { lot: req.lot }),
+    ...(req.note && { note: req.note }),
+    ...(req.refId && { refId: req.refId }),
+    ...(req.poLineId && { poLineId: req.poLineId }),
+    ...(req.actorId && { actorId: req.actorId }),
+  };
+
+  await ddb.send(
+    new PutCommand({
+      TableName: TABLE,
+      Item: movement as any,
+    })
+  );
+
+  return {
+    id: movementId,
+    itemId: req.itemId,
+    action: req.action,
+    qty: req.qty,
+    at: now,
+    note: req.note,
+    actorId: req.actorId,
+    refId: req.refId,
+    poLineId: req.poLineId,
+    lot: req.lot,
+    locationId: req.locationId,
+    docType: "inventoryMovement",
+    createdAt: now,
+  };
+}
+
 export async function handle(event: any) {
   const id: string | undefined = event?.pathParameters?.id;
   if (!id) return respond(400, { error: "BadRequest", message: "Missing id" });
@@ -203,4 +274,4 @@ export async function handle(event: any) {
   return respond(200, out);
 }
 
-export default { handle, listMovementsByItem };
+export default { handle, listMovementsByItem, createMovement };
