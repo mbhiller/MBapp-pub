@@ -1,4 +1,12 @@
+## Sprint XL: Locations Updates
+
+- Location is now a first-class object (SSOT) exposed via `/objects/location`.
+- Added web `/locations` page for listing, creating, editing, and pagination.
+- PO receive now uses `LocationPicker` with manual override fallback retained.
+- New opt-in smokes added: `smoke:locations:crud` and updated `smoke:po-receive-lot-location-assertions` to create/use a real location.
+
 # Sprint XXVI–XXVII — Tier 1–4 Foundations Report
+Note: Historical sections below reflect state as of 2025-12-23; later sprints are captured in addenda above.
 **Generated:** 2025-12-23  
 **Scope:** Mobile + Web client foundations for production-ready MVP
 
@@ -18,9 +26,26 @@ This section aligns the Sprint XXVI–XXVII Foundations checklist to the Tiered 
 | Parties — Mobile screens (Create/Edit + routes) | 1 | Core Identity (Parties) | ✅ | ✅ | ✅ | ✅ | Adds reusable form pattern on mobile (Sprint XXVI) |
 | Products — Web/Mobile forms (Create/Edit) | 1.2 | Commerce Core | ✅ | ✅ | ✅ | ✅ | Web ProductForm + mobile screens delivered (Sprint XXVII) |
 | Inventory — Web read-only (List/Detail) | 1.2 | Commerce Core | ✅ | ✅ | ✅ | ✅ | Show onHand + movements; adjust later (Sprint XXVII) |
+| Locations — SSOT + Web + Receiving integration | 1.2 | Commerce Core | ✅ | 🟨 (receive UI supports lot/locationId; no dedicated Locations screens) | ✅ | 🟨 | Sprint XL (2025-12-25) |
 | Update docs + add parties/products/inventory smokes | 1 | Delivery Notes | ✅ | ✅ | ✅ | ✅ | smoke:parties:crud + smoke:products:crud + smoke:inventory:crud (Sprint XXVI–XXVII) |
+| Locations SSOT + Web + Receiving integration | 1.2 | Commerce Core / Inventory | ✅ | (mobile unchanged) | ✅ | 🟨 | Sprint XL |
 
 Legend: ✅ done · 🟨 partial · ⬜ missing (planned)
+
+## Addendum — Post Sprint XXVII Foundations (Sprints XXXV–XL, 2025-12-25)
+
+- Web Purchasing workflow shipped:
+  - `/backorders` (bulk ignore + suggest-po; multi-vendor chooser)
+  - `/purchase-orders` list + detail (submit/approve/receive/cancel/close)
+  - PO Activity from inventory movements
+- Vendor guard enforcement validated (FEATURE_ENFORCE_VENDOR_ROLE + `X-Feature-Enforce-Vendor` in non-prod)
+- Receiving fidelity:
+  - per-line `lot`/`locationId` → persisted to inventory movements
+  - movements queryable via `refId` + `poLineId`
+- Locations foundation shipped:
+  - `/objects/location` CRUD
+  - `/locations` web page
+  - `LocationPicker` in PO receive with manual override fallback
 
 ### Gap Matrix (Tier 1–2) — Post Sprint XXVII
 
@@ -34,6 +59,8 @@ Legend: ✅ done · 🟨 partial · ⬜ missing (planned)
 | Views CRUD | ✅ | ⬜ | ⬜ | 🟨 | Handlers exist; smokes exist (not in CI) |
 | Workspaces CRUD | ✅ | 🟨 | ⬜ | 🟨 | Hub stub on mobile; CRUD UI missing |
 | Auth/config | ✅ | ✅ | ✅ | ✅ | Web has AuthProvider; smokes use bearer/env (Sprint XXVI) |
+| Web Backorders + Suggest-PO + Receive loop | ✅ | ✅/🟨 | ✅ | ✅ | Sprints XXXIII–XXXV |
+| Locations SSOT + pickers | ✅ | 🟨 | ✅ | 🟨 | Sprint XL |
 
 ### Recommended Sprint Sequence (XXVI–XXVIII)
 
@@ -171,6 +198,19 @@ const TENANT = process.env.MBAPP_TENANT_ID ?? "DemoTenant";
 ---
 
 ## 3. Web UI Inventory (apps/web/src)
+
+NOTE: The block below reflected Sprint XXVI–XXVII state. As of 2025-12-25 web has real pages.
+
+**Current Pages (as of 2025-12-25)**
+
+| Page | Route |
+|------|-------|
+| Parties list/detail | /parties, /parties/:id |
+| Products (forms) | /products/new, /products/:id/edit |
+| Inventory list/detail | /inventory, /inventory/:id |
+| Backorders list | /backorders |
+| Purchase orders list/detail | /purchase-orders, /purchase-orders/:id |
+| Locations list | /locations |
 
 **Current Structure:**
 ```

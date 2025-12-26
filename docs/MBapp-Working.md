@@ -1,3 +1,10 @@
+## Sprint XL: Locations Updates
+
+- Location is now a first-class object (SSOT) exposed via `/objects/location`.
+- Added web `/locations` page for listing, creating, editing, and pagination.
+- PO receive now uses `LocationPicker` with manual override fallback retained.
+- New opt-in smokes added: `smoke:locations:crud` and updated `smoke:po-receive-lot-location-assertions` to create/use a real location.
+
 ## Sprint XXXIX — Receive Defaults + Opt-in Smoke (2025-12-25)
 
 - Web receive defaults (per tenant, localStorage) store last-used lot and locationId.

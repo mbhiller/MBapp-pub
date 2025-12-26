@@ -1025,8 +1025,17 @@ const tests = {
     const itemId = firstLine?.itemId ?? null;
     if (!lineId || !itemId) return { test: "po-receive-lot-location-assertions", result: "FAIL", step: "missingLineOrItemId", createPo, poGet };
 
-    // Step 2: Receive with explicit lot/locationId
-    const payload = { lines: [{ lineId, deltaQty: 1, lot: "LOT-XYZ", locationId: "LOC-ABC" }] };
+    // Step 2: Create a real location, then receive with explicit lot/locationId
+    const locCreate = await post(`/objects/location`, {
+      type: "location",
+      name: smokeTag(`Loc-LotLocAssert-${Date.now()}`),
+      code: smokeTag(`LOC-${Math.random().toString(36).slice(2,6).toUpperCase()}`),
+      status: "active"
+    });
+    if (!locCreate.ok) return { test: "po-receive-lot-location-assertions", result: "FAIL", step: "createLocation", locCreate };
+    const locationId = locCreate.body?.id;
+
+    const payload = { lines: [{ lineId, deltaQty: 1, lot: "LOT-XYZ", locationId }] };
     const recv = await post(`/purchasing/po/${encodeURIComponent(poId)}:receive`, payload, { "Idempotency-Key": idem() });
     if (!recv.ok) return { test: "po-receive-lot-location-assertions", result: "FAIL", step: "receive", recv };
 
@@ -1035,7 +1044,7 @@ const tests = {
     if (!movements.ok) return { test: "po-receive-lot-location-assertions", result: "FAIL", step: "movements", movements };
 
     const match = (movements.body?.items ?? []).find((mv) =>
-      mv?.action === "receive" && Number(mv?.qty) === 1 && mv?.lot === "LOT-XYZ" && mv?.locationId === "LOC-ABC"
+      mv?.action === "receive" && Number(mv?.qty) === 1 && mv?.lot === "LOT-XYZ" && mv?.locationId === locationId
     );
 
     const pass = Boolean(match);
@@ -1269,6 +1278,76 @@ const tests = {
     const mv = await get(`/inventory/${encodeURIComponent(id)}/movements`);
     const ok = mv.ok && Array.isArray(mv.body?.items);
     return { test:"inventory-list-movements", result:ok?"PASS":"FAIL", item, mv };
+  },
+
+  "smoke:locations:crud": async () => {
+    await ensureBearer();
+
+    // Create
+    const short = Math.random().toString(36).slice(2,6).toUpperCase();
+    const nameCreate = smokeTag(`SmokeLocation-${SMOKE_RUN_ID}`);
+    const codeCreate = smokeTag(`LOC-${short}`);
+    const create = await post(`/objects/location`,
+      { type: "location", name: nameCreate, code: codeCreate, status: "active", notes: "created by locations:crud" },
+      { "Idempotency-Key": idem() }
+    );
+    const id = create.body?.id;
+    if (!create.ok || !id) {
+      return { test: "locations-crud", result: "FAIL", step: "create", create };
+    }
+    recordCreated({ type: 'location', id, route: '/objects/location', meta: { name: nameCreate, code: codeCreate, status: 'active' } });
+
+    // GET with tiny retry for eventual consistency
+    let get1 = null;
+    let got1 = false;
+    for (let i=0;i<5 && !got1;i++){
+      get1 = await get(`/objects/location/${encodeURIComponent(id)}`);
+      got1 = get1.ok && (get1.body?.name ?? "") === nameCreate;
+      if (!got1) await sleep(200);
+    }
+    if (!got1) {
+      return { test: "locations-crud", result: "FAIL", step: "get1", get1 };
+    }
+
+    // Update
+    const nameUpdated = smokeTag(`${nameCreate}-Updated`);
+    const update = await put(`/objects/location/${encodeURIComponent(id)}`,
+      { name: nameUpdated, status: "inactive", notes: "updated by locations:crud" },
+      { "Idempotency-Key": idem() }
+    );
+    if (!update.ok) {
+      return { test: "locations-crud", result: "FAIL", step: "update", update };
+    }
+
+    // GET again
+    const get2 = await get(`/objects/location/${encodeURIComponent(id)}`);
+    const gotUpdated = get2.ok && (get2.body?.name ?? "") === nameUpdated && (get2.body?.status ?? "") === "inactive";
+    if (!gotUpdated) {
+      return { test: "locations-crud", result: "FAIL", step: "get2", get2 };
+    }
+
+    // Presence check: prefer search, fallback to list
+    let searchOrList = null;
+    let found = false;
+    for (let i=0;i<5 && !found;i++){
+      // Try POST /objects/location/search if available
+      searchOrList = await post(`/objects/location/search`, { q: "SmokeLocation", limit: 20 });
+      if (searchOrList.ok) {
+        const items = Array.isArray(searchOrList.body?.items) ? searchOrList.body.items : [];
+        found = items.some(loc => loc.id === id || loc.name === nameUpdated || loc.code === codeCreate);
+      } else {
+        // Fallback to GET list
+        searchOrList = await get(`/objects/location`, { limit: 20, sort: 'desc' });
+        if (searchOrList.ok) {
+          const items = Array.isArray(searchOrList.body?.items) ? searchOrList.body.items : [];
+          found = items.some(loc => loc.id === id || loc.name === nameUpdated || loc.code === codeCreate);
+        }
+      }
+      if (!found) await sleep(200);
+    }
+
+    const pass = create.ok && got1 && update.ok && gotUpdated && searchOrList?.ok && found;
+    return { test: "locations-crud", result: pass ? "PASS" : "FAIL", create, get1, update, get2, searchOrList, found };
   },
 
   /* ===================== Sales Orders ===================== */

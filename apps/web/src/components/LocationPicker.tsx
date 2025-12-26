@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../providers/AuthProvider";
 import { listLocations, type Location } from "../lib/locations";
 
@@ -6,32 +6,52 @@ type Props = {
   value?: string;
   onChange: (id: string) => void;
   disabled?: boolean;
+  tenantId?: string; // optional override; defaults to AuthProvider
+  token?: string;    // optional override; defaults to AuthProvider
 };
 
-export default function LocationPicker({ value, onChange, disabled }: Props) {
-  const { token, tenantId } = useAuth();
+export default function LocationPicker({ value, onChange, disabled, tenantId: tOverride, token: tokOverride }: Props) {
+  const auth = useAuth();
+  const token = tokOverride ?? auth.token ?? undefined;
+  const tenantId = tOverride ?? auth.tenantId;
   const [items, setItems] = useState<Location[]>([]);
+  const [next, setNext] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState("");
+
+  const loadFirstPage = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await listLocations({ limit: 200 }, { token, tenantId });
+      setItems(res.items ?? []);
+      setNext(res.next ?? null);
+    } catch (err: any) {
+      setError(err?.message || "Failed to load locations");
+    } finally {
+      setLoading(false);
+    }
+  }, [tenantId, token]);
+
+  const loadMore = useCallback(async () => {
+    if (!next) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await listLocations({ limit: 200, next }, { token, tenantId });
+      setItems((prev) => [...prev, ...(res.items ?? [])]);
+      setNext(res.next ?? null);
+    } catch (err: any) {
+      setError(err?.message || "Failed to load more");
+    } finally {
+      setLoading(false);
+    }
+  }, [next, tenantId, token]);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await listLocations({ limit: 50 }, { token: token || undefined, tenantId });
-        if (!cancelled) setItems(res.items ?? []);
-      } catch (err: any) {
-        if (!cancelled) setError(err?.message || "Failed to load locations");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [tenantId, token]);
+    loadFirstPage();
+  }, [loadFirstPage]);
 
   const selectValue = useMemo(() => {
     // Only reflect value in <select> if it matches a known location id
@@ -40,13 +60,41 @@ export default function LocationPicker({ value, onChange, disabled }: Props) {
   }, [items, value]);
 
   const renderLabel = (loc: Location) => {
-    return (
-      loc.name || loc.label || (loc as any).displayName || String(loc.id ?? "Unknown")
-    );
+    const code = String((loc as any)?.code ?? "").trim();
+    const name = String(loc.name ?? (loc as any)?.label ?? (loc as any)?.displayName ?? "").trim();
+    if (code && name) return `${code} — ${name}`;
+    if (name) return name;
+    if (code) return code;
+    return String(loc.id ?? "Unknown");
   };
+
+  const filteredItems = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter((loc) => {
+      const code = String((loc as any)?.code ?? "").toLowerCase();
+      const name = String(loc.name ?? (loc as any)?.label ?? "").toLowerCase();
+      return code.includes(q) || name.includes(q) || String(loc.id ?? "").toLowerCase().includes(q);
+    });
+  }, [items, search]);
 
   return (
     <div style={{ display: "grid", gap: 8 }}>
+      {/* Controls: search + refresh */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by code or name (local)"
+          disabled={disabled}
+          style={{ flex: 1, minWidth: 200 }}
+        />
+        <button onClick={loadFirstPage} disabled={disabled || loading}>{loading ? "Loading…" : "Refresh"}</button>
+        {next ? (
+          <button onClick={loadMore} disabled={disabled || loading}>{loading ? "Loading…" : "Load more"}</button>
+        ) : null}
+      </div>
+
       {items.length > 0 && (
         <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
           Location:
@@ -57,7 +105,7 @@ export default function LocationPicker({ value, onChange, disabled }: Props) {
             style={{ minWidth: 200 }}
           >
             <option value="">Select a location…</option>
-            {items.map((loc) => {
+            {filteredItems.map((loc) => {
               const idStr = String(loc.id ?? "");
               return (
                 <option key={idStr || Math.random().toString(36)} value={idStr}>

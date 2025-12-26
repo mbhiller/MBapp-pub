@@ -11,6 +11,7 @@ import {
 } from "../lib/purchasing";
 import { listInventoryMovements, type InventoryMovement } from "../lib/inventoryMovements";
 import { friendlyPurchasingError } from "../lib/purchasingErrors";
+import LocationPicker from "../components/LocationPicker";
 
 const RECEIVE_DEFAULTS_PREFIX = "mbapp_receive_defaults_";
 
@@ -737,37 +738,36 @@ export default function PurchaseOrderDetailPage() {
                           </div>
                         </td>
                         <td style={{ padding: 8, border: "1px solid #ccc" }}>
-                          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                            <input
-                              type="text"
-                              placeholder="Location"
+                          <div style={{ display: "grid", gap: 6 }}>
+                            <LocationPicker
                               value={state.locationId ?? ""}
-                              onChange={(e) => {
+                              onChange={(newId) => {
+                                const val = String(newId || "").trim();
                                 setLineState((prev) => ({
                                   ...prev,
-                                  [lineId]: { ...prev[lineId], locationId: e.target.value || undefined },
+                                  [lineId]: { ...prev[lineId], locationId: val || undefined },
                                 }));
                               }}
-                              style={{ width: 90 }}
-                            />
-                            {(state.locationId ?? "") !== "" && (
-                              <button
-                                onClick={() => handleClearLineField(lineId, "locationId")}
-                                style={{ padding: "2px 6px", fontSize: 12 }}
-                                aria-label="Clear location"
-                              >
-                                ×
-                              </button>
-                            )}
-                          </div>
-                          <div style={{ marginTop: 4 }}>
-                            <button
-                              onClick={() => handleUseDefaultsForLine(lineId)}
                               disabled={actionLoading}
-                              style={{ fontSize: 12, padding: "2px 6px" }}
-                            >
-                              Use defaults
-                            </button>
+                            />
+                            <div style={{ display: "flex", gap: 8 }}>
+                              {(state.locationId ?? "") !== "" && (
+                                <button
+                                  onClick={() => handleClearLineField(lineId, "locationId")}
+                                  style={{ padding: "2px 6px", fontSize: 12 }}
+                                  aria-label="Clear location"
+                                >
+                                  Clear
+                                </button>
+                              )}
+                              <button
+                                onClick={() => handleUseDefaultsForLine(lineId)}
+                                disabled={actionLoading}
+                                style={{ fontSize: 12, padding: "2px 6px" }}
+                              >
+                                Use defaults
+                              </button>
+                            </div>
                           </div>
                         </td>
                         <td style={{ padding: 8, border: "1px solid #ccc" }}>

@@ -2115,6 +2115,58 @@ components:
         asOf:
           type: string
           format: date-time
+    Location:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        required:
+        - type
+        - name
+        properties:
+          type:
+            type: string
+            enum:
+            - location
+          name:
+            type: string
+          code:
+            type: string
+            nullable: true
+            description: Short code/label for the location
+          kind:
+            type: string
+            nullable: true
+            enum:
+            - facility
+            - warehouse
+            - zone
+            - aisle
+            - rack
+            - bin
+            - staging
+            - dropoff
+            - address
+            - geo
+            - other
+            default: facility
+          status:
+            type: string
+            enum:
+            - active
+            - inactive
+            - archived
+            default: active
+          parentId:
+            type: string
+            nullable: true
+            description: Optional parent location id (hierarchy)
+          attributes:
+            type: object
+            nullable: true
+            additionalProperties: true
+          notes:
+            type: string
+            nullable: true
     LocationNode:
       type: object
       required:
