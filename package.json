@@ -79,7 +79,8 @@
     "smoke:purchasing:suggest-po-skips": "node ops/smoke/smoke.mjs smoke:purchasing:suggest-po-skips",
     "smoke:salesOrders:commit-nonstrict-backorder": "node ops/smoke/smoke.mjs smoke:salesOrders:commit-nonstrict-backorder",
     "smoke:salesOrders:commit-strict-shortage": "node ops/smoke/smoke.mjs smoke:salesOrders:commit-strict-shortage",
-    "smoke:vendor-guard-enforced": "node ops/smoke/smoke.mjs smoke:vendor-guard-enforced"
+    "smoke:vendor-guard-enforced": "node ops/smoke/smoke.mjs smoke:vendor-guard-enforced",
+    "smoke:sales:fulfill-with-location": "node ops/smoke/smoke.mjs smoke:sales:fulfill-with-location"
   },
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "^3.882.0",

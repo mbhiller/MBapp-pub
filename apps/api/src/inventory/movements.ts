@@ -71,38 +71,44 @@ async function repoListMovementsByItem(
   itemId: string,
   opts: ListOptions
 ): Promise<RepoOut> {
-  const pageTarget = Math.max(1, Math.min(1000, opts.limit ?? 50));
+  const requestedLimit = Math.max(1, Math.min(200, opts.limit ?? 50));
   const skPrefix = "inventoryMovement#";
 
-  let items: InventoryMovement[] = [];
+  let matches: InventoryMovement[] = [];
   let lastKey = decodeCursor(opts.next || undefined);
-  // Safety cap so we don’t scan forever if a tenant has tons of data
-  const MAX_PAGES = 8;
+  
+  // Calculate scan page size: scan more to find matches faster
+  const scanPageSize = Math.min(500, Math.max(50, requestedLimit * 10));
+  const MAX_SCAN_PAGES = 10;
 
-  for (let i = 0; i < MAX_PAGES && items.length < pageTarget; i++) {
+  for (let i = 0; i < MAX_SCAN_PAGES && matches.length < requestedLimit; i++) {
     const out = await ddb.send(new QueryCommand({
       TableName: TABLE,
       KeyConditionExpression: "pk = :pk AND begins_with(sk, :sk)",
       ExpressionAttributeValues: { ":pk": tenantId, ":sk": skPrefix },
       ExclusiveStartKey: lastKey,
-      // This is still lexicographic on sk; we’ll re-sort by timestamps in memory below
-      ScanIndexForward: (opts.sort ?? "desc") === "asc",
-      // We purposely fetch a fatter page because we local-filter by itemId
-      Limit: Math.min(pageTarget * 3, 300),
+      ConsistentRead: true,
+      ScanIndexForward: false,  // Newest movements first (descending sk order)
+      Limit: scanPageSize,
     }));
 
     const raw = (out.Items ?? []) as any[];
     const wantItemId = String(itemId); // normalize to avoid number/string mismatches
 
-    const pageItems: InventoryMovement[] = raw
-      .filter((m) => String(m?.itemId) === wantItemId)
+    const pageMatches: InventoryMovement[] = raw
+      .filter((m) => {
+        // Ensure it's actually a movement document
+        const isMovement = m?.docType === "inventoryMovement" || m?.type === "inventoryMovement";
+        if (!isMovement) return false;
+        // Filter by itemId
+        return String(m?.itemId) === wantItemId;
+      })
       .map((m) => {
         const action =
           asAction(m?.action) ??
           asAction(m?.movement) ??
           asAction(m?.act) ??
-          asAction(m?.verb) ??
-          asAction(m?.type);
+          asAction(m?.verb);
         if (!action) return undefined;
         return {
           id: String(m.id),
@@ -122,14 +128,14 @@ async function repoListMovementsByItem(
       })
       .filter(Boolean) as InventoryMovement[];
 
-    items.push(...pageItems);
+    matches.push(...pageMatches);
     lastKey = out.LastEvaluatedKey;
-    if (!lastKey) break; // no more data
+    if (!lastKey) break; // no more data in tenant
   }
 
-  // In-memory stable sort by at/createdAt
+  // In-memory stable sort by at/createdAt (newest first for desc, oldest first for asc)
   const dir = (opts.sort ?? "desc") === "asc" ? 1 : -1;
-  items.sort((a, b) => {
+  matches.sort((a, b) => {
     const ta = Date.parse(a.at ?? a.createdAt ?? "0");
     const tb = Date.parse(b.at ?? b.createdAt ?? "0");
     if (ta === tb) return 0;
@@ -137,7 +143,7 @@ async function repoListMovementsByItem(
   });
 
   // Trim to the requested page size
-  items = items.slice(0, pageTarget);
+  const items = matches.slice(0, requestedLimit);
 
   // If we didn’t hit pageTarget but still have a LastEvaluatedKey, that means
   // there may be more matches further; keep passing a cursor so clients can continue.
@@ -202,6 +208,9 @@ async function repoListMovementsByLocation(
 
     const pageItems: InventoryMovement[] = raw
       .filter((m) => {
+        // Ensure it's actually a movement document
+        const isMovement = m?.docType === "inventoryMovement" || m?.type === "inventoryMovement";
+        if (!isMovement) return false;
         // Required filter: locationId must match
         if (String(m?.locationId ?? "") !== wantLocationId) return false;
         // Optional filters
@@ -214,8 +223,7 @@ async function repoListMovementsByLocation(
           asAction(m?.action) ??
           asAction(m?.movement) ??
           asAction(m?.act) ??
-          asAction(m?.verb) ??
-          asAction(m?.type);
+          asAction(m?.verb);
         if (!action) return undefined;
         return {
           id: String(m.id),

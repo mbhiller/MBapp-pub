@@ -55,6 +55,7 @@ import * as SoRelease  from "./sales/so-release";
 // Inventory on-hand (computed from movements)
 import * as InvOnHandGet from "./inventory/onhand-get";
 import * as InvOnHandBatch from "./inventory/onhand-batch";
+import * as InvOnHandByLocation from "./inventory/onhand-by-location";
 
 // Inventory search (rich)
 import * as InvSearch from "./inventory/search";
@@ -317,6 +318,16 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
         const [, id] = m;
         requirePerm(auth, "inventory:read");
         return InvOnHandGet.handle({ ...event, pathParameters: { ...(event.pathParameters||{}), id } });
+      }
+    }
+
+    // Inventory — onhand by location (computed)
+    {
+      const m = path.match(/^\/inventory\/([^/]+)\/onhand:by-location$/i);
+      if (method === "GET" && m) {
+        const [, id] = m;
+        requirePerm(auth, "inventory:read");
+        return InvOnHandByLocation.handle({ ...event, pathParameters: { ...(event.pathParameters||{}), id } });
       }
     }
 

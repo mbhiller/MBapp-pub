@@ -290,6 +290,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/inventory/{id}/onhand:by-location": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get computed counters for an inventory item grouped by location */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Computed counters grouped by location */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items?: components["schemas"]["InventoryOnHandByLocationItem"][];
+                        };
+                    };
+                };
+                400: components["responses"]["BadRequest"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/inventory/onhand:batch": {
         parameters: {
             query?: never;
@@ -3023,6 +3067,15 @@ export interface components {
         };
         InventoryCounters: {
             itemId: string;
+            onHand: number;
+            reserved: number;
+            available: number;
+            /** Format: date-time */
+            asOf?: string;
+        };
+        InventoryOnHandByLocationItem: {
+            itemId: string;
+            locationId?: string | null;
             onHand: number;
             reserved: number;
             available: number;
