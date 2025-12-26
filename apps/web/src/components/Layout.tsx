@@ -34,6 +34,7 @@ export function Layout({ children }: { children: ReactNode }) {
           <Link to="/purchase-orders" style={{ color: "#fff", textDecoration: "underline" }}>Purchase Orders</Link>
           <Link to="/purchase-orders?vendorMode=1" style={{ color: "#fff", textDecoration: "underline" }}>Vendor Portal</Link>
           <Link to="/inventory" style={{ color: "#fff", textDecoration: "underline" }}>Inventory</Link>
+          <Link to="/locations" style={{ color: "#fff", textDecoration: "underline" }}>Locations</Link>
           <Link to="/views" style={{ color: "#fff", textDecoration: "underline" }}>Views</Link>
           <Link to="/workspaces" style={{ color: "#fff", textDecoration: "underline" }}>Workspaces</Link>
         </nav>

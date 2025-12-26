@@ -157,12 +157,66 @@ function withTypeId(
   return e;
 }
 
-/** Map object method→permission (e.g., product:read / product:write) */
-function permForObject(method: string, typeRaw: string) {
-  const type = (typeRaw || "").toLowerCase();
-  if (method === "GET") return `${type}:read`;
-  if (method === "POST" || method === "PUT" || method === "DELETE") return `${type}:write`;
+/** Map object method→action for permission strings */
+function actionForObjectMethod(method: string) {
+  const m = method.toUpperCase();
+  if (m === "GET" || m === "HEAD") return "read";
+  if (m === "POST" || m === "PUT" || m === "DELETE") return "write";
   return "";
+}
+
+/** Allowed object types for /objects/{type} routes */
+const ALLOWED_OBJECT_TYPES = new Set<string>([
+  // Identity & commerce core
+  "party",
+  "product",
+  // Inventory entities
+  "inventory",
+  "inventoryItem",
+  "inventoryMovement",
+  // Orders & backorders
+  "salesOrder",
+  "purchaseOrder",
+  "backorderRequest",
+  // Resources & reservations
+  "resource",
+  "reservation",
+  // Views & workspaces (objects routes supported alongside dedicated endpoints)
+  "view",
+  "workspace",
+  // New: Locations as first-class object
+  "location",
+]);
+
+function assertAllowedObjectType(typeRaw: string): APIGatewayProxyResultV2 | null {
+  const t = (typeRaw || "").toLowerCase();
+  if (!ALLOWED_OBJECT_TYPES.has(t)) {
+    return json(400, { message: "Unknown object type", code: "UNKNOWN_OBJECT_TYPE", type: typeRaw });
+  }
+  return null;
+}
+
+/** Require object access, allowing generic objects:* as a fallback for new types (e.g., location) */
+function requireObjectPerm(auth: any, method: string, typeRaw: string) {
+  const action = actionForObjectMethod(method);
+  const type = (typeRaw || "").toLowerCase();
+  const specific = action ? `${type}:${action}` : "";
+  const generic = action ? `objects:${action}` : "";
+
+  try {
+    if (specific) requirePerm(auth, specific);
+    else requirePerm(auth, "");
+  } catch (err) {
+    if (generic) {
+      try {
+        requirePerm(auth, generic);
+        return;
+      } catch {
+        // fall through and rethrow original error
+      }
+    }
+    throw err;
+  }
 }
 
 export async function handler(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
@@ -406,7 +460,11 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
     const searchParts = match(/^\/objects\/([^/]+)\/search$/i, path);
     if (searchParts) {
       const [type] = searchParts;
-      requirePerm(auth, permForObject("GET", type));
+      {
+        const bad = assertAllowedObjectType(type);
+        if (bad) return bad;
+      }
+      requireObjectPerm(auth, method, type);
       return ObjSearch.handle(withTypeId(event, { type }));
     }
 
@@ -414,8 +472,12 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
     const collParts = match(/^\/objects\/([^/]+)$/i, path);
     if (collParts) {
       const [type] = collParts;
-      if (method === "GET")  { requirePerm(auth, permForObject("GET", type));  return ObjList.handle(withTypeId(event, { type })); }
-      if (method === "POST") { requirePerm(auth, permForObject("POST", type)); return ObjCreate.handle(withTypeId(event, { type })); }
+      {
+        const bad = assertAllowedObjectType(type);
+        if (bad) return bad;
+      }
+      if (method === "GET")  { requireObjectPerm(auth, method, type); return ObjList.handle(withTypeId(event, { type })); }
+      if (method === "POST") { requireObjectPerm(auth, method, type); return ObjCreate.handle(withTypeId(event, { type })); }
       return methodNotAllowed();
     }
 
@@ -423,9 +485,13 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
     const itemParts = match(/^\/objects\/([^/]+)\/([^/]+)$/i, path);
     if (itemParts) {
       const [type, id] = itemParts;
-      if (method === "GET")    { requirePerm(auth, permForObject("GET", type));    return ObjGet.handle(withTypeId(event, { type, id })); }
-      if (method === "PUT")    { requirePerm(auth, permForObject("PUT", type));    return ObjUpdate.handle(withTypeId(event, { type, id })); }
-      if (method === "DELETE") { requirePerm(auth, permForObject("DELETE", type)); return ObjDelete.handle(withTypeId(event, { type, id })); }
+      {
+        const bad = assertAllowedObjectType(type);
+        if (bad) return bad;
+      }
+      if (method === "GET")    { requireObjectPerm(auth, method, type); return ObjGet.handle(withTypeId(event, { type, id })); }
+      if (method === "PUT")    { requireObjectPerm(auth, method, type); return ObjUpdate.handle(withTypeId(event, { type, id })); }
+      if (method === "DELETE") { requireObjectPerm(auth, method, type); return ObjDelete.handle(withTypeId(event, { type, id })); }
       return methodNotAllowed();
     }
 

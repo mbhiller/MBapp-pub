@@ -137,6 +137,11 @@ npm run smokes:cleanup
 - MBAPP_SMOKE_CLEANUP: Arming switch for real deletes (must be "1")
 - DRY_RUN: If truthy, forces planning-only mode
 
+## Opt-in Smokes (Manual)
+
+- `smoke:locations:crud`: Validates Location object CRUD via `/objects/location` (create, get, update, list/search). Records created `location` in the manifest for cleanup.
+- `smoke:po-receive-lot-location-assertions`: Updated to create a real `location` and assert PO receive movements include the dynamic `locationId` and `lot`. Use only when validating receive+location integration.
+
 ## Smokes & Cleanup Cheat Sheet (PowerShell)
 
 **Run smokes (CI-style, SmokeTenant header, DemoTenant JWT)**

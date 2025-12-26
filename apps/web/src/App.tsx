@@ -24,6 +24,7 @@ import WorkspaceDetailPage from "./pages/WorkspaceDetailPage";
 import BackordersListPage from "./pages/BackordersListPage";
 import PurchaseOrdersListPage from "./pages/PurchaseOrdersListPage";
 import PurchaseOrderDetailPage from "./pages/PurchaseOrderDetailPage";
+import LocationsListPage from "./pages/LocationsListPage";
 
 function HomePage() {
   return (
@@ -37,6 +38,7 @@ function HomePage() {
         <Link to="/backorders">Backorders</Link>
         <Link to="/purchase-orders">Purchase Orders</Link>
         <Link to="/inventory">Inventory</Link>
+        <Link to="/locations">Locations</Link>
         <Link to="/views">Views</Link>
         <Link to="/workspaces">Workspaces</Link>
       </div>
@@ -73,6 +75,7 @@ export default function App() {
           <Route path="/backorders" element={<BackordersListPage />} />
           <Route path="/purchase-orders" element={<PurchaseOrdersListPage />} />
           <Route path="/purchase-orders/:id" element={<PurchaseOrderDetailPage />} />
+          <Route path="/locations" element={<LocationsListPage />} />
         </Routes>
       </Layout>
     </ErrorBoundary>
