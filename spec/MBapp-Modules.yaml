@@ -898,6 +898,19 @@ components:
               nullable: true
             pageSize:
               type: integer
+    ListMovementsByLocationResponse:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/InventoryMovement'
+        next:
+          type: string
+          nullable: true
+          description: Opaque cursor for next page (if any)
     Message:
       allOf:
       - $ref: '#/components/schemas/ObjectBase'
@@ -3560,6 +3573,72 @@ paths:
                   - $ref: '#/components/schemas/ListPageInventoryMovement'
                   - type: object
                     description: Backward-compatible; includes legacy `next` and optional `pageInfo`.
+  /inventory/movements:
+    get:
+      summary: List inventory movements filtered by location
+      parameters:
+      - in: query
+        name: locationId
+        required: true
+        schema:
+          type: string
+        description: Location id to filter movements by
+      - in: query
+        name: action
+        required: false
+        schema:
+          type: string
+          enum:
+          - receive
+          - reserve
+          - commit
+          - fulfill
+          - adjust
+          - release
+          - putaway
+          - cycle_count
+        description: Optional movement action type to further filter results
+      - in: query
+        name: refId
+        required: false
+        schema:
+          type: string
+        description: Optional source document id (e.g., purchaseOrder id) to filter movements
+      - in: query
+        name: limit
+        schema:
+          type: integer
+          default: 50
+          maximum: 200
+        description: Number of results per page (default 50, max 200)
+      - in: query
+        name: next
+        schema:
+          type: string
+          nullable: true
+        description: Opaque cursor for pagination (from previous response)
+      - in: query
+        name: sort
+        schema:
+          type: string
+          enum:
+          - asc
+          - desc
+          default: desc
+        description: Sort order by timestamp (createdAt)
+      responses:
+        '200':
+          description: Paged list of inventory movements at the location
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListMovementsByLocationResponse'
+        '400':
+          description: Bad Request (e.g., missing required locationId)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /inventory/{id}/adjust:
     post:
       summary: Adjust on-hand (creates movement)

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
 
@@ -223,7 +224,9 @@ export default function LocationsListPage() {
                       style={{ width: "100%" }}
                     />
                   ) : (
-                    loc.name || ""
+                    <Link to={`/locations/${encodeURIComponent(loc.id)}`} style={{ color: "#08a", textDecoration: "none" }}>
+                      {loc.name || "(no name)"}
+                    </Link>
                   )}
                 </td>
                 <td style={{ padding: 8, border: "1px solid #ccc" }}>

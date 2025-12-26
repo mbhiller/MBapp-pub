@@ -478,6 +478,7 @@ npm run smokes:cleanup
 | **smoke:inventory:guards** | 1. Create item 2. Receive qty 1 3. Try to reserve qty 2 (should fail) | Reserve fails with 400+; guards enforced | `/objects/item`, `/objects/inventoryMovement` |
 | **smoke:inventory:onhand-batch** | 1. Create 2 items 2. Receive each 3. GET /inventory/onhand:batch | Both items in response; onhands correct | `/inventory/onhand:batch` |
 | **smoke:inventory:list-movements** | 1. Create item 2. Receive 3, reserve 1, receive 2, reserve 1 3. List movements | 4 movements returned; all match item | `/inventory/{id}/movements` |
+| **smoke:inventory:movements-by-location** | 1. Create 2 locations (locA, locB) 2. Create product + item with onHand=2 3. Putaway qty 1 to locB with lot 4. GET /inventory/movements?locationId=locBId&limit=20 5. Verify all items have locationId===locBId | All returned movements have locationId=locB; putaway movement found with correct action/qty/lot | `/objects/location`, `/inventory/{id}:putaway`, `/inventory/movements?locationId=...` |
 
 ### Sales Orders
 
@@ -540,7 +541,7 @@ npm run smokes:cleanup
 
 | Module | Smoke Tests | Status | Notes |
 |--------|------------|--------|-------|
-| **Inventory** | onhand, guards, onhand-batch, list-movements, inventory:crud | ✅ Complete | CRUD + guards + batch ops + filter + Sprint XXVII CRUD smoke (in CI) |
+| **Inventory** | onhand, guards, onhand-batch, list-movements, movements-by-location, inventory:crud | ✅ Complete | CRUD + guards + batch ops + item-based filter + location-based filter + Sprint XXVII CRUD smoke (in CI) |
 | **Sales Orders** | sales:happy, sales:guards, salesOrders:commit-strict-shortage (CI), salesOrders:commit-nonstrict-backorder (CI) | ✅ Complete | Lifecycle + guardrails; strict shortage returns 409; non-strict shortage creates backorder (CI-covered) |
 | **Purchase Orders** | purchasing:happy, purchasing:guards, po:save-from-suggest, po:quick-receive, po:receive-line*, po:receive-line-batch, po:receive-line-idem-* | ✅ Complete | Lifecycle, receipt variants, idempotency, vendor guard, events |
 | **Parties** | parties:happy, parties:crud | ✅ Complete | CRUD lifecycle + search with idempotency + eventual consistency retry (in CI) |

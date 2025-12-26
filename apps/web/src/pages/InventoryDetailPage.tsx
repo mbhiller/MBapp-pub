@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
 import LocationPicker from "../components/LocationPicker";
+import MovementsTable from "../components/MovementsTable";
 
 type InventoryItem = {
   id: string;
@@ -28,6 +29,9 @@ type Movement = {
   note?: string;
   locationId?: string;
   lot?: string;
+  at?: string;
+  refId?: string;
+  poLineId?: string;
 };
 
 type MovementsPage = { items?: Movement[]; next?: string };
@@ -65,6 +69,12 @@ export default function InventoryDetailPage() {
   const [cycleCountForm, setCycleCountForm] = useState({ countedQty: 0, locationId: "", lot: "", note: "" });
   const [cycleCountLoading, setCycleCountLoading] = useState(false);
   const [cycleCountError, setCycleCountError] = useState<string | null>(null);
+  
+  // Movements filter and pagination
+  const [actionFilter, setActionFilter] = useState<string>("all");
+  const [locationIdFilter, setLocationIdFilter] = useState<string>("");
+  const [refIdFilter, setRefIdFilter] = useState<string>("");
+  const [movementsNext, setMovementsNext] = useState<string | null>(null);
 
   const reloadData = async () => {
     if (!id) return;
@@ -81,10 +91,34 @@ export default function InventoryDetailPage() {
         query: { limit: 10 },
       });
       setMovements(movementsRes.items || []);
+      setMovementsNext(movementsRes.next || null);
     } catch (err) {
       console.warn("Failed to reload data", err);
     }
   };
+
+  const loadMoreMovements = async () => {
+    if (!id || !movementsNext) return;
+    try {
+      const movementsRes = await apiFetch<MovementsPage>(`/inventory/${id}/movements`, {
+        token: token || undefined,
+        tenantId,
+        query: { limit: 10, next: movementsNext },
+      });
+      setMovements((prev) => [...prev, ...(movementsRes.items || [])]);
+      setMovementsNext(movementsRes.next || null);
+    } catch (err) {
+      console.warn("Failed to load more movements", err);
+    }
+  };
+
+  // Filter movements client-side
+  const filteredMovements = movements.filter((m) => {
+    if (actionFilter !== "all" && m.action !== actionFilter) return false;
+    if (locationIdFilter && m.locationId !== locationIdFilter) return false;
+    if (refIdFilter && m.refId !== refIdFilter) return false;
+    return true;
+  });
 
   useEffect(() => {
     if (!id) return;
@@ -117,6 +151,7 @@ export default function InventoryDetailPage() {
             query: { limit: 10 },
           });
           setMovements(movementsRes.items || []);
+          setMovementsNext(movementsRes.next || null);
         } catch (err) {
           console.warn("Failed to fetch movements", err);
         }
@@ -275,34 +310,69 @@ export default function InventoryDetailPage() {
         </>
       )}
 
-      {movements.length > 0 && (
-        <>
-          <h2>Recent Movements</h2>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ background: "#eee", textAlign: "left" }}>
-                <th style={{ padding: 8, border: "1px solid #ccc" }}>Action</th>
-                <th style={{ padding: 8, border: "1px solid #ccc" }}>Qty</th>
-                <th style={{ padding: 8, border: "1px solid #ccc" }}>Location</th>
-                <th style={{ padding: 8, border: "1px solid #ccc" }}>Lot</th>
-                <th style={{ padding: 8, border: "1px solid #ccc" }}>Note</th>
-                <th style={{ padding: 8, border: "1px solid #ccc" }}>Created</th>
-              </tr>
-            </thead>
-            <tbody>
-              {movements.map((m) => (
-                <tr key={m.id}>
-                  <td style={{ padding: 8, border: "1px solid #ccc" }}>{m.action || ""}</td>
-                  <td style={{ padding: 8, border: "1px solid #ccc" }}>{m.qty ?? ""}</td>
-                  <td style={{ padding: 8, border: "1px solid #ccc" }}>{m.locationId || ""}</td>
-                  <td style={{ padding: 8, border: "1px solid #ccc" }}>{m.lot || ""}</td>
-                  <td style={{ padding: 8, border: "1px solid #ccc" }}>{m.note || ""}</td>
-                  <td style={{ padding: 8, border: "1px solid #ccc" }}>{m.createdAt || ""}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
+      <h2>Movements</h2>
+      <div style={{ display: "grid", gridTemplateColumns: "auto 1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
+        <label style={{ display: "grid", gap: 4 }}>
+          <span style={{ fontWeight: "bold", fontSize: 12 }}>Action</span>
+          <select
+            value={actionFilter}
+            onChange={(e) => setActionFilter(e.target.value)}
+            style={{ padding: 6, border: "1px solid #ccc", borderRadius: 4 }}
+          >
+            <option value="all">All</option>
+            <option value="receive">receive</option>
+            <option value="reserve">reserve</option>
+            <option value="commit">commit</option>
+            <option value="fulfill">fulfill</option>
+            <option value="adjust">adjust</option>
+            <option value="release">release</option>
+            <option value="putaway">putaway</option>
+            <option value="cycle_count">cycle_count</option>
+          </select>
+        </label>
+        <label style={{ display: "grid", gap: 4 }}>
+          <span style={{ fontWeight: "bold", fontSize: 12 }}>Location ID</span>
+          <input
+            type="text"
+            value={locationIdFilter}
+            onChange={(e) => setLocationIdFilter(e.target.value)}
+            placeholder="Filter by location id"
+            style={{ padding: 6, border: "1px solid #ccc", borderRadius: 4 }}
+          />
+        </label>
+        <label style={{ display: "grid", gap: 4 }}>
+          <span style={{ fontWeight: "bold", fontSize: 12 }}>Ref ID</span>
+          <input
+            type="text"
+            value={refIdFilter}
+            onChange={(e) => setRefIdFilter(e.target.value)}
+            placeholder="Filter by ref id"
+            style={{ padding: 6, border: "1px solid #ccc", borderRadius: 4 }}
+          />
+        </label>
+        <div style={{ display: "grid", gap: 4, alignSelf: "end" }}>
+          <button
+            onClick={() => {
+              setActionFilter("all");
+              setLocationIdFilter("");
+              setRefIdFilter("");
+            }}
+            style={{ padding: 6, background: "#ddd", border: "1px solid #ccc", borderRadius: 4, cursor: "pointer" }}
+          >
+            Clear Filters
+          </button>
+        </div>
+      </div>
+
+      <MovementsTable movements={filteredMovements} showItemId={false} emptyText="No movements found." />
+
+      {movementsNext && (
+        <button
+          onClick={loadMoreMovements}
+          style={{ padding: 8, background: "#08a", color: "white", border: "none", borderRadius: 4, cursor: "pointer", marginBottom: 16 }}
+        >
+          Load More Movements
+        </button>
       )}
 
       {/* Putaway Modal */}
@@ -363,13 +433,10 @@ export default function InventoryDetailPage() {
               </label>
               <label style={{ display: "grid", gap: 4 }}>
                 From Location (optional):
-                <input
-                  type="text"
+                <LocationPicker
                   value={putawayForm.fromLocationId}
-                  onChange={(e) => setPutawayForm({ ...putawayForm, fromLocationId: e.target.value })}
+                  onChange={(val) => setPutawayForm({ ...putawayForm, fromLocationId: val })}
                   disabled={putawayLoading}
-                  placeholder="Source location id (audit trail)"
-                  style={{ padding: 8, border: "1px solid #ccc", borderRadius: 4 }}
                 />
               </label>
               <label style={{ display: "grid", gap: 4 }}>

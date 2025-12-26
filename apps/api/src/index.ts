@@ -327,7 +327,6 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
       const itemIds = Array.isArray(body?.itemIds) ? body.itemIds : [];
       return InvOnHandBatch.handle({ ...event, body: JSON.stringify({ itemIds }) });
     }
-
     // Inventory — movements (computed)
     {
       const m = path.match(/^\/inventory\/([^/]+)\/movements$/i);
@@ -336,6 +335,12 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
         requirePerm(auth, "inventory:read");
         return InvMovements.handle({ ...event, pathParameters: { ...(event.pathParameters||{}), id } });
       }
+    }
+
+    // Inventory — movements by location
+    if (path === "/inventory/movements" && method === "GET") {
+      requirePerm(auth, "inventory:read");
+      return InvMovements.handleByLocation(event);
     }
 
     // Rich inventory search (label + uom + counters)
