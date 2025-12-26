@@ -2894,6 +2894,10 @@ export interface components {
             lines: {
                 lineId: string;
                 deltaQty: number;
+                /** @description Optional: when provided, reservation is applied to the specific location; if omitted, behavior is aggregate/unassigned (legacy). */
+                locationId?: string | null;
+                /** @description Optional: lot identifier to associate with the reservation when applicable. */
+                lot?: string | null;
             }[];
         };
         SalesOrderReleaseRequest: {
@@ -2901,6 +2905,10 @@ export interface components {
                 lineId: string;
                 deltaQty: number;
                 reason?: string;
+                /** @description Optional: when provided, release is applied to the specific location; if omitted, behavior is aggregate/unassigned (legacy). */
+                locationId?: string | null;
+                /** @description Optional: lot identifier; may be ignored for release in current implementation. */
+                lot?: string | null;
             }[];
         };
         SalesCommitRequest: {

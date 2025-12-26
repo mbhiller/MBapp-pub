@@ -108,23 +108,23 @@ export function deriveCountersByLocation(
       }
 
       case "reserve": {
-        // Apply to unassigned (these movements don't carry locationId today)
-        const c = getOrCreate(null);
+        // Location-aware: if locationId present, apply to that bucket; else unassigned
+        const c = getOrCreate(locId);
         c.reserved += q;
         break;
       }
 
       case "commit": {
-        // Apply to unassigned
-        const c = getOrCreate(null);
+        // Location-aware: subtract onHand and reserved at specific location when present; else unassigned
+        const c = getOrCreate(locId);
         c.onHand -= q;
         c.reserved = Math.max(0, c.reserved - q);
         break;
       }
 
       case "release": {
-        // Apply to unassigned
-        const c = getOrCreate(null);
+        // Location-aware: decrement reserved at specific location when present; else unassigned
+        const c = getOrCreate(locId);
         c.reserved = Math.max(0, c.reserved - q);
         break;
       }

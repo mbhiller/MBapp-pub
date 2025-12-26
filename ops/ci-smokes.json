@@ -8,6 +8,7 @@
     "smoke:events:enabled-noop",
     "smoke:close-the-loop",
     "smoke:salesOrders:commit-strict-shortage",
-    "smoke:salesOrders:commit-nonstrict-backorder"
+    "smoke:salesOrders:commit-nonstrict-backorder",
+    "smoke:sales:reserve-with-location"
     ]
 }

@@ -1766,6 +1766,8 @@ components:
             properties:
               lineId:   { type: string }
               deltaQty: { type: number, minimum: 1 }
+              locationId: { type: string, nullable: true, description: "Optional: when provided, reservation is applied to the specific location; if omitted, behavior is aggregate/unassigned (legacy)." }
+              lot:        { type: string, nullable: true, description: "Optional: lot identifier to associate with the reservation when applicable." }
 
     SalesOrderReleaseRequest:
       type: object
@@ -1781,6 +1783,8 @@ components:
               lineId:   { type: string }
               deltaQty: { type: number, minimum: 1 }
               reason:   { type: string }
+              locationId: { type: string, nullable: true, description: "Optional: when provided, release is applied to the specific location; if omitted, behavior is aggregate/unassigned (legacy)." }
+              lot:        { type: string, nullable: true, description: "Optional: lot identifier; may be ignored for release in current implementation." }
 
     SalesCommitRequest:
       type: object

@@ -348,41 +348,76 @@ export default function SalesOrderDetailPage() {
 
     setShortageInfo(null);
 
-    // Precheck: compute requested qty per item from user-entered deltas
+    // Precheck: split by location-aware vs aggregate
     const soLinesMap = new Map((order?.lines ?? []).map((ln) => [ln.id, ln]));
-    const itemQtyMap = new Map<string, number>();
-    for (const { lineId, deltaQty } of payload) {
-      const line = soLinesMap.get(lineId);
-      const itemId = line?.itemId;
-      if (!itemId || deltaQty <= 0) continue;
-      itemQtyMap.set(itemId, (itemQtyMap.get(itemId) ?? 0) + deltaQty);
-    }
+    const withLoc = payload.filter((p) => !!p.locationId);
+    const withoutLoc = payload.filter((p) => !p.locationId);
 
-    if (itemQtyMap.size > 0) {
-      const itemIds = Array.from(itemQtyMap.keys());
-      const availabilityItems = await fetchOnhandBatch(itemIds);
-      const availabilityMap = new Map(availabilityItems.map((it) => [it.itemId, it.available]));
+    const precheckShortages: ShortageRow[] = [];
 
-      const precheckShortages: ShortageRow[] = [];
-      for (const [itemId, requested] of itemQtyMap) {
-        const available = availabilityMap.get(itemId) ?? 0;
-        if (requested > available) {
-          precheckShortages.push({ itemId, requested, available });
+    // Location-aware precheck: validate availability at selected location
+    if (withLoc.length > 0) {
+      // Group by item to reduce API calls
+      const itemsSet = new Set<string>();
+      for (const p of withLoc) {
+        const itemId = soLinesMap.get(p.lineId)?.itemId;
+        if (itemId) itemsSet.add(itemId);
+      }
+      const byItemAvailability = new Map<string, InventoryOnHandByLocationItem[]>();
+      for (const itemId of itemsSet) {
+        try {
+          const items = await getOnHandByLocation(itemId, { token: token || undefined, tenantId });
+          byItemAvailability.set(itemId, items);
+        } catch (err) {
+          byItemAvailability.set(itemId, []);
         }
       }
-
-      if (precheckShortages.length > 0) {
-        setShortageInfo({
-          kind: "reserve",
-          message: "Precheck: Insufficient availability detected",
-          rows: precheckShortages,
-        });
-
-        const shouldProceed = window.confirm(
-          `Reserve will fail due to ${precheckShortages.length} shortage(s). Proceed anyway to see server response?`
-        );
-        if (!shouldProceed) return;
+      for (const p of withLoc) {
+        const line = soLinesMap.get(p.lineId);
+        const itemId = line?.itemId;
+        if (!itemId) continue;
+        const items = byItemAvailability.get(itemId) ?? [];
+        const targetLoc = p.locationId ?? null;
+        const entry = items.find((it) => (it.locationId ?? null) === targetLoc);
+        const available = entry?.available ?? 0;
+        if (p.deltaQty > available) {
+          precheckShortages.push({ itemId, requested: p.deltaQty, available, lineId: p.lineId });
+        }
       }
+    }
+
+    // Aggregate precheck for non-location lines
+    if (withoutLoc.length > 0) {
+      const itemQtyMap = new Map<string, number>();
+      for (const { lineId, deltaQty } of withoutLoc) {
+        const line = soLinesMap.get(lineId);
+        const itemId = line?.itemId;
+        if (!itemId || deltaQty <= 0) continue;
+        itemQtyMap.set(itemId, (itemQtyMap.get(itemId) ?? 0) + deltaQty);
+      }
+      if (itemQtyMap.size > 0) {
+        const itemIds = Array.from(itemQtyMap.keys());
+        const availabilityItems = await fetchOnhandBatch(itemIds);
+        const availabilityMap = new Map(availabilityItems.map((it) => [it.itemId, it.available]));
+        for (const [itemId, requested] of itemQtyMap) {
+          const available = availabilityMap.get(itemId) ?? 0;
+          if (requested > available) {
+            precheckShortages.push({ itemId, requested, available });
+          }
+        }
+      }
+    }
+
+    if (precheckShortages.length > 0) {
+      setShortageInfo({
+        kind: "reserve",
+        message: "Precheck: Insufficient availability detected",
+        rows: precheckShortages,
+      });
+      const shouldProceed = window.confirm(
+        `Reserve will fail due to ${precheckShortages.length} shortage(s). Proceed anyway to see server response?`
+      );
+      if (!shouldProceed) return;
     }
 
     await performAction("reserve", { lines: payload });
@@ -414,6 +449,7 @@ export default function SalesOrderDetailPage() {
   const canFulfill = status === "committed" || status === "partially_fulfilled" || status === "submitted";
   const canClose = status === "fulfilled" || status === "partially_fulfilled" || status === "committed";
   const canCancel = status !== "cancelled" && status !== "closed" && status !== "fulfilled";
+  const showLocSelectors = canFulfill || canReserve;
 
   const lines = useMemo(() => order?.lines ?? [], [order?.lines]);
 
@@ -464,8 +500,8 @@ export default function SalesOrderDetailPage() {
                 <th style={{ padding: 8, border: "1px solid #ccc" }}>Committed</th>
                 <th style={{ padding: 8, border: "1px solid #ccc" }}>Fulfilled</th>
                 <th style={{ padding: 8, border: "1px solid #ccc" }}>Delta</th>
-                {canFulfill ? <th style={{ padding: 8, border: "1px solid #ccc" }}>Location</th> : null}
-                {canFulfill ? <th style={{ padding: 8, border: "1px solid #ccc" }}>Lot</th> : null}
+                {showLocSelectors ? <th style={{ padding: 8, border: "1px solid #ccc" }}>Location</th> : null}
+                {showLocSelectors ? <th style={{ padding: 8, border: "1px solid #ccc" }}>Lot</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -474,7 +510,7 @@ export default function SalesOrderDetailPage() {
                   <tr key={ln.id}>
                     <td style={{ padding: 8, border: "1px solid #ccc" }}>
                       {ln.id}
-                      {canFulfill && ln.itemId ? (
+                      {showLocSelectors && ln.itemId ? (
                         <div style={{ marginTop: 4 }}>
                           <button
                             onClick={() => toggleAvailability(ln.id, ln.itemId)}
@@ -499,7 +535,7 @@ export default function SalesOrderDetailPage() {
                         style={{ width: 100 }}
                       />
                     </td>
-                    {canFulfill ? (
+                    {showLocSelectors ? (
                       <td style={{ padding: 8, border: "1px solid #ccc" }}>
                         <LocationPicker
                           value={lineLocationIds[ln.id] ?? ""}
@@ -507,7 +543,7 @@ export default function SalesOrderDetailPage() {
                         />
                       </td>
                     ) : null}
-                    {canFulfill ? (
+                    {showLocSelectors ? (
                       <td style={{ padding: 8, border: "1px solid #ccc" }}>
                         <input
                           type="text"
@@ -521,7 +557,7 @@ export default function SalesOrderDetailPage() {
                   </tr>
                   {expandedAvailability[ln.id] ? (
                     <tr key={`${ln.id}-availability`}>
-                      <td colSpan={canFulfill ? 8 : 6} style={{ padding: 8, border: "1px solid #ccc", background: "#f9f9f9" }}>
+                      <td colSpan={showLocSelectors ? 8 : 6} style={{ padding: 8, border: "1px solid #ccc", background: "#f9f9f9" }}>
                         {availabilityLoading[ln.id] ? (
                           <div style={{ fontSize: 12, color: "#666" }}>Loading availability...</div>
                         ) : (

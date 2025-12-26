@@ -3,7 +3,7 @@ import { ddb, tableObjects } from "../common/ddb";
 import { GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 import { resolveTenantId } from "../common/tenant";
 
-type LineReq = { lineId: string; deltaQty: number; reason?: string };
+type LineReq = { lineId: string; deltaQty: number; reason?: string; locationId?: string; lot?: string };
 type SOLine = { id: string; itemId: string; qty: number; uom?: string };
 type SalesOrder = {
   pk: string; sk: string; id: string; type: "salesOrder";
@@ -80,6 +80,8 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
         reason: r.reason ?? "release",
         soId: so.id,
         soLineId: line.id,
+        ...(r.locationId ? { locationId: r.locationId } : {}),
+        ...(r.lot ? { lot: r.lot } : {}),
         createdAt: now,
         updatedAt: now,
       };
