@@ -1,0 +1,214 @@
+[
+  {
+    "test": "smoke:close-the-loop",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:close-the-loop-multi-vendor",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:close-the-loop-partial-receive",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:vendor-guard-enforced",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:ping",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:po-receive-lot-location-assertions",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:parties:happy",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:parties:crud",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:products:crud",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:inventory:crud",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:inventory:onhand",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:inventory:guards",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:inventory:onhand-batch",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:inventory:list-movements",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:locations:crud",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:inventory:putaway",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:inventory:cycle-count",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:inventory:movements-by-location",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:sales:happy",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:sales:guards",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:salesOrders:commit-strict-shortage",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:salesOrders:commit-nonstrict-backorder",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:purchasing:happy",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:purchasing:guards",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:purchasing:suggest-po-skips",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:po:save-from-suggest",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:po:quick-receive",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:po:receive-line",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:po:receive-line-batch",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:po:receive-line-idem-different-key",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:po-receive-after-close-guard",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:po-receive-after-cancel-guard",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:objects:list-pagination",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:objects:list-filter-soId",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:objects:list-filter-status",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:objects:list-filter-itemId",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:objects:list-filter-soId-itemId",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:movements:filter-by-poLine",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:po:vendor-guard:on",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:po:vendor-guard:off",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:po:emit-events",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:objects:pageInfo-present",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:epc:resolve",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:views:crud",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:workspaces:list",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:events:enabled-noop",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:registrations:crud",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:registrations:filters",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:resources:crud",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:reservations:crud",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:reservations:conflicts",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:common:pagination",
+    "result": "PASS"
+  },
+  {
+    "test": "smoke:common:error-shapes",
+    "result": "PASS"
+  }
+]

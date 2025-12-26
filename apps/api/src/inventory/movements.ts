@@ -174,6 +174,118 @@ export async function listMovementsByItem(
   return { itemId, items: clean as InventoryMovement[], next: next ?? null, pageInfo };
 }
 
+// ===== List movements by location (new endpoint) =====
+async function repoListMovementsByLocation(
+  tenantId: string,
+  locationId: string,
+  opts: ListOptions & { action?: string; refId?: string }
+): Promise<RepoOut> {
+  const pageTarget = Math.max(1, Math.min(200, opts.limit ?? 50));
+  const skPrefix = "inventoryMovement#";
+
+  let items: InventoryMovement[] = [];
+  let lastKey = decodeCursor(opts.next || undefined);
+  const MAX_PAGES = 8;
+
+  for (let i = 0; i < MAX_PAGES && items.length < pageTarget; i++) {
+    const out = await ddb.send(new QueryCommand({
+      TableName: TABLE,
+      KeyConditionExpression: "pk = :pk AND begins_with(sk, :sk)",
+      ExpressionAttributeValues: { ":pk": tenantId, ":sk": skPrefix },
+      ExclusiveStartKey: lastKey,
+      ScanIndexForward: (opts.sort ?? "desc") === "asc",
+      Limit: Math.min(pageTarget * 3, 300),
+    }));
+
+    const raw = (out.Items ?? []) as any[];
+    const wantLocationId = String(locationId);
+
+    const pageItems: InventoryMovement[] = raw
+      .filter((m) => {
+        // Required filter: locationId must match
+        if (String(m?.locationId ?? "") !== wantLocationId) return false;
+        // Optional filters
+        if (opts.action && asAction(m?.action) !== opts.action) return false;
+        if (opts.refId && String(m?.refId ?? "") !== opts.refId) return false;
+        return true;
+      })
+      .map((m) => {
+        const action =
+          asAction(m?.action) ??
+          asAction(m?.movement) ??
+          asAction(m?.act) ??
+          asAction(m?.verb) ??
+          asAction(m?.type);
+        if (!action) return undefined;
+        return {
+          id: String(m.id),
+          itemId: String(m.itemId),
+          action,
+          qty: Number(m.qty ?? 0),
+          at: m.at || m.createdAt,
+          note: m.note,
+          actorId: m.actorId,
+          refId: m.refId,
+          poLineId: m.poLineId,
+          lot: m.lot,
+          locationId: m.locationId,
+          docType: "inventoryMovement",
+          createdAt: m.createdAt,
+        } as InventoryMovement;
+      })
+      .filter(Boolean) as InventoryMovement[];
+
+    items.push(...pageItems);
+    lastKey = out.LastEvaluatedKey;
+    if (!lastKey) break;
+  }
+
+  // In-memory stable sort by at/createdAt
+  const dir = (opts.sort ?? "desc") === "asc" ? 1 : -1;
+  items.sort((a, b) => {
+    const ta = Date.parse(a.at ?? a.createdAt ?? "0");
+    const tb = Date.parse(b.at ?? b.createdAt ?? "0");
+    if (ta === tb) return 0;
+    return ta < tb ? -1 * dir : 1 * dir;
+  });
+
+  // Trim to the requested page size
+  items = items.slice(0, pageTarget);
+
+  const next = encodeCursor(lastKey);
+  return { items, next };
+}
+
+export type ListMovementsByLocationResponse = {
+  items: InventoryMovement[];
+  next: string | null;
+};
+
+export async function listMovementsByLocation(
+  tenantId: string,
+  locationId: string,
+  opts: ListOptions & { action?: string; refId?: string } = {}
+): Promise<ListMovementsByLocationResponse> {
+  const { items, next } = await repoListMovementsByLocation(tenantId, locationId, opts);
+
+  const clean: InventoryMovement[] = items.map((m) => ({
+    id: m.id,
+    itemId: m.itemId,
+    action: m.action as Action,
+    qty: m.qty,
+    at: m.at,
+    note: m.note,
+    actorId: m.actorId,
+    refId: m.refId,
+    poLineId: m.poLineId,
+    lot: m.lot,
+    locationId: m.locationId,
+    docType: "inventoryMovement",
+  }));
+
+  return { items: clean as InventoryMovement[], next: next ?? null };
+}
+
 // ===== HTTP handler for GET /inventory/{id}/movements =====
 
 // ===== Shared movement writer for consistency across putaway, cycle-count, adjust, etc. =====
@@ -274,4 +386,31 @@ export async function handle(event: any) {
   return respond(200, out);
 }
 
-export default { handle, listMovementsByItem, createMovement };
+// ===== HTTP handler for GET /inventory/movements?locationId={id} =====
+export async function handleByLocation(event: any) {
+  let tenantId: string;
+  try {
+    tenantId = getTenantId(event);
+  } catch (err: any) {
+    const status = err?.statusCode ?? 400;
+    return respond(status, { error: err?.code ?? "TenantError", message: err?.message ?? "Tenant resolution failed" });
+  }
+
+  const qs = event?.queryStringParameters ?? {};
+  const locationId = String(qs.locationId ?? "").trim();
+  if (!locationId) {
+    return respond(400, { error: "BadRequest", message: "locationId is required" });
+  }
+
+  const limit = Number.isFinite(+qs.limit) ? Math.max(1, Math.min(200, +qs.limit)) : 50;
+  const sort: SortDir = String(qs.sort ?? "desc").toLowerCase() === "asc" ? "asc" : "desc";
+  const next: string | undefined = (qs.next || qs.cursor || qs.pageToken) || undefined;
+  const action: string | undefined = qs.action ? String(qs.action).toLowerCase() : undefined;
+  const refId: string | undefined = qs.refId ? String(qs.refId).trim() : undefined;
+
+  const result = await listMovementsByLocation(tenantId, locationId, { limit, sort, next, action, refId });
+  return respond(200, result);
+}
+
+export default { handle, handleByLocation, listMovementsByItem, listMovementsByLocation, createMovement };
+

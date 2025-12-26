@@ -383,6 +383,64 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/inventory/movements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List inventory movements filtered by location */
+        get: {
+            parameters: {
+                query: {
+                    /** @description Location id to filter movements by */
+                    locationId: string;
+                    /** @description Optional movement action type to further filter results */
+                    action?: "receive" | "reserve" | "commit" | "fulfill" | "adjust" | "release" | "putaway" | "cycle_count";
+                    /** @description Optional source document id (e.g., purchaseOrder id) to filter movements */
+                    refId?: string;
+                    /** @description Number of results per page (default 50, max 200) */
+                    limit?: number;
+                    /** @description Opaque cursor for pagination (from previous response) */
+                    next?: string | null;
+                    /** @description Sort order by timestamp (createdAt) */
+                    sort?: "asc" | "desc";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Paged list of inventory movements at the location */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ListMovementsByLocationResponse"];
+                    };
+                };
+                /** @description Bad Request (e.g., missing required locationId) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/inventory/{id}/adjust": {
         parameters: {
             query?: never;
@@ -2309,6 +2367,11 @@ export interface components {
                 nextCursor?: string | null;
                 pageSize?: number;
             };
+        };
+        ListMovementsByLocationResponse: {
+            items: components["schemas"]["InventoryMovement"][];
+            /** @description Opaque cursor for next page (if any) */
+            next?: string | null;
         };
         Message: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */

@@ -1529,6 +1529,99 @@ const tests = {
     return { test: "inventory-cycle-count", result: "PASS", item: itemId, mvId, delta: expectedDelta, ccFound: true };
   },
 
+  "smoke:inventory:movements-by-location": async () => {
+    await ensureBearer();
+
+    // Create two locations
+    const locA = await post(`/objects/location`, {
+      type: "location",
+      name: "LocationA-MovementsByLoc",
+      code: "LOCA-MBL",
+      status: "active"
+    });
+    if (!locA.ok) {
+      return { test: "inventory-movements-by-location", result: "FAIL", step: "createLocationA", locA };
+    }
+    const locAId = locA.body?.id;
+    recordCreated({ type: 'location', id: locAId, route: '/objects/location', meta: { name: 'LocationA-MovementsByLoc', code: 'LOCA-MBL' } });
+
+    const locB = await post(`/objects/location`, {
+      type: "location",
+      name: "LocationB-MovementsByLoc",
+      code: "LOCB-MBL",
+      status: "active"
+    });
+    if (!locB.ok) {
+      return { test: "inventory-movements-by-location", result: "FAIL", step: "createLocationB", locB };
+    }
+    const locBId = locB.body?.id;
+    recordCreated({ type: 'location', id: locBId, route: '/objects/location', meta: { name: 'LocationB-MovementsByLoc', code: 'LOCB-MBL' } });
+
+    // Create product and inventory
+    const prod = await createProduct({ name: "MovementsByLocTest" });
+    if (!prod.ok) {
+      return { test: "inventory-movements-by-location", result: "FAIL", step: "createProduct", prod };
+    }
+    const prodId = prod.body?.id;
+    recordCreated({ type: 'product', id: prodId, route: '/objects/product', meta: { name: 'MovementsByLocTest' } });
+
+    const item = await createInventoryForProduct(prodId, "MovementsByLocItem");
+    if (!item.ok) {
+      return { test: "inventory-movements-by-location", result: "FAIL", step: "createInventory", item };
+    }
+    const itemId = item.body?.id;
+    recordCreated({ type: 'inventory', id: itemId, route: '/objects/inventory', meta: { name: 'MovementsByLocItem', productId: prodId } });
+
+    // Ensure onHand == 2
+    const ensure = await ensureOnHand(itemId, 2);
+    if (!ensure.ok) {
+      return { test: "inventory-movements-by-location", result: "FAIL", step: "ensureOnHand", ensure };
+    }
+
+    // Putaway qty 1 to locB with lot "LOT-LOC-MBL"
+    const putaway = await post(`/inventory/${itemId}:putaway`, {
+      qty: 1,
+      toLocationId: locBId,
+      lot: "LOT-LOC-MBL",
+      note: "smoke movements-by-location test"
+    }, { "Idempotency-Key": idem() });
+    if (!putaway.ok) {
+      return { test: "inventory-movements-by-location", result: "FAIL", step: "putaway", putaway };
+    }
+    const putawayMvId = putaway.body?.movementId;
+    if (putawayMvId) recordCreated({ type: 'inventoryMovement', id: putawayMvId, route: '/inventory/:id:putaway', meta: { action: 'putaway', qty: 1, toLocationId: locBId, lot: 'LOT-LOC-MBL' } });
+
+    // Query GET /inventory/movements?locationId={locBId}&limit=20
+    const movementsResp = await get(`/inventory/movements`, { locationId: locBId, limit: 20 });
+    if (!movementsResp.ok) {
+      return { test: "inventory-movements-by-location", result: "FAIL", step: "getMovements", movementsResp };
+    }
+
+    const items = movementsResp.body?.items ?? [];
+    if (!Array.isArray(items)) {
+      return { test: "inventory-movements-by-location", result: "FAIL", step: "assertItemsArray", items };
+    }
+
+    // Verify all returned items have locationId === locBId
+    const allHaveLocB = items.every(m => (m.locationId ?? "") === locBId);
+    if (!allHaveLocB) {
+      return { test: "inventory-movements-by-location", result: "FAIL", step: "assertAllLocationB", locBId, items };
+    }
+
+    // Verify putaway movement found in results
+    const putawayFound = items.some(m => 
+      (m.action ?? "") === "putaway" && 
+      m.qty === 1 && 
+      (m.locationId ?? "") === locBId &&
+      (m.lot ?? "") === "LOT-LOC-MBL"
+    );
+    if (!putawayFound) {
+      return { test: "inventory-movements-by-location", result: "FAIL", step: "assertPutawayFound", locBId, items, expectedAction: "putaway", expectedQty: 1, expectedLot: "LOT-LOC-MBL" };
+    }
+
+    return { test: "inventory-movements-by-location", result: "PASS", locA: locAId, locB: locBId, item: itemId, putawayMvId, itemsCount: items.length, putawayFound: true };
+  },
+
   /* ===================== Sales Orders ===================== */
   "smoke:sales:happy": async ()=>{
     await ensureBearer();

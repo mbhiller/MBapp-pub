@@ -3,18 +3,34 @@
 - **New endpoints:**
   - POST `/inventory/{id}:putaway` – Move inventory to a location with optional source location audit trail.
   - POST `/inventory/{id}:cycle-count` – Reconcile inventory by physical count with delta computation.
+  - GET `/inventory/movements?locationId=&action=&refId=&limit=&next=` – Query movements by location (NEW); supports optional action/refId filters, cursor pagination (limit max 200).
 - **New movement actions:** Extended InventoryMovement action enum from 6 to 8:
   - `putaway` – Location transfer (counter no-op; audit trail only).
   - `cycle_count` – Physical count with delta (like adjust; updates onHand if delta ≠ 0).
+- **Movement semantics:**
+  - **Putaway:** Records movement but does NOT change onHand; tracks location transfer for audit.
+  - **Cycle Count:** Uses `countedQty`; server computes `delta = countedQty - currentOnHand`; records movement with action=`cycle_count` and qty=delta; updates onHand by delta (adjustment semantics).
 - **Web UI enhancements:**
-  - InventoryDetailPage now displays Putaway and Cycle Count action buttons.
-  - Putaway modal: qty, toLocationId (required), fromLocationId (optional audit), lot, note; uses LocationPicker.
-  - Cycle Count modal: countedQty (required), locationId (optional), lot, note; uses LocationPicker.
-  - Both modals include idempotency keys; success reloads inventory data.
+  - **InventoryDetailPage** (`/inventory/:id`):
+    - Displays movements table with filters (action dropdown, locationId/refId text inputs) + load-more pagination.
+    - Putaway modal: qty, toLocationId (required), fromLocationId (optional audit), lot, note; uses LocationPicker.
+    - Cycle Count modal: countedQty (required), locationId (optional), lot, note; uses LocationPicker.
+    - Both modals include idempotency keys; success reloads inventory data.
+  - **LocationsListPage** (`/locations`): Lists locations with name links to detail page.
+  - **LocationDetailPage** (`/locations/:id`):
+    - Displays location details (ID, name, code, status, kind, parentId, createdAt, updatedAt, notes).
+    - Parent location link (if parentId exists).
+    - Movements section: filters by action + refId; load-more pagination; updates derived inventory items list as data loads.
+    - Derived "Inventory Items Seen at This Location": unique itemIds from loaded movements, linked to `/inventory/{itemId}`.
 - **Opt-in smoke tests:**
   - `smoke:inventory:putaway` – Creates locations A+B, product, inventory; ensures onHand ≥ 1; calls putaway (A→B, qty=1); asserts movement and onHand unchanged.
   - `smoke:inventory:cycle-count` – Creates product, inventory; ensures onHand = 5; calls cycle-count (countedQty=2, delta=-3); asserts onHand = 2 and movement with delta.
-  - **Command:** `node ops/smoke/smoke.mjs smoke:inventory:putaway` or `smoke:inventory:cycle-count` (not in CI list).
+  - `smoke:inventory:movements-by-location` – Creates 2 locations, product, inventory; putaways qty 1 to locB; queries movements by locationId; asserts all items have locationId=locB and putaway found.
+  - **Command:** `node ops/smoke/smoke.mjs smoke:inventory:putaway` or `smoke:inventory:cycle-count` or `smoke:inventory:movements-by-location` (not in CI list).
+- **How to verify locally:**
+  - Set env: `$env:MBAPP_API_BASE = "https://..."; $env:MBAPP_BEARER = "..."; $env:MBAPP_TENANT_ID = "SmokeTenant"`
+  - Run smoke test: `node ops/smoke/smoke.mjs smoke:inventory:movements-by-location`
+  - Web verification: Navigate to `/locations` → click a location name → see movements with action/refId filters + load-more button; click inventory item link to verify putaway movements on detail page.
 
 ## Sprint XL: Locations Updates
 
