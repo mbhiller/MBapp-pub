@@ -62,6 +62,11 @@ import * as InvSearch from "./inventory/search";
 // Inventory computed endpoints
 import * as InvMovements from "./inventory/movements";
 
+// Inventory actions
+import * as InvPutaway from "./inventory/putaway";
+import * as InvCycleCount from "./inventory/cycle-count";
+import * as InvAdjust from "./inventory/adjust";
+
 // Reservations & Resources
 import * as ReservationsCheckConflicts from "./reservations/check-conflicts";
 import * as ResourcesAvailability from "./resources/availability";
@@ -165,33 +170,15 @@ function actionForObjectMethod(method: string) {
   return "";
 }
 
-/** Allowed object types for /objects/{type} routes */
-const ALLOWED_OBJECT_TYPES = new Set<string>([
-  // Identity & commerce core
-  "party",
-  "product",
-  // Inventory entities
-  "inventory",
-  "inventoryItem",
-  "inventoryMovement",
-  // Orders & backorders
-  "salesOrder",
-  "purchaseOrder",
-  "backorderRequest",
-  // Resources & reservations
-  "resource",
-  "reservation",
-  // Views & workspaces (objects routes supported alongside dedicated endpoints)
-  "view",
-  "workspace",
-  // New: Locations as first-class object
-  "location",
-]);
-
+/**
+ * Relaxed object-type gate for /objects routes.
+ * Only reject missing/empty/invalid type strings; allow arbitrary types.
+ * Special-case validation (e.g., inventoryMovement action allowlist) happens in handlers.
+ */
 function assertAllowedObjectType(typeRaw: string): APIGatewayProxyResultV2 | null {
-  const t = (typeRaw || "").toLowerCase();
-  if (!ALLOWED_OBJECT_TYPES.has(t)) {
-    return json(400, { message: "Unknown object type", code: "UNKNOWN_OBJECT_TYPE", type: typeRaw });
+  const t = String(typeRaw ?? "").trim();
+  if (!t || t.toLowerCase() === "undefined" || t.toLowerCase() === "null") {
+    return json(400, { message: "Missing or invalid object type", code: "INVALID_OBJECT_TYPE", type: typeRaw });
   }
   return null;
 }
@@ -355,6 +342,30 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
     if (path === "/inventory/search" && method === "POST") {
       requirePerm(auth, "inventory:read");
       return InvSearch.handle(event);
+    }
+
+    // Inventory actions
+    {
+      const m = match(/^\/inventory\/([^/]+):(putaway|cycle-count|adjust)$/i, path);
+      if (m) {
+        const [id, action] = m;
+        switch (action) {
+          case "putaway": requirePerm(auth, "inventory:write"); return InvPutaway.handle({ ...event, pathParameters: { ...(event.pathParameters||{}), id } });
+          case "cycle-count": requirePerm(auth, "inventory:adjust"); return InvCycleCount.handle({ ...event, pathParameters: { ...(event.pathParameters||{}), id } });
+          case "adjust": requirePerm(auth, "inventory:write"); return InvAdjust.handle({ ...event, pathParameters: { ...(event.pathParameters||{}), id } });
+        }
+        return methodNotAllowed();
+      }
+    }
+
+    // Optional alias: /inventory/{id}/adjust
+    {
+      const m = match(/^\/inventory\/([^/]+)\/adjust$/i, path);
+      if (m && method === "POST") {
+        const [id] = m;
+        requirePerm(auth, "inventory:write");
+        return InvAdjust.handle({ ...event, pathParameters: { ...(event.pathParameters||{}), id } });
+      }
     }
 
     // Routing & Delivery 

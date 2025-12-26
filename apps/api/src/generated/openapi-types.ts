@@ -428,6 +428,141 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/inventory/{id}:putaway": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Putaway inventory to location
+         * @description Creates a putaway movement; location trace only (no-op for onHand counters).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
+                path: {
+                    /** @description Inventory item id */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["PutawayRequest"];
+                };
+            };
+            responses: {
+                /** @description Putaway movement recorded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["InventoryMovement"];
+                    };
+                };
+                /** @description BadRequest (e.g., qty <= 0 or missing toLocationId) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inventory/{id}:cycle-count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reconcile on-hand via physical count
+         * @description Performs a cycle count reconciliation. Computes delta = countedQty - currentOnHand.
+         *     If delta = 0, returns early without writing a movement.
+         *     Otherwise, creates a cycle_count movement with qty=delta to correct the onHand.
+         *
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Optional idempotency key for safe retries. */
+                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                };
+                path: {
+                    /** @description Inventory item id */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CycleCountRequest"];
+                };
+            };
+            responses: {
+                /** @description Cycle count completed. If delta=0, no movement is written and message='no change'.
+                 *     Otherwise, a cycle_count movement with qty=delta is recorded.
+                 *      */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            ok?: boolean;
+                            /** @description OnHand before count */
+                            priorOnHand?: number;
+                            /** @description Physical count quantity */
+                            countedQty?: number;
+                            /** @description Difference (countedQty - priorOnHand) */
+                            delta?: number;
+                            /** @description If delta=0: "no change", else null */
+                            message?: string | null;
+                            /** @description Movement id (null if delta=0) */
+                            movementId?: string | null;
+                            /** @description Created movement (null if delta=0) */
+                            movement?: components["schemas"]["InventoryMovement"];
+                        };
+                    };
+                };
+                /** @description BadRequest (e.g., countedQty < 0) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/purchasing/po/{id}:submit": {
         parameters: {
             query?: never;
@@ -2084,6 +2219,28 @@ export interface components {
             deltaQty: number;
             notes?: string | null;
         };
+        PutawayRequest: {
+            /** @description Quantity to putaway (must be > 0) */
+            qty: number;
+            /** @description Target location id */
+            toLocationId: string;
+            /** @description Source location id (optional audit trail) */
+            fromLocationId?: string | null;
+            /** @description Lot identifier (optional) */
+            lot?: string | null;
+            /** @description Optional note for the putaway movement */
+            note?: string | null;
+        };
+        CycleCountRequest: {
+            /** @description Physical count quantity (non-negative) */
+            countedQty: number;
+            /** @description Location where count was performed (optional) */
+            locationId?: string | null;
+            /** @description Lot identifier (optional) */
+            lot?: string | null;
+            /** @description Optional note for the cycle count movement */
+            note?: string | null;
+        };
         InventoryItem: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
             type: "inventory";
@@ -2114,7 +2271,7 @@ export interface components {
             id: string;
             itemId: string;
             /** @enum {string} */
-            action: "receive" | "reserve" | "commit" | "fulfill" | "adjust" | "release";
+            action: "receive" | "reserve" | "commit" | "fulfill" | "adjust" | "release" | "putaway" | "cycle_count";
             qty: number;
             /** Format: date-time */
             at?: string;
@@ -2241,11 +2398,7 @@ export interface components {
              */
             status: "active" | "inactive" | "archived";
             notes?: string;
-            /** @description Denormalized role membership for fast gates. */
-            roleFlags?: {
-                [key: string]: boolean;
-            };
-            /** @description Optional array for UI; roleFlags is the source of truth. */
+            /** @description Canonical role membership (customer, vendor, employee, etc.). Used for party role enforcement. */
             roles?: string[];
         };
         PartyLink: components["schemas"]["ObjectBase"] & {
@@ -2259,16 +2412,6 @@ export interface components {
             startsAt?: string;
             /** Format: date-time */
             endsAt?: string;
-            notes?: string;
-        };
-        PartyRole: components["schemas"]["ObjectBase"] & {
-            /** @enum {string} */
-            type: "partyRole";
-            partyId: string;
-            /** @enum {string} */
-            role: "customer" | "vendor" | "employee" | "event_staff" | "rider" | "owner" | "judge";
-            /** @default true */
-            active: boolean;
             notes?: string;
         };
         Policy: {
@@ -2822,6 +2965,29 @@ export interface components {
             available: number;
             /** Format: date-time */
             asOf?: string;
+        };
+        Location: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "location";
+            name: string;
+            /** @description Short code/label for the location */
+            code?: string | null;
+            /**
+             * @default facility
+             * @enum {string|null}
+             */
+            kind: "facility" | "warehouse" | "zone" | "aisle" | "rack" | "bin" | "staging" | "dropoff" | "address" | "geo" | "other" | null;
+            /**
+             * @default active
+             * @enum {string}
+             */
+            status: "active" | "inactive" | "archived";
+            /** @description Optional parent location id (hierarchy) */
+            parentId?: string | null;
+            attributes?: {
+                [key: string]: unknown;
+            } | null;
+            notes?: string | null;
         };
         LocationNode: {
             id: string;

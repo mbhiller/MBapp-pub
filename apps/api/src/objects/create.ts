@@ -6,7 +6,6 @@ import { ok, bad, error } from "../common/responses";
 import { createObject, buildSkuLock } from "./repo";
 import { getAuth, requirePerm } from "../auth/middleware";
 import { ensurePartyRole } from "../common/validators";
-import { markPartyRole } from "../common/party";
 import { featureReservationsEnabled } from "../flags";
 
 const TABLE = process.env.MBAPP_OBJECTS_TABLE || process.env.MBAPP_TABLE || "mbapp_objects";
@@ -27,7 +26,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
     // ---- inventoryMovement normalization & reserve guard (INLINE, no helpers) ----
     // Do this *before* we overwrite body.type with the route param.
     if (String(type).toLowerCase() === "inventorymovement") {
-      const MOVEMENT_ACTIONS = new Set(["receive","reserve","commit","fulfill","adjust","release"]);
+      const MOVEMENT_ACTIONS = new Set(["receive","reserve","commit","fulfill","adjust","release","putaway","cycle_count"]);
       // Accept verb from action or legacy fields (including body.type if it held the verb)
       const incomingVerb = String(
         body?.action ?? body?.movement ?? body?.act ?? body?.verb ?? body?.type ?? ""
@@ -188,16 +187,6 @@ export async function handle(event: APIGatewayProxyEventV2) {
     if (lockedSku) {
       const final = buildSkuLock(auth.tenantId, item.id, lockedSku);
       await ddb.send(new PutCommand({ TableName: TABLE, Item: final })); // idempotent overwrite
-    }
-
-    // 5) Denorm party roles AFTER creation of partyRole object
-    if (String(type).toLowerCase() === "partyrole") {
-      const active = (body?.active ?? true) === true;
-      const partyId = String(body?.partyId || "");
-      const role = String(body?.role || "");
-      if (partyId && role) {
-        await markPartyRole({ tenantId: auth.tenantId, partyId, role, active });
-      }
     }
 
     return ok(item);

@@ -1,5 +1,5 @@
 // apps/api/src/inventory/counters.ts
-const ACTIONS = new Set(["receive","reserve","commit","fulfill","adjust","release"] as const);
+const ACTIONS = new Set(["receive","reserve","commit","fulfill","adjust","release","putaway","cycle_count"] as const);
 type Action = typeof ACTIONS extends Set<infer T> ? T : never;
 
 export function deriveCounters(movs: Array<{ action?: string; qty?: number }>) {
@@ -17,6 +17,8 @@ export function deriveCounters(movs: Array<{ action?: string; qty?: number }>) {
       case "commit":  onHand -= q; reserved = Math.max(0, reserved - q); break;
       case "release": reserved = Math.max(0, reserved - q); break;
       case "adjust":  onHand += q; break;   // q may be negative
+      case "cycle_count": onHand += q; break;  // treat like adjust (count correction)
+      case "putaway": /* no-op for counters */ break;  // location trace only
       case "fulfill": /* no-op for counters */ break;
     }
   }

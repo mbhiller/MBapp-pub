@@ -1,3 +1,21 @@
+## Sprint XLI: Inventory Putaway + Cycle Count Operations (2025-12-25)
+
+- **New endpoints:**
+  - POST `/inventory/{id}:putaway` – Move inventory to a location with optional source location audit trail.
+  - POST `/inventory/{id}:cycle-count` – Reconcile inventory by physical count with delta computation.
+- **New movement actions:** Extended InventoryMovement action enum from 6 to 8:
+  - `putaway` – Location transfer (counter no-op; audit trail only).
+  - `cycle_count` – Physical count with delta (like adjust; updates onHand if delta ≠ 0).
+- **Web UI enhancements:**
+  - InventoryDetailPage now displays Putaway and Cycle Count action buttons.
+  - Putaway modal: qty, toLocationId (required), fromLocationId (optional audit), lot, note; uses LocationPicker.
+  - Cycle Count modal: countedQty (required), locationId (optional), lot, note; uses LocationPicker.
+  - Both modals include idempotency keys; success reloads inventory data.
+- **Opt-in smoke tests:**
+  - `smoke:inventory:putaway` – Creates locations A+B, product, inventory; ensures onHand ≥ 1; calls putaway (A→B, qty=1); asserts movement and onHand unchanged.
+  - `smoke:inventory:cycle-count` – Creates product, inventory; ensures onHand = 5; calls cycle-count (countedQty=2, delta=-3); asserts onHand = 2 and movement with delta.
+  - **Command:** `node ops/smoke/smoke.mjs smoke:inventory:putaway` or `smoke:inventory:cycle-count` (not in CI list).
+
 ## Sprint XL: Locations Updates
 
 - Location is now a first-class object (SSOT) exposed via `/objects/location`.
