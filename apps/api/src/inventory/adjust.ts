@@ -26,12 +26,25 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const locationIdRaw = body?.locationId ?? body?.location;
     const locationId = locationIdRaw ? String(locationIdRaw).trim() : undefined;
     const lot = body?.lot ? String(body.lot).trim() : undefined;
-    const note = body?.note ? String(body.note).trim() : undefined;
+    
+    // Accept both 'reason' and 'note'/'notes' fields for backwards compatibility
+    // Priority: note > notes > reason
+    let note = body?.note ? String(body.note).trim() : undefined;
+    if (!note) {
+      note = body?.notes ? String(body.notes).trim() : undefined;
+    }
+    if (!note && body?.reason) {
+      note = String(body.reason).trim();
+    }
 
     // Validation
     if (!Number.isFinite(deltaQty) || deltaQty === 0) {
       return respond(400, { error: "BadRequest", message: "deltaQty must be a non-zero number" });
     }
+
+    // Ensure at least a note is provided (even if empty, it's acceptable for backwards compat)
+    // but if both reason and note are completely missing, that's OK for backwards compat too
+
 
     // Create the inventory movement using the shared writer
     const movement = await createMovement({

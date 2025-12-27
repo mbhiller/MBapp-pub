@@ -1,3 +1,39 @@
+## Sprint B — Inventory Operations UX (2025-12-26)
+
+- **InventoryDetailPage enhancements:**
+  - **On-Hand by Location table:** New section displays per-location inventory breakdown fetched from `GET /inventory/{id}/onhand:by-location`. Table columns: Location (name resolved from cache), On Hand, Reserved, Available. Location names resolved on first load with fallback to "(unassigned)" if location not found.
+  - **Adjust modal:** New modal for manual quantity adjustments. Fields: deltaQty (required, positive or negative, validates non-zero and finite), locationId (optional), lot (optional), note (optional reason). Sends `POST /inventory/{id}:adjust` with `Idempotency-Key` header. Success reloads inventory counters and updates on-hand by location table.
+  - **Operator defaults (localStorage):** Modal forms auto-prefill `locationId` and `lot` from browser localStorage keys `mbapp:lastLocationId` and `mbapp:lastLot`. On successful adjust, defaults are saved. Improves efficiency for repeated operations at same location/lot.
+  - **Context link to InventoryMovementsPage:** Button guiding users to dedicated movement explorer for that inventory item.
+- **InventoryMovementsPage (new page):** Located at `/inventory-movements`, filters movements by optional `locationId` query param. Features:
+  - Location-based filtering via query string.
+  - Action filter dropdown (all actions available).
+  - RefId text filter for source document references.
+  - Limit selector: 10, 20, 50, 100 items per page.
+  - Cursor-based pagination with "Load More" button.
+  - MovementsTable displays: timestamp, action, qty, note, location (resolved), lot, refId.
+  - All filters sync to URL for bookmarkable/shareable states.
+  - Accessible from InventoryDetailPage and LocationDetailPage with pre-filled locationId.
+- **LocationDetailPage enhancement:** Added prominent "View All Movements" button above Details section, navigates to `/inventory-movements?locationId=<id>` to guide users to movement explorer. Existing "Recent Movements" table retained for quick reference.
+- **Spec / Implementation Alignment:**
+  - **InventoryAdjustmentRequest schema updated:** Only `deltaQty` is required; `reason` (legacy), `note`, and `notes` all optional. Backwards compatible: handler accepts all three field names with fallback priority: `note` → `notes` → `reason`.
+  - **API handler logic:** `apps/api/src/inventory/adjust.ts` implements three-level fallback for note extraction, enabling zero-breaking-change upgrade from legacy `reason` field to new `note` field.
+  - **Spec: spec/MBapp-Modules.yaml**
+    - `InventoryAdjustmentRequest.required`: Only `[deltaQty]` (was `[reason, deltaQty]`)
+    - Properties documented with descriptions for backwards compatibility
+  - **API: apps/api/src/inventory/adjust.ts**
+    - Accepts `reason`, `note`, or `notes` in request body
+    - Populates handler's internal `note` field via fallback logic
+    - Existing clients using `reason` continue to work without changes
+- **Smoke Tests Added:**
+  - `smoke:inventory:onhand-by-location` – Creates two locations (A, B); creates product + inventory; adjusts locationA (+10), locationB (+5); verifies aggregate onHand (15) and per-location breakdown; asserts location entries exist, correct values, sum equals aggregate. Tests eventual consistency with 10-attempt retry loop (500ms delays).
+  - `smoke:inventory:adjust-negative` – Creates product + inventory; ensures onHand = 5; adjusts by -2 (shrink); verifies onHand decreased to 3; asserts available/reserved counters remain consistent (`available = onHand - reserved`).
+  - **Command:** `node ops/smoke/smoke.mjs smoke:inventory:onhand-by-location` or `smoke:inventory:adjust-negative` (not in CI list; opt-in for validation).
+- **How to verify locally:**
+  - Web: Navigate to inventory detail page → see "On Hand by Location" table → click "Adjust" → fill deltaQty (+/-) and location → save → verify defaults persisted on next modal open → click "View Movements" to navigate to location-specific explorer.
+  - API: `POST /inventory/{id}:adjust` with `{ deltaQty: -2, note: "shrink" }` → `GET /inventory/{id}/onhand` verifies delta applied.
+  - Smoke: Set env vars, run `node ops/smoke/smoke.mjs smoke:inventory:adjust-negative`.
+
 ## Sprint A — Backorders → Purchase Orders Hardening (2025-12-26)
 
 - Backorders Suggest PO flow hardened: handles `draft` or `drafts`, renders `skipped` summary with reasons, and shows a clear error when neither is present.

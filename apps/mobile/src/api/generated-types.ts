@@ -2317,8 +2317,13 @@ export interface components {
             error?: string | null;
         };
         InventoryAdjustmentRequest: {
-            reason: string;
+            /** @description Quantity adjustment (positive to add, negative to subtract) */
             deltaQty: number;
+            /** @description Reason for adjustment (legacy field, use note instead) */
+            reason?: string | null;
+            /** @description Note or reason for the adjustment */
+            note?: string | null;
+            /** @description Alias for note (both are accepted for backwards compatibility) */
             notes?: string | null;
         };
         PutawayRequest: {
