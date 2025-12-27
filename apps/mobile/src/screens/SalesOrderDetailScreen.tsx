@@ -1,6 +1,6 @@
 // apps/mobile/src/screens/SalesOrderDetailScreen.tsx
 import * as React from "react";
-import { View, Text, ActivityIndicator, FlatList, Pressable, Alert } from "react-native";
+import { View, Text, ActivityIndicator, FlatList, Pressable, Alert, TextInput, Modal, ScrollView } from "react-native";
 import { useRoute, useNavigation } from "@react-navigation/native";
 import { useObjects } from "../features/_shared/useObjects";
 import { BackorderHeaderBadge, BackorderLineBadge } from "../features/backorders/BackorderBadges";
@@ -25,6 +25,13 @@ export default function SalesOrderDetailScreen() {
   const toast = useToast();
 
   const [commitHint, setCommitHint] = React.useState<{ type: "success" | "error"; message: string } | null>(null);
+  
+  // Outbound location/lot defaults (foundation for future pick/pack/ship)
+  const [defaultLocationId, setDefaultLocationId] = React.useState<string | null>(null);
+  const [defaultLot, setDefaultLot] = React.useState<string>("");
+  const [locationModalOpen, setLocationModalOpen] = React.useState(false);
+  const [locationQuery, setLocationQuery] = React.useState("");
+  const [locationOptions, setLocationOptions] = React.useState<any[]>([]);
 
   const so = data;
   const lines = (so?.lines ?? []) as any[];
@@ -61,7 +68,12 @@ export default function SalesOrderDetailScreen() {
       const remainingToShip = Math.max(0, ordered - fulfilled);
       const reserveDelta = Math.max(0, remainingToShip - reserved);
       const lineId = String(line?.id ?? line?.lineId ?? "");
-      return { lineId, deltaQty: reserveDelta };
+      return { 
+        lineId, 
+        deltaQty: reserveDelta,
+        ...(defaultLocationId ? { locationId: defaultLocationId } : {}),
+        ...(defaultLot ? { lot: defaultLot } : {})
+      };
     }).filter((l) => l.lineId && l.deltaQty > 0);
     return { lines: mapped };
   };
@@ -70,16 +82,34 @@ export default function SalesOrderDetailScreen() {
     const mapped = lines.map((line: any) => {
       const reserved = Number(line?.qtyReserved ?? 0);
       const lineId = String(line?.id ?? line?.lineId ?? "");
-      return { lineId, deltaQty: reserved };
+      return { 
+        lineId, 
+        deltaQty: reserved,
+        ...(defaultLocationId ? { locationId: defaultLocationId } : {}),
+        ...(defaultLot ? { lot: defaultLot } : {})
+      };
     }).filter((l) => l.lineId && l.deltaQty > 0);
     return { lines: mapped };
   };
 
   const fulfillPayload = () => {
     const mapped = lines.map((line: any) => {
+      const ordered = Number(line?.qty ?? 0);
+      const fulfilled = Number(line?.qtyFulfilled ?? 0);
       const reserved = Number(line?.qtyReserved ?? 0);
+      const remaining = Math.max(0, ordered - fulfilled);
+      
+      // If qty is reserved, fulfill up to reserved amount (but not more than remaining)
+      // If no reserve, fulfill the remaining to-ship qty (enables fulfill-without-reserve)
+      const deltaQty = reserved > 0 ? Math.min(reserved, remaining) : Math.max(0, remaining);
+      
       const lineId = String(line?.id ?? line?.lineId ?? "");
-      return { lineId, deltaQty: Math.max(0, reserved) };
+      return { 
+        lineId, 
+        deltaQty,
+        ...(defaultLocationId ? { locationId: defaultLocationId } : {}),
+        ...(defaultLot ? { lot: defaultLot } : {})
+      };
     }).filter((l) => l.lineId && l.deltaQty > 0);
     return { lines: mapped };
   };
@@ -209,6 +239,109 @@ export default function SalesOrderDetailScreen() {
           <BackorderHeaderBadge count={backorders.length} />
         )}
       </View>
+
+      {/* Outbound defaults: location + lot (foundation) */}
+      <View style={{ marginBottom: 10, padding: 10, borderRadius: 8, backgroundColor: "#f5f5f5", borderWidth: 1, borderColor: "#ddd" }}>
+        <Text style={{ fontWeight: "600", marginBottom: 8 }}>Outbound Defaults</Text>
+        
+        {/* Location selector */}
+        <View style={{ marginBottom: 8 }}>
+          <Pressable
+            onPress={() => setLocationModalOpen(true)}
+            style={{ 
+              padding: 10, 
+              borderRadius: 6, 
+              borderWidth: 1, 
+              borderColor: "#ccc", 
+              backgroundColor: "#fff",
+              flexDirection: "row",
+              justifyContent: "space-between",
+              alignItems: "center"
+            }}
+          >
+            <Text style={{ color: defaultLocationId ? "#000" : "#999" }}>
+              {defaultLocationId ? `Location: ${defaultLocationId}` : "Select location (optional)"}
+            </Text>
+            <Text style={{ fontSize: 12, color: "#666" }}>▼</Text>
+          </Pressable>
+        </View>
+
+        {/* Lot input */}
+        <View>
+          <TextInput
+            placeholder="Lot (optional)"
+            value={defaultLot}
+            onChangeText={setDefaultLot}
+            style={{ 
+              padding: 10, 
+              borderRadius: 6, 
+              borderWidth: 1, 
+              borderColor: "#ccc", 
+              backgroundColor: "#fff"
+            }}
+          />
+        </View>
+      </View>
+
+      {/* Location picker modal */}
+      <Modal visible={locationModalOpen} transparent animationType="fade">
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", padding: 20 }}>
+          <View style={{ backgroundColor: "#fff", borderRadius: 12, width: "100%", maxHeight: "80%", padding: 16 }}>
+            <Text style={{ fontSize: 16, fontWeight: "600", marginBottom: 12 }}>Select Location</Text>
+            <TextInput
+              placeholder="Search locations..."
+              value={locationQuery}
+              onChangeText={setLocationQuery}
+              style={{ 
+                padding: 10, 
+                borderRadius: 6, 
+                borderWidth: 1, 
+                borderColor: "#ccc", 
+                marginBottom: 12,
+                backgroundColor: "#f9f9f9"
+              }}
+            />
+            <ScrollView style={{ marginBottom: 12 }}>
+              {/* Placeholder: in real implementation, fetch locations from API and filter by locationQuery */}
+              {defaultLocationId && (
+                <Pressable
+                  onPress={() => {
+                    setLocationModalOpen(false);
+                    setLocationQuery("");
+                  }}
+                  style={{ padding: 10, borderBottomWidth: 1, borderBottomColor: "#eee" }}
+                >
+                  <Text style={{ color: "#000", fontWeight: "600" }}>{defaultLocationId}</Text>
+                </Pressable>
+              )}
+              <Pressable
+                onPress={() => {
+                  setDefaultLocationId(null);
+                  setLocationModalOpen(false);
+                  setLocationQuery("");
+                }}
+                style={{ padding: 10, borderBottomWidth: 1, borderBottomColor: "#eee" }}
+              >
+                <Text style={{ color: "#666" }}>Clear selection</Text>
+              </Pressable>
+            </ScrollView>
+            <Pressable
+              onPress={() => {
+                setLocationModalOpen(false);
+                setLocationQuery("");
+              }}
+              style={{ 
+                padding: 12, 
+                borderRadius: 6, 
+                backgroundColor: "#666",
+                alignItems: "center"
+              }}
+            >
+              <Text style={{ color: "#fff", fontWeight: "600" }}>Close</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
 
       {/* Commit hint (success or error) — only show "View Backorders" in hint when it's not already in header */}
       {commitHint && (
