@@ -138,6 +138,69 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
       summary: Search Objects by Type
+    post:
+      tags:
+        - Objects
+      operationId: searchObjectsPost
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/TypePath'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                q:
+                  type: string
+                  description: Full-text search query
+                limit:
+                  type: integer
+                  default: 20
+                  description: Results per page
+                next:
+                  type: string
+                  nullable: true
+                  description: Pagination cursor from previous response
+                fields:
+                  type: array
+                  items:
+                    type: string
+                  description: Optional field projection
+                status:
+                  type: string
+                  description: Filter by status (e.g., open, ignored, converted, fulfilled for backorderRequest)
+                soId:
+                  type: string
+                  description: Filter by Sales Order ID (backorderRequest, salesOrder)
+                itemId:
+                  type: string
+                  description: Filter by Inventory Item ID (backorderRequest, inventory)
+                preferredVendorId:
+                  type: string
+                  description: Filter by Vendor ID (backorderRequest, product)
+              description: |
+                Search request body with optional filters.
+                Filters are combined with AND logic and merged with q text search.
+                For backorderRequest, supported filters include:
+                - status: open, ignored, converted, fulfilled
+                - soId: Sales Order ID
+                - itemId: Inventory Item ID
+                - preferredVendorId: Vendor ID
+                Additional filters depend on object type.
+      responses:
+        '200':
+          $ref: '#/components/responses/ListPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      summary: Search Objects by Type (POST)
   /objects/{type}/{id}:
     get:
       tags:
@@ -3579,6 +3642,12 @@ components:
           type: string
           format: date-time
           nullable: true
+        backorderRequestIds:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: BackorderRequest ids this PO line is intended to fulfill
     PurchaseOrder:
       allOf:
         - $ref: '#/components/schemas/ObjectBase'

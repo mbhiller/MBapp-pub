@@ -49,7 +49,8 @@ export interface paths {
         /** Search Objects by Type */
         get: operations["searchObjects"];
         put?: never;
-        post?: never;
+        /** Search Objects by Type (POST) */
+        post: operations["searchObjectsPost"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2594,6 +2595,8 @@ export interface components {
             lot?: string | null;
             /** Format: date-time */
             expectedDate?: string | null;
+            /** @description BackorderRequest ids this PO line is intended to fulfill */
+            backorderRequestIds?: string[] | null;
         };
         PurchaseOrder: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
@@ -3427,6 +3430,49 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            200: components["responses"]["ListPage"];
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    searchObjectsPost: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-tenant-id": components["parameters"]["TenantHeader"];
+            };
+            path: {
+                type: components["parameters"]["TypePath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description Full-text search query */
+                    q?: string;
+                    /**
+                     * @description Results per page
+                     * @default 20
+                     */
+                    limit?: number;
+                    /** @description Pagination cursor from previous response */
+                    next?: string | null;
+                    /** @description Optional field projection */
+                    fields?: string[];
+                    /** @description Filter by status (e.g., open, ignored, converted, fulfilled for backorderRequest) */
+                    status?: string;
+                    /** @description Filter by Sales Order ID (backorderRequest, salesOrder) */
+                    soId?: string;
+                    /** @description Filter by Inventory Item ID (backorderRequest, inventory) */
+                    itemId?: string;
+                    /** @description Filter by Vendor ID (backorderRequest, product) */
+                    preferredVendorId?: string;
+                };
+            };
+        };
         responses: {
             200: components["responses"]["ListPage"];
             400: components["responses"]["BadRequest"];

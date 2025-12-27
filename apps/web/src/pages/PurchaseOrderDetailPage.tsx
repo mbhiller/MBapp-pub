@@ -65,6 +65,7 @@ type PurchaseLine = {
   qty?: number;
   orderedQty?: number;
   receivedQty?: number;
+  backorderRequestIds?: string[] | null;
 };
 
 function formatError(err: unknown): string {
@@ -172,6 +173,28 @@ export default function PurchaseOrderDetailPage() {
   useEffect(() => {
     fetchPo();
   }, [fetchPo]);
+
+  // Prefill deltaQty with remaining by default without overriding user inputs
+  useEffect(() => {
+    const lines = po?.lines ?? [];
+    if (lines.length === 0) return;
+    setLineState((prev) => {
+      const next = { ...prev } as typeof prev;
+      lines.forEach((line) => {
+        const lineId = line.id ?? line.lineId ?? "";
+        if (!lineId) return;
+        const orderedQty = line.qty ?? line.orderedQty ?? 0;
+        const receivedQty = line.receivedQty ?? 0;
+        const remaining = Math.max(0, orderedQty - receivedQty);
+        const cur = next[lineId];
+        // Only set default if no user-provided deltaQty yet
+        if (remaining > 0 && (!cur || typeof cur.deltaQty !== "number")) {
+          next[lineId] = { ...(cur ?? {}), deltaQty: remaining };
+        }
+      });
+      return next;
+    });
+  }, [po?.lines]);
 
   // Load inventory movements for PO lines
   useEffect(() => {
@@ -815,6 +838,53 @@ export default function PurchaseOrderDetailPage() {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Backorder Linkage Section */}
+      {po?.lines?.some((line) => line.backorderRequestIds?.length) && (
+        <div style={{ display: "grid", gap: 8, padding: 16, background: "#f0f7ff", borderRadius: 4, border: "1px solid #90caf9" }}>
+          <h3 style={{ margin: 0, color: "#1976d2", fontSize: 16, fontWeight: 600 }}>
+            Backorder Fulfillment
+          </h3>
+          <p style={{ margin: "0 0 12px 0", fontSize: 13, color: "#666" }}>
+            This purchase order is fulfilling the following backorder requests:
+          </p>
+          <div style={{ display: "grid", gap: 12 }}>
+            {po.lines
+              .filter((line) => line.backorderRequestIds?.length)
+              .map((line) => {
+                const lineId = line.id ?? line.lineId ?? "";
+                const itemId = line.itemId ?? line.productId ?? "—";
+                return (
+                  <div key={lineId} style={{ display: "grid", gap: 8 }}>
+                    <div style={{ fontWeight: 500, fontSize: 13 }}>
+                      {lineId} ({itemId})
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      {line.backorderRequestIds!.map((boId) => (
+                        <Link
+                          key={boId}
+                          to={`/backorders?backorderRequestId=${encodeURIComponent(boId)}`}
+                          style={{
+                            display: "inline-block",
+                            padding: "4px 12px",
+                            background: "#1976d2",
+                            color: "#fff",
+                            borderRadius: 3,
+                            textDecoration: "none",
+                            fontSize: 12,
+                            fontWeight: 500,
+                          }}
+                        >
+                          {boId}
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
         </div>
       )}
 

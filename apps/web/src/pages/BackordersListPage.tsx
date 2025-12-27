@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../providers/AuthProvider";
 import { apiFetch } from "../lib/http";
 import {
@@ -16,6 +16,7 @@ import {
 import SuggestPoChooserModal, {
   type PurchaseOrderDraft,
 } from "../components/SuggestPoChooserModal";
+import VendorPicker from "../components/VendorPicker";
 
 function formatError(err: unknown): string {
   const e = err as any;
@@ -29,23 +30,109 @@ function formatError(err: unknown): string {
 export default function BackordersListPage() {
   const { token, tenantId } = useAuth();
   const navigate = useNavigate();
-  const [status, setStatus] = useState<"open" | "ignored" | "converted">("open");
-  const [vendorFilter, setVendorFilter] = useState("");
-  const [soIdFilter, setSoIdFilter] = useState("");
-  const [itemIdFilter, setItemIdFilter] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  
+  // Read filter values from URL params
+  const status = (searchParams.get("status") || "open") as "open" | "ignored" | "converted";
+  // Prefer vendorId query param; fall back to preferredVendorId for compatibility
+  const vendorFilter = searchParams.get("vendorId") || searchParams.get("preferredVendorId") || "";
+  const soIdFilter = searchParams.get("soId") || "";
+  const itemIdFilter = searchParams.get("itemId") || "";
+  // Track next page cursor internally for stable append behavior
+  const [pageNext, setPageNext] = useState<string | null>(null);
+  
   const [items, setItems] = useState<BackorderRequest[]>([]);
   const [vendorNameById, setVendorNameById] = useState<Record<string, string>>({});
-  const [next, setNext] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [actionInfo, setActionInfo] = useState<string | null>(null);
+  const [actionInfo, setActionInfo] = useState<string | React.ReactNode | null>(null);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [suggestResult, setSuggestResult] = useState<SuggestPoResponse | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalDrafts, setModalDrafts] = useState<PurchaseOrderDraft[]>([]);
+  const [modalSkipped, setModalSkipped] = useState<Array<{ backorderRequestId: string; reason: string }> | undefined>();
   const [groupedView, setGroupedView] = useState(false);
+
+  // Helper to update URL search params
+  const updateSearchParams = useCallback(
+    (updates: Record<string, string | null>) => {
+      const newParams = new URLSearchParams(searchParams);
+      for (const [key, value] of Object.entries(updates)) {
+        if (value === null || value === "") {
+          newParams.delete(key);
+        } else {
+          newParams.set(key, value);
+        }
+      }
+      setSearchParams(newParams);
+    },
+    [searchParams, setSearchParams]
+  );
+
+  // Handlers for filter changes (update URL and reset pagination)
+  const handleStatusChange = (newStatus: "open" | "ignored" | "converted") => {
+    updateSearchParams({ status: newStatus });
+    // Reset paging and UI selection/banners
+    setItems([]);
+    setSelected({});
+    setActionError(null);
+    setActionInfo(null);
+    setSuggestResult(null);
+    setPageNext(null);
+  };
+
+  const handleVendorFilterChange = (newVendor: string) => {
+    // Use vendorId in URL; remove legacy preferredVendorId param
+    updateSearchParams({ vendorId: newVendor, preferredVendorId: null });
+    setItems([]);
+    setSelected({});
+    setActionError(null);
+    setActionInfo(null);
+    setSuggestResult(null);
+    setPageNext(null);
+  };
+
+  const handleSoIdFilterChange = (newSoId: string) => {
+    updateSearchParams({ soId: newSoId });
+    setItems([]);
+    setSelected({});
+    setActionError(null);
+    setActionInfo(null);
+    setSuggestResult(null);
+    setPageNext(null);
+  };
+
+  const handleItemIdFilterChange = (newItemId: string) => {
+    updateSearchParams({ itemId: newItemId });
+    setItems([]);
+    setSelected({});
+    setActionError(null);
+    setActionInfo(null);
+    setSuggestResult(null);
+    setPageNext(null);
+  };
+
+  const handleLoadMore = () => {
+    if (pageNext) fetchPage(pageNext);
+  };
+
+  const handleClearFilters = () => {
+    updateSearchParams({
+      status: "open",
+      vendorId: null,
+      preferredVendorId: null,
+      soId: null,
+      itemId: null,
+    });
+    setItems([]);
+    setSelected({});
+    setActionError(null);
+    setActionInfo(null);
+    setSuggestResult(null);
+    setPageNext(null);
+  };
 
   const fetchPage = useCallback(
     async (cursor?: string) => {
@@ -64,7 +151,7 @@ export default function BackordersListPage() {
           next: cursor || undefined,
         });
         setItems((prev) => (cursor ? [...prev, ...(res.items ?? [])] : res.items ?? []));
-        setNext(res.next ?? null);
+        setPageNext(res.next ?? null);
       } catch (err) {
         setError(formatError(err));
       } finally {
@@ -74,9 +161,10 @@ export default function BackordersListPage() {
     [status, vendorFilter, soIdFilter, itemIdFilter, tenantId, token]
   );
 
+  // Refetch when filters change; replace list
   useEffect(() => {
-    fetchPage();
-  }, [fetchPage]);
+    fetchPage(undefined);
+  }, [fetchPage, status, vendorFilter, soIdFilter, itemIdFilter]);
 
   // Fetch vendor names for display
   useEffect(() => {
@@ -129,6 +217,8 @@ export default function BackordersListPage() {
     setActionError(null);
     try {
       await ignoreBackorderRequest(id, { token: token || undefined, tenantId });
+      updateSearchParams({ next: null });
+      setItems([]);
       await fetchPage();
     } catch (err) {
       setActionError(formatError(err));
@@ -141,14 +231,23 @@ export default function BackordersListPage() {
     if (selectedIds.length === 0) return;
     setActionLoading(true);
     setActionError(null);
+    setActionInfo(null);
+
+    // Optimistically remove selected items from the list
+    const itemsBeforeAction = items;
+    setItems((prev) => prev.filter((item) => !selectedIds.includes(item.id)));
+    setSelected({});
+
     try {
+      // Call ignore for all selected items in parallel
       await Promise.all(
         selectedIds.map((id) => ignoreBackorderRequest(id, { token: token || undefined, tenantId }))
       );
-      setSelected({});
-      await fetchPage();
+      setActionInfo(`Ignored ${selectedIds.length} backorder request(s).`);
     } catch (err) {
-      setActionError(formatError(err));
+      // Restore items on error
+      setItems(itemsBeforeAction);
+      setActionError(`Failed to ignore: ${formatError(err)}`);
     } finally {
       setActionLoading(false);
     }
@@ -185,6 +284,8 @@ export default function BackordersListPage() {
           setActionError("No drafts returned from suggest-po");
         }
         // Do NOT clear selection here - let user retry after reviewing skipped reasons
+        updateSearchParams({ next: null });
+        setItems([]);
         await fetchPage();
         return;
       }
@@ -200,6 +301,8 @@ export default function BackordersListPage() {
         if (createdId) {
           if (ids.length > 1) setActionInfo(`Created ${ids.length} purchase orders; opening the first.`);
           setSelected({});
+          updateSearchParams({ next: null });
+          setItems([]);
           await fetchPage();
           navigate(`/purchase-orders/${createdId}`);
         } else {
@@ -210,6 +313,7 @@ export default function BackordersListPage() {
 
       // For multiple drafts: show chooser modal
       setModalDrafts(drafts);
+      setModalSkipped(res.skipped);
       setModalOpen(true);
     } catch (err) {
       setActionError(formatError(err));
@@ -232,7 +336,7 @@ export default function BackordersListPage() {
             Status:
             <select
               value={status}
-              onChange={(e) => setStatus(e.target.value as "open" | "ignored" | "converted")}
+              onChange={(e) => handleStatusChange(e.target.value as "open" | "ignored" | "converted")}
               style={{ minWidth: 120 }}
             >
               <option value="open">open</option>
@@ -240,20 +344,17 @@ export default function BackordersListPage() {
               <option value="converted">converted</option>
             </select>
           </label>
-          <label style={{ display: "flex", alignItems: "center", gap: 4, flex: 1 }}>
-            Preferred Vendor ID:
-            <input
+          <div style={{ flex: 1 }}>
+            <VendorPicker
               value={vendorFilter}
-              onChange={(e) => setVendorFilter(e.target.value)}
-              placeholder="Optional: filter by preferred vendor ID"
-              style={{ flex: 1 }}
+              onChange={handleVendorFilterChange}
             />
-          </label>
+          </div>
           <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
             SO ID:
             <input
               value={soIdFilter}
-              onChange={(e) => setSoIdFilter(e.target.value)}
+              onChange={(e) => handleSoIdFilterChange(e.target.value)}
               placeholder="Optional: filter by SO ID"
               style={{ minWidth: 160 }}
             />
@@ -262,7 +363,7 @@ export default function BackordersListPage() {
             Item ID:
             <input
               value={itemIdFilter}
-              onChange={(e) => setItemIdFilter(e.target.value)}
+              onChange={(e) => handleItemIdFilterChange(e.target.value)}
               placeholder="Optional: filter by item ID"
               style={{ minWidth: 160 }}
             />
@@ -275,8 +376,11 @@ export default function BackordersListPage() {
             />
             Grouped view
           </label>
-          <button onClick={() => fetchPage()} disabled={loading}>
+          <button onClick={() => fetchPage(undefined)} disabled={loading}>
             {loading ? "Loading..." : "Refresh"}
+          </button>
+          <button onClick={handleClearFilters} disabled={loading}>
+            Clear filters
           </button>
         </div>
 
@@ -326,7 +430,18 @@ export default function BackordersListPage() {
                   <tr key={idx}>
                     <td style={{ padding: 6, border: "1px solid #fbc02d" }}>{s.backorderRequestId}</td>
                     <td style={{ padding: 6, border: "1px solid #fbc02d" }}>
-                      {s.reason || "Unknown reason"}
+                      {(() => {
+                        const map: Record<string, string> = {
+                          no_preferred_vendor: "No preferred vendor set",
+                          no_vendor: "No vendor available",
+                          already_converted: "Already converted to PO",
+                          already_fulfilled: "Already fulfilled",
+                          invalid_backorder: "Invalid backorder request",
+                          unsupported_item: "Item not eligible for purchase",
+                        };
+                        const r = s.reason || "unknown";
+                        return map[r] || r.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+                      })()}
                     </td>
                   </tr>
                 ))}
@@ -381,7 +496,13 @@ export default function BackordersListPage() {
                               onChange={() => toggleSelect(bo.id)}
                             />
                           </td>
-                          <td style={{ padding: 8, border: "1px solid #ccc" }}>{bo.itemId ?? "—"}</td>
+                          <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                            {bo.itemId ? (
+                              <Link to={`/inventory/${bo.itemId}`}>{bo.itemId}</Link>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
                           <td style={{ padding: 8, border: "1px solid #ccc" }}>{bo.qty ?? 0}</td>
                           <td style={{ padding: 8, border: "1px solid #ccc" }}>
                             {bo.soId ? (
@@ -421,7 +542,13 @@ export default function BackordersListPage() {
                         onChange={() => toggleSelect(bo.id)}
                       />
                     </td>
-                    <td style={{ padding: 8, border: "1px solid #ccc" }}>{bo.itemId ?? "—"}</td>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                      {bo.itemId ? (
+                        <Link to={`/inventory/${bo.itemId}`}>{bo.itemId}</Link>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
                     <td style={{ padding: 8, border: "1px solid #ccc" }}>{bo.qty ?? 0}</td>
                     <td style={{ padding: 8, border: "1px solid #ccc" }}>
                       {bo.soId ? (
@@ -453,8 +580,8 @@ export default function BackordersListPage() {
         </table>
       ) : null}
 
-      {next ? (
-        <button onClick={() => fetchPage(next)} disabled={loading}>
+      {pageNext ? (
+        <button onClick={handleLoadMore} disabled={loading}>
           {loading ? "Loading..." : "Load more"}
         </button>
       ) : null}
@@ -462,9 +589,11 @@ export default function BackordersListPage() {
       <SuggestPoChooserModal
         open={modalOpen}
         drafts={modalDrafts}
+        skipped={modalSkipped}
         onClose={() => {
           setModalOpen(false);
           setModalDrafts([]);
+          setModalSkipped(undefined);
         }}
         onChoose={async (draft) => {
           setModalOpen(false);
@@ -482,10 +611,83 @@ export default function BackordersListPage() {
               if (ids.length > 1) setActionInfo(`Created ${ids.length} purchase orders; opening the first.`);
               setSelected({});
               setModalDrafts([]);
+              setModalSkipped(undefined);
+              updateSearchParams({ next: null });
+              setItems([]);
               await fetchPage();
               navigate(`/purchase-orders/${createdId}`);
             } else {
               setActionError("PO created but no ID returned");
+            }
+          } catch (err) {
+            setActionError(formatError(err));
+          } finally {
+            setActionLoading(false);
+          }
+        }}
+        onChooseMultiple={async (drafts) => {
+          setModalOpen(false);
+          setActionLoading(true);
+          setActionError(null);
+          setActionInfo(null);
+          try {
+            // Create all selected POs in parallel
+            const createResPromises = drafts.map((draft) =>
+              createPurchaseOrderFromSuggestion(
+                { draft },
+                { token: token || undefined, tenantId }
+              )
+            );
+            const createResults = await Promise.all(createResPromises);
+
+            // Collect all created IDs
+            const allIds: string[] = [];
+            for (const res of createResults) {
+              const ids = Array.isArray(res.ids) ? res.ids : (res.id ? [res.id] : []);
+              allIds.push(...ids);
+            }
+
+            if (allIds.length === 0) {
+              setActionError("No POs created");
+              return;
+            }
+
+            // Clean up and refetch
+            setSelected({});
+            setModalDrafts([]);
+            setModalSkipped(undefined);
+            updateSearchParams({ next: null });
+            setItems([]);
+            await fetchPage();
+
+            // Show info message with navigation
+            if (allIds.length === 1) {
+              navigate(`/purchase-orders/${allIds[0]}`);
+            } else {
+              setActionInfo(
+                <div>
+                  <p>Created {allIds.length} purchase orders:</p>
+                  <div style={{ marginTop: 8 }}>
+                    {allIds.map((id) => (
+                      <div key={id} style={{ marginBottom: 4 }}>
+                        <button
+                          onClick={() => navigate(`/purchase-orders/${id}`)}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            color: "#1976d2",
+                            cursor: "pointer",
+                            textDecoration: "underline",
+                            padding: 0,
+                          }}
+                        >
+                          {id}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
             }
           } catch (err) {
             setActionError(formatError(err));

@@ -175,8 +175,9 @@ export async function listObjects({
 
   // Pagination-aware filtering: loop through Dynamo pages until we collect `limit` matches
   let collected: AnyRecord[] = [];
-  let lastReturnedItem: AnyRecord | undefined;
+  const incomingCursorString = next ?? null;
   let ExclusiveStartKey = decodeNext(next);
+  let LastEvaluatedKey: AnyRecord | undefined = undefined;
   let hasMorePages = true;
 
   while (collected.length < limit && hasMorePages) {
@@ -192,6 +193,7 @@ export async function listObjects({
     );
 
     const rawItems = (res.Items || []) as AnyRecord[];
+    LastEvaluatedKey = res.LastEvaluatedKey;
 
     // Apply filters and q to each item
     for (const item of rawItems) {
@@ -215,31 +217,42 @@ export async function listObjects({
 
       // Item matched all filters and q; add to results
       collected.push(item);
-      lastReturnedItem = item;
 
       // Stop if we've collected enough
       if (collected.length >= limit) break;
     }
 
     // Check if we have more pages
-    if (!res.LastEvaluatedKey) {
+    if (!LastEvaluatedKey) {
       hasMorePages = false;
+      break;
     } else if (collected.length >= limit) {
-      // We stopped mid-page; set next to resume AFTER the last returned item
-      ExclusiveStartKey = {
-        [PK_ATTR]: lastReturnedItem![PK_ATTR],
-        [SK_ATTR]: lastReturnedItem![SK_ATTR],
-      };
+      // We have enough results; next cursor is from Dynamo (more may exist after filters)
+      hasMorePages = true;
       break;
     } else {
       // We exhausted the page but haven't collected enough; continue with Dynamo's cursor
-      ExclusiveStartKey = res.LastEvaluatedKey;
+      ExclusiveStartKey = LastEvaluatedKey;
     }
+  }
+
+  // Compute outgoing cursor ONLY from DynamoDB's LastEvaluatedKey
+  const outgoingCursor = hasMorePages && LastEvaluatedKey ? encodeNext(LastEvaluatedKey) : null;
+
+  // Defensive guard: if outgoing cursor equals incoming cursor, we're stuck
+  if (outgoingCursor && outgoingCursor === incomingCursorString) {
+    console.warn(
+      `[objects/repo] Stuck cursor detected: type=${type}, tenantId=${tenantId}, cursor=${outgoingCursor.slice(0, 20)}...`
+    );
+    return {
+      items: collected.slice(0, limit).map((o) => project(o, fields)),
+      next: null,
+    };
   }
 
   return {
     items: collected.slice(0, limit).map((o) => project(o, fields)),
-    next: encodeNext(ExclusiveStartKey),
+    next: outgoingCursor,
   };
 }
 
