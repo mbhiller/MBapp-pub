@@ -777,7 +777,7 @@ export interface paths {
         put?: never;
         /**
          * Receive against purchase order lines
-         * @description Allowed from **approved** or **partially_fulfilled**. Over-receive returns 409. \ **Idempotency:** provide an `Idempotency-Key` header to safely retry the same receive request; \ duplicates with the same key will return the current PO state without double-applying movements.
+         * @description Allowed from **approved** or **partially-received**. Over-receive returns 409. \ **Idempotency:** provide an `Idempotency-Key` header to safely retry the same receive request; \ duplicates with the same key will return the current PO state without double-applying movements. \ Requests may also be deduplicated by payload signature.
          */
         post: {
             parameters: {
@@ -2609,7 +2609,7 @@ export interface components {
             partyKind?: "person" | "organization" | "animal";
             orderNumber?: string;
             /** @enum {string} */
-            status: "draft" | "submitted" | "approved" | "partially_fulfilled" | "fulfilled" | "cancelled" | "closed";
+            status: "draft" | "submitted" | "approved" | "partially-received" | "fulfilled" | "cancelled" | "closed";
             /** @default USD */
             currency: string;
             notes?: string;

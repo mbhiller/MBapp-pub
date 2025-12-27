@@ -17,7 +17,9 @@
   "smoke:sales:fulfill-without-reserve",
   "smoke:outbound:reserve-fulfill-release-cycle",
   "smoke:vendor-filter-preferred",
-  "smoke:suggest-po-with-vendor"
+  "smoke:suggest-po-with-vendor",
+  "smoke:po:receive-with-location-counters",
+  "smoke:po:receive-line-negative-qty"
   ]
 
 }

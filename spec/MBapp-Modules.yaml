@@ -1273,7 +1273,7 @@ components:
           orderNumber:   { type: string }
           status:
             type: string
-            enum: [draft, submitted, approved, partially_fulfilled, fulfilled, cancelled, closed]
+            enum: [draft, submitted, approved, partially-received, fulfilled, cancelled, closed]
           currency:      { type: string, default: USD }
           notes:         { type: string }
           totals:        { $ref: '#/components/schemas/MoneyTotals' }
@@ -3926,9 +3926,10 @@ paths:
   /purchasing/po/{id}:receive:
     post:
       summary: Receive against purchase order lines
-      description: Allowed from **approved** or **partially_fulfilled**. Over-receive returns 409. \
+      description: Allowed from **approved** or **partially-received**. Over-receive returns 409. \
         **Idempotency:** provide an `Idempotency-Key` header to safely retry the same receive request; \
-        duplicates with the same key will return the current PO state without double-applying movements.
+        duplicates with the same key will return the current PO state without double-applying movements. \
+        Requests may also be deduplicated by payload signature.
       parameters:
         - in: path
           name: id

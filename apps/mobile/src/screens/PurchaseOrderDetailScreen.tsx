@@ -27,6 +27,9 @@ export default function PurchaseOrderDetailScreen() {
   const [qty, setQty] = React.useState<string>("1");
   const [lot, setLot] = React.useState<string>("");
   const [locationId, setLocationId] = React.useState<string>("");
+  // Order-level defaults for quick receive
+  const [defaultLot, setDefaultLot] = React.useState<string>("");
+  const [defaultLocationId, setDefaultLocationId] = React.useState<string>("");
 
   const [history, setHistory] = React.useState<{ open: boolean; itemId?: string; lineId?: string }>({ open: false });
   const [vendorModalOpen, setVendorModalOpen] = React.useState(false);
@@ -58,7 +61,7 @@ export default function PurchaseOrderDetailScreen() {
   }
 
   // Only allow receive for backend-allowed statuses
-  const receivable = ["open", "partially-received", "approved", "partially_fulfilled"].includes(String(po?.status ?? "").toLowerCase());
+  const receivable = ["approved", "partially-received"].includes(String(po?.status ?? "").toLowerCase());
   // Match banner semantics: vendor must exist AND have the "vendor" role
   const vendorHasRole =
     !!(vendorParty?.roles?.includes("vendor")) ||
@@ -70,7 +73,7 @@ export default function PurchaseOrderDetailScreen() {
   const canSubmit = po?.status === "draft" && !vendorGuardActive;
   const canApprove = po?.status === "submitted" && !vendorGuardActive;
   const canCancel = (po?.status === "draft" || po?.status === "submitted") && po?.status !== "cancelled" && po?.status !== "canceled" && po?.status !== "closed";
-  const canClose = (po?.status === "approved" || po?.status === "received" || po?.status === "partially_fulfilled" || po?.status === "fulfilled") && po?.status !== "cancelled" && po?.status !== "canceled" && po?.status !== "closed";
+  const canClose = po?.status === "fulfilled";
 
   return (
     <View style={{ flex: 1, padding: 12 }}>
@@ -171,9 +174,18 @@ export default function PurchaseOrderDetailScreen() {
                 const linesToReceive = (po?.lines ?? [])
                   .map((line: any) => {
                     const remaining = Number(line?.qty ?? 0) - Number(line?.receivedQty ?? 0);
-                    return { lineId: String(line.id ?? line.lineId), deltaQty: remaining };
+                    if (!(remaining > 0)) return null;
+                    const lineId = String(line.id ?? line.lineId);
+                    const lotVal = (line?.lot ?? defaultLot ?? "").trim();
+                    const locVal = (line?.locationId ?? defaultLocationId ?? "").trim();
+                    return {
+                      lineId,
+                      deltaQty: remaining,
+                      ...(lotVal ? { lot: lotVal } : {}),
+                      ...(locVal ? { locationId: locVal } : {}),
+                    };
                   })
-                  .filter((ln: any) => ln.deltaQty > 0);
+                  .filter((ln: any) => ln && ln.deltaQty > 0);
 
                 if (!po?.id || linesToReceive.length === 0) {
                   toast("No items to receive", "info");
@@ -226,6 +238,40 @@ export default function PurchaseOrderDetailScreen() {
           <Text>Close</Text>
         </Pressable>
       </View>
+
+      {/* Order-level defaults for quick receive */}
+      {receivable && (
+        <View style={{ marginTop: 12, gap: 8 as any }}>
+          <Text style={{ fontWeight: "700" }}>Receive Defaults</Text>
+          <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+            <View style={{ width: 160 }}>
+              <Text style={{ fontWeight: "600" }}>Default Lot</Text>
+              <TextInput
+                value={defaultLot}
+                onChangeText={setDefaultLot}
+                placeholder="Lot/Batch"
+                style={{ borderWidth: 1, borderRadius: 8, padding: 8 }}
+              />
+            </View>
+            <View style={{ width: 160 }}>
+              <Text style={{ fontWeight: "600" }}>Default LocationId</Text>
+              <TextInput
+                value={defaultLocationId}
+                onChangeText={setDefaultLocationId}
+                placeholder="Location"
+                style={{ borderWidth: 1, borderRadius: 8, padding: 8 }}
+              />
+            </View>
+            <Btn
+              label="Apply defaults to all lines"
+              onPress={() => {
+                // No per-line state to edit; inform operator defaults will be applied during bulk receive
+                toast("Defaults will be applied to missing fields", "success");
+              }}
+            />
+          </View>
+        </View>
+      )}
 
       <FlatList
         style={{ marginTop: 12 }}

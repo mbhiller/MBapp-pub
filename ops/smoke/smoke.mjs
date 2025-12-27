@@ -3545,6 +3545,143 @@ const tests = {
     return { test:"po-receive-line-batch", result: ok ? "PASS" : "FAIL", create, recv1, recv2 };
   },
 
+  // Receive with location + lot and validate movement fields + by-location counters
+  "smoke:po:receive-with-location-counters": async () => {
+    await ensureBearer();
+    const { vendorId } = await seedVendor(api);
+
+    // Create two products and inventory items
+    const prodA = await createProduct({ name: "RecvLocA" });
+    const prodB = await createProduct({ name: "RecvLocB" });
+    const invA  = await createInventoryForProduct(prodA.body.id, "RecvLocItemA");
+    const invB  = await createInventoryForProduct(prodB.body.id, "RecvLocItemB");
+    if (!invA.ok || !invB.ok) return { test: "po:receive-with-location-counters", result: "FAIL", invA, invB };
+
+    // Create PO draft with two lines
+    const create = await post(`/objects/purchaseOrder`, {
+      type: "purchaseOrder",
+      status: "draft",
+      vendorId,
+      lines: [
+        { id: "LC1", itemId: invA.body.id, uom: "ea", qty: 2 },
+        { id: "LC2", itemId: invB.body.id, uom: "ea", qty: 1 }
+      ]
+    });
+    if (!create.ok) return { test: "po:receive-with-location-counters", result: "FAIL", create };
+    const poId = create.body.id;
+
+    // Submit + approve
+    const submit  = await post(`/purchasing/po/${encodeURIComponent(poId)}:submit`,  {}, { "Idempotency-Key": idem() });
+    const approve = await post(`/purchasing/po/${encodeURIComponent(poId)}:approve`, {}, { "Idempotency-Key": idem() });
+    if (!submit.ok || !approve.ok) return { test: "po:receive-with-location-counters", result: "FAIL", submit, approve };
+
+    const approved = await waitForStatus("purchaseOrder", poId, ["approved"]);
+    if (!approved.ok) return { test: "po:receive-with-location-counters", result: "FAIL", reason: "not-approved-yet", approved };
+
+    // Receive into a specific location; include lot for LC1
+    const LOC = "LOC-RX";
+    const LOT = "LOT-RX-200";
+    const recv = await post(`/purchasing/po/${encodeURIComponent(poId)}:receive`, {
+      lines: [
+        { lineId: "LC1", deltaQty: 2, lot: LOT, locationId: LOC },
+        { lineId: "LC2", deltaQty: 1, locationId: LOC }
+      ]
+    }, { "Idempotency-Key": idem() });
+    if (!recv.ok) return { test: "po:receive-with-location-counters", result: "FAIL", step: "receive", recv };
+
+    // Poll movements search for action=receive with refId=poId
+    let found = [];
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const search = await post(`/objects/inventoryMovement/search`, { refId: poId, action: "receive" });
+      const items = Array.isArray(search.body?.items) ? search.body.items : [];
+      found = items.filter(m => m.refId === poId);
+      if (found.length >= 2) break;
+      await sleep(200);
+    }
+
+    // Validate movement fields
+    const mvLC1 = found.find(m => (m.poLineId === "LC1"));
+    const mvLC2 = found.find(m => (m.poLineId === "LC2"));
+    const fieldsOk = !!mvLC1 && !!mvLC2
+      && mvLC1.action === "receive" && Number(mvLC1.qty) === 2 && mvLC1.locationId === LOC && mvLC1.lot === LOT
+      && mvLC2.action === "receive" && Number(mvLC2.qty) === 1 && mvLC2.locationId === LOC;
+
+    // Check by-location counters reflect received quantities
+    const byLocA = await get(`/inventory/${encodeURIComponent(invA.body.id)}/onhand:by-location`);
+    const byLocB = await get(`/inventory/${encodeURIComponent(invB.body.id)}/onhand:by-location`);
+    const locA = Array.isArray(byLocA.body?.items) ? byLocA.body.items.find(b => (b.locationId ?? null) === LOC) : null;
+    const locB = Array.isArray(byLocB.body?.items) ? byLocB.body.items.find(b => (b.locationId ?? null) === LOC) : null;
+    const countersOk = !!locA && !!locB && Number(locA.onHand) >= 2 && Number(locB.onHand) >= 1;
+
+    const pass = fieldsOk && countersOk;
+    return {
+      test: "po:receive-with-location-counters",
+      result: pass ? "PASS" : "FAIL",
+      poId,
+      recv,
+      fieldsOk,
+      countersOk,
+      mvLC1,
+      mvLC2,
+      byLocA,
+      byLocB,
+    };
+  },
+
+  // Validate negative/zero deltaQty rejects with 400 and references lineId
+  "smoke:po:receive-line-negative-qty": async () => {
+    await ensureBearer();
+    const { vendorId } = await seedVendor(api);
+
+    const prod = await createProduct({ name: "RecvNegQty" });
+    const inv  = await createInventoryForProduct(prod.body.id, "RecvNegQtyItem");
+    if (!inv.ok) return { test: "po-receive-line-negative-qty", result: "FAIL", inv };
+
+    const create = await post(`/objects/purchaseOrder`, {
+      type: "purchaseOrder", status: "draft", vendorId,
+      lines: [{ id: "NL1", itemId: inv.body.id, uom: "ea", qty: 3 }]
+    });
+    if (!create.ok) return { test: "po-receive-line-negative-qty", result: "FAIL", create };
+    const id = create.body.id;
+
+    await post(`/purchasing/po/${encodeURIComponent(id)}:submit`,  {}, { "Idempotency-Key": idem() });
+    await post(`/purchasing/po/${encodeURIComponent(id)}:approve`, {}, { "Idempotency-Key": idem() });
+    const approved = await waitForStatus("purchaseOrder", id, ["approved"]);
+    if (!approved.ok) return { test: "po-receive-line-negative-qty", result: "FAIL", reason: "not-approved-yet", approved };
+
+    const includesLineRef = (body) => {
+      try {
+        if (!body || typeof body !== "object") return false;
+        if (body.lineId === "NL1") return true;
+        const d = body.details;
+        if (d && typeof d === "object") {
+          if (d.lineId === "NL1") return true;
+          const errs = Array.isArray(d.errors) ? d.errors : Array.isArray(d) ? d : [];
+          if (Array.isArray(errs)) {
+            return errs.some(e => e && (e.lineId === "NL1" || e.field === "lineId"));
+          }
+        }
+        return false;
+      } catch { return false; }
+    };
+
+    // Attempt deltaQty=0
+    const recvZero = await post(`/purchasing/po/${encodeURIComponent(id)}:receive`, {
+      lines: [{ lineId: "NL1", deltaQty: 0 }]
+    }, { "Idempotency-Key": idem() });
+
+    // Attempt deltaQty=-1
+    const recvNeg = await post(`/purchasing/po/${encodeURIComponent(id)}:receive`, {
+      lines: [{ lineId: "NL1", deltaQty: -1 }]
+    }, { "Idempotency-Key": idem() });
+
+    const zeroBad = !recvZero.ok && recvZero.status === 400 && includesLineRef(recvZero.body);
+    const negBad  = !recvNeg.ok  && recvNeg.status  === 400 && includesLineRef(recvNeg.body);
+
+    const pass = zeroBad && negBad;
+    return { test: "po-receive-line-negative-qty", result: pass ? "PASS" : "FAIL", create, recvZero, recvNeg };
+  },
+
   // Same payload, different Idempotency-Key -> should be idempotent via payload signature
   "smoke:po:receive-line-idem-different-key": async () => {
     await ensureBearer();

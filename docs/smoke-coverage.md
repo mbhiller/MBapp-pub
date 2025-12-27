@@ -510,6 +510,13 @@ npm run smokes:cleanup
 | **smoke:po:receive-line** | 1. Create product + item 2. Create PO line (qty 3) 3. Submit, approve 4. Receive 2 qty with lot+location 5. Retry over-receive attempt (deltaQty 2 when only 1 remains) with same Idempotency-Key → 409 conflict 6. Retry again with same key → 409 again (failed ops not cached) | Status: draft→submitted→approved→partially-received; over-receive validation returns 409 with RECEIVE_EXCEEDS_REMAINING; failed operations are NOT cached for idempotency | `/purchasing/po/{id}:receive` |
 | **smoke:po:receive-line-batch** | 1. Create 2 products + items 2. Create PO 2 lines 3. Submit, approve 4. Receive line BL1 qty 2 + BL2 qty 1 5. Receive BL2 remaining qty 3 | BL1 fully received, BL2 fully received; final PO status transitions to `fulfilled` (not `received`) | `/purchasing/po/{id}:receive` |
 | **smoke:po:receive-line-idem-different-key** | 1. Create PO (line qty 3) 2. Submit, approve 3. Receive deltaQty 2 with KEY_A (succeeds) 4. Receive same payload + KEY_B → 409 conflict (over-receive) 5. Finish receive deltaQty 1 with third key → status `fulfilled` | KEY_A succeeds; KEY_B fails over-receive validation (409 with RECEIVE_EXCEEDS_REMAINING); final status `fulfilled`; validates that payload-sig idempotency happens AFTER validation | `/purchasing/po/{id}:receive` |
+| **smoke:po:receive-with-location-counters** | 1. Create PO 2 lines 2. Submit, approve 3. Receive with `{ locationId, lot }` 4. Poll movements search 5. Check by-location counters | Movements for `receive` include `poLineId`, `locationId`, `lot`; per-location onHand increments as expected | `/purchasing/po/{id}:receive`, `/objects/inventoryMovement/search`, `/inventory/{id}/onhand:by-location` |
+| **smoke:po:receive-line-negative-qty** | 1. Create PO (approved) 2. Attempt `deltaQty=0` and `deltaQty=-1` on a line | API returns 400 (bad request) and includes line reference (e.g., `lineId`) in error details | `/purchasing/po/{id}:receive` |
+
+**Receiving UX (Sprint E):**
+- Web bulk receive: "Receive All Remaining (Apply Defaults)" builds a multi-line payload and applies order-level defaults (location, lot) to empty fields only; blocks when required defaults are missing.
+- Keyboard ergonomics: Enter applies defaults on the defaults inputs; Enter on line inputs can submit receiving.
+- Mobile quick receive: Order-level defaults for location/lot are applied to missing fields without overriding line-specific values; per-line modal remains available.
 
 ### Feature Flags & Events
 
@@ -553,6 +560,7 @@ npm run smokes:cleanup
 | **Inventory** | onhand, guards, onhand-batch, list-movements, movements-by-location, inventory:crud | ✅ Complete | CRUD + guards + batch ops + item-based filter + location-based filter + Sprint XXVII CRUD smoke (in CI) |
 | **Sales Orders** | sales:happy, sales:guards, sales:fulfill-without-reserve, outbound:reserve-fulfill-release-cycle, salesOrders:commit-strict-shortage (CI), salesOrders:commit-nonstrict-backorder (CI) | ✅ Complete | Lifecycle + guardrails + outbound patterns; strict shortage returns 409; non-strict shortage creates backorder (CI-covered); fulfill semantics validated |
 | **Purchase Orders** | purchasing:happy, purchasing:guards, po:save-from-suggest, po:quick-receive, po:receive-line*, po:receive-line-batch, po:receive-line-idem-* | ✅ Complete | Lifecycle, receipt variants, idempotency, vendor guard, events |
+| **Purchase Orders (Sprint E adds)** | po:receive-with-location-counters, po:receive-line-negative-qty | ✅ Added | Location-aware receive validation + bad-request guard for non-positive deltaQty |
 | **Parties** | parties:happy, parties:crud | ✅ Complete | CRUD lifecycle + search with idempotency + eventual consistency retry (in CI) |
 | **Products** | products:crud | ✅ Complete (Sprint XXVII) | CRUD lifecycle + search with idempotency + eventual consistency retry (in CI) |
 | **Pagination & Filtering** | objects:list-pagination, objects:list-filter-soId, objects:pageInfo-present, movements:filter-by-poLine | ✅ Complete | Cursor pagination, query param filters (filter.*) |
