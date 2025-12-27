@@ -491,6 +491,12 @@ npm run smokes:cleanup
 | **smoke:sales:fulfill-with-location** | 1. Create locations A+B 2. Create product+item, receive 5, putaway to locB 3. Create SO qty 2, submit, commit 4. Fulfill with `{ locationId: locBId, lot: \"LOT-SO\" }` 5. Assert fulfill OK, movement has locationId+lot, GET `/inventory/{id}/onhand:by-location` shows locB onHand decreased by 2 | Fulfill with location/lot succeeds; movement recorded; per-location counters accurate | `/objects/location`, `/inventory/{id}:putaway`, `/sales/so/{id}:fulfill`, `/inventory/{id}/onhand:by-location` |
 | **smoke:salesOrders:commit-strict-shortage** | 1. Create product+item onHand=0 2. Create SO qty 5 3. Submit 4. Commit strict:true | Commit returns 409 with shortages[]; no backorderRequest created | `/sales/so/{id}:commit`, `/objects/backorderRequest/search` |
 | **smoke:salesOrders:commit-nonstrict-backorder** | 1. Create product+item onHand=0 2. Create SO qty 4 3. Submit 4. Commit (strict=false default) 5. Poll backorderRequest | Commit 200 with shortages[]; backorderRequest created (open) | `/sales/so/{id}:commit`, `/objects/backorderRequest/search` |
+| **smoke:sales:fulfill-without-reserve** | 1. Create product+item, receive qty 2 2. Create SO qty 2, submit, commit 3. Fulfill directly (skip reserve) 4. Poll inventoryMovement | SO status fulfilled; movement action=fulfill with correct soId/soLineId | `/sales/so/{id}:commit`, `/sales/so/{id}:fulfill`, `/objects/inventoryMovement/search` |
+| **smoke:outbound:reserve-fulfill-release-cycle** | 1. Create product+item, receive qty 5 2. Create SO qty 3, submit, commit 3. Reserve qty 3 4. Fulfill qty 2 (partial) 5. Release qty 1 6. Poll movements and counters | 3 movements created (reserve/fulfill/release); counter transitions: +3 reserved, -1 released; fulfill is counter no-op | `/sales/so/{id}:reserve`, `:fulfill`, `:release`, `/objects/inventoryMovement/search`, `/inventory/{id}/onhand:by-location` |
+
+**Outbound Semantics** (Sales Orders):
+- **Fulfill** does NOT auto-apply reserved qty server-side; clients default fulfill quantities (reserved qty if present, else remaining qty).
+- **Fulfill** is a counter no-op; inventory changes happen on commit (decrement onhand), reserve/release (manage reserved balance).
 
 ### Purchase Orders
 
@@ -545,7 +551,7 @@ npm run smokes:cleanup
 | Module | Smoke Tests | Status | Notes |
 |--------|------------|--------|-------|
 | **Inventory** | onhand, guards, onhand-batch, list-movements, movements-by-location, inventory:crud | ✅ Complete | CRUD + guards + batch ops + item-based filter + location-based filter + Sprint XXVII CRUD smoke (in CI) |
-| **Sales Orders** | sales:happy, sales:guards, salesOrders:commit-strict-shortage (CI), salesOrders:commit-nonstrict-backorder (CI) | ✅ Complete | Lifecycle + guardrails; strict shortage returns 409; non-strict shortage creates backorder (CI-covered) |
+| **Sales Orders** | sales:happy, sales:guards, sales:fulfill-without-reserve, outbound:reserve-fulfill-release-cycle, salesOrders:commit-strict-shortage (CI), salesOrders:commit-nonstrict-backorder (CI) | ✅ Complete | Lifecycle + guardrails + outbound patterns; strict shortage returns 409; non-strict shortage creates backorder (CI-covered); fulfill semantics validated |
 | **Purchase Orders** | purchasing:happy, purchasing:guards, po:save-from-suggest, po:quick-receive, po:receive-line*, po:receive-line-batch, po:receive-line-idem-* | ✅ Complete | Lifecycle, receipt variants, idempotency, vendor guard, events |
 | **Parties** | parties:happy, parties:crud | ✅ Complete | CRUD lifecycle + search with idempotency + eventual consistency retry (in CI) |
 | **Products** | products:crud | ✅ Complete (Sprint XXVII) | CRUD lifecycle + search with idempotency + eventual consistency retry (in CI) |

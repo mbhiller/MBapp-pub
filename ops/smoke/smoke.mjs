@@ -2861,6 +2861,345 @@ const tests = {
     };
   },
 
+  "smoke:sales:fulfill-without-reserve": async () => {
+    await ensureBearer();
+
+    // 1) Create product + inventory
+    const prod = await createProduct({ name: "FulfillNoReserve" });
+    if (!prod.ok) return { test: "sales:fulfill-without-reserve", result: "FAIL", step: "createProduct", prod };
+    const prodId = prod.body?.id;
+    recordCreated({ type: 'product', id: prodId, route: '/objects/product', meta: { name: 'FulfillNoReserve' } });
+
+    const item = await createInventoryForProduct(prodId, "FulfillNoReserveItem");
+    if (!item.ok) return { test: "sales:fulfill-without-reserve", result: "FAIL", step: "createInventory", item };
+    const itemId = item.body?.id;
+    recordCreated({ type: 'inventory', id: itemId, route: '/objects/inventory', meta: { name: 'FulfillNoReserveItem', productId: prodId } });
+
+    // 2) Create location and receive inventory there
+    const loc = await post(`/objects/location`,
+      { type: "location", name: smokeTag("Loc-FulfillNR"), code: "LOC-FNR", status: "active" },
+      { "Idempotency-Key": idem() }
+    );
+    if (!loc.ok) return { test: "sales:fulfill-without-reserve", result: "FAIL", step: "createLocation", loc };
+    const locId = loc.body?.id;
+    recordCreated({ type: 'location', id: locId, route: '/objects/location', meta: { name: 'Loc-FulfillNR', code: 'LOC-FNR' } });
+
+    // Ensure onHand is 0 first
+    const ohPre = await onhand(itemId);
+    const currentOnHand = ohPre.body?.items?.[0]?.onHand ?? 0;
+    if (currentOnHand !== 0) {
+      await post(`/objects/${MV_TYPE}`, { itemId, action: "adjust", qty: -currentOnHand }, { "Idempotency-Key": idem() });
+    }
+
+    // Receive 5 units, then putaway to location
+    const receive = await post(`/objects/${MV_TYPE}`, { itemId, action: "receive", qty: 5 }, { "Idempotency-Key": idem() });
+    if (!receive.ok) return { test: "sales:fulfill-without-reserve", result: "FAIL", step: "receive", receive };
+
+    const putaway = await post(`/inventory/${itemId}:putaway`, {
+      qty: 5,
+      toLocationId: locId,
+      lot: "LOT-FNR",
+      note: "smoke fulfill-without-reserve setup"
+    }, { "Idempotency-Key": idem() });
+    if (!putaway.ok) return { test: "sales:fulfill-without-reserve", result: "FAIL", step: "putaway", putaway };
+
+    // 3) Create SO with qty 3, submit and commit (non-strict)
+    const { partyId } = await seedParties(api);
+    const so = await post(`/objects/salesOrder`, {
+      type: "salesOrder",
+      status: "draft",
+      partyId,
+      lines: [{ id: "FNR1", itemId, uom: "ea", qty: 3 }]
+    }, { "Idempotency-Key": idem() });
+    if (!so.ok) return { test: "sales:fulfill-without-reserve", result: "FAIL", step: "createSO", so };
+    const soId = so.body?.id;
+    const soLineId = "FNR1";
+    recordCreated({ type: 'salesOrder', id: soId, route: '/objects/salesOrder', meta: { partyId } });
+
+    const submit = await post(`/sales/so/${encodeURIComponent(soId)}:submit`, {}, { "Idempotency-Key": idem() });
+    if (!submit.ok) return { test: "sales:fulfill-without-reserve", result: "FAIL", step: "submit", submit };
+
+    const commit = await post(`/sales/so/${encodeURIComponent(soId)}:commit`, {}, { "Idempotency-Key": idem() });
+    if (!commit.ok) return { test: "sales:fulfill-without-reserve", result: "FAIL", step: "commit", commit };
+    if (commit.body?.status !== "committed") {
+      return { test: "sales:fulfill-without-reserve", result: "FAIL", step: "commitStatus", status: commit.body?.status, expected: "committed" };
+    }
+
+    // 4) Fulfill directly WITHOUT reserve call
+    const fulfill = await post(`/sales/so/${encodeURIComponent(soId)}:fulfill`, {
+      lines: [{ lineId: soLineId, deltaQty: 3, locationId: locId, lot: "LOT-FNR" }]
+    }, { "Idempotency-Key": idem() });
+    if (!fulfill.ok) return { test: "sales:fulfill-without-reserve", result: "FAIL", step: "fulfill", fulfill };
+
+    // 5) Assert SO status is fulfilled
+    const soAfterFulfill = fulfill.body;
+    if (soAfterFulfill?.status !== "fulfilled") {
+      return { test: "sales:fulfill-without-reserve", result: "FAIL", step: "checkFulfillStatus", status: soAfterFulfill?.status, expected: "fulfilled" };
+    }
+
+    // 6) Query movements for this SO to assert fulfill action exists
+    // Use top-level filters: soId and action (not nested under "filters")
+    const mvSearch = await post(`/objects/inventoryMovement/search`, {
+      soId,
+      action: "fulfill"
+    });
+    if (!mvSearch.ok) return { test: "sales:fulfill-without-reserve", result: "FAIL", step: "searchMovements", mvSearch };
+
+    const movements = Array.isArray(mvSearch.body?.items) ? mvSearch.body.items : [];
+    if (movements.length === 0) {
+      return { test: "sales:fulfill-without-reserve", result: "FAIL", step: "noFulfillMovements", movements, soId };
+    }
+
+    // Assert at least one movement has action=fulfill, qty=3, soId=..., soLineId=...
+    const fulfillMv = movements.find(m => 
+      m.action === "fulfill" && 
+      m.qty === 3 && 
+      m.soId === soId && 
+      m.soLineId === soLineId
+    );
+    if (!fulfillMv) {
+      return { 
+        test: "sales:fulfill-without-reserve", 
+        result: "FAIL", 
+        step: "assertFulfillMovement",
+        expected: { action: "fulfill", qty: 3, soId, soLineId },
+        foundMovements: movements.map(m => ({ action: m.action, qty: m.qty, soId: m.soId, soLineId: m.soLineId, itemId: m.itemId }))
+      };
+    }
+
+    const pass = soAfterFulfill?.status === "fulfilled" && !!fulfillMv;
+    return {
+      test: "sales:fulfill-without-reserve",
+      result: pass ? "PASS" : "FAIL",
+      steps: {
+        product: { prodId },
+        item: { itemId },
+        location: { locId },
+        so: { soId, soLineId },
+        statusTransition: { preCommit: "committed", postFulfill: soAfterFulfill?.status },
+        fulfillMovement: fulfillMv ? {
+          id: fulfillMv.id,
+          action: fulfillMv.action,
+          qty: fulfillMv.qty,
+          soId: fulfillMv.soId,
+          soLineId: fulfillMv.soLineId,
+          locationId: fulfillMv.locationId,
+          lot: fulfillMv.lot
+        } : null
+      }
+    };
+  },
+
+  "smoke:outbound:reserve-fulfill-release-cycle": async () => {
+    await ensureBearer();
+
+    // 1) Setup: create product + inventory + location, receive 3 units
+    const prod = await createProduct({ name: "OutboundCycle" });
+    if (!prod.ok) return { test: "outbound:reserve-fulfill-release-cycle", result: "FAIL", step: "createProduct", prod };
+    const prodId = prod.body?.id;
+    recordCreated({ type: 'product', id: prodId, route: '/objects/product', meta: { name: 'OutboundCycle' } });
+
+    const item = await createInventoryForProduct(prodId, "OutboundCycleItem");
+    if (!item.ok) return { test: "outbound:reserve-fulfill-release-cycle", result: "FAIL", step: "createInventory", item };
+    const itemId = item.body?.id;
+    recordCreated({ type: 'inventory', id: itemId, route: '/objects/inventory', meta: { name: 'OutboundCycleItem', productId: prodId } });
+
+    const loc = await post(`/objects/location`,
+      { type: "location", name: smokeTag("Loc-OutboundCycle"), code: "LOC-OBC", status: "active" },
+      { "Idempotency-Key": idem() }
+    );
+    if (!loc.ok) return { test: "outbound:reserve-fulfill-release-cycle", result: "FAIL", step: "createLocation", loc };
+    const locId = loc.body?.id;
+    recordCreated({ type: 'location', id: locId, route: '/objects/location', meta: { name: 'Loc-OutboundCycle', code: 'LOC-OBC' } });
+
+    // Ensure onHand is 0
+    const ohPre = await onhand(itemId);
+    const currentOnHand = ohPre.body?.items?.[0]?.onHand ?? 0;
+    if (currentOnHand !== 0) {
+      await post(`/objects/${MV_TYPE}`, { itemId, action: "adjust", qty: -currentOnHand }, { "Idempotency-Key": idem() });
+    }
+
+    // Receive 3 units and putaway to location
+    const receive = await post(`/objects/${MV_TYPE}`, { itemId, action: "receive", qty: 3 }, { "Idempotency-Key": idem() });
+    if (!receive.ok) return { test: "outbound:reserve-fulfill-release-cycle", result: "FAIL", step: "receive", receive };
+
+    const putaway = await post(`/inventory/${itemId}:putaway`, {
+      qty: 3,
+      toLocationId: locId,
+      lot: "LOT-OBC",
+      note: "smoke outbound-cycle setup"
+    }, { "Idempotency-Key": idem() });
+    if (!putaway.ok) return { test: "outbound:reserve-fulfill-release-cycle", result: "FAIL", step: "putaway", putaway };
+
+    // Verify initial counters at location: onHand=3, reserved=0
+    const ohByLocInitial = await get(`/inventory/${encodeURIComponent(itemId)}/onhand:by-location`);
+    if (!ohByLocInitial.ok) return { test: "outbound:reserve-fulfill-release-cycle", result: "FAIL", step: "onhand-by-location-initial", ohByLocInitial };
+    const locCounterInitial = (ohByLocInitial.body?.items ?? []).find(c => c.locationId === locId);
+    const initialOnHand = locCounterInitial?.onHand ?? 0;
+    if (initialOnHand !== 3) {
+      return { test: "outbound:reserve-fulfill-release-cycle", result: "FAIL", step: "verifyInitialStock", initialOnHand, expected: 3 };
+    }
+
+    // 2) Create SO with qty 3, submit + commit
+    const { partyId } = await seedParties(api);
+    const so = await post(`/objects/salesOrder`, {
+      type: "salesOrder",
+      status: "draft",
+      partyId,
+      lines: [{ id: "OBC1", itemId, uom: "ea", qty: 3 }]
+    }, { "Idempotency-Key": idem() });
+    if (!so.ok) return { test: "outbound:reserve-fulfill-release-cycle", result: "FAIL", step: "createSO", so };
+    const soId = so.body?.id;
+    const soLineId = "OBC1";
+    recordCreated({ type: 'salesOrder', id: soId, route: '/objects/salesOrder', meta: { partyId } });
+
+    const submit = await post(`/sales/so/${encodeURIComponent(soId)}:submit`, {}, { "Idempotency-Key": idem() });
+    if (!submit.ok) return { test: "outbound:reserve-fulfill-release-cycle", result: "FAIL", step: "submit", submit };
+
+    const commit = await post(`/sales/so/${encodeURIComponent(soId)}:commit`, {}, { "Idempotency-Key": idem() });
+    if (!commit.ok) return { test: "outbound:reserve-fulfill-release-cycle", result: "FAIL", step: "commit", commit };
+    if (commit.body?.status !== "committed") {
+      return { test: "outbound:reserve-fulfill-release-cycle", result: "FAIL", step: "commitStatus", status: commit.body?.status, expected: "committed" };
+    }
+
+    // 3) Reserve qty 3 from location
+    const reserve = await post(`/sales/so/${encodeURIComponent(soId)}:reserve`, {
+      lines: [{ lineId: soLineId, deltaQty: 3, locationId: locId, lot: "LOT-OBC" }]
+    }, { "Idempotency-Key": idem() });
+    if (!reserve.ok) return { test: "outbound:reserve-fulfill-release-cycle", result: "FAIL", step: "reserve", reserve };
+
+    // Verify counters after reserve: reserved=3, onHand=3
+    const ohByLocAfterReserve = await get(`/inventory/${encodeURIComponent(itemId)}/onhand:by-location`);
+    if (!ohByLocAfterReserve.ok) return { test: "outbound:reserve-fulfill-release-cycle", result: "FAIL", step: "onhand-by-location-after-reserve", ohByLocAfterReserve };
+    const locCounterAfterReserve = (ohByLocAfterReserve.body?.items ?? []).find(c => c.locationId === locId);
+    const reservedAfterReserve = locCounterAfterReserve?.reserved ?? 0;
+    const onHandAfterReserve = locCounterAfterReserve?.onHand ?? 0;
+    if (reservedAfterReserve !== 3) {
+      return { test: "outbound:reserve-fulfill-release-cycle", result: "FAIL", step: "verifyReservedAfterReserve", reservedAfterReserve, expected: 3 };
+    }
+
+    // 4) Fulfill qty 2 (partial)
+    const fulfill = await post(`/sales/so/${encodeURIComponent(soId)}:fulfill`, {
+      lines: [{ lineId: soLineId, deltaQty: 2, locationId: locId, lot: "LOT-OBC" }]
+    }, { "Idempotency-Key": idem() });
+    if (!fulfill.ok) return { test: "outbound:reserve-fulfill-release-cycle", result: "FAIL", step: "fulfill", fulfill };
+    if (fulfill.body?.status !== "partially_fulfilled") {
+      return { test: "outbound:reserve-fulfill-release-cycle", result: "FAIL", step: "fulfillStatus", status: fulfill.body?.status, expected: "partially_fulfilled" };
+    }
+
+    // Verify counters after fulfill (no change expected - fulfill is counter no-op)
+    const ohByLocAfterFulfill = await get(`/inventory/${encodeURIComponent(itemId)}/onhand:by-location`);
+    if (!ohByLocAfterFulfill.ok) return { test: "outbound:reserve-fulfill-release-cycle", result: "FAIL", step: "onhand-by-location-after-fulfill", ohByLocAfterFulfill };
+    const locCounterAfterFulfill = (ohByLocAfterFulfill.body?.items ?? []).find(c => c.locationId === locId);
+    const reservedAfterFulfill = locCounterAfterFulfill?.reserved ?? 0;
+    const onHandAfterFulfill = locCounterAfterFulfill?.onHand ?? 0;
+    // Fulfill doesn't change counters, so reserved should still be 3, onHand should still be 3
+    if (reservedAfterFulfill !== 3) {
+      return { test: "outbound:reserve-fulfill-release-cycle", result: "FAIL", step: "verifyReservedAfterFulfill", reservedAfterFulfill, expected: 3, note: "Fulfill should not change reserved counter" };
+    }
+
+    // 5) Release qty 1 (of the remaining 1 reserved after fulfill)
+    const release = await post(`/sales/so/${encodeURIComponent(soId)}:release`, {
+      lines: [{ lineId: soLineId, deltaQty: 1, locationId: locId, lot: "LOT-OBC" }]
+    }, { "Idempotency-Key": idem() });
+    if (!release.ok) return { test: "outbound:reserve-fulfill-release-cycle", result: "FAIL", step: "release", release };
+
+    // Verify counters after release: reserved should decrease to 2 (3 - 1)
+    const ohByLocAfterRelease = await get(`/inventory/${encodeURIComponent(itemId)}/onhand:by-location`);
+    if (!ohByLocAfterRelease.ok) return { test: "outbound:reserve-fulfill-release-cycle", result: "FAIL", step: "onhand-by-location-after-release", ohByLocAfterRelease };
+    const locCounterAfterRelease = (ohByLocAfterRelease.body?.items ?? []).find(c => c.locationId === locId);
+    const reservedAfterRelease = locCounterAfterRelease?.reserved ?? 0;
+    const onHandAfterRelease = locCounterAfterRelease?.onHand ?? 0;
+    if (reservedAfterRelease !== 2) {
+      return { test: "outbound:reserve-fulfill-release-cycle", result: "FAIL", step: "verifyReservedAfterRelease", reservedAfterRelease, expected: 2 };
+    }
+
+    // 6) Query movements and assert each action
+    const mvSearch = await post(`/objects/inventoryMovement/search`, {
+      soId
+    });
+    if (!mvSearch.ok) return { test: "outbound:reserve-fulfill-release-cycle", result: "FAIL", step: "searchMovements", mvSearch };
+
+    const movements = Array.isArray(mvSearch.body?.items) ? mvSearch.body.items : [];
+
+    // Assert reserve movement: action="reserve", qty=3, soId, soLineId, locationId
+    const reserveMv = movements.find(m =>
+      m.action === "reserve" &&
+      m.qty === 3 &&
+      m.soId === soId &&
+      m.soLineId === soLineId &&
+      m.locationId === locId
+    );
+    if (!reserveMv) {
+      return {
+        test: "outbound:reserve-fulfill-release-cycle",
+        result: "FAIL",
+        step: "assertReserveMovement",
+        expected: { action: "reserve", qty: 3, soId, soLineId, locationId: locId },
+        foundMovements: movements.map(m => ({ action: m.action, qty: m.qty, soId: m.soId, soLineId: m.soLineId, locationId: m.locationId }))
+      };
+    }
+
+    // Assert fulfill movement: action="fulfill", qty=2, soId, soLineId, locationId
+    const fulfillMv = movements.find(m =>
+      m.action === "fulfill" &&
+      m.qty === 2 &&
+      m.soId === soId &&
+      m.soLineId === soLineId &&
+      m.locationId === locId
+    );
+    if (!fulfillMv) {
+      return {
+        test: "outbound:reserve-fulfill-release-cycle",
+        result: "FAIL",
+        step: "assertFulfillMovement",
+        expected: { action: "fulfill", qty: 2, soId, soLineId, locationId: locId },
+        foundMovements: movements.map(m => ({ action: m.action, qty: m.qty, soId: m.soId, soLineId: m.soLineId, locationId: m.locationId }))
+      };
+    }
+
+    // Assert release movement: action="release", qty=1, soId, soLineId, locationId
+    const releaseMv = movements.find(m =>
+      m.action === "release" &&
+      m.qty === 1 &&
+      m.soId === soId &&
+      m.soLineId === soLineId &&
+      m.locationId === locId
+    );
+    if (!releaseMv) {
+      return {
+        test: "outbound:reserve-fulfill-release-cycle",
+        result: "FAIL",
+        step: "assertReleaseMovement",
+        expected: { action: "release", qty: 1, soId, soLineId, locationId: locId },
+        foundMovements: movements.map(m => ({ action: m.action, qty: m.qty, soId: m.soId, soLineId: m.soLineId, locationId: m.locationId }))
+      };
+    }
+
+    const pass = !!reserveMv && !!fulfillMv && !!releaseMv && reservedAfterRelease === 2;
+    return {
+      test: "outbound:reserve-fulfill-release-cycle",
+      result: pass ? "PASS" : "FAIL",
+      steps: {
+        product: { prodId },
+        item: { itemId },
+        location: { locId },
+        so: { soId, soLineId },
+        counters: {
+          initial: { onHand: initialOnHand, reserved: 0 },
+          afterReserve: { onHand: onHandAfterReserve, reserved: reservedAfterReserve },
+          afterFulfill: { onHand: onHandAfterFulfill, reserved: reservedAfterFulfill },
+          afterRelease: { onHand: onHandAfterRelease, reserved: reservedAfterRelease }
+        },
+        movements: {
+          reserve: reserveMv ? { action: reserveMv.action, qty: reserveMv.qty, soId: reserveMv.soId, soLineId: reserveMv.soLineId, locationId: reserveMv.locationId } : null,
+          fulfill: fulfillMv ? { action: fulfillMv.action, qty: fulfillMv.qty, soId: fulfillMv.soId, soLineId: fulfillMv.soLineId, locationId: fulfillMv.locationId } : null,
+          release: releaseMv ? { action: releaseMv.action, qty: releaseMv.qty, soId: releaseMv.soId, soLineId: releaseMv.soLineId, locationId: releaseMv.locationId } : null
+        }
+      }
+    };
+  },
+
   "smoke:salesOrders:commit-strict-shortage": async () => {
     await ensureBearer();
 
