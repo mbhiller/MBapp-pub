@@ -1,3 +1,14 @@
+## Sprint A — Backorders → Purchase Orders Hardening (2025-12-26)
+
+- Backorders Suggest PO flow hardened: handles `draft` or `drafts`, renders `skipped` summary with reasons, and shows a clear error when neither is present.
+- PO receive uses canonical `lineId`: prefers `line.id`, then `line.lineId`; fails fast with a helpful UI message if missing.
+- PO receive sends an `Idempotency-Key` header by default (uuid v4 when available, with a safe fallback), passed through the apiFetch wrapper.
+- Spec aligned: `BackorderRequest.status` enum now includes `fulfilled` to match runtime and smoke expectations.
+
+Follow-ups:
+- Multi-PO navigation UX: indicate when multiple POs are created and provide better batch navigation or summary.
+- VendorGuard precheck UX: add proactive banner/inline checks before submit/approve/receive when vendor role is missing.
+
 ## Warehouse Ops / Sales Outbound
 
 - **Sales reserve/release** now optionally accept locationId (v1). When present, movements record locationId and onhand:by-location reserved reflects it.

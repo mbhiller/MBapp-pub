@@ -108,6 +108,13 @@ function normalizeStatus(s: string | undefined): string {
   return norm;
 }
 
+// Prefer canonical PO line identifier for receive payloads
+function getPoLineId(line: any): string {
+  if (line && typeof line.id === "string" && line.id.trim()) return String(line.id);
+  if (line && typeof line.lineId === "string" && line.lineId.trim()) return String(line.lineId);
+  throw new Error("Missing line identifier: this PO line has no id/lineId");
+}
+
 export default function PurchaseOrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { token, tenantId } = useAuth();
@@ -117,6 +124,7 @@ export default function PurchaseOrderDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionInfo, setActionInfo] = useState<string | null>(null);
   const [lineState, setLineState] = useState<Record<string, { deltaQty: number; lot?: string; locationId?: string; editQty?: number }>>({});
   const [lineErrors, setLineErrors] = useState<Record<string, string>>({});
   const [activity, setActivity] = useState<Array<InventoryMovement & { lineId?: string }>>([]);
@@ -223,9 +231,11 @@ export default function PurchaseOrderDetailPage() {
     if (!id) return;
     setActionLoading(true);
     setActionError(null);
+    setActionInfo(null);
     try {
       await submitPurchaseOrder(id, { token: token || undefined, tenantId });
       await fetchPo();
+      setActionInfo("Submitted purchase order.");
     } catch (err) {
       const e = err as any;
       if (e?.status === 409) setActionError(renderFriendly(e));
@@ -239,9 +249,11 @@ export default function PurchaseOrderDetailPage() {
     if (!id) return;
     setActionLoading(true);
     setActionError(null);
+    setActionInfo(null);
     try {
       await approvePurchaseOrder(id, { token: token || undefined, tenantId });
       await fetchPo();
+      setActionInfo("Approved purchase order.");
     } catch (err) {
       setActionError(renderFriendly(err));
     } finally {
@@ -255,28 +267,36 @@ export default function PurchaseOrderDetailPage() {
     // Client-side validation
     const newErrors: Record<string, string> = {};
     const linesToReceive = Object.entries(lineState)
-      .map(([lineId, state]) => {
+      .map(([lineKey, state]) => {
         const qty = Number(state.deltaQty ?? 0);
         const lot = (state.lot ?? "").trim();
         const locationId = (state.locationId ?? "").trim();
 
         if (!Number.isFinite(qty) || qty <= 0) {
-          newErrors[lineId] = "Enter a positive quantity.";
+          newErrors[lineKey] = "Enter a positive quantity.";
           return null;
         }
 
-        const line = po.lines?.find((l) => (l.id ?? l.lineId) === lineId);
+        const line = po.lines?.find((l) => (l.id ?? l.lineId) === lineKey);
+        let payloadLineId: string;
+        try {
+          payloadLineId = getPoLineId(line);
+        } catch (e) {
+          newErrors[lineKey] = "Missing line identifier; cannot receive this line.";
+          return null;
+        }
+
         const orderedQty = line?.qty ?? line?.orderedQty ?? 0;
         const receivedQty = line?.receivedQty ?? 0;
         const remaining = Math.max(0, orderedQty - receivedQty);
 
         if (qty > remaining) {
-          newErrors[lineId] = `Cannot receive ${qty} (only ${remaining} remaining)`;
+          newErrors[lineKey] = `Cannot receive ${qty} (only ${remaining} remaining)`;
           return null;
         }
 
         return {
-          lineId,
+          lineId: payloadLineId,
           deltaQty: qty,
           ...(lot ? { lot } : {}),
           ...(locationId ? { locationId } : {}),
@@ -293,6 +313,7 @@ export default function PurchaseOrderDetailPage() {
 
     setActionLoading(true);
     setActionError(null);
+    setActionInfo(null);
     try {
       // Generate idempotency key
       const uuid = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -319,6 +340,7 @@ export default function PurchaseOrderDetailPage() {
       setLineState({});
       setLineErrors({});
       await fetchPo();
+      setActionInfo(`Received ${linesToReceive.length} line(s).`);
     } catch (err: any) {
       setActionError(renderFriendly(err));
     } finally {
@@ -456,9 +478,9 @@ export default function PurchaseOrderDetailPage() {
   // Status gates aligned with API handler rules:
   // - Receive handler allows: ["open","approved","partially-received","partially_fulfilled"]
   // - Denies: ["cancelled","closed","canceled"]
-  const canSubmit = ["draft", "open"].includes(status);
+  const canSubmit = status === "draft";
   const canApprove = status === "submitted";
-  const canReceive = ["open", "approved", "partially_received", "partially_fulfilled"].includes(status);
+  const canReceive = status === "approved" || status === "partially_fulfilled";
   // Cancel only allowed for draft/submitted (API: po-cancel.ts)
   const canCancel = ["draft", "submitted"].includes(status);
   // Close only allowed for fulfilled (API: po-close.ts)
@@ -546,6 +568,11 @@ export default function PurchaseOrderDetailPage() {
       {actionError && (
         <div style={{ padding: 12, background: "#fff4e5", color: "#8a3c00", borderRadius: 4 }}>
           {actionError}
+        </div>
+      )}
+      {actionInfo && (
+        <div style={{ padding: 12, background: "#e8f5e9", color: "#1b5e20", borderRadius: 4 }}>
+          {actionInfo}
         </div>
       )}
 

@@ -23,6 +23,14 @@ export type ReceivePurchaseOrderRequest = {
   }>;
 };
 
+// Generate a safe idempotency key (uuid v4 if available, else timestamp-random)
+function generateIdempotencyKey(prefix = "web-receive"): string {
+  const uuid = typeof crypto !== "undefined" && (crypto as any).randomUUID
+    ? (crypto as any).randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  return `${prefix}-${uuid}`;
+}
+
 /**
  * Call POST /purchasing/suggest-po to generate draft PO(s) from backorder requests.
  * Returns single draft or multiple drafts grouped by vendor.
@@ -102,9 +110,8 @@ export async function receivePurchaseOrder(
   opts: { token?: string; tenantId: string; idempotencyKey?: string }
 ): Promise<any> {
   const headers: Record<string, string> = {};
-  if (opts.idempotencyKey) {
-    headers["Idempotency-Key"] = opts.idempotencyKey;
-  }
+  const idk = opts.idempotencyKey || generateIdempotencyKey();
+  headers["Idempotency-Key"] = idk;
 
   return apiFetch(`/purchasing/po/${encodeURIComponent(id)}:receive`, {
     method: "POST",

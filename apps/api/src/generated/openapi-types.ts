@@ -2133,7 +2133,7 @@ export interface components {
              * @default open
              * @enum {string}
              */
-            status: "open" | "ignored" | "converted";
+            status: "open" | "ignored" | "converted" | "fulfilled";
         };
         Class: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */

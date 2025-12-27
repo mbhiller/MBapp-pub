@@ -40,6 +40,7 @@ export default function BackordersListPage() {
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionInfo, setActionInfo] = useState<string | null>(null);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [suggestResult, setSuggestResult] = useState<SuggestPoResponse | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -157,6 +158,7 @@ export default function BackordersListPage() {
     if (selectedIds.length === 0) return;
     setActionLoading(true);
     setActionError(null);
+    setActionInfo(null);
     setSuggestResult(null);
     try {
       // Step 1: Convert backorders
@@ -193,9 +195,12 @@ export default function BackordersListPage() {
           { draft: drafts[0] },
           { token: token || undefined, tenantId }
         );
-        const createdId = createRes.id ?? createRes.ids?.[0];
+        const ids = Array.isArray(createRes.ids) ? createRes.ids : (createRes.id ? [createRes.id] : []);
+        const createdId = ids[0];
         if (createdId) {
+          if (ids.length > 1) setActionInfo(`Created ${ids.length} purchase orders; opening the first.`);
           setSelected({});
+          await fetchPage();
           navigate(`/purchase-orders/${createdId}`);
         } else {
           setActionError("PO created but no ID returned");
@@ -294,6 +299,10 @@ export default function BackordersListPage() {
 
       {actionError ? (
         <div style={{ padding: 12, background: "#fff4e5", color: "#8a3c00", borderRadius: 4 }}>{actionError}</div>
+      ) : null}
+
+      {actionInfo ? (
+        <div style={{ padding: 12, background: "#e8f5e9", color: "#1b5e20", borderRadius: 4 }}>{actionInfo}</div>
       ) : null}
 
       {suggestResult?.skipped && suggestResult.skipped.length > 0 && (
@@ -461,15 +470,19 @@ export default function BackordersListPage() {
           setModalOpen(false);
           setActionLoading(true);
           setActionError(null);
+          setActionInfo(null);
           try {
             const createRes = await createPurchaseOrderFromSuggestion(
               { draft },
               { token: token || undefined, tenantId }
             );
-            const createdId = createRes.id ?? createRes.ids?.[0];
+            const ids = Array.isArray(createRes.ids) ? createRes.ids : (createRes.id ? [createRes.id] : []);
+            const createdId = ids[0];
             if (createdId) {
+              if (ids.length > 1) setActionInfo(`Created ${ids.length} purchase orders; opening the first.`);
               setSelected({});
               setModalDrafts([]);
+              await fetchPage();
               navigate(`/purchase-orders/${createdId}`);
             } else {
               setActionError("PO created but no ID returned");

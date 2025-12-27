@@ -10,7 +10,7 @@ export type BackorderRequest = {
   soLineId?: string;
   itemId?: string;
   qty?: number;
-  status?: "open" | "ignored" | "converted";
+  status?: "open" | "ignored" | "converted" | "fulfilled";
   preferredVendorId?: string;
   createdAt?: string;
   updatedAt?: string;

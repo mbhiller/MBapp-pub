@@ -264,7 +264,7 @@ components:
         itemId:      { type: string }
         qty:         { type: number }
         createdAt:   { type: string, format: date-time }
-        status:      { type: string, enum: [open, ignored, converted], default: open }
+        status:      { type: string, enum: [open, ignored, converted, fulfilled], default: open }
     Class:
       allOf:
       - $ref: '#/components/schemas/ObjectBase'
@@ -1307,7 +1307,7 @@ components:
                   reason:
                     type: string
                     enum: [ZERO_QTY, MISSING_VENDOR, IGNORED, NOT_FOUND]
-        - oneOf:
+        - anyOf:
             - type: object
               required: [draft]
               properties:
