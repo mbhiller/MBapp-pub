@@ -1,15 +1,17 @@
 // apps/api/src/inventory/counters.ts
-const ACTIONS = new Set(["receive","reserve","commit","fulfill","adjust","release","putaway","cycle_count"] as const);
-type Action = typeof ACTIONS extends Set<infer T> ? T : never;
+const ACTIONS = ["receive","reserve","commit","fulfill","adjust","release","putaway","cycle_count"] as const;
+type Action = typeof ACTIONS[number];
+
+const ACTIONS_SET = new Set<string>(ACTIONS);
 
 export function deriveCounters(movs: Array<{ action?: string; qty?: number }>) {
   let onHand = 0, reserved = 0;
   for (const mv of movs) {
     const a = String(
       (mv as any)?.action ?? (mv as any)?.movement ?? (mv as any)?.act ?? (mv as any)?.verb ?? (mv as any)?.type ?? ""
-    ).toLowerCase() as Action;
+    ).toLowerCase();
     const q = Number(mv?.qty ?? 0) || 0;
-    if (!ACTIONS.has(a as Action) || !q) continue;
+    if (!ACTIONS_SET.has(a) || !q) continue;
 
     switch (a) {
       case "receive": onHand += q; break;
@@ -57,27 +59,24 @@ export function deriveCountersByLocation(
   };
 
   for (const mv of movs) {
-    const a = String(
-      (mv as any)?.action ?? (mv as any)?.movement ?? (mv as any)?.act ?? (mv as any)?.verb ?? (mv as any)?.type ?? ""
-    ).toLowerCase() as Action;
-    const q = Number(mv?.qty ?? 0) || 0;
-    if (!ACTIONS.has(a as Action) || !q) continue;
-
-    const locId = (mv as any)?.locationId ?? null;
+    const a = String(mv?.action ?? "").trim().toLowerCase();
+    const dq = Math.abs(Number(mv?.qty ?? 0) || 0);
+    if (!ACTIONS_SET.has(a) || !dq) continue;
 
     switch (a) {
       case "receive":
       case "adjust":
       case "cycle_count": {
         // Add to onHand at locationId (or unassigned)
-        const c = getOrCreate(locId);
-        c.onHand += q;
+        const key = mv.locationId ? String(mv.locationId) : "unassigned";
+        const bucket = getOrCreate(key);
+        bucket.onHand += dq;
         break;
       }
 
       case "putaway": {
         // Move qty from fromLocationId to toLocationId (movement.locationId)
-        const toLocationId = locId;
+        const toLocationId = mv.locationId ? String(mv.locationId) : null;
         
         // Try to extract fromLocationId from note "from=..." or explicit field
         let fromLocationId: string | null = null;
@@ -92,57 +91,64 @@ export function deriveCountersByLocation(
         // If we can determine source location, subtract qty
         if (fromLocationId) {
           const cFrom = getOrCreate(fromLocationId);
-          cFrom.onHand -= q;
+          cFrom.onHand -= dq;
         }
 
         // Always add to destination (conservative: if from unknown, we still track arrival)
         if (toLocationId) {
           const cTo = getOrCreate(toLocationId);
-          cTo.onHand += q;
+          cTo.onHand += dq;
         } else {
           // Destination also unknown, add to unassigned
-          const cTo = getOrCreate(null);
-          cTo.onHand += q;
+          const cTo = getOrCreate("unassigned");
+          cTo.onHand += dq;
         }
         break;
       }
 
       case "reserve": {
-        // Location-aware: if locationId present, apply to that bucket; else unassigned
-        const c = getOrCreate(locId);
-        c.reserved += q;
+        // Location-aware: increment reserved at locationId (or unassigned if missing)
+        // Same bucket as commit/release for proper correlation
+        const key = mv.locationId ? String(mv.locationId) : "unassigned";
+        const bucket = getOrCreate(key);
+        bucket.reserved += dq;
         break;
       }
 
       case "commit": {
-        // Location-aware: subtract onHand and reserved at specific location when present; else unassigned
-        const c = getOrCreate(locId);
-        c.onHand -= q;
-        c.reserved = Math.max(0, c.reserved - q);
+        // Location-aware: decrement onHand AND release reservation at locationId (or unassigned if missing)
+        // Must use same bucket as reserve to properly release the reservation
+        const key = mv.locationId ? String(mv.locationId) : "unassigned";
+        const bucket = getOrCreate(key);
+        bucket.onHand -= dq;
+        bucket.reserved -= dq;  // Allow negative; will clamp in final output
         break;
       }
 
       case "release": {
-        // Location-aware: decrement reserved at specific location when present; else unassigned
-        const c = getOrCreate(locId);
-        c.reserved = Math.max(0, c.reserved - q);
+        // Location-aware: decrement reserved at locationId (or unassigned if missing)
+        // Same bucket as reserve/commit for proper correlation
+        const key = mv.locationId ? String(mv.locationId) : "unassigned";
+        const bucket = getOrCreate(key);
+        bucket.reserved -= dq;  // Allow negative; will clamp in final output
         break;
       }
 
       case "fulfill": {
         // Subtract onHand at locationId (or unassigned)
-        const c = getOrCreate(locId);
-        c.onHand -= q;
+        const key = mv.locationId ? String(mv.locationId) : "unassigned";
+        const bucket = getOrCreate(key);
+        bucket.onHand -= dq;
         break;
       }
     }
   }
 
-  // Convert map to array with locationId
+  // Convert map to array with locationId, clamping reserved to >= 0
   return Array.from(counters.entries()).map(([locationId, { onHand, reserved }]) => ({
     locationId: locationId === "unassigned" ? null : locationId,
     onHand,
-    reserved,
-    available: onHand - reserved,
+    reserved: Math.max(0, reserved),
+    available: onHand - Math.max(0, reserved),
   }));
 }

@@ -5,6 +5,7 @@ import { GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 import * as InvOnHandBatch from "../inventory/onhand-batch";
 import { getObjectById, createObject } from "../objects/repo";
 import { resolveTenantId } from "../common/tenant";
+import { listMovementsByItem, createMovement } from "../inventory/movements";
 
 type SOStatus =
   | "draft"
@@ -86,6 +87,67 @@ async function saveSO(order: SalesOrder): Promise<void> {
 }
 
 function boId() { return "bo_" + Math.random().toString(36).slice(2, 10); }
+
+function movementId(prefix = "mv") {
+  return `${prefix}_${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36).slice(-4)}`;
+}
+
+/**
+ * Compute reservedOutstanding and derive location/lot for a SO line.
+ * Returns { reservedOutstanding, locationId?, lot? }
+ * 
+ * reservedOutstanding = sum(reserve.qty) - sum(release.qty) - sum(commit.qty)
+ * locationId/lot are taken from latest reserve movement with locationId set.
+ */
+async function computeReservationStatus(
+  tenantId: string,
+  itemId: string,
+  soId: string,
+  soLineId: string
+): Promise<{ reservedOutstanding: number; locationId?: string; lot?: string }> {
+  try {
+    // Fetch movements for this item
+    const { items: movements } = await listMovementsByItem(tenantId, itemId, { limit: 500, sort: "desc" });
+    
+    // Filter for movements matching this SO line
+    const lineMovements = movements.filter(
+      (m) => (m as any).soId === soId && (m as any).soLineId === soLineId
+    );
+    
+    // Calculate outstanding reservation
+    let reservedSum = 0;
+    let releasedSum = 0;
+    let committedSum = 0;
+    
+    for (const m of lineMovements) {
+      if (m.action === "reserve") reservedSum += Math.abs(m.qty);
+      else if (m.action === "release") releasedSum += Math.abs(m.qty);
+      else if (m.action === "commit") committedSum += Math.abs(m.qty);
+    }
+    
+    const reservedOutstanding = reservedSum - releasedSum - committedSum;
+    
+    // Find latest reserve with locationId
+    const reserves = lineMovements
+      .filter((m) => m.action === "reserve")
+      .sort((a, b) => {
+        const tA = Date.parse(a.at ?? a.createdAt ?? "0");
+        const tB = Date.parse(b.at ?? b.createdAt ?? "0");
+        return tB - tA; // descending (newest first)
+      });
+    
+    const latestWithLocation = reserves.find((r) => r.locationId);
+    
+    return {
+      reservedOutstanding,
+      locationId: latestWithLocation?.locationId,
+      lot: latestWithLocation?.lot,
+    };
+  } catch (err) {
+    // If movement query fails, assume no reservation
+    return { reservedOutstanding: 0 };
+  }
+}
 
 export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   try {
@@ -187,6 +249,8 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
 
     // Non-strict: proceed and mark committed (idempotently).
     const before = so.status;
+    const wasAlreadyCommitted = so.status === "committed";
+    
     // Advance status if needed
     if (so.status === "submitted" || so.status === "approved") {
       so.status = "committed";
@@ -205,6 +269,51 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     
     await saveSO(so);
     log(event, "so-commit.saved", { id: so.id, before, after: so.status, strict, shortagesCount: shortages.length });
+
+    // Emit commit movements for each line (only if transitioning to committed to ensure idempotency)
+    if (!wasAlreadyCommitted) {
+      const now = new Date().toISOString();
+      let movementsEmitted = 0;
+      
+      for (const line of lines) {
+        const itemId = line.itemId;
+        if (!itemId) continue;
+        
+        // Compute current reservation status for this line
+        const { reservedOutstanding, locationId, lot } = await computeReservationStatus(
+          tenantId,
+          itemId,
+          so.id,
+          line.id
+        );
+        
+        // Only emit commit movement if there is outstanding reservation
+        if (reservedOutstanding <= 0) {
+          log(event, "so-commit.skip-line", { lineId: line.id, reason: "no-reservation", reservedOutstanding });
+          continue;
+        }
+        
+        // Commit qty is the lesser of reservedOutstanding or line.qty
+        const committedQty = Math.min(reservedOutstanding, Number(line.qty ?? 0));
+        
+        if (committedQty <= 0) continue;
+        
+        // Create commit movement with resolved location using shared helper
+        await createMovement({
+          tenantId,
+          itemId,
+          action: "commit",
+          qty: committedQty,
+          soId: so.id,
+          soLineId: line.id,
+          ...(locationId && { locationId }),
+          ...(lot && { lot }),
+        });
+        movementsEmitted++;
+      }
+      
+      log(event, "so-commit.movements", { soId: so.id, movementsEmitted });
+    }
 
     // Create BackorderRequest rows for actionable shortages (reorderEnabled only)
     if (!strict && shortages.length > 0) {

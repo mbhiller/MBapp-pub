@@ -1,8 +1,11 @@
 ## Warehouse Ops / Sales Outbound
 
-- Sales reserve/release now optionally accept locationId (v1). When present, movements record locationId and onhand:by-location reserved reflects it.
+- **Sales reserve/release** now optionally accept locationId (v1). When present, movements record locationId and onhand:by-location reserved reflects it.
+- **Sales commit** now emits `inventoryMovement` with `action="commit"` per committed qty. The `locationId` and `lot` are derived from the latest reserve movement for that SO line (via `soId` + `soLineId` filtering); if no reserve exists, defaults to unassigned. This enables location-aware counters and lets web UI auto-default fulfill locations.
+- **Movement storage:** `InventoryMovement` type and storage extended with optional `soId` and `soLineId` fields for reliable cross-action correlation (reserve→commit→fulfill).
 - If locationId is omitted, behavior remains legacy "unassigned".
-- Future Tier 2: add multi-location allocations[] per SO line (pick list) and a GSI for inventoryMovement by (tenantId,itemId) for scale.
+- **Smoke coverage:** `smoke:sales:reserve-with-location` and `smoke:sales:commit-with-location` validate location-aware reserve and commit workflows.
+- **Future Tier 2:** Add multi-location allocations[] per SO line (pick list) and a GSI for inventoryMovement by (tenantId,itemId) for scale.
 
 ## Sprint XLIII: Location-Aware Fulfill + Per-Location Counters (2025-12-26)
 

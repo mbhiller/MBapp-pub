@@ -2081,6 +2081,311 @@ const tests = {
     };
   },
 
+  "smoke:sales:commit-with-location": async () => {
+    await ensureBearer();
+
+    // 1) Create locations A and B
+    const locA = await post(`/objects/location`,
+      { type: "location", name: smokeTag("LocA-Commit"), code: "LOC-A-CMT", status: "active" },
+      { "Idempotency-Key": idem() }
+    );
+    const locB = await post(`/objects/location`,
+      { type: "location", name: smokeTag("LocB-Commit"), code: "LOC-B-CMT", status: "active" },
+      { "Idempotency-Key": idem() }
+    );
+    if (!locA.ok || !locB.ok) {
+      return { test: "sales:commit-with-location", result: "FAIL", step: "createLocations", locA, locB };
+    }
+    const locAId = locA.body?.id;
+    const locBId = locB.body?.id;
+    recordCreated({ type: 'location', id: locAId, route: '/objects/location', meta: { name: 'LocA-Commit', code: 'LOC-A-CMT' } });
+    recordCreated({ type: 'location', id: locBId, route: '/objects/location', meta: { name: 'LocB-Commit', code: 'LOC-B-CMT' } });
+
+    // 2) Create product + inventory item
+    const prod = await createProduct({ name: "CommitLocationTest" });
+    if (!prod.ok) {
+      return { test: "sales:commit-with-location", result: "FAIL", step: "createProduct", prod };
+    }
+    const prodId = prod.body?.id;
+    recordCreated({ type: 'product', id: prodId, route: '/objects/product', meta: { name: 'CommitLocationTest' } });
+
+    const item = await createInventoryForProduct(prodId, "CommitLocationItem");
+    if (!item.ok) {
+      return { test: "sales:commit-with-location", result: "FAIL", step: "createInventory", item };
+    }
+    const itemId = item.body?.id;
+    recordCreated({ type: 'inventory', id: itemId, route: '/objects/inventory', meta: { name: 'CommitLocationItem', productId: prodId } });
+
+    // 3) Ensure onHand at locB = 5, locA = 0 (receive + putaway)
+    const receive = await post(`/objects/${MV_TYPE}`, { itemId, action: "receive", qty: 5 }, { "Idempotency-Key": idem() });
+    if (!receive.ok) {
+      return { test: "sales:commit-with-location", result: "FAIL", step: "receive", receive };
+    }
+    const putaway = await post(`/inventory/${itemId}:putaway`, {
+      qty: 5,
+      toLocationId: locBId,
+      lot: "LOT-CMT-B",
+      note: "smoke commit-with-location setup"
+    }, { "Idempotency-Key": idem() });
+    if (!putaway.ok) {
+      return { test: "sales:commit-with-location", result: "FAIL", step: "putaway", putaway };
+    }
+
+    // Verify initial counters: locB onHand = 5, locA onHand = 0
+    const ohByLocInitial = await get(`/inventory/${encodeURIComponent(itemId)}/onhand:by-location`);
+    if (!ohByLocInitial.ok) {
+      return { test: "sales:commit-with-location", result: "FAIL", step: "onhand-by-location-initial", ohByLocInitial };
+    }
+    const countersInitial = (ohByLocInitial.body?.items ?? []);
+    const locBCounterInitial = countersInitial.find(it => it.locationId === locBId);
+    const onHandAtLocBInitial = locBCounterInitial?.onHand ?? 0;
+    if (onHandAtLocBInitial !== 5) {
+      return { test: "sales:commit-with-location", result: "FAIL", step: "verify-initial-stock", onHandAtLocBInitial, expected: 5 };
+    }
+
+    // 4) Create SO qty 2, submit
+    const { partyId } = await seedParties(api);
+    const so = await post(`/objects/salesOrder`, {
+      type: "salesOrder",
+      status: "draft",
+      partyId,
+      customerId: partyId,
+      lines: [{ id: "CL1", itemId, uom: "ea", qty: 2 }]
+    });
+    if (!so.ok) {
+      return { test: "sales:commit-with-location", result: "FAIL", step: "createSO", so };
+    }
+    const soId = so.body?.id;
+    const soLineId = "CL1";
+    recordCreated({ type: 'salesOrder', id: soId, route: '/objects/salesOrder', meta: { partyId } });
+
+    const submit = await post(`/sales/so/${encodeURIComponent(soId)}:submit`, {}, { "Idempotency-Key": idem() });
+    if (!submit.ok) {
+      return { test: "sales:commit-with-location", result: "FAIL", step: "submit", submit };
+    }
+
+    // 5) Reserve with locationId=locB, lot=LOT-CMT-B
+    const reserve = await post(`/sales/so/${encodeURIComponent(soId)}:reserve`, {
+      lines: [{ lineId: soLineId, deltaQty: 2, locationId: locBId, lot: "LOT-CMT-B" }]
+    }, { "Idempotency-Key": idem() });
+    if (!reserve.ok) {
+      return { test: "sales:commit-with-location", result: "FAIL", step: "reserve", reserve };
+    }
+
+    // Verify counters after reserve: locB reserved = 2
+    const ohByLocPostReserve = await get(`/inventory/${encodeURIComponent(itemId)}/onhand:by-location`);
+    if (!ohByLocPostReserve.ok) {
+      return { test: "sales:commit-with-location", result: "FAIL", step: "onhand-by-location-post-reserve", ohByLocPostReserve };
+    }
+    const countersPostReserve = (ohByLocPostReserve.body?.items ?? []);
+    const locBCounterPostReserve = countersPostReserve.find(it => it.locationId === locBId);
+    const reservedAtLocBPostReserve = locBCounterPostReserve?.reserved ?? 0;
+    if (reservedAtLocBPostReserve !== 2) {
+      return { test: "sales:commit-with-location", result: "FAIL", step: "verify-reserved-after-reserve", reservedAtLocBPostReserve, expected: 2 };
+    }
+
+    // 6) Commit - should emit commit movements with locationId derived from reserve
+    const commit1 = await post(`/sales/so/${encodeURIComponent(soId)}:commit`, {}, { "Idempotency-Key": idem() });
+    if (!commit1.ok) {
+      return { test: "sales:commit-with-location", result: "FAIL", step: "commit", commit1 };
+    }
+
+    // 7) Assert movements include reserve and commit at locB
+    const mvPost = await get(`/inventory/${encodeURIComponent(itemId)}/movements`, { limit: 50, sort: "desc" });
+    if (!mvPost.ok) {
+      return { test: "sales:commit-with-location", result: "FAIL", step: "getMovements", mvPost };
+    }
+    const mvListPost = mvPost.body?.items ?? [];
+    
+    // Assert reserve movement: action="reserve", qty=2 (positive), locationId=locBId, soId/soLineId match
+    const reserveMv = mvListPost.find(m => 
+      m.action === "reserve" && 
+      m.soId === soId && 
+      m.soLineId === soLineId &&
+      m.locationId === locBId &&
+      m.qty === 2
+    );
+    if (!reserveMv) {
+      // Debug: show expected vs actual movements
+      const allReserves = mvListPost.filter(m => m.action === "reserve");
+      return { 
+        test: "sales:commit-with-location", 
+        result: "FAIL", 
+        step: "assertReserveMovement", 
+        expected: { action: "reserve", qty: 2, locationId: locBId, soId, soLineId },
+        allReserves,
+        allMovements: mvListPost,
+        note: "Reserve movement not found with matching action/qty/locationId/soId/soLineId"
+      };
+    }
+    // Verify reserve movement has soId and soLineId (required for commit location derivation)
+    if (!reserveMv.soId || !reserveMv.soLineId) {
+      return { 
+        test: "sales:commit-with-location", 
+        result: "FAIL", 
+        step: "verifyReserveMovementLinkage",
+        reserveMv,
+        allMovements: mvListPost,
+        note: "Reserve movement missing soId or soLineId - required for commit location derivation"
+      };
+    }
+
+    // Assert commit movement: qty = 2, locationId = locBId (derived from reserve), soId/soLineId match
+    const commitMv = mvListPost.find(m => 
+      m.action === "commit" && 
+      m.soId === soId && 
+      m.soLineId === soLineId
+    );
+    if (!commitMv) {
+      // Debug: show all commit movements
+      const allCommits = mvListPost.filter(m => m.action === "commit");
+      return { 
+        test: "sales:commit-with-location", 
+        result: "FAIL", 
+        step: "assertCommitMovement", 
+        expected: { action: "commit", soId, soLineId, locationId: locBId },
+        allCommits,
+        reserveMv: { soId: reserveMv.soId, soLineId: reserveMv.soLineId, locationId: reserveMv.locationId, lot: reserveMv.lot },
+        note: "Commit movement not found with matching soId/soLineId"
+      };
+    }
+    // Verify commit movement has locationId derived from reserve
+    if (commitMv.locationId !== locBId) {
+      return { 
+        test: "sales:commit-with-location", 
+        result: "FAIL", 
+        step: "verifyCommitMovementLocation",
+        commitMv,
+        reserveMv: { soId: reserveMv.soId, soLineId: reserveMv.soLineId, locationId: reserveMv.locationId, lot: reserveMv.lot },
+        expected: { locationId: locBId },
+        note: "Commit movement locationId should be derived from reserve movement"
+      };
+    }
+    // Verify commit movement has correct qty
+    if (commitMv.qty !== 2) {
+      return { 
+        test: "sales:commit-with-location", 
+        result: "FAIL", 
+        step: "verifyCommitMovementQty",
+        commitMv,
+        expected: { qty: 2 }
+      };
+    }
+    // Verify commit movement has soId and soLineId
+    if (!commitMv.soId || !commitMv.soLineId) {
+      return { 
+        test: "sales:commit-with-location", 
+        result: "FAIL", 
+        step: "verifyCommitMovementLinkage",
+        commitMv,
+        note: "Commit movement missing soId or soLineId"
+      };
+    }
+
+    // Verify commit movement has correct lot
+    if (commitMv.lot !== "LOT-CMT-B") {
+      return { 
+        test: "sales:commit-with-location", 
+        result: "FAIL", 
+        step: "verifyCommitMovementLot",
+        commitMv,
+        expected: { lot: "LOT-CMT-B" }
+      };
+    }
+
+    // 8) Assert onhand:by-location for locB after commit
+    const ohByLocPostCommit = await get(`/inventory/${encodeURIComponent(itemId)}/onhand:by-location`);
+    if (!ohByLocPostCommit.ok) {
+      return { test: "sales:commit-with-location", result: "FAIL", step: "onhand-by-location-post-commit", ohByLocPostCommit };
+    }
+    const countersPostCommit = (ohByLocPostCommit.body?.items ?? []);
+    const locBCounterPostCommit = countersPostCommit.find(it => it.locationId === locBId);
+    const reservedAtLocBPostCommit = locBCounterPostCommit?.reserved ?? 0;
+    const onHandAtLocBPostCommit = locBCounterPostCommit?.onHand ?? 0;
+
+    // Reserved should decrease to 0 after commit (commit releases reservation)
+    if (reservedAtLocBPostCommit !== 0) {
+      // Compute reservedOutstanding for diagnostics
+      const relevantMvs = mvListPost.filter(m => 
+        m.action === "reserve" || m.action === "release" || m.action === "commit"
+      );
+      let reservedSum = 0, releasedSum = 0, committedSum = 0;
+      for (const m of relevantMvs) {
+        if (m.action === "reserve") reservedSum += Math.abs(m.qty || 0);
+        else if (m.action === "release") releasedSum += Math.abs(m.qty || 0);
+        else if (m.action === "commit") committedSum += Math.abs(m.qty || 0);
+      }
+      const reservedOutstanding = reservedSum - releasedSum - committedSum;
+      
+      const mvDiagnostics = relevantMvs.map(m => ({
+        action: m.action,
+        qty: m.qty,
+        soId: m.soId,
+        soLineId: m.soLineId,
+        locationId: m.locationId,
+        lot: m.lot,
+        at: m.at
+      }));
+      
+      return { 
+        test: "sales:commit-with-location", 
+        result: "FAIL", 
+        step: "verify-reserved-after-commit", 
+        reservedAtLocBPostCommit, 
+        expected: 0,
+        reservedOutstanding,
+        computedSums: { reservedSum, releasedSum, committedSum },
+        movements: mvDiagnostics,
+        note: "Commit should release reservation (reserved -> 0)"
+      };
+    }
+
+    // OnHand should decrease from 5 to 3 after commit (commit decrements by 2)
+    if (onHandAtLocBPostCommit !== 3) {
+      return { 
+        test: "sales:commit-with-location", 
+        result: "FAIL", 
+        step: "verify-onhand-after-commit", 
+        onHandAtLocBPostCommit, 
+        expected: 3,
+        note: "Commit should decrement onHand from 5 to 3"
+      };
+    }
+
+    const pass = !!reserveMv && !!commitMv && commitMv.locationId === locBId && reservedAtLocBPostCommit === 0 && onHandAtLocBPostCommit === 3;
+    return {
+      test: "sales:commit-with-location",
+      result: pass ? "PASS" : "FAIL",
+      steps: {
+        locations: { locAId, locBId },
+        product: { prodId },
+        item: { itemId },
+        so: { soId, soLineId },
+        counters: {
+          initial: { onHandAtLocB: onHandAtLocBInitial },
+          postReserve: { reservedAtLocB: reservedAtLocBPostReserve },
+          postCommit: { reservedAtLocB: reservedAtLocBPostCommit, onHandAtLocB: onHandAtLocBPostCommit }
+        },
+        reserveMovement: { 
+          action: reserveMv.action, 
+          soId: reserveMv.soId, 
+          soLineId: reserveMv.soLineId,
+          locationId: reserveMv.locationId, 
+          lot: reserveMv.lot,
+          qty: reserveMv.qty 
+        },
+        commitMovement: { 
+          action: commitMv.action, 
+          soId: commitMv.soId, 
+          soLineId: commitMv.soLineId,
+          locationId: commitMv.locationId, 
+          lot: commitMv.lot,
+          qty: commitMv.qty 
+        }
+      }
+    };
+  },
+
   "smoke:salesOrders:commit-strict-shortage": async () => {
     await ensureBearer();
 

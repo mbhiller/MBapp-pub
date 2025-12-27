@@ -3107,6 +3107,14 @@ components:
           type: string
           description: Optional purchase order line id (when action is from a PO)
           nullable: true
+        soId:
+          type: string
+          description: Optional sales order id (when action is from an SO, e.g., reserve/commit/release/fulfill)
+          nullable: true
+        soLineId:
+          type: string
+          description: Optional sales order line id (when action is from an SO line)
+          nullable: true
         uom:
           type: string
           nullable: true

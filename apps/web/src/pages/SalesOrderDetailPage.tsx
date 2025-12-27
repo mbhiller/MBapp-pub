@@ -89,6 +89,7 @@ export default function SalesOrderDetailPage() {
   const [backordersLoading, setBackordersLoading] = useState(false);
   const [backordersError, setBackordersError] = useState<string | null>(null);
   const [vendorNameById, setVendorNameById] = useState<Record<string, string>>({});
+  const [prefillFromReserve, setPrefillFromReserve] = useState<Record<string, { locationId?: string; lot?: string }>>({});
 
   const fetchBackorders = useCallback(async () => {
     if (!id) return;
@@ -131,6 +132,53 @@ export default function SalesOrderDetailPage() {
     [tenantId, token]
   );
 
+  const fetchReserveMovementsForLines = useCallback(async (soId: string, lines: SalesOrderLine[]) => {
+    if (!soId || lines.length === 0) return;
+    const uniqueItemIds = Array.from(new Set(lines.map((ln) => ln.itemId).filter((x): x is string => Boolean(x))));
+    if (uniqueItemIds.length === 0) return;
+
+    const prefillData: Record<string, { locationId?: string; lot?: string }> = {};
+
+    await Promise.all(
+      uniqueItemIds.map(async (itemId) => {
+        try {
+          const res = await apiFetch<{ items?: any[] }>(`/inventory/${encodeURIComponent(itemId)}/movements?limit=50`, {
+            token: token || undefined,
+            tenantId,
+          });
+          const movements = res?.items ?? [];
+          // For each line with this itemId, find latest reserve movement matching soId + soLineId
+          lines
+            .filter((ln) => ln.itemId === itemId)
+            .forEach((ln) => {
+              const reserveMovements = movements.filter(
+                (m) => m.action === "reserve" && m.soId === soId && m.soLineId === ln.id
+              );
+              if (reserveMovements.length > 0) {
+                // Sort descending by timestamp (at field)
+                reserveMovements.sort((a, b) => {
+                  const aTime = new Date(a.at ?? 0).getTime();
+                  const bTime = new Date(b.at ?? 0).getTime();
+                  return bTime - aTime;
+                });
+                const latest = reserveMovements[0];
+                if (latest.locationId || latest.lot) {
+                  prefillData[ln.id] = {
+                    locationId: latest.locationId,
+                    lot: latest.lot,
+                  };
+                }
+              }
+            });
+        } catch (err) {
+          console.error(`Failed to fetch movements for item ${itemId}:`, err);
+        }
+      })
+    );
+
+    setPrefillFromReserve(prefillData);
+  }, [tenantId, token]);
+
   const fetchOrder = useCallback(async () => {
     if (!id) return;
     setLoading(true);
@@ -144,12 +192,20 @@ export default function SalesOrderDetailPage() {
       setLineQtys(toLineQtys(res.lines));
       setShortageInfo(null);
       await fetchBackorders();
+      // Fetch reserve movements to prefill fulfill locations (non-blocking)
+      const status = res?.status ?? "";
+      const canFulfill = status === "committed" || status === "partially_fulfilled" || status === "submitted";
+      if (canFulfill && res.lines && res.lines.length > 0) {
+        fetchReserveMovementsForLines(res.id, res.lines).catch((err) => {
+          console.error("Failed to fetch reserve movements:", err);
+        });
+      }
     } catch (err) {
       setError(formatError(err));
     } finally {
       setLoading(false);
     }
-  }, [id, tenantId, token, fetchBackorders]);
+  }, [id, tenantId, token, fetchBackorders, fetchReserveMovementsForLines]);
 
   useEffect(() => {
     const preferredVendorIds = Array.from(
@@ -233,12 +289,15 @@ export default function SalesOrderDetailPage() {
             lineId: ln.id,
             deltaQty: Math.max(0, Number(lineQtys[ln.id] ?? 0)),
           };
-          if (lineLocationIds[ln.id]) payload.locationId = lineLocationIds[ln.id];
-          if (lineLots[ln.id]) payload.lot = lineLots[ln.id];
+          // Use explicit user input first, fallback to prefill from reserve
+          const locationId = lineLocationIds[ln.id] ?? prefillFromReserve[ln.id]?.locationId;
+          const lot = lineLots[ln.id] ?? prefillFromReserve[ln.id]?.lot;
+          if (locationId) payload.locationId = locationId;
+          if (lot) payload.lot = lot;
           return payload;
         })
         .filter((ln) => ln.deltaQty > 0),
-    [lineQtys, lineLocationIds, lineLots, order?.lines]
+    [lineQtys, lineLocationIds, lineLots, prefillFromReserve, order?.lines]
   );
 
   const performAction = useCallback(
@@ -538,7 +597,7 @@ export default function SalesOrderDetailPage() {
                     {showLocSelectors ? (
                       <td style={{ padding: 8, border: "1px solid #ccc" }}>
                         <LocationPicker
-                          value={lineLocationIds[ln.id] ?? ""}
+                          value={lineLocationIds[ln.id] ?? prefillFromReserve[ln.id]?.locationId ?? ""}
                           onChange={(locId) => setLineLocationIds((prev) => ({ ...prev, [ln.id]: locId }))}
                         />
                       </td>
@@ -548,7 +607,7 @@ export default function SalesOrderDetailPage() {
                         <input
                           type="text"
                           placeholder="Lot (optional)"
-                          value={lineLots[ln.id] ?? ""}
+                          value={lineLots[ln.id] ?? prefillFromReserve[ln.id]?.lot ?? ""}
                           onChange={(e) => setLineLots((prev) => ({ ...prev, [ln.id]: e.target.value }))}
                           style={{ width: 120 }}
                         />

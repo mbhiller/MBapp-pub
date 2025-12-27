@@ -16,6 +16,16 @@ function asAction(v: unknown): Action | undefined {
   return (ACTIONS as readonly string[]).includes(s) ? (s as Action) : undefined;
 }
 
+/**
+ * InventoryMovement: Canonical movement record with action, qty, and optional linkage fields.
+ * 
+ * Linkage fields (soId, soLineId, poLineId) enable:
+ * - Cross-action correlation: reserve→commit→fulfill flows
+ * - Commit location derivation: so-commit queries reserve movements by soId+soLineId to derive locationId/lot
+ * - Audit trails: track which PO/SO caused each movement
+ * 
+ * All linkage/location fields are optional for backwards compatibility.
+ */
 export type InventoryMovement = {
   id: string;
   itemId: string;
@@ -25,9 +35,11 @@ export type InventoryMovement = {
   note?: string;
   actorId?: string;
   refId?: string;
-  poLineId?: string;
-  lot?: string;          // NEW: surface lot
-  locationId?: string;   // NEW: surface location
+  poLineId?: string;     // purchase order line linkage
+  soId?: string;         // sales order linkage (for reserve/commit/release/fulfill)
+  soLineId?: string;     // sales order line linkage (enables commit location derivation)
+  lot?: string;          // lot tracking
+  locationId?: string;   // location tracking
   docType?: "inventoryMovement";
   createdAt?: string;    // storage field (used only for sorting fallback)
 };
@@ -120,6 +132,8 @@ async function repoListMovementsByItem(
           actorId: m.actorId,
           refId: m.refId,
           poLineId: m.poLineId,
+          soId: m.soId,
+          soLineId: m.soLineId,
           lot: m.lot,
           locationId: m.locationId,
           docType: "inventoryMovement",
@@ -160,7 +174,11 @@ export async function listMovementsByItem(
 ): Promise<ListMovementsPage> {
   const { items, next } = await repoListMovementsByItem(tenantId, itemId, opts);
 
-  // Pass-through, but include poLineId + lot + locationId so clients/smokes can assert them.
+  // Pass-through response includes all tracked fields for clients/smokes:
+  // - poLineId, soId, soLineId: enable cross-action correlation (reserve→commit→fulfill)
+  //   and support commit location derivation (so-commit queries reserve movements by soId+soLineId)
+  // - lot, locationId: enable location-aware counters and audit trails
+  // These fields are optional; if absent in DB, they are omitted from response (backwards compatible).
   const clean: InventoryMovement[] = items.map((m) => ({
     id: m.id,
     itemId: m.itemId,
@@ -170,9 +188,11 @@ export async function listMovementsByItem(
     note: m.note,
     actorId: m.actorId,
     refId: m.refId,
-    poLineId: m.poLineId,        // keep
-    lot: m.lot,                  // keep
-    locationId: m.locationId,    // keep
+    poLineId: m.poLineId,        // purchase order line linkage
+    soId: m.soId,                // sales order linkage (reserve/commit/fulfill)
+    soLineId: m.soLineId,        // sales order line linkage (for commit location derivation)
+    lot: m.lot,                  // lot tracking
+    locationId: m.locationId,    // location tracking
     docType: "inventoryMovement",
   }));
 
@@ -235,6 +255,8 @@ async function repoListMovementsByLocation(
           actorId: m.actorId,
           refId: m.refId,
           poLineId: m.poLineId,
+          soId: m.soId,
+          soLineId: m.soLineId,
           lot: m.lot,
           locationId: m.locationId,
           docType: "inventoryMovement",
@@ -276,6 +298,9 @@ export async function listMovementsByLocation(
 ): Promise<ListMovementsByLocationResponse> {
   const { items, next } = await repoListMovementsByLocation(tenantId, locationId, opts);
 
+  // Include all linkage fields (soId, soLineId, poLineId) for audit trail and cross-action correlation.
+  // These enable commit location derivation (querying reserve movements by soId+soLineId)
+  // and location-aware counter reconciliation. Fields are optional; omitted if not present.
   const clean: InventoryMovement[] = items.map((m) => ({
     id: m.id,
     itemId: m.itemId,
@@ -285,9 +310,11 @@ export async function listMovementsByLocation(
     note: m.note,
     actorId: m.actorId,
     refId: m.refId,
-    poLineId: m.poLineId,
-    lot: m.lot,
-    locationId: m.locationId,
+    poLineId: m.poLineId,        // purchase order line linkage
+    soId: m.soId,                // sales order linkage
+    soLineId: m.soLineId,        // sales order line linkage
+    lot: m.lot,                  // lot tracking
+    locationId: m.locationId,    // location tracking
     docType: "inventoryMovement",
   }));
 
@@ -311,6 +338,8 @@ export interface CreateMovementRequest {
   note?: string;
   refId?: string;
   poLineId?: string;
+  soId?: string;
+  soLineId?: string;
   actorId?: string;
 }
 
@@ -338,6 +367,8 @@ export async function createMovement(req: CreateMovementRequest): Promise<Invent
     ...(req.note && { note: req.note }),
     ...(req.refId && { refId: req.refId }),
     ...(req.poLineId && { poLineId: req.poLineId }),
+    ...(req.soId && { soId: req.soId }),
+    ...(req.soLineId && { soLineId: req.soLineId }),
     ...(req.actorId && { actorId: req.actorId }),
   };
 
@@ -358,6 +389,8 @@ export async function createMovement(req: CreateMovementRequest): Promise<Invent
     actorId: req.actorId,
     refId: req.refId,
     poLineId: req.poLineId,
+    soId: req.soId,
+    soLineId: req.soLineId,
     lot: req.lot,
     locationId: req.locationId,
     docType: "inventoryMovement",

@@ -2383,6 +2383,10 @@ export interface components {
             refId?: string | null;
             /** @description Optional purchase order line id (when action is from a PO) */
             poLineId?: string | null;
+            /** @description Optional sales order id (when action is from an SO, e.g., reserve/commit/release/fulfill) */
+            soId?: string | null;
+            /** @description Optional sales order line id (when action is from an SO line) */
+            soLineId?: string | null;
             uom?: string | null;
             lot?: string | null;
             locationId?: string | null;
