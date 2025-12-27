@@ -158,8 +158,8 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
       return json(200, fresh ?? po);
     }
 
-    // Status guard: allow receiving for open, approved, partially-received, partially_fulfilled
-    const allowedStatuses = ["open", "approved", "partially-received", "partially_fulfilled"];
+    // Status guard: PO receive is allowed from: approved, partially-received
+    const allowedStatuses = ["approved", "partially-received"];
     const deniedStatuses = ["cancelled", "closed", "canceled"];
     const poStatusNorm = String(po.status ?? "").toLowerCase();
     if (!allowedStatuses.includes(poStatusNorm)) {

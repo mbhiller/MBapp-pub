@@ -1,0 +1,42 @@
+{
+  "smokeRunId": "smk-1766856357537-avic",
+  "base": "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com",
+  "tenantHeader": "DemoTenant",
+  "jwtTenant": "DemoTenant",
+  "startedAt": "2025-12-27T17:25:57.538Z",
+  "finishedAt": "2025-12-27T17:26:01.438Z",
+  "entries": [
+    {
+      "type": "party",
+      "id": "y3stti3d411mit2zz6rxf",
+      "route": "/objects/party",
+      "meta": {
+        "name": "smk-1766856357537-avic-Seed Vendor",
+        "status": 200
+      },
+      "createdAt": "2025-12-27T17:25:58.555Z"
+    },
+    {
+      "type": "product",
+      "id": "qdfiv1uimvaouv5jcwdji",
+      "route": "/objects/product",
+      "meta": {
+        "name": "RecvLine",
+        "sku": "smk-1766856357537-avic-SKU-8cn3m",
+        "status": 200
+      },
+      "createdAt": "2025-12-27T17:25:59.246Z"
+    },
+    {
+      "type": "inventory",
+      "id": "e8ke5b8xyrjfpdyp5gyb1o",
+      "route": "/objects/inventory",
+      "meta": {
+        "name": "smk-1766856357537-avic-RecvLineItem-1766856359246",
+        "productId": "qdfiv1uimvaouv5jcwdji",
+        "status": 200
+      },
+      "createdAt": "2025-12-27T17:25:59.353Z"
+    }
+  ]
+}

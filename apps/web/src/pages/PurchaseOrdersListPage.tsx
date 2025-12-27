@@ -128,7 +128,7 @@ export default function PurchaseOrdersListPage() {
             <option value="draft">draft</option>
             <option value="submitted">submitted</option>
             <option value="approved">approved</option>
-            <option value="partially_fulfilled">partially_fulfilled</option>
+            <option value="partially-received">partially-received</option>
             <option value="fulfilled">fulfilled</option>
             <option value="closed">closed</option>
             <option value="cancelled">cancelled</option>

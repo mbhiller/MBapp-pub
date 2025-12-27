@@ -29,7 +29,7 @@
   - Backorder ID tags are clickable, filter `/backorders?backorderRequestId={id}`
   - Receive defaults (localStorage) prefill location/lot per tenant
   - Receive guards: deltaQty > 0, idempotency key, status checks (not cancelled/closed), refetch after receive
-  - Status display normalizes hyphens to underscores (partially_fulfilled, etc.)
+  - Status display normalizes hyphens to underscores (partially-received, etc.)
 
 **Quick Links:**
 - Web: `/backorders`
@@ -145,6 +145,11 @@ node ops/smoke/smoke.mjs smoke:close-the-loop-multi-vendor
 4. **Multi-select with grouping:** Vendor-grouped drafts with visual feedback (blue highlight) for multi-PO workflows
 5. **Idempotency:** All state-changing requests (receive, PO creation, suggest-po) include `Idempotency-Key` header
 
+#### Receiving Ergonomics (Sprint E)
+- Web: Added "Receive All Remaining (Apply Defaults)" — builds a single multi-line payload and applies order-level defaults (location, lot) only to empty fields; submission is blocked if required defaults are missing.
+- Web: Enter key applies defaults on the defaults inputs; Enter on per-line inputs can submit receiving to speed operator flow.
+- Mobile: Order-level defaults for location/lot apply during quick receive without overwriting line-specific values; per-line modal remains unchanged.
+
 ### How to Verify Locally
 
 **Web flow:**
@@ -156,7 +161,7 @@ node ops/smoke/smoke.mjs smoke:close-the-loop-multi-vendor
 5. Click "Suggest PO" → modal shows drafts (possibly multi-vendor)
 6. Multi-vendor case: Select drafts via checkboxes, "Create POs" → success message
 7. Navigate to PO detail → see "Backorder Fulfillment" section
-8. Receive items (defaults prefill location/lot) → status transitions to partially_fulfilled → fulfilled
+8. Receive items (defaults prefill location/lot) → status transitions to partially-received → fulfilled
 9. Click backorder ID in blue section → filters /backorders by that backorder
 ```
 
@@ -408,7 +413,7 @@ Follow-ups:
 - **PO Detail Actions & Gating:**
   - Submit: visible for statuses `draft` and `open`; server enforces exact gate.
   - Approve: visible for `submitted`.
-  - Receive: visible for `open`, `approved`, `partially_received`, `partially_fulfilled`.
+  - Receive: visible for `approved`, `partially-received`.
   - Cancel: hidden only for `closed`, `cancelled`, `canceled` (server still validates).
   - Close: hidden only for `closed`, `cancelled`, `canceled` (server still validates).
   - Status normalization: UI maps hyphens/uppercase to underscored lowercase; fully received POs surface as `fulfilled` before `close`.
@@ -483,9 +488,9 @@ node ops/smoke/smoke.mjs smoke:close-the-loop-multi-vendor
 - ✅ PO detail shows status-gated actions:
   - Draft: Submit
   - Submitted: Approve
-  - Approved/Partially Fulfilled: Receive (with deltaQty inputs per line, "Receive remaining", "Receive all remaining")
+  - Approved/Partially-Received: Receive (with deltaQty inputs per line, "Receive remaining", "Receive all remaining")
   - Draft/Submitted: Cancel
-  - Approved/Partially Fulfilled/Fulfilled: Close
+  - Approved/Partially-Received/Fulfilled: Close
 - ✅ Receive action refetches PO and updates receivedQty, resets deltaQty inputs
 - ✅ TypeScript: Web app passes typecheck (apps/web ✅)
 - ✅ Vendor name resolution consistent across all pages (apiFetch /objects/party/{id})
@@ -1077,7 +1082,7 @@ When filtering causes `collected >= limit` before reaching DynamoDB's `LastEvalu
 - **Receive handler hardening:** `/purchasing/po/{id}:receive`
   - Uses shared `getPurchaseOrder` / `updatePurchaseOrder` so status transitions match submit/approve.
   - **Idempotency:** (1) key ledger `Idempotency-Key`; (2) payload-signature hash of canonical `lines[]` to prevent double-apply across different keys.
-  - **Guards:** only `approved | partially_fulfilled`; 409 on over-receive per line.
+  - **Guards:** only `approved | partially-received`; 409 on over-receive per line.
   - **Movements shape:** writes `docType:"inventoryMovement"`, `action:"receive"`, `refId` (po id), `poLineId`, optional `lot`/`locationId`, `at`, `createdAt`/`updatedAt`.
   - **Events:** integrated `maybeDispatch` with **simulate** header (`X-Feature-Events-Simulate`) returning `_dev.emitted: true` in responses when exercised by smokes.
 - **Movements list:** `GET /inventory/{id}/movements` now supports additive query filters `refId` and `poLineId` (filtered after the pk/sk query), returns optional `pageInfo` alongside legacy `next`.

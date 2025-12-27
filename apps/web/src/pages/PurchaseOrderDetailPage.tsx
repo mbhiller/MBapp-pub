@@ -93,20 +93,15 @@ function renderFriendly(err: unknown): string {
 }
 
 /**
- * Normalize status string: lowercase, convert hyphens to underscores, map variants
- * Examples:
- *   "DRAFT" -> "draft"
- *   "Partially-Received" -> "partially_received"
- *   "Partially_Fulfilled" -> "partially_fulfilled"
+ * Normalize PO status for display.
+ * - Use hyphen style for partial: "partially-received"
+ * - Map variant input "partially_received" to "partially-received"
  */
 function normalizeStatus(s: string | undefined): string {
   if (!s) return "unknown";
-  let norm = s.toLowerCase().replace(/-/g, "_");
-  // Ensure common variants are mapped
-  if (norm === "partially-received") norm = "partially_received";
-  if (norm === "partially_received" || norm === "partially-received") norm = "partially_received";
-  if (norm === "partially_fulfilled" || norm === "partially-fulfilled") norm = "partially_fulfilled";
-  return norm;
+  const t = s.toLowerCase().replace(/_/g, "-");
+  if (t === "partially-received" || t === "partially_received") return "partially-received";
+  return t;
 }
 
 // Prefer canonical PO line identifier for receive payloads
@@ -371,6 +366,89 @@ export default function PurchaseOrderDetailPage() {
     }
   };
 
+  // Bulk receive: apply order-level defaults to missing lot/location and submit one request
+  const handleReceiveAllWithDefaults = async () => {
+    if (!id || !po?.lines) return;
+
+    // Build lines: remaining qty for each line; apply defaults for missing lot/location
+    const missingRequired: string[] = [];
+    const linesToReceive = po.lines
+      .map((line) => {
+        const lineId = line.id ?? line.lineId ?? "";
+        if (!lineId) return null;
+        const orderedQty = line.qty ?? line.orderedQty ?? 0;
+        const receivedQty = line.receivedQty ?? 0;
+        const remaining = Math.max(0, orderedQty - receivedQty);
+        if (remaining <= 0) return null;
+
+        const state = lineState[lineId] ?? {};
+        const lot = (state.lot ?? receiveDefaults.lot ?? "").trim();
+        const locationId = (state.locationId ?? receiveDefaults.locationId ?? "").trim();
+
+        // UX rule: require location for bulk receive (example requirement)
+        const REQUIRE_LOCATION_FOR_BULK = true;
+        if (REQUIRE_LOCATION_FOR_BULK && !locationId) {
+          missingRequired.push(lineId);
+        }
+
+        return {
+          lineId: getPoLineId(line),
+          deltaQty: remaining,
+          ...(lot ? { lot } : {}),
+          ...(locationId ? { locationId } : {}),
+        };
+      })
+      .filter((l): l is any => l !== null);
+
+    if (linesToReceive.length === 0) {
+      setActionError("No remaining quantities to receive.");
+      return;
+    }
+
+    if (missingRequired.length > 0) {
+      setActionError(
+        `Bulk receive requires a Location; missing on lines: ${missingRequired.join(", ")}`
+      );
+      return;
+    }
+
+    setActionLoading(true);
+    setActionError(null);
+    setActionInfo(null);
+    try {
+      const uuid =
+        typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      const idempotencyKey = `web-bulk-receive-${id}-${uuid}`;
+
+      await receivePurchaseOrder(
+        id,
+        { lines: linesToReceive },
+        { token: token || undefined, tenantId, idempotencyKey }
+      );
+
+      // Persist latest non-empty lot/locationId from this submission
+      const latestLot = [...linesToReceive.map((l) => l.lot).filter(Boolean)].pop();
+      const latestLocationId = [...linesToReceive.map((l) => l.locationId).filter(Boolean)].pop();
+      if ((latestLot || latestLocationId) && tenantId) {
+        const nextDefaults = {
+          lot: latestLot ?? receiveDefaults.lot,
+          locationId: latestLocationId ?? receiveDefaults.locationId,
+        };
+        setReceiveDefaults(nextDefaults);
+        saveReceiveDefaults(tenantId, nextDefaults);
+      }
+
+      await fetchPo();
+      setActionInfo(`Received ${linesToReceive.length} line(s).`);
+    } catch (err: any) {
+      setActionError(renderFriendly(err));
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const handleCancel = async () => {
     if (!id) return;
     setActionLoading(true);
@@ -499,11 +577,11 @@ export default function PurchaseOrderDetailPage() {
   const lines = po.lines ?? [];
 
   // Status gates aligned with API handler rules:
-  // - Receive handler allows: ["open","approved","partially-received","partially_fulfilled"]
+  // - Receive handler allows: ["approved","partially-received"]
   // - Denies: ["cancelled","closed","canceled"]
   const canSubmit = status === "draft";
   const canApprove = status === "submitted";
-  const canReceive = status === "approved" || status === "partially_fulfilled";
+  const canReceive = status === "approved" || status === "partially-received";
   // Cancel only allowed for draft/submitted (API: po-cancel.ts)
   const canCancel = ["draft", "submitted"].includes(status);
   // Close only allowed for fulfilled (API: po-close.ts)
@@ -623,6 +701,9 @@ export default function PurchaseOrderDetailPage() {
             <button onClick={handleReceiveAllRemaining} disabled={actionLoading}>
               Receive All Remaining
             </button>
+            <button onClick={handleReceiveAllWithDefaults} disabled={actionLoading}>
+              {actionLoading ? "Receiving..." : "Receive All Remaining (Apply Defaults)"}
+            </button>
           </>
         )}
         {canCancel && (
@@ -650,6 +731,12 @@ export default function PurchaseOrderDetailPage() {
               type="text"
               value={receiveDefaults.lot ?? ""}
               onChange={(e) => handleDefaultChange("lot", e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  // Apply defaults quickly from keyboard
+                  handleApplyDefaults();
+                }
+              }}
               placeholder="Lot/Batch"
               style={{ width: 160 }}
             />
@@ -660,13 +747,18 @@ export default function PurchaseOrderDetailPage() {
               type="text"
               value={receiveDefaults.locationId ?? ""}
               onChange={(e) => handleDefaultChange("locationId", e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  handleApplyDefaults();
+                }
+              }}
               placeholder="Location"
               style={{ width: 160 }}
             />
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={handleApplyDefaults} disabled={actionLoading}>
-              Apply defaults to all lines
+              Apply defaults to empty fields
             </button>
             <button onClick={handleClearDefaults} disabled={actionLoading}>
               Clear defaults
@@ -757,6 +849,12 @@ export default function PurchaseOrderDetailPage() {
                                 }));
                                 setLineErrors((prev) => ({ ...prev, [lineId]: "" }));
                               }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  // Submit current selection of lines
+                                  handleReceive();
+                                }
+                              }}
                               style={{ width: 70 }}
                             />
                           </div>
@@ -773,6 +871,11 @@ export default function PurchaseOrderDetailPage() {
                                   ...prev,
                                   [lineId]: { ...prev[lineId], lot: e.target.value || undefined },
                                 }));
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  handleReceive();
+                                }
                               }}
                               style={{ width: 90 }}
                             />
