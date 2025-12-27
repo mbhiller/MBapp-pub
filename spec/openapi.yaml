@@ -2534,6 +2534,7 @@ components:
             - open
             - ignored
             - converted
+            - fulfilled
           default: open
     Class:
       allOf:
@@ -3677,7 +3678,7 @@ components:
                       - MISSING_VENDOR
                       - IGNORED
                       - NOT_FOUND
-        - oneOf:
+        - anyOf:
             - type: object
               required:
                 - draft
