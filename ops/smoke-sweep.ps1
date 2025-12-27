@@ -24,6 +24,8 @@ $smokes = @(
   'smoke:sales:happy',
   'smoke:sales:guards',
   'smoke:sales:fulfill-with-location',
+  'smoke:sales:reserve-with-location',
+  'smoke:sales:commit-with-location',
   'smoke:salesOrders:commit-strict-shortage',
   'smoke:salesOrders:commit-nonstrict-backorder',
   'smoke:purchasing:happy',

@@ -143,10 +143,11 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     const now = new Date().toISOString();
     for (const r of reqLines) {
       const line = soLines.get(r.lineId)!;
+      const mvId = rid();
       const mv = {
         pk: tenantId,
-        sk: `inventoryMovement#${rid()}`,
-        id: rid(),
+        sk: `inventoryMovement#${mvId}`,
+        id: mvId,
         type: "inventoryMovement",
         docType: "inventoryMovement",
         action: "reserve",
