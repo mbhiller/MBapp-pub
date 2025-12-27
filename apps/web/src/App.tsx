@@ -26,6 +26,7 @@ import PurchaseOrdersListPage from "./pages/PurchaseOrdersListPage";
 import PurchaseOrderDetailPage from "./pages/PurchaseOrderDetailPage";
 import LocationsListPage from "./pages/LocationsListPage";
 import LocationDetailPage from "./pages/LocationDetailPage";
+import InventoryMovementsPage from "./pages/InventoryMovementsPage";
 
 function HomePage() {
   return (
@@ -67,6 +68,7 @@ export default function App() {
           <Route path="/sales-orders/:id/edit" element={<EditSalesOrderPage />} />
           <Route path="/inventory" element={<InventoryListPage />} />
           <Route path="/inventory/:id" element={<InventoryDetailPage />} />
+          <Route path="/inventory-movements" element={<InventoryMovementsPage />} />
           <Route path="/views" element={<ViewsListPage />} />
           <Route path="/views/new" element={<CreateViewPage />} />
           <Route path="/views/:id" element={<ViewDetailPage />} />

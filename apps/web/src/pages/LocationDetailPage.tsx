@@ -140,6 +140,27 @@ export default function LocationDetailPage() {
       </div>
 
       <h2>Details</h2>
+      <div style={{ marginBottom: 16 }}>
+        <Link
+          to={`/inventory-movements?locationId=${encodeURIComponent(id || "")}`}
+          style={{
+            display: "inline-block",
+            padding: "10px 16px",
+            background: "#08a",
+            color: "white",
+            textDecoration: "none",
+            borderRadius: 4,
+            fontWeight: 500,
+            fontSize: 14,
+          }}
+        >
+          View All Movements
+        </Link>
+        <p style={{ marginTop: 8, fontSize: 14, color: "#666" }}>
+          Explore all movements at this location with advanced filtering and pagination.
+        </p>
+      </div>
+
       <table style={{ maxWidth: 600, borderCollapse: "collapse" }}>
         <tbody>
           <tr>

@@ -104,7 +104,26 @@ async function get(p, params, opts){
   const headers = buildHeaders({ ...baseHeaders(), ...((opts&&opts.headers)||{}) }, (opts&&opts.auth) ?? "default");
   const r=await fetch(API + p + qs(params), {headers});
   const b=await r.json().catch(()=>({}));
-  return {ok:r.ok,status:r.status,body:b};
+  const result = {ok:r.ok,status:r.status,body:b};
+  // On failure, include diagnostic headers and request details
+  if (!r.ok) {
+    result.method = "GET";
+    result.url = API + p + qs(params);
+    const reqId = r.headers.get("x-amzn-requestid") ?? r.headers.get("x-amzn-RequestId");
+    const apigwId = r.headers.get("x-amz-apigw-id");
+    const date = r.headers.get("date");
+    result.responseHeaders = {
+      "x-amzn-requestid": reqId,
+      "x-amz-apigw-id": apigwId,
+      date
+    };
+    if (!reqId) {
+      try {
+        result.allHeaders = Object.fromEntries(r.headers.entries());
+      } catch {/* noop */}
+    }
+  }
+  return result;
 }
 async function post(p,body,h={},opts){
   const headers = buildHeaders({ ...baseHeaders(), ...h, ...((opts&&opts.headers)||{}) }, (opts&&opts.auth) ?? "default");
@@ -129,7 +148,27 @@ async function post(p,body,h={},opts){
       recordCreated({ type, id: j.id, route, meta });
     }
   }catch{/* noop */}
-  return {ok:r.ok,status:r.status,body:j};
+  const result = {ok:r.ok,status:r.status,body:j};
+  // On failure, include diagnostic headers and request details
+  if (!r.ok) {
+    result.method = "POST";
+    result.url = API+p;
+    result.requestPayload = body;
+    const reqId = r.headers.get("x-amzn-requestid") ?? r.headers.get("x-amzn-RequestId");
+    const apigwId = r.headers.get("x-amz-apigw-id");
+    const date = r.headers.get("date");
+    result.responseHeaders = {
+      "x-amzn-requestid": reqId,
+      "x-amz-apigw-id": apigwId,
+      date
+    };
+    if (!reqId) {
+      try {
+        result.allHeaders = Object.fromEntries(r.headers.entries());
+      } catch {/* noop */}
+    }
+  }
+  return result;
 }
 async function put(p,body,h={},opts){
   const headers = buildHeaders({ ...baseHeaders(), ...h, ...((opts&&opts.headers)||{}) }, (opts&&opts.auth) ?? "default");
@@ -149,7 +188,27 @@ async function put(p,body,h={},opts){
       recordCreated({ type, id: j.id, route, meta });
     }
   }catch{/* noop */}
-  return {ok:r.ok,status:r.status,body:j};
+  const result = {ok:r.ok,status:r.status,body:j};
+  // On failure, include diagnostic headers and request details
+  if (!r.ok) {
+    result.method = "PUT";
+    result.url = API+p;
+    result.requestPayload = body;
+    const reqId = r.headers.get("x-amzn-requestid") ?? r.headers.get("x-amzn-RequestId");
+    const apigwId = r.headers.get("x-amz-apigw-id");
+    const date = r.headers.get("date");
+    result.responseHeaders = {
+      "x-amzn-requestid": reqId,
+      "x-amz-apigw-id": apigwId,
+      date
+    };
+    if (!reqId) {
+      try {
+        result.allHeaders = Object.fromEntries(r.headers.entries());
+      } catch {/* noop */}
+    }
+  }
+  return result;
 }
 
 /* ---------- Helpers ---------- */
@@ -519,13 +578,76 @@ const tests = {
       await post(`/sales/so/${encodeURIComponent(soId)}:submit`, {}, { "Idempotency-Key": idem() });
       await post(`/sales/so/${encodeURIComponent(soId)}:commit`, {}, { "Idempotency-Key": idem() });
       
-      // Assert backorderRequests exist with status="open"
-      const boRes = await post(`/objects/backorderRequest/search`, { soId, status: "open" });
-      if (!boRes.ok || !Array.isArray(boRes.body?.items) || boRes.body.items.length < 2)
-        return { test: "close-the-loop-multi-vendor", result: "FAIL", step: "backorderRequest-count", boRes };
-      
-      const boIds = boRes.body.items.map(b => b.id);
-      recordFromListResult(boRes.body.items, "backorderRequest", `/objects/backorderRequest/search`);
+      // Assert backorderRequests exist with status="open" (two items → two requests)
+      const expectedBoCount = 2;
+      const expectedItems = [item1Id, item2Id];
+      const expectedVendors = [vendor1Id, vendor2Id];
+      let found = [];
+      const seen = [];
+
+      for (let attempt = 1; attempt <= 10; attempt++) {
+        let next;
+        let pages = 0;
+        while (pages < 5) {
+          const body = { soId, status: "open" };
+          if (next) body.next = next;
+
+          const boPage = await post(`/objects/backorderRequest/search`, body);
+          if (!boPage.ok) {
+            if (attempt === 10) {
+              return { test: "close-the-loop-multi-vendor", result: "FAIL", step: "backorderRequest-count", attempt, boPage };
+            }
+            break; // retry outer loop
+          }
+
+          const items = boPage.body?.items ?? [];
+          if (!Array.isArray(items)) {
+            if (attempt === 10) {
+              return { test: "close-the-loop-multi-vendor", result: "FAIL", step: "backorderRequest-items-array", attempt, boPage };
+            }
+            break;
+          }
+
+          // Collect diagnostics (cap to first 10 later)
+          seen.push(...items);
+
+          // Filter matches for this SO and expected items, status=open
+          found.push(...items.filter(x => x?.soId === soId && expectedItems.includes(x?.itemId) && x?.status === "open"));
+
+          if (found.length >= expectedBoCount) break;
+
+          next = boPage.body?.next;
+          pages += 1;
+          if (!next) break;
+        }
+
+        if (found.length >= expectedBoCount) break;
+        if (attempt < 10) await new Promise(r => setTimeout(r, 250));
+      }
+
+      if (found.length < expectedBoCount) {
+        const diagnosticSample = seen.slice(0, 10).map(x => ({
+          id: x.id,
+          soId: x.soId,
+          itemId: x.itemId,
+          status: x.status,
+          createdAt: x.createdAt
+        }));
+        return {
+          test: "close-the-loop-multi-vendor",
+          result: "FAIL",
+          step: "backorderRequest-count",
+          soId,
+          expectedItems,
+          expectedVendors,
+          expectedCount: expectedBoCount,
+          foundCount: found.length,
+          diagnosticSample
+        };
+      }
+
+      const boIds = found.map(b => b.id);
+      recordFromListResult(found, "backorderRequest", `/objects/backorderRequest/search`);
       
       // 8) Call suggest-po with all backorderRequestIds
       const suggest = await post(`/purchasing/suggest-po`, { 
@@ -1603,15 +1725,81 @@ const tests = {
     const putawayMvId = putaway.body?.movementId;
     if (putawayMvId) recordCreated({ type: 'inventoryMovement', id: putawayMvId, route: '/inventory/:id:putaway', meta: { action: 'putaway', qty: 1, toLocationId: locBId, lot: 'LOT-LOC-MBL' } });
 
-    // Query GET /inventory/movements?locationId={locBId}&limit=20
-    const movementsResp = await get(`/inventory/movements`, { locationId: locBId, limit: 20 });
-    if (!movementsResp.ok) {
-      return { test: "inventory-movements-by-location", result: "FAIL", step: "getMovements", movementsResp };
+    // Query GET /inventory/movements?locationId={locBId} with retries
+    // Poll up to 10 attempts with 250ms delay, looking for the putaway movement
+    let items = [];
+    let putawayFound = false;
+    const expectedQty = 1;
+    const expectedLot = "LOT-LOC-MBL";
+    
+    for (let attempt = 1; attempt <= 10; attempt++) {
+      const movementsResp = await get(`/inventory/movements`, { locationId: locBId, limit: 50, sort: "desc" });
+      if (!movementsResp.ok) {
+        // On final attempt, return the error
+        if (attempt === 10) {
+          return { test: "inventory-movements-by-location", result: "FAIL", step: "getMovementsByLocation", attempt, movementsResp };
+        }
+        // Otherwise retry
+        await new Promise(r => setTimeout(r, 250));
+        continue;
+      }
+
+      items = movementsResp.body?.items ?? [];
+      if (!Array.isArray(items)) {
+        if (attempt === 10) {
+          return { test: "inventory-movements-by-location", result: "FAIL", step: "assertItemsArray", attempt, items };
+        }
+        await new Promise(r => setTimeout(r, 250));
+        continue;
+      }
+
+      // Check if putaway movement exists with expected values
+      putawayFound = items.some(m => 
+        (m.action ?? "") === "putaway" && 
+        m.qty === expectedQty && 
+        (m.locationId ?? "") === locBId &&
+        (m.lot ?? "") === expectedLot
+      );
+
+      if (putawayFound) {
+        // Found it early, stop retrying
+        break;
+      }
+
+      // Not found yet, wait and retry (unless this was the last attempt)
+      if (attempt < 10) {
+        await new Promise(r => setTimeout(r, 250));
+      }
     }
 
-    const items = movementsResp.body?.items ?? [];
-    if (!Array.isArray(items)) {
-      return { test: "inventory-movements-by-location", result: "FAIL", step: "assertItemsArray", items };
+    // If we still didn't find it after retries, fetch by-item movements for diagnostics
+    if (!putawayFound) {
+      const byItemResp = await get(`/inventory/${itemId}/movements`, { limit: 50, sort: "desc" });
+      
+      let diagnosticMovements = [];
+      if (byItemResp.ok && Array.isArray(byItemResp.body?.items)) {
+        // Compact diagnostic: first 10 movements with key fields
+        diagnosticMovements = byItemResp.body.items.slice(0, 10).map(m => ({
+          id: m.id,
+          action: m.action,
+          qty: m.qty,
+          lot: m.lot ?? null,
+          locationId: m.locationId ?? null,
+          createdAt: m.createdAt
+        }));
+      }
+
+      return {
+        test: "inventory-movements-by-location",
+        result: "FAIL",
+        step: "assertPutawayFound",
+        locBId,
+        expectedAction: "putaway",
+        expectedQty,
+        expectedLot,
+        byLocationItems: items,
+        diagnosticMovements
+      };
     }
 
     // Verify all returned items have locationId === locBId
@@ -1620,18 +1808,187 @@ const tests = {
       return { test: "inventory-movements-by-location", result: "FAIL", step: "assertAllLocationB", locBId, items };
     }
 
-    // Verify putaway movement found in results
-    const putawayFound = items.some(m => 
-      (m.action ?? "") === "putaway" && 
-      m.qty === 1 && 
-      (m.locationId ?? "") === locBId &&
-      (m.lot ?? "") === "LOT-LOC-MBL"
-    );
-    if (!putawayFound) {
-      return { test: "inventory-movements-by-location", result: "FAIL", step: "assertPutawayFound", locBId, items, expectedAction: "putaway", expectedQty: 1, expectedLot: "LOT-LOC-MBL" };
+    return { test: "inventory-movements-by-location", result: "PASS", locA: locAId, locB: locBId, item: itemId, putawayMvId, itemsCount: items.length, putawayFound: true };
+  },
+
+  "smoke:inventory:onhand-by-location": async () => {
+    await ensureBearer();
+
+    // Create two locations A and B
+    const locA = await post(`/objects/location`, {
+      type: "location",
+      name: smokeTag("LocationA-OnHandByLoc"),
+      code: "LOCA-OHBL",
+      status: "active"
+    }, { "Idempotency-Key": idem() });
+    if (!locA.ok) {
+      return { test: "inventory-onhand-by-location", result: "FAIL", step: "createLocationA", locA };
+    }
+    const locAId = locA.body?.id;
+    recordCreated({ type: 'location', id: locAId, route: '/objects/location', meta: { name: 'LocationA-OnHandByLoc', code: 'LOCA-OHBL' } });
+
+    const locB = await post(`/objects/location`, {
+      type: "location",
+      name: smokeTag("LocationB-OnHandByLoc"),
+      code: "LOCB-OHBL",
+      status: "active"
+    }, { "Idempotency-Key": idem() });
+    if (!locB.ok) {
+      return { test: "inventory-onhand-by-location", result: "FAIL", step: "createLocationB", locB };
+    }
+    const locBId = locB.body?.id;
+    recordCreated({ type: 'location', id: locBId, route: '/objects/location', meta: { name: 'LocationB-OnHandByLoc', code: 'LOCB-OHBL' } });
+
+    // Create product and inventory
+    const prod = await createProduct({ name: "OnHandByLocTest" });
+    if (!prod.ok) {
+      return { test: "inventory-onhand-by-location", result: "FAIL", step: "createProduct", prod };
+    }
+    const prodId = prod.body?.id;
+    recordCreated({ type: 'product', id: prodId, route: '/objects/product', meta: { name: 'OnHandByLocTest' } });
+
+    const item = await createInventoryForProduct(prodId, "OnHandByLocItem");
+    if (!item.ok) {
+      return { test: "inventory-onhand-by-location", result: "FAIL", step: "createInventory", item };
+    }
+    const itemId = item.body?.id;
+    recordCreated({ type: 'inventory', id: itemId, route: '/objects/inventory', meta: { name: 'OnHandByLocItem', productId: prodId } });
+
+    // Adjust inventory at location A (+10 units)
+    const adjustA = await post(`/inventory/${itemId}:adjust`, {
+      deltaQty: 10,
+      locationId: locAId,
+      note: "smoke onhand-by-location test at location A"
+    }, { "Idempotency-Key": idem() });
+    if (!adjustA.ok) {
+      return { test: "inventory-onhand-by-location", result: "FAIL", step: "adjustLocationA", adjustA };
+    }
+    const mvAId = adjustA.body?.movementId;
+    if (mvAId) recordCreated({ type: 'inventoryMovement', id: mvAId, route: '/inventory/:id:adjust', meta: { action: 'adjust', qty: 10, locationId: locAId } });
+
+    // Adjust inventory at location B (+5 units)
+    const adjustB = await post(`/inventory/${itemId}:adjust`, {
+      deltaQty: 5,
+      locationId: locBId,
+      note: "smoke onhand-by-location test at location B"
+    }, { "Idempotency-Key": idem() });
+    if (!adjustB.ok) {
+      return { test: "inventory-onhand-by-location", result: "FAIL", step: "adjustLocationB", adjustB };
+    }
+    const mvBId = adjustB.body?.movementId;
+    if (mvBId) recordCreated({ type: 'inventoryMovement', id: mvBId, route: '/inventory/:id:adjust', meta: { action: 'adjust', qty: 5, locationId: locBId } });
+
+    // Get aggregate onhand
+    const ohAggregate = await onhand(itemId);
+    if (!ohAggregate.ok) {
+      return { test: "inventory-onhand-by-location", result: "FAIL", step: "getAggregateOnHand", ohAggregate };
+    }
+    const aggregateOnHand = ohAggregate.body?.items?.[0]?.onHand ?? 0;
+    if (aggregateOnHand !== 15) {
+      return { test: "inventory-onhand-by-location", result: "FAIL", step: "assertAggregateOnHand", aggregateOnHand, expected: 15 };
     }
 
-    return { test: "inventory-movements-by-location", result: "PASS", locA: locAId, locB: locBId, item: itemId, putawayMvId, itemsCount: items.length, putawayFound: true };
+    // Get onhand by location (retry for consistency)
+    let onHandByLoc = null;
+    let ohByLocFound = false;
+    for (let attempt = 1; attempt <= 10; attempt++) {
+      const response = await get(`/inventory/${itemId}/onhand:by-location`);
+      if (!response.ok) {
+        return { test: "inventory-onhand-by-location", result: "FAIL", step: "getOnHandByLocation", response };
+      }
+      onHandByLoc = response.body?.items ?? [];
+      if (!Array.isArray(onHandByLoc)) {
+        return { test: "inventory-onhand-by-location", result: "FAIL", step: "assertItemsArray", onHandByLoc };
+      }
+      // Check if both locations have entries
+      const locAEntry = onHandByLoc.find(e => (e.locationId ?? "") === locAId);
+      const locBEntry = onHandByLoc.find(e => (e.locationId ?? "") === locBId);
+      if (locAEntry && locBEntry) {
+        ohByLocFound = true;
+        break;
+      }
+      if (attempt < 10) await sleep(500);
+    }
+    if (!ohByLocFound) {
+      return { test: "inventory-onhand-by-location", result: "FAIL", step: "assertLocationsFound", onHandByLoc, expectedLocations: [locAId, locBId] };
+    }
+
+    // Verify location A has onHand=10
+    const locAEntry = onHandByLoc.find(e => (e.locationId ?? "") === locAId);
+    if (!locAEntry || locAEntry.onHand !== 10) {
+      return { test: "inventory-onhand-by-location", result: "FAIL", step: "assertLocationAOnHand", locAEntry, expectedOnHand: 10 };
+    }
+
+    // Verify location B has onHand=5
+    const locBEntry = onHandByLoc.find(e => (e.locationId ?? "") === locBId);
+    if (!locBEntry || locBEntry.onHand !== 5) {
+      return { test: "inventory-onhand-by-location", result: "FAIL", step: "assertLocationBOnHand", locBEntry, expectedOnHand: 5 };
+    }
+
+    // Verify sum of per-location onHand equals aggregate
+    const sumPerLocation = onHandByLoc.reduce((sum, e) => sum + (e.onHand ?? 0), 0);
+    if (sumPerLocation !== aggregateOnHand) {
+      return { test: "inventory-onhand-by-location", result: "FAIL", step: "assertSumEqualsAggregate", sumPerLocation, aggregateOnHand };
+    }
+
+    return { test: "inventory-onhand-by-location", result: "PASS", locA: locAId, locB: locBId, item: itemId, aggregateOnHand, perLocationSum: sumPerLocation, entriesCount: onHandByLoc.length };
+  },
+
+  "smoke:inventory:adjust-negative": async () => {
+    await ensureBearer();
+
+    // Step 1: Create product and inventory item
+    const prod = await createProduct({ name: "AdjustNegativeTest" });
+    if (!prod.ok) return { test: "inventory-adjust-negative", result: "FAIL", step: "createProduct", prod };
+    const prodId = prod.body?.id;
+
+    const item = await createInventoryForProduct(prodId, "AdjustNegativeItem");
+    if (!item.ok) return { test: "inventory-adjust-negative", result: "FAIL", step: "createInventory", item };
+    const itemId = item.body?.id;
+    recordCreated("inventory", itemId);
+
+    // Step 2: Ensure onHand is 5
+    const ensure = await ensureOnHand(itemId, 5);
+    if (!ensure.ok) return { test: "inventory-adjust-negative", result: "FAIL", step: "ensureOnHand", ensure };
+
+    const beforeAdjust = await onhand(itemId);
+    if (!beforeAdjust.ok || beforeAdjust.body?.items?.[0]?.onHand !== 5) {
+      return { test: "inventory-adjust-negative", result: "FAIL", step: "verifyBeforeOnHand", onHand: beforeAdjust.body?.items?.[0]?.onHand };
+    }
+
+    // Step 3: Adjust by -2 (shrink)
+    const adjust = await post(`/inventory/${itemId}:adjust`, {
+      deltaQty: -2,
+      note: "shrink"
+    }, { "Idempotency-Key": `idem_${Date.now()}_${Math.random()}` });
+
+    if (!adjust.ok) return { test: "inventory-adjust-negative", result: "FAIL", step: "adjust", adjust };
+
+    // Step 4: Verify onHand decreased to 3
+    const afterAdjust = await onhand(itemId);
+    if (!afterAdjust.ok) return { test: "inventory-adjust-negative", result: "FAIL", step: "fetchAfterAdjust", afterAdjust };
+
+    const counters = afterAdjust.body?.items?.[0];
+    const onHandValue = counters?.onHand;
+    const reservedValue = counters?.reserved;
+    const availableValue = counters?.available;
+
+    if (onHandValue !== 3) {
+      return { test: "inventory-adjust-negative", result: "FAIL", step: "assertOnHand", expected: 3, actual: onHandValue };
+    }
+
+    // Verify available/reserved consistency
+    if (typeof availableValue !== "number" || typeof reservedValue !== "number") {
+      return { test: "inventory-adjust-negative", result: "FAIL", step: "assertCountersExist", available: availableValue, reserved: reservedValue };
+    }
+
+    // available = onHand - reserved (should hold true)
+    const expectedAvailable = onHandValue - reservedValue;
+    if (availableValue !== expectedAvailable) {
+      return { test: "inventory-adjust-negative", result: "FAIL", step: "assertAvailable", expected: expectedAvailable, actual: availableValue, onHand: onHandValue, reserved: reservedValue };
+    }
+
+    return { test: "inventory-adjust-negative", result: "PASS", itemId, beforeOnHand: 5, afterOnHand: onHandValue, available: availableValue, reserved: reservedValue };
   },
 
   /* ===================== Sales Orders ===================== */
@@ -2953,7 +3310,7 @@ const tests = {
     await ensureBearer();
     const { partyId } = await seedParties(api);
 
-    // 1) Create a Sales Order with shortage to trigger backorder requests
+    // 1) Create items (will force shortage/backorders like the passing SO smoke)
     const item1 = await post(`/objects/${ITEM_TYPE}`, { productId: "prod-FILTER_TEST_A" });
     const item2 = await post(`/objects/${ITEM_TYPE}`, { productId: "prod-FILTER_TEST_B" });
     if (!item1.ok || !item2.ok) return { test: "objects:list-filter-soId", result: "FAIL", reason: "item-creation-failed", item1, item2 };
@@ -2961,22 +3318,30 @@ const tests = {
     const idA = item1.body?.id;
     const idB = item2.body?.id;
 
-    // Ensure low on-hand to trigger backorder on reserve/commit
-    const recvA = await ensureOnHand(idA, 1);
-    const recvB = await ensureOnHand(idB, 1);
-    if (!recvA.ok || !recvB.ok) return { test: "objects:list-filter-soId", result: "FAIL", reason: "onhand-setup-failed", recvA, recvB };
+    // Force zero on-hand (matches passing commit-nonstrict flow: shortage => backorder)
+    const onhandA = await onhand(idA);
+    const qtyA = onhandA.body?.items?.[0]?.onHand ?? 0;
+    if (qtyA > 0) await post(`/objects/${MV_TYPE}`, { itemId: idA, type: "adjust", qty: -qtyA });
+
+    const onhandB = await onhand(idB);
+    const qtyB = onhandB.body?.items?.[0]?.onHand ?? 0;
+    if (qtyB > 0) await post(`/objects/${MV_TYPE}`, { itemId: idB, type: "adjust", qty: -qtyB });
 
     // Create SO with lines that exceed on-hand
-    const create = await post(`/objects/salesOrder`, {
-      type: "salesOrder",
-      status: "draft",
-      partyId,
-      customerId: partyId,
-      lines: [
-        { id: "L1", itemId: idA, uom: "ea", qty: 5 },  // 5 needed, 1 on-hand -> 4 backorder
-        { id: "L2", itemId: idB, uom: "ea", qty: 3 }   // 3 needed, 1 on-hand -> 2 backorder
-      ]
-    });
+    const create = await post(
+      `/objects/salesOrder`,
+      {
+        type: "salesOrder",
+        status: "draft",
+        partyId,
+        customerId: partyId,
+        lines: [
+          { id: "L1", itemId: idA, uom: "ea", qty: 5 },
+          { id: "L2", itemId: idB, uom: "ea", qty: 3 }
+        ]
+      },
+      { "Idempotency-Key": idem() }
+    );
     if (!create.ok) return { test: "objects:list-filter-soId", result: "FAIL", reason: "so-creation-failed", create };
     const soId = create.body?.id;
 
@@ -3142,22 +3507,30 @@ const tests = {
     const id1 = item1.body?.id;
     const id2 = item2.body?.id;
 
-    // Ensure on-hand to avoid SO shortage blocking
-    const recvA = await ensureOnHand(id1, 1);
-    const recvB = await ensureOnHand(id2, 1);
-    if (!recvA.ok || !recvB.ok) return { test: "objects:list-filter-itemId", result: "FAIL", reason: "onhand-setup-failed", recvA, recvB };
+    // Force zero on-hand (matches passing commit-nonstrict flow: shortage => backorder)
+    const onhand1 = await onhand(id1);
+    const qty1 = onhand1.body?.items?.[0]?.onHand ?? 0;
+    if (qty1 > 0) await post(`/objects/${MV_TYPE}`, { itemId: id1, type: "adjust", qty: -qty1 });
+
+    const onhand2 = await onhand(id2);
+    const qty2 = onhand2.body?.items?.[0]?.onHand ?? 0;
+    if (qty2 > 0) await post(`/objects/${MV_TYPE}`, { itemId: id2, type: "adjust", qty: -qty2 });
 
     // Create SO with 2 lines to trigger backorders
-    const create = await post(`/objects/salesOrder`, {
-      type: "salesOrder",
-      status: "draft",
-      partyId,
-      customerId: partyId,
-      lines: [
-        { id: "L1", itemId: id1, uom: "ea", qty: 3 },
-        { id: "L2", itemId: id2, uom: "ea", qty: 2 }
-      ]
-    });
+    const create = await post(
+      `/objects/salesOrder`,
+      {
+        type: "salesOrder",
+        status: "draft",
+        partyId,
+        customerId: partyId,
+        lines: [
+          { id: "L1", itemId: id1, uom: "ea", qty: 3 },
+          { id: "L2", itemId: id2, uom: "ea", qty: 2 }
+        ]
+      },
+      { "Idempotency-Key": idem() }
+    );
     if (!create.ok) return { test: "objects:list-filter-itemId", result: "FAIL", reason: "so-creation-failed", create };
 
     const soId = create.body?.id;

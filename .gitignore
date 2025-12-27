@@ -59,3 +59,7 @@ Thumbs.db
 # These files are automatically generated and should NOT be committed
 ops/smoke/.manifests/
 
+
+# local smoke sweep artifacts
+ops/smoke-sweep-results-*.json
+

@@ -21,6 +21,8 @@ $smokes = @(
   'smoke:inventory:putaway',
   'smoke:inventory:cycle-count',
   'smoke:inventory:movements-by-location',
+  'smoke:inventory:onhand-by-location',
+  'smoke:inventory:adjust-negative',
   'smoke:sales:happy',
   'smoke:sales:guards',
   'smoke:sales:fulfill-with-location',

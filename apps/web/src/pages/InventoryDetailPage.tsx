@@ -4,6 +4,8 @@ import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
 import LocationPicker from "../components/LocationPicker";
 import MovementsTable from "../components/MovementsTable";
+import { getOnHandByLocation, adjustInventory, type InventoryOnHandByLocationItem } from "../lib/inventory";
+import { listLocations, type Location } from "../lib/locations";
 
 type InventoryItem = {
   id: string;
@@ -49,11 +51,26 @@ function generateIdempotencyKey(): string {
   return `idem_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function getLastLocationId(): string {
+  return localStorage.getItem("mbapp:lastLocationId") || "";
+}
+
+function getLastLot(): string {
+  return localStorage.getItem("mbapp:lastLot") || "";
+}
+
+function saveDefaults(locationId?: string, lot?: string) {
+  if (locationId) localStorage.setItem("mbapp:lastLocationId", locationId);
+  if (lot) localStorage.setItem("mbapp:lastLot", lot);
+}
+
 export default function InventoryDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { token, tenantId } = useAuth();
   const [item, setItem] = useState<InventoryItem | null>(null);
   const [onHand, setOnHand] = useState<OnHand | null>(null);
+  const [onHandByLocation, setOnHandByLocation] = useState<InventoryOnHandByLocationItem[]>([]);
+  const [locationsCache, setLocationsCache] = useState<Record<string, Location>>({});
   const [movements, setMovements] = useState<Movement[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -70,6 +87,11 @@ export default function InventoryDetailPage() {
   const [cycleCountLoading, setCycleCountLoading] = useState(false);
   const [cycleCountError, setCycleCountError] = useState<string | null>(null);
   
+  const [showAdjustModal, setShowAdjustModal] = useState(false);
+  const [adjustForm, setAdjustForm] = useState({ deltaQty: 0, locationId: "", lot: "", note: "" });
+  const [adjustLoading, setAdjustLoading] = useState(false);
+  const [adjustError, setAdjustError] = useState<string | null>(null);
+  
   // Movements filter and pagination
   const [actionFilter, setActionFilter] = useState<string>("all");
   const [locationIdFilter, setLocationIdFilter] = useState<string>("");
@@ -84,6 +106,14 @@ export default function InventoryDetailPage() {
         tenantId,
       });
       setOnHand(onHandRes);
+
+      // Fetch onHand by location
+      try {
+        const onHandByLoc = await getOnHandByLocation(id, { token: token || undefined, tenantId });
+        setOnHandByLocation(onHandByLoc);
+      } catch (err) {
+        console.warn("Failed to fetch onHandByLocation", err);
+      }
 
       const movementsRes = await apiFetch<MovementsPage>(`/inventory/${id}/movements`, {
         token: token || undefined,
@@ -110,6 +140,37 @@ export default function InventoryDetailPage() {
     } catch (err) {
       console.warn("Failed to load more movements", err);
     }
+  };
+
+  const handleOpenPutawayModal = () => {
+    setPutawayForm({
+      qty: 0,
+      toLocationId: getLastLocationId(),
+      fromLocationId: "",
+      lot: getLastLot(),
+      note: "",
+    });
+    setShowPutawayModal(true);
+  };
+
+  const handleOpenCycleCountModal = () => {
+    setCycleCountForm({
+      countedQty: 0,
+      locationId: getLastLocationId(),
+      lot: getLastLot(),
+      note: "",
+    });
+    setShowCycleCountModal(true);
+  };
+
+  const handleOpenAdjustModal = () => {
+    setAdjustForm({
+      deltaQty: 0,
+      locationId: getLastLocationId(),
+      lot: getLastLot(),
+      note: "",
+    });
+    setShowAdjustModal(true);
   };
 
   // Filter movements client-side
@@ -141,6 +202,26 @@ export default function InventoryDetailPage() {
           setOnHand(onHandRes);
         } catch (err) {
           console.warn("Failed to fetch onHand", err);
+        }
+
+        // Fetch onHand by location
+        try {
+          const onHandByLoc = await getOnHandByLocation(id, { token: token || undefined, tenantId });
+          setOnHandByLocation(onHandByLoc);
+        } catch (err) {
+          console.warn("Failed to fetch onHandByLocation", err);
+        }
+
+        // Best-effort fetch locations for name/code resolution
+        try {
+          const locsRes = await listLocations({ limit: 200 }, { token: token || undefined, tenantId });
+          const cache: Record<string, Location> = {};
+          (locsRes.items || []).forEach((loc) => {
+            if (loc.id) cache[String(loc.id)] = loc;
+          });
+          setLocationsCache(cache);
+        } catch (err) {
+          console.warn("Failed to fetch locations", err);
         }
 
         // Optionally fetch movements
@@ -193,6 +274,7 @@ export default function InventoryDetailPage() {
       });
       setSuccess("Putaway recorded successfully");
       setShowPutawayModal(false);
+      saveDefaults(putawayForm.toLocationId, putawayForm.lot);
       setPutawayForm({ qty: 0, toLocationId: "", fromLocationId: "", lot: "", note: "" });
       await reloadData();
       setTimeout(() => setSuccess(null), 3000);
@@ -227,6 +309,7 @@ export default function InventoryDetailPage() {
       });
       setSuccess("Cycle count completed successfully");
       setShowCycleCountModal(false);
+      saveDefaults(cycleCountForm.locationId, cycleCountForm.lot);
       setCycleCountForm({ countedQty: 0, locationId: "", lot: "", note: "" });
       await reloadData();
       setTimeout(() => setSuccess(null), 3000);
@@ -234,6 +317,39 @@ export default function InventoryDetailPage() {
       setCycleCountError(formatError(err));
     } finally {
       setCycleCountLoading(false);
+    }
+  };
+
+  const handleAdjustSubmit = async () => {
+    setAdjustError(null);
+    if (!id) return;
+    if (!isFinite(adjustForm.deltaQty) || adjustForm.deltaQty === 0) {
+      setAdjustError("Delta Qty must be a non-zero number");
+      return;
+    }
+
+    setAdjustLoading(true);
+    try {
+      await adjustInventory(
+        id,
+        {
+          deltaQty: adjustForm.deltaQty,
+          ...(adjustForm.locationId && { locationId: adjustForm.locationId }),
+          ...(adjustForm.lot && { lot: adjustForm.lot }),
+          ...(adjustForm.note && { note: adjustForm.note }),
+        },
+        { token: token || undefined, tenantId }
+      );
+      setSuccess("Inventory adjusted successfully");
+      setShowAdjustModal(false);
+      saveDefaults(adjustForm.locationId, adjustForm.lot);
+      setAdjustForm({ deltaQty: 0, locationId: "", lot: "", note: "" });
+      await reloadData();
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err: any) {
+      setAdjustError(formatError(err));
+    } finally {
+      setAdjustLoading(false);
     }
   };
 
@@ -252,8 +368,9 @@ export default function InventoryDetailPage() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h1>{item.name || item.itemId || "(no name)"}</h1>
         <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={() => setShowPutawayModal(true)}>Putaway</button>
-          <button onClick={() => setShowCycleCountModal(true)}>Cycle Count</button>
+          <button onClick={handleOpenPutawayModal}>Putaway</button>
+          <button onClick={handleOpenCycleCountModal}>Cycle Count</button>
+          <button onClick={handleOpenAdjustModal}>Adjust</button>
           <Link to="/inventory">Back to List</Link>
         </div>
       </div>
@@ -310,7 +427,52 @@ export default function InventoryDetailPage() {
         </>
       )}
 
+      {onHandByLocation.length > 0 && (
+        <>
+          <h2>OnHand by Location</h2>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: "#eee", textAlign: "left" }}>
+                <th style={{ padding: 8, border: "1px solid #ccc" }}>Location</th>
+                <th style={{ padding: 8, border: "1px solid #ccc" }}>On Hand</th>
+                <th style={{ padding: 8, border: "1px solid #ccc" }}>Reserved</th>
+                <th style={{ padding: 8, border: "1px solid #ccc" }}>Available</th>
+                <th style={{ padding: 8, border: "1px solid #ccc" }}>As Of</th>
+              </tr>
+            </thead>
+            <tbody>
+              {onHandByLocation.map((item, idx) => {
+                const locId = item.locationId;
+                let locName = "(unassigned)";
+                if (locId) {
+                  const cached = locationsCache[locId];
+                  if (cached) {
+                    locName = String(cached.name || cached.displayName || cached.label || cached.id || locId);
+                  } else {
+                    locName = String(locId);
+                  }
+                }
+                return (
+                  <tr key={idx}>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }}>{locName}</td>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }}>{item.onHand}</td>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }}>{item.reserved}</td>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }}>{item.available}</td>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }}>{new Date(item.asOf).toLocaleString()}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </>
+      )}
+
       <h2>Movements</h2>
+      <p style={{ marginBottom: 16, fontSize: 14, color: "#666" }}>
+        Showing recent movements for this item. To explore movements by location, 
+        <Link to={`/inventory-movements?locationId=...`} style={{ color: "#08a", marginLeft: 4, marginRight: 4 }}>view all movements by location</Link>
+        (select a location from the OnHand by Location table above).
+      </p>
       <div style={{ display: "grid", gridTemplateColumns: "auto 1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
         <label style={{ display: "grid", gap: 4 }}>
           <span style={{ fontWeight: "bold", fontSize: 12 }}>Action</span>
@@ -570,6 +732,105 @@ export default function InventoryDetailPage() {
               <button
                 onClick={() => setShowCycleCountModal(false)}
                 disabled={cycleCountLoading}
+                style={{ flex: 1, padding: 8, background: "#ccc", border: "none", borderRadius: 4, cursor: "pointer" }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Adjust Modal */}
+      {showAdjustModal && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+          onClick={() => setShowAdjustModal(false)}
+        >
+          <div
+            style={{
+              background: "white",
+              padding: 24,
+              borderRadius: 8,
+              maxWidth: 500,
+              maxHeight: "90vh",
+              overflowY: "auto",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2>Adjust Inventory</h2>
+            {adjustError && (
+              <div style={{ padding: 8, background: "#fee", color: "#c00", borderRadius: 4, marginBottom: 12 }}>
+                {adjustError}
+              </div>
+            )}
+            <div style={{ display: "grid", gap: 12 }}>
+              <label style={{ display: "grid", gap: 4 }}>
+                Delta Qty (required, + or -):
+                <input
+                  type="number"
+                  step="0.01"
+                  value={adjustForm.deltaQty || ""}
+                  onChange={(e) => setAdjustForm({ ...adjustForm, deltaQty: parseFloat(e.target.value) || 0 })}
+                  disabled={adjustLoading}
+                  placeholder="e.g., 10 or -5"
+                  style={{ padding: 8, border: "1px solid #ccc", borderRadius: 4 }}
+                />
+                <small style={{ color: "#666" }}>Positive to add, negative to subtract</small>
+              </label>
+              <label style={{ display: "grid", gap: 4 }}>
+                Location (optional):
+                <LocationPicker
+                  value={adjustForm.locationId}
+                  onChange={(val) => setAdjustForm({ ...adjustForm, locationId: val })}
+                  disabled={adjustLoading}
+                />
+              </label>
+              <label style={{ display: "grid", gap: 4 }}>
+                Lot (optional):
+                <input
+                  type="text"
+                  value={adjustForm.lot}
+                  onChange={(e) => setAdjustForm({ ...adjustForm, lot: e.target.value })}
+                  disabled={adjustLoading}
+                  placeholder="Lot identifier"
+                  style={{ padding: 8, border: "1px solid #ccc", borderRadius: 4 }}
+                />
+              </label>
+              <label style={{ display: "grid", gap: 4 }}>
+                Note (optional):
+                <textarea
+                  value={adjustForm.note}
+                  onChange={(e) => setAdjustForm({ ...adjustForm, note: e.target.value })}
+                  disabled={adjustLoading}
+                  placeholder="Reason for adjustment"
+                  style={{ padding: 8, border: "1px solid #ccc", borderRadius: 4, minHeight: 60 }}
+                />
+              </label>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              <button
+                onClick={handleAdjustSubmit}
+                disabled={adjustLoading}
+                style={{ flex: 1, padding: 8, background: "#08a", color: "white", border: "none", borderRadius: 4, cursor: "pointer" }}
+              >
+                {adjustLoading ? "Submitting…" : "Submit Adjustment"}
+              </button>
+              <button
+                onClick={() => setShowAdjustModal(false)}
+                disabled={adjustLoading}
                 style={{ flex: 1, padding: 8, background: "#ccc", border: "none", borderRadius: 4, cursor: "pointer" }}
               >
                 Cancel

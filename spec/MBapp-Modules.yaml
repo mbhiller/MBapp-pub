@@ -681,17 +681,24 @@ components:
     InventoryAdjustmentRequest:
       type: object
       required:
-      - reason
       - deltaQty
       properties:
-        reason:
-          type: string
-          minLength: 1
         deltaQty:
           type: number
+          description: Quantity adjustment (positive to add, negative to subtract)
+        reason:
+          type: string
+          nullable: true
+          description: Reason for adjustment (legacy field, use note instead)
+          minLength: 1
+        note:
+          type: string
+          nullable: true
+          description: Note or reason for the adjustment
         notes:
           type: string
           nullable: true
+          description: Alias for note (both are accepted for backwards compatibility)
     PutawayRequest:
       type: object
       required:
