@@ -60,7 +60,9 @@ $smokes = @(
   'smoke:reservations:crud',
   'smoke:reservations:conflicts',
   'smoke:common:pagination',
-  'smoke:common:error-shapes'
+  'smoke:common:error-shapes',
+  'smoke:vendor-filter-preferred',
+  'smoke:suggest-po-with-vendor'
 )
 
 $results = @()

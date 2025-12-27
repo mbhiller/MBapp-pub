@@ -84,7 +84,9 @@
     "smoke:sales:commit-with-location": "node ops/smoke/smoke.mjs smoke:sales:commit-with-location",
     "smoke:sales:reserve-with-location": "node ops/smoke/smoke.mjs smoke:sales:reserve-with-location",
     "smoke:inventory:adjust-negative": "node ops/smoke/smoke.mjs smoke:inventory:adjust-negative",
-    "smoke:inventory:onhand-by-location": "node ops/smoke/smoke.mjs smoke:inventory:onhand-by-location"
+    "smoke:inventory:onhand-by-location": "node ops/smoke/smoke.mjs smoke:inventory:onhand-by-location",
+    "smoke:suggest-po-with-vendor": "node ops/smoke/smoke.mjs smoke:suggest-po-with-vendor",
+    "smoke:vendor-filter-preferred": "node ops/smoke/smoke.mjs smoke:vendor-filter-preferred"
   },
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "^3.882.0",

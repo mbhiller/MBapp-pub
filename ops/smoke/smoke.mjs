@@ -313,6 +313,65 @@ async function onhand(itemId){
   return await get(`/inventory/${encodeURIComponent(itemId)}/onhand`);
 }
 async function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+/**
+ * Paginate through pages where `items` may be empty while `pageInfo.hasNext` is true.
+ * Stops early once at least one item is collected, or when hasNext=false, or maxPages reached.
+ * Expected `fetchPage` signature: `({ limit, next }) => ({ items?, pageInfo? , cursor? , body? })`
+ */
+async function fetchAllPages({ fetchPage, pageSize = 50, maxPages = 10 }) {
+  if (typeof fetchPage !== "function") {
+    throw new Error("fetchAllPages requires a fetchPage({ limit, next }) function");
+  }
+  const collected = [];
+  let next = undefined;
+  let pagesFetched = 0;
+  let lastPageInfo = { hasNext: false };
+  let lastCursorUsed = null;
+  let lastNextCursorReturned = null;
+  while (pagesFetched < maxPages) {
+    const res = await fetchPage({ limit: pageSize, next });
+    const items = Array.isArray(res?.items) ? res.items
+      : Array.isArray(res?.body?.items) ? res.body.items
+      : [];
+    const pageInfo = res?.pageInfo ?? res?.body?.pageInfo ?? {};
+    lastPageInfo = pageInfo || {};
+    // Track cursor used for this request (first page: null)
+    lastCursorUsed = next ?? null;
+    // Determine next cursor from response, prefer pageInfo.nextCursor
+    const nextCursor = pageInfo?.nextCursor ?? pageInfo?.next ?? res?.body?.next ?? res?.next ?? res?.cursor ?? null;
+    lastNextCursorReturned = nextCursor ?? null;
+    pagesFetched++;
+    if (items.length > 0) {
+      collected.push(...items);
+      break;
+    }
+    const hasNext = !!(pageInfo && (pageInfo.hasNext || pageInfo.has_more || pageInfo.more || nextCursor));
+    next = nextCursor;
+    if (!hasNext || !next) {
+      break;
+    }
+  }
+  return { items: collected, pagesFetched, lastPageInfo, lastCursorUsed, lastNextCursorReturned };
+}
+
+/**
+ * Poll using fetchAllPages until items appear or timeout elapses.
+ * Returns items when found; throws with debug details on timeout.
+ */
+async function waitForItems({ fetchPage, timeoutMs = 2000, intervalMs = 120, pageSize = 50, maxPages = 10 }) {
+  const start = Date.now();
+  let last = { items: [], pagesFetched: 0, lastPageInfo: { hasNext: false }, lastCursorUsed: null, lastNextCursorReturned: null };
+  while (Date.now() - start < timeoutMs) {
+    last = await fetchAllPages({ fetchPage, pageSize, maxPages });
+    if (Array.isArray(last.items) && last.items.length > 0) {
+      return last.items;
+    }
+    await sleep(intervalMs);
+  }
+  const err = new Error("waitForItems: timeout waiting for items");
+  err.debug = { lastPageInfo: last.lastPageInfo, lastCursorUsed: last.lastCursorUsed, lastNextCursorReturned: last.lastNextCursorReturned, pagesFetched: last.pagesFetched };
+  throw err;
+}
 async function waitForStatus(type, id, wanted, { tries=10, delayMs=120 } = {}) {
   for (let i=0;i<tries;i++){
     const po = await get(`/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}`);
@@ -322,6 +381,65 @@ async function waitForStatus(type, id, wanted, { tries=10, delayMs=120 } = {}) {
   }
   const last = await get(`/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}`);
   return { ok:false, lastStatus:last?.body?.status, po:last };
+}
+
+/**
+ * Wait for backorder requests to be created by polling search endpoint.
+ * Uses the same polling pattern as smoke:salesOrders:commit-nonstrict-backorder.
+ * Polls continuously (ignores hasNext=false) until items found or timeout.
+ */
+async function waitForBackorders({ soId, itemId, status = "open", preferredVendorId }, { timeoutMs = 12000, intervalMs = 500 } = {}) {
+  const maxAttempts = Math.ceil(timeoutMs / intervalMs);
+  let attemptsMade = 0;
+  let lastSearchRequestBody = null;
+  let lastSearchResponse = null;
+  let found = false;
+  let items = [];
+
+  // Poll with same request body shape as working smoke
+  for (let i = 0; i < maxAttempts && !found; i++) {
+    attemptsMade++;
+    lastSearchRequestBody = { soId, status };
+    if (itemId) lastSearchRequestBody.itemId = itemId;
+    
+    lastSearchResponse = await post(`/objects/backorderRequest/search`, lastSearchRequestBody);
+    items = Array.isArray(lastSearchResponse.body?.items) ? lastSearchResponse.body.items : [];
+    found = lastSearchResponse.ok && items.length > 0;
+    
+    if (found) {
+      recordFromListResult(items, "backorderRequest", `/objects/backorderRequest/search`);
+    }
+    if (!found && i < maxAttempts - 1) {
+      await sleep(intervalMs);
+    }
+  }
+
+  if (!found) {
+    return {
+      ok: false,
+      error: "timeout",
+      attemptsMade,
+      lastSearchRequestBody,
+      lastSearchResponse: {
+        pageInfo: lastSearchResponse?.body?.pageInfo || { hasNext: false },
+        itemsLength: items.length,
+        status: lastSearchResponse?.status
+      },
+      soId,
+      itemId,
+      status,
+      preferredVendorId
+    };
+  }
+
+  // If no vendor filter requested, return all discovered backorders
+  if (!preferredVendorId) {
+    return { ok: true, items, attemptsMade };
+  }
+
+  // Filter by vendor if requested
+  const vendorMatches = items.filter(b => b.preferredVendorId === preferredVendorId);
+  return { ok: true, items, vendorMatches, attemptsMade };
 }
 
 /** Try multiple movement payload shapes until on-hand increases. */
@@ -4932,6 +5050,290 @@ const tests = {
         "403": { hasCode: !!forbidden.body.code, hasMessage: !!forbidden.body.message },
         "404": { hasCode: !!notFound.body.code, hasMessage: !!notFound.body.message }
       }
+    };
+  },
+
+  "smoke:vendor-filter-preferred": async () => {
+    await ensureBearer();
+
+    // Step 1: Create two vendors
+    const { vendorId: vendor1Id } = await seedVendor(api);
+    const vendor2Res = await post(`/objects/party`, {
+      type: "party",
+      name: `TestVendor2-${Date.now()}`,
+      role: "vendor"
+    }, { "Idempotency-Key": idem() });
+    if (!vendor2Res.ok) return { test: "vendor-filter-preferred", result: "FAIL", step: "seedVendor2", vendor2Res };
+    const vendor2Id = vendor2Res.body?.id;
+
+    // Step 2: Create product1 with vendor1, product2 with vendor2
+    const prod1 = await createProduct({ name: `ProdV1-${Date.now()}`, preferredVendorId: vendor1Id });
+    if (!prod1.ok) return { test: "vendor-filter-preferred", result: "FAIL", step: "createProduct1", prod1 };
+    const prod1Id = prod1.body?.id;
+
+    const prod2 = await createProduct({ name: `ProdV2-${Date.now()}`, preferredVendorId: vendor2Id });
+    if (!prod2.ok) return { test: "vendor-filter-preferred", result: "FAIL", step: "createProduct2", prod2 };
+    const prod2Id = prod2.body?.id;
+
+    // Step 3: Create inventory for both products
+    const inv1 = await createInventoryForProduct(prod1Id, `Item1-${Date.now()}`);
+    if (!inv1.ok) return { test: "vendor-filter-preferred", result: "FAIL", step: "createInventory1", inv1 };
+    const inv1Id = inv1.body?.id;
+
+    const inv2 = await createInventoryForProduct(prod2Id, `Item2-${Date.now()}`);
+    if (!inv2.ok) return { test: "vendor-filter-preferred", result: "FAIL", step: "createInventory2", inv2 };
+    const inv2Id = inv2.body?.id;
+
+    // Step 4: Create SO with item1 only (so backorder created for vendor1)
+    const { partyId } = await seedParties(api);
+    const so = await post(`/objects/salesOrder`, {
+      type: "salesOrder",
+      partyId,
+      status: "draft",
+      lines: [{ itemId: inv1Id, qty: 5, uom: "ea" }]
+    });
+    if (!so.ok) return { test: "vendor-filter-preferred", result: "FAIL", step: "createSO", so };
+    const soId = so.body?.id;
+
+    // Step 5: Submit and commit SO to trigger backorder creation
+    const soSubmit = await post(`/sales/so/${encodeURIComponent(soId)}:submit`, {}, { "Idempotency-Key": idem() });
+    if (!soSubmit.ok) return { test: "vendor-filter-preferred", result: "FAIL", step: "submitSO", soSubmit };
+
+    const soCommit = await post(`/sales/so/${encodeURIComponent(soId)}:commit`, {}, { "Idempotency-Key": idem() });
+    if (!soCommit.ok) return { test: "vendor-filter-preferred", result: "FAIL", step: "commitSO", soCommit };
+
+    // Step 5b: Assert commit created backorders (shortages)
+    const shortages = Array.isArray(soCommit.body?.shortages) ? soCommit.body.shortages : [];
+    if (shortages.length === 0) {
+      return {
+        test: "vendor-filter-preferred",
+        result: "FAIL",
+        step: "commitDidNotCreateBackorders",
+        reason: "commit_returned_zero_shortages",
+        soId,
+        itemId: inv1Id,
+        commitStatus: soCommit.status,
+        commitBody: soCommit.body
+      };
+    }
+
+    // Step 6: Discover backorders by soId+itemId (no vendor filter) - eventual consistency
+    const boDiscovery = await waitForBackorders({ soId, itemId: inv1Id, status: "open" }, { timeoutMs: 12000, intervalMs: 500 });
+    if (!boDiscovery.ok) {
+      return {
+        test: "vendor-filter-preferred",
+        result: "FAIL",
+        step: "noBackordersCreated",
+        reason: "timeout_discovering_backorders",
+        soId,
+        itemId: inv1Id,
+        vendor1Id,
+        vendor2Id,
+        debug: boDiscovery.debug || {}
+      };
+    }
+    const allBackorders = boDiscovery.items || [];
+    if (allBackorders.length === 0) {
+      return {
+        test: "vendor-filter-preferred",
+        result: "FAIL",
+        step: "noBackordersCreated",
+        reason: "empty_after_discovery",
+        soId,
+        itemId: inv1Id
+      };
+    }
+
+    // Step 6b: Capture debug info from first discovered backorder
+    const bo0 = allBackorders[0];
+    const bo0Debug = {
+      id: bo0?.id,
+      soId: bo0?.soId,
+      itemId: bo0?.itemId,
+      status: bo0?.status,
+      preferredVendorId: bo0?.preferredVendorId,
+      vendorId: bo0?.vendorId,
+      allKeys: Object.keys(bo0 || {})
+    };
+
+    // Step 7: Test vendor filtering - search with vendor1 filter
+    const fetchPageV1 = async ({ limit, next }) => {
+      return await post(`/objects/backorderRequest/search`, {
+        soId,
+        status: "open",
+        preferredVendorId: vendor1Id,
+        limit,
+        next
+      });
+    };
+    const v1 = await fetchAllPages({ fetchPage: fetchPageV1, pageSize: 50, maxPages: 10 });
+    const boV1Items = v1.items ?? [];
+    const foundV1 = boV1Items.length > 0;
+
+    // Step 8: Test vendor filtering - search with vendor2 filter (expect zero)
+    const fetchPageV2 = async ({ limit, next }) => {
+      return await post(`/objects/backorderRequest/search`, {
+        soId,
+        status: "open",
+        preferredVendorId: vendor2Id,
+        limit,
+        next
+      });
+    };
+    const v2 = await fetchAllPages({ fetchPage: fetchPageV2, pageSize: 50, maxPages: 10 });
+    const boV2Items = v2.items ?? [];
+    const foundV2 = boV2Items.length > 0;
+
+    // Assertions
+    const matchesV1 = boV1Items.every(b => b.status === "open" && b.soId === soId);
+    const pass = foundV1 && matchesV1 && !foundV2;
+    
+    return {
+      test: "vendor-filter-preferred",
+      result: pass ? "PASS" : "FAIL",
+      debug: {
+        expectedVendor1Id: vendor1Id,
+        expectedVendor2Id: vendor2Id,
+        discoveredBackorder: bo0Debug
+      },
+      discovery: { totalBackorders: allBackorders.length },
+      filterResults: {
+        vendor1Filtered: { count: boV1Items.length, found: foundV1, matches: matchesV1 },
+        vendor2Filtered: { count: boV2Items.length, found: foundV2 }
+      },
+      ...((!foundV1 && allBackorders.length > 0) ? { 
+        reason: "vendor1FilterNoMatches",
+        detail: "Backorders exist but vendor1 filter returned none"
+      } : {}),
+      ...(foundV2 ? {
+        reason: "vendor2FilterUnexpectedMatches", 
+        detail: "Vendor2 filter should return zero but found items"
+      } : {})
+    };
+  },
+
+  "smoke:suggest-po-with-vendor": async () => {
+    await ensureBearer();
+
+    // Step 1: Create vendor and product with preferredVendorId
+    const { vendorId } = await seedVendor(api);
+    const prod = await createProduct({ name: `SuggestPOTest-${Date.now()}`, preferredVendorId: vendorId });
+    if (!prod.ok) return { test: "suggest-po-with-vendor", result: "FAIL", step: "createProduct", prod };
+    const prodId = prod.body?.id;
+
+    // Step 2: Create inventory
+    const inv = await createInventoryForProduct(prodId, `InventorySuggest-${Date.now()}`);
+    if (!inv.ok) return { test: "suggest-po-with-vendor", result: "FAIL", step: "createInventory", inv };
+    const invId = inv.body?.id;
+
+    // Step 3: Create SO with shortage to trigger backorder
+    const { partyId } = await seedParties(api);
+    const so = await post(`/objects/salesOrder`, {
+      type: "salesOrder",
+      partyId,
+      status: "draft",
+      lines: [{ itemId: invId, qty: 10, uom: "ea" }]
+    });
+    if (!so.ok) return { test: "suggest-po-with-vendor", result: "FAIL", step: "createSO", so };
+    const soId = so.body?.id;
+
+    // Step 4: Submit and commit SO to trigger backorder creation
+    const soSubmit = await post(`/sales/so/${encodeURIComponent(soId)}:submit`, {}, { "Idempotency-Key": idem() });
+    if (!soSubmit.ok) return { test: "suggest-po-with-vendor", result: "FAIL", step: "submitSO", soSubmit };
+
+    const soCommit = await post(`/sales/so/${encodeURIComponent(soId)}:commit`, {}, { "Idempotency-Key": idem() });
+    if (!soCommit.ok) return { test: "suggest-po-with-vendor", result: "FAIL", step: "commitSO", soCommit };
+
+    // Step 4b: Assert commit created backorders (shortages)
+    const shortages = Array.isArray(soCommit.body?.shortages) ? soCommit.body.shortages : [];
+    if (shortages.length === 0) {
+      return {
+        test: "suggest-po-with-vendor",
+        result: "FAIL",
+        step: "commitDidNotCreateBackorders",
+        reason: "commit_returned_zero_shortages",
+        vendorId,
+        soId,
+        itemId: invId,
+        commitStatus: soCommit.status,
+        commitBody: soCommit.body
+      };
+    }
+
+    // Step 5: Discover backorders by soId+itemId (no vendor filter) - eventual consistency
+    const boDiscovery = await waitForBackorders({ soId, itemId: invId, status: "open" }, { timeoutMs: 12000, intervalMs: 500 });
+    if (!boDiscovery.ok) {
+      return {
+        test: "suggest-po-with-vendor",
+        result: "FAIL",
+        step: "noBackordersCreated",
+        reason: "timeout_discovering_backorders",
+        vendorId,
+        soId,
+        itemId: invId,
+        debug: boDiscovery.debug || {}
+      };
+    }
+    const allBackorders = boDiscovery.items || [];
+    if (allBackorders.length === 0) {
+      return {
+        test: "suggest-po-with-vendor",
+        result: "FAIL",
+        step: "noBackordersCreated",
+        reason: "empty_after_discovery",
+        vendorId,
+        soId,
+        itemId: invId
+      };
+    }
+
+    // Step 6: Use discovered backorder IDs for suggest-po
+    const boIds = allBackorders.map(b => b.id).filter(Boolean);
+    const boUseIds = boIds.length ? [boIds[0]] : [];
+    if (!boUseIds.length) {
+      return {
+        test: "suggest-po-with-vendor",
+        result: "FAIL",
+        step: "noBackorderIds",
+        reason: "backorders_missing_ids",
+        vendorId,
+        soId,
+        itemId: invId,
+        backordersFound: allBackorders.length
+      };
+    }
+
+    // Step 7: Call suggest-po
+    const suggest = await post(`/purchasing/suggest-po`, {
+      requests: boUseIds.map(id => ({ backorderRequestId: id }))
+    }, { "Idempotency-Key": idem() });
+    if (!suggest.ok) return { test: "suggest-po-with-vendor", result: "FAIL", step: "suggestPO", suggest };
+
+    const draft = suggest.body?.draft ?? suggest.body?.drafts?.[0];
+    if (!draft) return { test: "suggest-po-with-vendor", result: "FAIL", step: "noDraft", suggest };
+
+    // Step 8: Verify draft has correct vendorId and backorderRequestIds
+    const hasCorrectVendor = draft.vendorId === vendorId;
+    const hasBackorderIds = (draft.lines || []).some(line => Array.isArray(line.backorderRequestIds) && line.backorderRequestIds.length > 0);
+    const pass = hasCorrectVendor && hasBackorderIds;
+
+    return {
+      test: "suggest-po-with-vendor",
+      result: pass ? "PASS" : "FAIL",
+      discovery: { totalBackorders: allBackorders.length, usedBackorderIds: boUseIds },
+      draftValidation: {
+        vendorId: { expected: vendorId, actual: draft.vendorId, match: hasCorrectVendor },
+        hasBackorderIds: hasBackorderIds,
+        lineCount: (draft.lines ?? []).length
+      },
+      ...(!hasCorrectVendor ? {
+        reason: "vendorIdMismatch",
+        detail: `Expected vendorId ${vendorId}, got ${draft.vendorId}`
+      } : {}),
+      ...(!hasBackorderIds ? {
+        reason: "missingBackorderIds",
+        detail: "Draft lines missing backorderRequestIds"
+      } : {})
     };
   }
 };

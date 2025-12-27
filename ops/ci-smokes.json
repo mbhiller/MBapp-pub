@@ -13,7 +13,9 @@
   "smoke:salesOrders:commit-strict-shortage",
   "smoke:salesOrders:commit-nonstrict-backorder",
   "smoke:sales:reserve-with-location",
-  "smoke:sales:commit-with-location"
+  "smoke:sales:commit-with-location",
+  "smoke:vendor-filter-preferred",
+  "smoke:suggest-po-with-vendor"
   ]
 
 }
