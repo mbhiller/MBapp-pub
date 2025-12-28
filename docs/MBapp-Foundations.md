@@ -428,6 +428,28 @@ export async function smoke_module_flow(API_BASE, authToken) {
 | `/sales/so/{id}:close` | POST | ✅ | ✅ Used | ❌ | **Required** |
 
 **Mobile gaps:** Edit SO/lines UI (currently create-only)  
+
+---
+
+### PatchLines foundation (SO/PO lines)
+
+**Why:** Stable line identity with minimal diffs and a reusable editor model across web/mobile. Avoids full-array replacements, reduces payload size, and standardizes line edits.
+
+**Contract:**
+- Operations: `ops[]` supports `{ op: "upsert" | "remove", id?, cid?, patch? }`.
+- Apply: server runs shared `applyPatchLines()` without reordering, then assigns missing IDs via `ensureLineIds()`.
+- Guard: endpoints allow patching only while orders are editable (Sales Orders: `draft|submitted|approved`; Purchase Orders: `draft`). Non-editable states return 409 (e.g., `PO_NOT_EDITABLE`).
+
+**Where:**
+- Shared utility: [apps/api/src/shared/patchLines.ts](../apps/api/src/shared/patchLines.ts)
+- ID assignment: [apps/api/src/shared/ensureLineIds.ts](../apps/api/src/shared/ensureLineIds.ts)
+- Sales endpoint: [apps/api/src/sales/so-patch-lines.ts](../apps/api/src/sales/so-patch-lines.ts)
+- Purchasing endpoint: [apps/api/src/purchasing/po-patch-lines.ts](../apps/api/src/purchasing/po-patch-lines.ts)
+- Spec: [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml)
+
+**How to verify:**
+- Run smoke flow `smoke:salesOrders:patch-lines` in [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) to validate qty update + new line add and that new lines receive server-assigned IDs.
+
 **Web gaps:** All screens  
 **API complete:** ✅
 

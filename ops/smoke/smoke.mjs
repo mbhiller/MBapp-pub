@@ -3332,6 +3332,70 @@ const tests = {
     };
   },
 
+  "smoke:salesOrders:patch-lines": async () => {
+    await ensureBearer();
+
+    const { partyId } = await seedParties(api);
+    const prod = await createProduct({ name: "SO-PatchLines" });
+    if (!prod.ok) return { test: "salesOrders:patch-lines", result: "FAIL", prod };
+    const inv = await createInventoryForProduct(prod.body?.id, "SO-PatchLinesItem");
+    if (!inv.ok) return { test: "salesOrders:patch-lines", result: "FAIL", inv };
+    const itemId = inv.body?.id;
+
+    // 1) Create draft SO with 1 line (server should assign id)
+    const create = await post(
+      `/objects/salesOrder`,
+      {
+        type: "salesOrder",
+        status: "draft",
+        partyId,
+        lines: [{ itemId, uom: "ea", qty: 2 }],
+      },
+      { "Idempotency-Key": idem() }
+    );
+    if (!create.ok) return { test: "salesOrders:patch-lines", result: "FAIL", create };
+
+    const soId = create.body?.id;
+    const createLines = Array.isArray(create.body?.lines) ? create.body.lines : [];
+    const keepLine = createLines[0] || {};
+    const keepLineId = keepLine.id ?? keepLine.lineId;
+
+    // 2) Patch-lines: update qty of existing line and add a second line
+    const patch = await post(
+      `/sales/so/${encodeURIComponent(soId)}:patch-lines`,
+      {
+        ops: [
+          { op: "upsert", id: keepLineId, patch: { qty: (Number(keepLine.qty) || 0) + 1 } },
+          { op: "upsert", patch: { itemId, uom: "ea", qty: 5 } },
+        ],
+      },
+      { "Idempotency-Key": idem() }
+    );
+    if (!patch.ok) return { test: "salesOrders:patch-lines", result: "FAIL", patch, create };
+
+    // 3) Fetch SO and assert lines reflect ops; new line has id assigned
+    const got = await get(`/objects/salesOrder/${encodeURIComponent(soId)}`);
+    const lines = Array.isArray(got.body?.lines) ? got.body.lines : [];
+    const ids = lines.map(l => l?.id ?? l?.lineId).filter(Boolean);
+    const updatedKeep = lines.find(l => (l?.id ?? l?.lineId) === keepLineId);
+    const addedLine = lines.find(l => (l?.id ?? l?.lineId) !== keepLineId && l.itemId === itemId && Number(l.qty) === 5);
+    const addedHasId = addedLine && typeof (addedLine.id ?? addedLine.lineId) === "string" && (addedLine.id ?? addedLine.lineId).trim().length > 0;
+
+    const pass = create.ok && patch.ok && got.ok && lines.length === 2 && updatedKeep && Number(updatedKeep.qty) === ((Number(keepLine.qty) || 0) + 1) && addedLine && addedHasId;
+    return {
+      test: "salesOrders:patch-lines",
+      result: pass ? "PASS" : "FAIL",
+      createLines,
+      patched: patch.body,
+      persistedLines: lines,
+      keepLineId,
+      addedLineId: addedLine?.id ?? addedLine?.lineId,
+      create,
+      patch,
+      got,
+    };
+  },
+
   "smoke:salesOrders:commit-strict-shortage": async () => {
     await ensureBearer();
 

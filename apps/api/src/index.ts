@@ -43,6 +43,7 @@ import * as PoApprove  from "./purchasing/po-approve";
 import * as PoReceive  from "./purchasing/po-receive";
 import * as PoCancel   from "./purchasing/po-cancel";
 import * as PoClose    from "./purchasing/po-close";
+import * as PoPatchLines from "./purchasing/po-patch-lines";
 // Sales Orders
 import * as SoSubmit   from "./sales/so-submit";
 import * as SoCommit   from "./sales/so-commit";
@@ -51,6 +52,8 @@ import * as SoCancel   from "./sales/so-cancel";
 import * as SoClose    from "./sales/so-close";
 import * as SoReserve  from "./sales/so-reserve";
 import * as SoRelease  from "./sales/so-release";
+// Use require to avoid transient TS module resolution hiccup for hyphenated filename
+const SoPatchLines = require("./sales/so-patch-lines");
 
 // Inventory on-hand (computed from movements)
 import * as InvOnHandGet from "./inventory/onhand-get";
@@ -279,7 +282,7 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
     /* ========= Actions ========= */
     // Purchasing PO actions
     {
-      const m = match(/^\/purchasing\/po\/([^/]+):(submit|approve|receive|cancel|close)$/i, path);
+      const m = match(/^\/purchasing\/po\/([^/]+):(submit|approve|receive|cancel|close|patch-lines)$/i, path);
       if (m) {
         const [id, action] = m;
         switch (action) {
@@ -288,6 +291,7 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
           case "receive": requirePerm(auth, "purchase:receive"); return PoReceive.handle(withId(event, id));
           case "cancel":  requirePerm(auth, "purchase:cancel");  return PoCancel.handle(withId(event, id));
           case "close":   requirePerm(auth, "purchase:close");   return PoClose.handle(withId(event, id));
+          case "patch-lines": requirePerm(auth, "purchase:write"); return PoPatchLines.handle(withId(event, id));
         }
         return methodNotAllowed();
       }
@@ -295,7 +299,7 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
 
     // Sales SO actions
     {
-      const m = match(/^\/sales\/so\/([^/]+):(submit|commit|reserve|release|fulfill|cancel|close)$/i, path);
+      const m = match(/^\/sales\/so\/([^/]+):(submit|commit|reserve|release|fulfill|cancel|close|patch-lines)$/i, path);
       if (m) {
         const [id, action] = m;
         switch (action) {
@@ -306,6 +310,7 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
           case "fulfill": requirePerm(auth, "sales:fulfill");  return SoFulfill.handle(withId(event, id));
           case "cancel":  requirePerm(auth, "sales:cancel");   return SoCancel.handle(withId(event, id));
           case "close":   requirePerm(auth, "sales:close");    return SoClose.handle(withId(event, id));
+          case "patch-lines": requirePerm(auth, "sales:write"); return SoPatchLines.handle(withId(event, id));
         }
         return methodNotAllowed();
       }

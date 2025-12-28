@@ -1,3 +1,7 @@
+// Usage expectation:
+// - Callers should run ensureLineIds() AFTER applying any line patch operations.
+// - patchLines (apps/api/src/shared/patchLines.ts) does not assign ids; ensureLineIds
+//   assigns stable `L{n}` IDs where missing, preserves existing ids, and avoids reuse.
 export type LineLike = { id?: string } & Record<string, unknown>;
 
 type EnsureOptions = {

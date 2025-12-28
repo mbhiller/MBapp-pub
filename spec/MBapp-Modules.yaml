@@ -1693,7 +1693,34 @@ components:
         lineTotal:     { type: number, nullable: true }
         locationId:    { type: string, nullable: true }
         lot:           { type: string, nullable: true }
-        expectedDate:  { type: string, format: date-time, nullable: true }
+
+    # Patch-lines (draft edit) utility types
+    PatchLinesOp:
+      type: object
+      description: Minimal patch operation for editing lines in draft orders.
+      properties:
+        op:
+          type: string
+          enum: [upsert, remove]
+        id:
+          type: string
+          description: Server line id; preferred for matching existing lines
+        cid:
+          type: string
+          description: Client-side temporary key; best-effort for non-persisted lines
+        patch:
+          type: object
+          description: Partial line fields to merge when op=upsert
+      required: [op]
+    PatchLinesRequest:
+      type: object
+      required: [ops]
+      properties:
+        ops:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/PatchLinesOp'
     ScannerAction:
       allOf:
       - $ref: '#/components/schemas/ObjectBase'
@@ -3923,6 +3950,29 @@ paths:
           description: Only submitted can approve
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
 
+  /purchasing/po/{id}:patch-lines:
+    post:
+      summary: Apply patch operations to purchase order lines (draft-only)
+      operationId: patchPurchaseOrderLines
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PatchLinesRequest' }
+      responses:
+        '200':
+          description: Updated purchase order
+          content: { application/json: { schema: { $ref: '#/components/schemas/PurchaseOrder' } } }
+        '409':
+          description: Guardrail violation (e.g., invalid status for patch)
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
   /purchasing/po/{id}:receive:
     post:
       summary: Receive against purchase order lines
@@ -4207,6 +4257,29 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/SalesOrder' } } }
         '409':
           description: Guardrail violation
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
+  /sales/so/{id}:patch-lines:
+    post:
+      summary: Apply patch operations to sales order lines (draft-only)
+      operationId: patchSalesOrderLines
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PatchLinesRequest' }
+      responses:
+        '200':
+          description: Updated sales order
+          content: { application/json: { schema: { $ref: '#/components/schemas/SalesOrder' } } }
+        '409':
+          description: Guardrail violation (e.g., invalid status for patch)
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
 
   /sales/so/{id}:fulfill:

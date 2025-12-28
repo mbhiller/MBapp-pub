@@ -31,6 +31,7 @@ $smokes = @(
   'smoke:sales:fulfill-without-reserve',
   'smoke:outbound:reserve-fulfill-release-cycle',
   'smoke:salesOrders:draft-lines-server-assign-ids',
+  'smoke:salesOrders:patch-lines',
   'smoke:salesOrders:commit-strict-shortage',
   'smoke:salesOrders:commit-nonstrict-backorder',
   'smoke:purchaseOrders:draft-create-edit-lines',

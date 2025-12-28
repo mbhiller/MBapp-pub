@@ -766,6 +766,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/purchasing/po/{id}:patch-lines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply patch operations to purchase order lines (draft-only) */
+        post: operations["patchPurchaseOrderLines"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/purchasing/po/{id}:receive": {
         parameters: {
             query?: never;
@@ -1335,6 +1352,23 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sales/so/{id}:patch-lines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply patch operations to sales order lines (draft-only) */
+        post: operations["patchSalesOrderLines"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2870,8 +2904,20 @@ export interface components {
             lineTotal?: number | null;
             locationId?: string | null;
             lot?: string | null;
-            /** Format: date-time */
-            expectedDate?: string | null;
+        };
+        /** @description Minimal patch operation for editing lines in draft orders. */
+        PatchLinesOp: {
+            /** @enum {string} */
+            op: "upsert" | "remove";
+            /** @description Server line id; preferred for matching existing lines */
+            id?: string;
+            /** @description Client-side temporary key; best-effort for non-persisted lines */
+            cid?: string;
+            /** @description Partial line fields to merge when op=upsert */
+            patch?: Record<string, never>;
+        };
+        PatchLinesRequest: {
+            ops: components["schemas"]["PatchLinesOp"][];
         };
         ScannerAction: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
@@ -4638,6 +4684,44 @@ export interface operations {
             };
         };
     };
+    patchPurchaseOrderLines: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional idempotency key for safe retries. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchLinesRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated purchase order */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseOrder"];
+                };
+            };
+            /** @description Guardrail violation (e.g., invalid status for patch) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     createPoFromSuggestion: {
         parameters: {
             query?: never;
@@ -4666,6 +4750,44 @@ export interface operations {
                         id?: string;
                         ids?: string[];
                     };
+                };
+            };
+        };
+    };
+    patchSalesOrderLines: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional idempotency key for safe retries. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchLinesRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated sales order */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesOrder"];
+                };
+            };
+            /** @description Guardrail violation (e.g., invalid status for patch) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
