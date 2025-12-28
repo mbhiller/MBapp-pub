@@ -3,6 +3,8 @@ import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda
 import { ddb, tableObjects } from "../common/ddb";
 import { GetCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import { resolveTenantId } from "../common/tenant";
+import { badRequest, conflictError, internalError, notFound } from "../common/responses";
+import { logger } from "../common/logger";
 
 type LineReq = { lineId: string; deltaQty: number; locationId?: string; lot?: string };
 type SOLine = { id: string; itemId: string; qty: number; uom?: string };
@@ -14,11 +16,7 @@ type SalesOrder = {
 };
 
 const DEBUG = process.env.MBAPP_DEBUG === "1" || process.env.DEBUG === "1";
-const log = (event: APIGatewayProxyEventV2, tag: string, data: Record<string, any>) => {
-  if (!DEBUG) return;
-  const reqId = (event.requestContext as any)?.requestId;
-  try { console.log(JSON.stringify({ tag, reqId, ...data })); } catch {}
-};
+const reqIdOf = (event: APIGatewayProxyEventV2) => (event.requestContext as any)?.requestId;
 
 const json = (s: number, b: unknown): APIGatewayProxyResultV2 => ({
   statusCode: s,
@@ -69,35 +67,39 @@ async function fulfilledSoFar(tenantId: string, soId: string): Promise<Record<st
 
 
 export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
+  const requestId = reqIdOf(event);
+  const baseCtx = { requestId };
   try {
     let tenantId: string;
     try { tenantId = tid(event); } catch (err: any) {
       const status = err?.statusCode ?? 400;
-      return json(status, { message: err?.message ?? "Tenant header mismatch" });
+      return badRequest(err?.message ?? "Tenant header mismatch", undefined, requestId);
     }
     const id = event.pathParameters?.id;
-    if (!tenantId || !id) return json(400, { message: "Missing tenant or id" });
+    if (!tenantId || !id) return badRequest("Missing tenant or id", undefined, requestId);
+    const logCtx = { ...baseCtx, tenantId, route: event.rawPath ?? event.requestContext?.http?.path, method: event.requestContext?.http?.method };
 
     const body = parse<{ lines: LineReq[] }>(event);
     const reqLines = Array.isArray(body?.lines) ? body.lines : [];
     if (reqLines.length === 0) return json(400, { message: "lines[] required" });
 
     const so = await loadSO(tenantId, id);
-    if (!so) return json(404, { message: "Sales order not found" });
-    log(event, "so-fulfill.load", { id: so.id, status: so.status, reqCount: reqLines.length });
+    if (!so) return notFound("Sales order not found", requestId);
+    logger.info(logCtx, "so-fulfill.load", { soId: so.id, status: so.status, reqCount: reqLines.length });
 
     // Guard status: allow fulfill from committed or partially_fulfilled
     if (!["committed", "partially_fulfilled"].includes(so.status)) {
-      return json(409, { message: `Cannot fulfill from status=${so.status}` });
+      logger.warn(logCtx, "so-fulfill.guard", { reason: "bad_status", status: so.status });
+      return conflictError(`Cannot fulfill from status=${so.status}`, undefined, requestId);
     }
 
     const linesById = new Map<string, SOLine>((so.lines ?? []).map(l => [l.id, l]));
     for (const l of reqLines) {
       if (!l?.lineId || typeof l.deltaQty !== "number" || l.deltaQty <= 0) {
-        return json(400, { message: "Each line requires { lineId, deltaQty>0 }" });
+        return badRequest("Each line requires { lineId, deltaQty>0 }", undefined, requestId);
       }
       if (!linesById.has(l.lineId)) {
-        return json(404, { message: `Unknown lineId ${l.lineId}` });
+        return notFound(`Unknown lineId ${l.lineId}`, requestId);
       }
     }
 
@@ -110,8 +112,8 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
       const already = shipped[r.lineId] ?? 0;
       const willBe = already + Number(r.deltaQty);
       if (willBe > Number(line.qty ?? 0)) {
-        log(event, "so-fulfill.guard", { lineId: r.lineId, qtyOrdered: line.qty, already, attempt: r.deltaQty });
-        return json(409, { message: "Over-fulfillment blocked", lineId: r.lineId, ordered: line.qty, fulfilledSoFar: already, attempt: r.deltaQty });
+        logger.warn(logCtx, "so-fulfill.guard", { lineId: r.lineId, qtyOrdered: line.qty, already, attempt: r.deltaQty });
+        return conflictError("Over-fulfillment blocked", { lineId: r.lineId, ordered: line.qty, fulfilledSoFar: already, attempt: r.deltaQty }, requestId);
       }
     }
 
@@ -138,7 +140,7 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
       await ddb.send(new PutCommand({ TableName: tableObjects, Item: item }));
       mvCount++;
     }
-    log(event, "so-fulfill.movements", { count: mvCount });
+    logger.info(logCtx, "so-fulfill.movements", { count: mvCount });
 
     // Decide new status: if all lines fully shipped → fulfilled, else partially_fulfilled
     const shippedNow = await fulfilledSoFar(tenantId, so.id);
@@ -152,11 +154,11 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
 
     const updated: SalesOrder = { ...so, status: nextStatus, updatedAt: now };
     await ddb.send(new PutCommand({ TableName: tableObjects, Item: updated }));
-    log(event, "so-fulfill.saved", { id: so.id, status: nextStatus });
+    logger.info(logCtx, "so-fulfill.saved", { soId: so.id, status: nextStatus });
 
     return json(200, updated);
   } catch (err: any) {
-    log(event, "so-fulfill.error", { message: err?.message });
-    return json(500, { message: err?.message ?? "Internal Server Error" });
+    logger.error({ requestId }, "so-fulfill.error", { message: err?.message });
+    return internalError(err, requestId);
   }
 }

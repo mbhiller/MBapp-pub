@@ -313,6 +313,16 @@ async function onhand(itemId){
   return await get(`/inventory/${encodeURIComponent(itemId)}/onhand`);
 }
 async function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+function snippet(value, maxLen = 600) {
+  try {
+    const s = JSON.stringify(value);
+    if (typeof s !== "string") return value;
+    return s.length > maxLen ? `${s.slice(0, maxLen)}...(truncated)` : s;
+  } catch {
+    const s = String(value);
+    return s.length > maxLen ? `${s.slice(0, maxLen)}...(truncated)` : s;
+  }
+}
 /**
  * Paginate through pages where `items` may be empty while `pageInfo.hasNext` is true.
  * Stops early once at least one item is collected, or when hasNext=false, or maxPages reached.
@@ -358,29 +368,55 @@ async function fetchAllPages({ fetchPage, pageSize = 50, maxPages = 10 }) {
  * Poll using fetchAllPages until items appear or timeout elapses.
  * Returns items when found; throws with debug details on timeout.
  */
-async function waitForItems({ fetchPage, timeoutMs = 2000, intervalMs = 120, pageSize = 50, maxPages = 10 }) {
+async function waitForItems({ fetchPage, timeoutMs = 8000, intervalMs = 250, pageSize = 50, maxPages = 10 }) {
   const start = Date.now();
   let last = { items: [], pagesFetched: 0, lastPageInfo: { hasNext: false }, lastCursorUsed: null, lastNextCursorReturned: null };
+  let attempts = 0;
   while (Date.now() - start < timeoutMs) {
+    attempts++;
     last = await fetchAllPages({ fetchPage, pageSize, maxPages });
     if (Array.isArray(last.items) && last.items.length > 0) {
       return last.items;
     }
     await sleep(intervalMs);
   }
+  const debug = {
+    fn: "waitForItems",
+    attempts,
+    timeoutMs,
+    intervalMs,
+    lastPageInfo: last.lastPageInfo,
+    lastCursorUsed: last.lastCursorUsed,
+    lastNextCursorReturned: last.lastNextCursorReturned,
+    pagesFetched: last.pagesFetched
+  };
+  console.warn("[waitForItems timeout]", debug);
   const err = new Error("waitForItems: timeout waiting for items");
-  err.debug = { lastPageInfo: last.lastPageInfo, lastCursorUsed: last.lastCursorUsed, lastNextCursorReturned: last.lastNextCursorReturned, pagesFetched: last.pagesFetched };
+  err.debug = debug;
   throw err;
 }
-async function waitForStatus(type, id, wanted, { tries=10, delayMs=120 } = {}) {
+async function waitForStatus(type, id, wanted, { tries=32, delayMs=250 } = {}) {
+  let attempts = 0;
   for (let i=0;i<tries;i++){
+    attempts++;
     const po = await get(`/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}`);
     const s = po?.body?.status;
-    if (wanted.includes(s)) return { ok:true, po };
+    if (wanted.includes(s)) return { ok:true, po, attempts };
     await sleep(delayMs);
   }
   const last = await get(`/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}`);
-  return { ok:false, lastStatus:last?.body?.status, po:last };
+  const debug = {
+    fn: "waitForStatus",
+    type,
+    id,
+    wanted,
+    attempts,
+    delayMs,
+    lastStatus: last?.body?.status,
+    bodySnippet: snippet(last?.body, 600)
+  };
+  console.warn("[waitForStatus timeout]", debug);
+  return { ok:false, lastStatus:last?.body?.status, po:last, attempts };
 }
 
 /**
@@ -388,7 +424,7 @@ async function waitForStatus(type, id, wanted, { tries=10, delayMs=120 } = {}) {
  * Uses the same polling pattern as smoke:salesOrders:commit-nonstrict-backorder.
  * Polls continuously (ignores hasNext=false) until items found or timeout.
  */
-async function waitForBackorders({ soId, itemId, status = "open", preferredVendorId }, { timeoutMs = 12000, intervalMs = 500 } = {}) {
+async function waitForBackorders({ soId, itemId, status = "open", preferredVendorId }, { timeoutMs = 10000, intervalMs = 400 } = {}) {
   const maxAttempts = Math.ceil(timeoutMs / intervalMs);
   let attemptsMade = 0;
   let lastSearchRequestBody = null;
@@ -415,6 +451,20 @@ async function waitForBackorders({ soId, itemId, status = "open", preferredVendo
   }
 
   if (!found) {
+    const debug = {
+      fn: "waitForBackorders",
+      attemptsMade,
+      timeoutMs,
+      intervalMs,
+      soId,
+      itemId,
+      status,
+      lastPageInfo: lastSearchResponse?.body?.pageInfo || { hasNext: false },
+      itemsLength: items.length,
+      lastStatus: lastSearchResponse?.status,
+      bodySnippet: snippet(lastSearchResponse?.body, 600)
+    };
+    console.warn("[waitForBackorders timeout]", debug);
     return {
       ok: false,
       error: "timeout",
@@ -3247,9 +3297,26 @@ const tests = {
       await sleep(200);
     }
 
-    const shortage = !commit.ok && commit.status === 409 && Array.isArray(commit.body?.shortages) && commit.body.shortages.length > 0;
+    // Validate standardized error envelope
+    const envelopeValid = 
+      !commit.ok && 
+      commit.status === 409 &&
+      typeof commit.body?.code === "string" &&
+      typeof commit.body?.message === "string" &&
+      typeof commit.body?.requestId === "string" &&
+      Array.isArray(commit.body?.details?.shortages) &&
+      commit.body.details.shortages.length > 0;
+    
+    // Validate shortage contents
+    const shortages = commit.body?.details?.shortages ?? [];
+    const shortageValid = 
+      envelopeValid &&
+      shortages[0]?.lineId === "L1" &&
+      shortages[0]?.itemId === itemId &&
+      shortages[0]?.backordered === 5;
+    
     const noBackorders = bo?.ok && backorderCount === 0;
-    const pass = submit.ok && shortage && noBackorders;
+    const pass = submit.ok && envelopeValid && shortageValid && noBackorders;
     return { test: "salesOrders:commit-strict-shortage", result: pass ? "PASS" : "FAIL", current, adjust, create, submit, commit, bo };
   },
 
@@ -3825,11 +3892,22 @@ const tests = {
       lines: [{ lineId, deltaQty: 1 }]
     }, { "Idempotency-Key": idem() });
 
-    // Assert 409 with PO_STATUS_NOT_RECEIVABLE
-    const guardOk = !receiveAfterClose.ok
+    // Assert 409 with standardized error envelope
+    const envelopeValid = !receiveAfterClose.ok
       && receiveAfterClose.status === 409
-      && receiveAfterClose.body?.code === "PO_STATUS_NOT_RECEIVABLE"
-      && receiveAfterClose.body?.status === "closed";
+      && typeof receiveAfterClose.body?.code === "string"
+      && receiveAfterClose.body?.code === "conflict"
+      && typeof receiveAfterClose.body?.message === "string"
+      && receiveAfterClose.body?.message.toLowerCase().includes("not receivable")
+      && typeof receiveAfterClose.body?.requestId === "string"
+      && receiveAfterClose.body?.requestId.length > 0
+      && receiveAfterClose.body?.details !== undefined;
+    
+    const detailsValid = envelopeValid
+      && receiveAfterClose.body?.details?.code === "PO_STATUS_NOT_RECEIVABLE"
+      && receiveAfterClose.body?.details?.status === "closed";
+
+    const guardOk = envelopeValid && detailsValid;
 
     return {
       test: "po-receive-after-close-guard",
@@ -3867,11 +3945,22 @@ const tests = {
       lines: [{ lineId, deltaQty: 1 }]
     }, { "Idempotency-Key": idem() });
 
-    // Assert 409 with PO_STATUS_NOT_RECEIVABLE
-    const guardOk = !receiveAfterCancel.ok
+    // Assert 409 with standardized error envelope
+    const envelopeValid = !receiveAfterCancel.ok
       && receiveAfterCancel.status === 409
-      && receiveAfterCancel.body?.code === "PO_STATUS_NOT_RECEIVABLE"
-      && receiveAfterCancel.body?.status === "cancelled";
+      && typeof receiveAfterCancel.body?.code === "string"
+      && receiveAfterCancel.body?.code === "conflict"
+      && typeof receiveAfterCancel.body?.message === "string"
+      && receiveAfterCancel.body?.message.toLowerCase().includes("not receivable")
+      && typeof receiveAfterCancel.body?.requestId === "string"
+      && receiveAfterCancel.body?.requestId.length > 0
+      && receiveAfterCancel.body?.details !== undefined;
+    
+    const detailsValid = envelopeValid
+      && receiveAfterCancel.body?.details?.code === "PO_STATUS_NOT_RECEIVABLE"
+      && receiveAfterCancel.body?.details?.status === "cancelled";
+
+    const guardOk = envelopeValid && detailsValid;
 
     return {
       test: "po-receive-after-cancel-guard",

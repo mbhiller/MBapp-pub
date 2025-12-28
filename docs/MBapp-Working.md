@@ -4,6 +4,12 @@
 
 **Scope:** End-to-end backorders → purchase orders with vendor filtering, smart defaults, optimistic UX, and smoke test coverage.
 
+### Error Contract & RequestId Debugging
+- Standard error envelope: `{ code, message, requestId, details? }` (errors include the API Gateway `requestId` when available).
+- RequestId source: API Gateway context; propagated into structured logs (JSON with requestId, tenant, user, route, method).
+- How to debug: search logs by `requestId` to pull the full trace (prefer structured logger output); pair with tenant/route if multiple matches.
+- Smokes on timeout: wait helpers log concise blocks (function, ids, expected status, attempts, cursor/pageInfo, body snippet). Body snippets usually include `requestId` from the last API response—use that to find server logs.
+
 ### What Shipped
 
 **Core User Story:**
