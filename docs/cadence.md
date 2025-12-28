@@ -34,6 +34,12 @@
   - Spec scripts (when relevant)
 - Include the **testing/deploy rules** (below) so we don’t run smokes against stale backend.
 
+**Command formatting rules**
+- All commands must be provided in fenced code blocks** for copy/paste.
+- All commands must be PowerShell-compatible** (assume Windows terminal).
+- If Copilot claims “typecheck is green,” it must actually run it** and paste the output (at least the command + last lines showing 0 errors).
+- PR wrap content must be provided in a fenced code block** for copy/paste.
+
 ### 3D) PR wrap
 - PR title
 - Summary

@@ -103,6 +103,16 @@ export default function PurchaseOrderDetailScreen() {
     }
   };
 
+  // Helper: create stable idempotency key for a single submit attempt
+  // Uses SMOKE_RUN_ID when present; falls back to a timestamp captured once.
+  const makeScanIdempotencyKey = (poId: string, lineCount: number) => {
+    const runToken =
+      (typeof process !== "undefined" && (process as any)?.env?.EXPO_PUBLIC_SMOKE_RUN_ID) ||
+      (typeof process !== "undefined" && (process as any)?.env?.SMOKE_RUN_ID) ||
+      String(Date.now());
+    return `po:${poId}#scan:${runToken}#lines:${lineCount}`;
+  };
+
   // Helper: undo last scan
   const undoLastScan = () => {
     if (scanHistory.length === 0) return;
@@ -144,9 +154,8 @@ export default function PurchaseOrderDetailScreen() {
         ...(defaultLocationId ? { locationId: defaultLocationId } : {}),
       }));
 
-      // Generate idempotency key for the entire batch
-      // Using timestamp + count to ensure uniqueness across scan sessions
-      const idempotencyKey = `po:${po.id}#scan-batch:${Date.now()}#lines:${linesToReceive.length}`;
+      // Capture a stable idempotency key for this submit attempt
+      const idempotencyKey = makeScanIdempotencyKey(po.id, linesToReceive.length);
 
       await receiveLines(po.id, linesToReceive, { idempotencyKey });
       toast(`Received ${linesToReceive.length} line(s)`, "success");
