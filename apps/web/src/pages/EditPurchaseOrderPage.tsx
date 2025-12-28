@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { PurchaseOrderForm, type PurchaseOrderFormValue } from "../components/PurchaseOrderForm";
+import { PurchaseOrderForm, type PurchaseOrderFormValue, type PurchaseOrderLineInput } from "../components/PurchaseOrderForm";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
+import { computePatchLinesDiff } from "../lib/patchLinesDiff";
 
 type PurchaseOrder = PurchaseOrderFormValue & { id: string; status?: string };
 
@@ -20,6 +21,7 @@ export default function EditPurchaseOrderPage() {
   const { token, tenantId } = useAuth();
   const navigate = useNavigate();
   const [order, setOrder] = useState<PurchaseOrder | null>(null);
+  const [originalLines, setOriginalLines] = useState<PurchaseOrderLineInput[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,7 +36,28 @@ export default function EditPurchaseOrderPage() {
           token: token || undefined,
           tenantId,
         });
-        if (!cancelled) setOrder(res);
+        if (!cancelled) {
+          setOrder(res);
+          const makeLineId = () => {
+            try {
+              // Prefer crypto.randomUUID for stable unique ids
+              if (typeof crypto !== "undefined" && typeof (crypto as any).randomUUID === "function") {
+                return `tmp-${(crypto as any).randomUUID()}`;
+              }
+            } catch {}
+            // Fallback if randomUUID is unavailable
+            return `tmp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+          };
+          const orig: PurchaseOrderLineInput[] = Array.isArray(res?.lines)
+            ? res.lines.map((ln: any) => ({
+                id: String(ln.id || "").trim() || makeLineId(),
+                itemId: String(ln.itemId || "").trim(),
+                qty: Number(ln.qty ?? 0),
+                uom: String(ln.uom || "ea").trim() || "ea",
+              }))
+            : [];
+          setOriginalLines(orig);
+        }
       } catch (err) {
         if (!cancelled) setError(formatError(err));
       } finally {
@@ -49,13 +72,35 @@ export default function EditPurchaseOrderPage() {
 
   const handleSubmit = async (payload: PurchaseOrderFormValue) => {
     if (!id) throw new Error("Missing purchase order id");
-    await apiFetch(`/objects/purchaseOrder/${id}`, {
-      method: "PUT",
-      token: token || undefined,
-      tenantId,
-      body: payload,
-    });
-    navigate(`/purchase-orders/${id}`);
+
+    // Compute patch ops using shared helper
+    const current = Array.isArray(payload?.lines) ? payload.lines : [];
+    const ops = computePatchLinesDiff(originalLines, current, ["itemId", "qty", "uom"]);
+
+    if (ops.length === 0) {
+      // No changes; avoid endpoint call
+      navigate(`/purchase-orders/${id}`);
+      return;
+    }
+
+    try {
+      await apiFetch(`/purchasing/po/${id}:patch-lines`, {
+        method: "POST",
+        token: token || undefined,
+        tenantId,
+        body: { ops },
+      });
+      navigate(`/purchase-orders/${id}`);
+    } catch (err) {
+      const e = err as any;
+      // Handle PO_NOT_EDITABLE or status guard failures with clear message
+      if (e?.code === "PO_NOT_EDITABLE" || e?.status === 409 || e?.status === 400) {
+        const msg = e?.message || "Purchase order cannot be edited in current status (only draft can be patched)";
+        setError(msg);
+      } else {
+        setError(formatError(err));
+      }
+    }
   };
 
   if (!id) return <div>Missing purchase order id</div>;

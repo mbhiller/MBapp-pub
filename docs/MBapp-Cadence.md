@@ -22,6 +22,7 @@
 ---
 
 ## Step 3 — ChatGPT response (after P0 is posted)
+Note: Include documentation updates in each labeled edit prompt when behavior or workflows change.
 ### 3A) Sprint plan
 - Vertical-slice goal
 - Acceptance criteria

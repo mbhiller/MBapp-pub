@@ -92,6 +92,7 @@
     "smoke:po:receive-with-location-counters": "node ops/smoke/smoke.mjs smoke:po:receive-with-location-counters",
     "smoke:sales:fulfill-without-reserve": "node ops/smoke/smoke.mjs smoke:sales:fulfill-without-reserve",
     "smoke:purchaseOrders:draft-create-edit-lines": "node ops/smoke/smoke.mjs smoke:purchaseOrders:draft-create-edit-lines",
+    "smoke:purchaseOrders:patch-lines": "node ops/smoke/smoke.mjs smoke:purchaseOrders:patch-lines",
     "smoke:salesOrders:draft-lines-server-assign-ids": "node ops/smoke/smoke.mjs smoke:salesOrders:draft-lines-server-assign-ids",
     "smoke:webish:purchaseOrders:list-detail-join": "node ops/smoke/smoke.mjs smoke:webish:purchaseOrders:list-detail-join",
     "smoke:salesOrders:patch-lines": "node ops/smoke/smoke.mjs smoke:salesOrders:patch-lines"
