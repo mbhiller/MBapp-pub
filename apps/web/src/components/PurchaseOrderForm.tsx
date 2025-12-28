@@ -1,29 +1,27 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { LineArrayEditor, type LineInput } from "./LineArrayEditor";
 
-export type SalesOrderLineInput = {
+export type PurchaseOrderLineInput = {
   id: string;
   itemId: string;
   qty: number;
   uom?: string;
 };
 
-export type SalesOrderFormValue = {
-  partyId: string;
-  customerId?: string;
-  lines: SalesOrderLineInput[];
+export type PurchaseOrderFormValue = {
+  vendorId: string;
+  lines: PurchaseOrderLineInput[];
   notes?: string;
 };
 
 type Props = {
-  initialValue?: Partial<SalesOrderFormValue>;
+  initialValue?: Partial<PurchaseOrderFormValue>;
   submitLabel?: string;
-  onSubmit: (value: SalesOrderFormValue) => Promise<void> | void;
+  onSubmit: (value: PurchaseOrderFormValue) => Promise<void> | void;
 };
 
-export function SalesOrderForm({ initialValue, submitLabel = "Save", onSubmit }: Props) {
-  const [partyId, setPartyId] = useState(initialValue?.partyId ?? "");
-  const [customerId, setCustomerId] = useState(initialValue?.customerId ?? "");
+export function PurchaseOrderForm({ initialValue, submitLabel = "Save", onSubmit }: Props) {
+  const [vendorId, setVendorId] = useState(initialValue?.vendorId ?? "");
   const [notes, setNotes] = useState(initialValue?.notes ?? "");
   const [lines, setLines] = useState<LineInput[]>(() => {
     if (initialValue?.lines && initialValue.lines.length > 0) {
@@ -41,8 +39,7 @@ export function SalesOrderForm({ initialValue, submitLabel = "Save", onSubmit }:
 
   useEffect(() => {
     if (initialValue) {
-      setPartyId(initialValue.partyId ?? "");
-      setCustomerId(initialValue.customerId ?? "");
+      setVendorId(initialValue.vendorId ?? "");
       setNotes(initialValue.notes ?? "");
       if (initialValue.lines && initialValue.lines.length > 0) {
         setLines(
@@ -55,17 +52,17 @@ export function SalesOrderForm({ initialValue, submitLabel = "Save", onSubmit }:
         );
       }
     }
-  }, [initialValue?.partyId, initialValue?.customerId, initialValue?.notes, initialValue?.lines]);
+  }, [initialValue?.vendorId, initialValue?.notes, initialValue?.lines]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
     try {
-      const trimmedParty = partyId.trim();
-      if (!trimmedParty) throw new Error("partyId is required");
+      const trimmedVendor = vendorId.trim();
+      if (!trimmedVendor) throw new Error("vendorId is required");
 
-      const cleanedLines: SalesOrderLineInput[] = lines
+      const cleanedLines: PurchaseOrderLineInput[] = lines
         .map((ln, idx) => ({
           id: (ln.id || `L${idx + 1}`).trim(),
           itemId: ln.itemId.trim(),
@@ -77,8 +74,7 @@ export function SalesOrderForm({ initialValue, submitLabel = "Save", onSubmit }:
       if (cleanedLines.length === 0) throw new Error("At least one line with itemId and qty>0 is required");
 
       await onSubmit({
-        partyId: trimmedParty,
-        customerId: customerId.trim() || undefined,
+        vendorId: trimmedVendor,
         notes: notes.trim() || undefined,
         lines: cleanedLines,
       });
@@ -93,13 +89,8 @@ export function SalesOrderForm({ initialValue, submitLabel = "Save", onSubmit }:
   return (
     <form onSubmit={handleSubmit} style={{ display: "grid", gap: 12, maxWidth: 720 }}>
       <label style={{ display: "grid", gap: 4 }}>
-        <span>Party ID *</span>
-        <input value={partyId} onChange={(e) => setPartyId(e.target.value)} placeholder="customer party id" required />
-      </label>
-
-      <label style={{ display: "grid", gap: 4 }}>
-        <span>Customer ID (optional)</span>
-        <input value={customerId} onChange={(e) => setCustomerId(e.target.value)} placeholder="legacy customerId" />
+        <span>Vendor ID *</span>
+        <input value={vendorId} onChange={(e) => setVendorId(e.target.value)} placeholder="vendor party id" required />
       </label>
 
       <label style={{ display: "grid", gap: 4 }}>

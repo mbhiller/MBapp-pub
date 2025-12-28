@@ -10,6 +10,7 @@
   "smoke:workspaces:list",
   "smoke:events:enabled-noop",
   "smoke:close-the-loop",
+  "smoke:salesOrders:draft-lines-server-assign-ids",
   "smoke:salesOrders:commit-strict-shortage",
   "smoke:salesOrders:commit-nonstrict-backorder",
   "smoke:sales:reserve-with-location",
@@ -18,6 +19,7 @@
   "smoke:outbound:reserve-fulfill-release-cycle",
   "smoke:vendor-filter-preferred",
   "smoke:suggest-po-with-vendor",
+  "smoke:purchaseOrders:draft-create-edit-lines",
   "smoke:po:receive-with-location-counters",
   "smoke:po:receive-line-negative-qty"
   ]

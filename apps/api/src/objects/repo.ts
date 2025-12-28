@@ -8,6 +8,7 @@ import {
   QueryCommand,
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
+import { ensureLineIds } from "../shared/ensureLineIds";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -113,11 +114,16 @@ function project<T extends AnyRecord>(obj: T, fields?: string[]): Partial<T> | T
 // -------- Public API --------
 
 export async function createObject({ tenantId, type, body }: CreateArgs) {
-  const id = (body.id as string) || newId();
-  const createdAt = (body.createdAt as string) || nowIso();
+  const needsLineIds = type === "salesOrder" || type === "purchaseOrder";
+  const normalizedBody = needsLineIds && Array.isArray((body as AnyRecord)?.lines)
+    ? { ...body, lines: ensureLineIds((body as AnyRecord).lines as AnyRecord[]) }
+    : body;
+
+  const id = (normalizedBody.id as string) || newId();
+  const createdAt = (normalizedBody.createdAt as string) || nowIso();
 
   const item: AnyRecord = {
-    ...body,
+    ...normalizedBody,
     ...computeKeys(tenantId!, type, id),
     createdAt,
     updatedAt: nowIso(),
@@ -282,12 +288,39 @@ export async function replaceObject({ tenantId, type, id, body }: ReplaceArgs) {
 }
 
 export async function updateObject({ tenantId, type, id, body }: UpdateArgs) {
+  const needsLineIds = type === "salesOrder" || type === "purchaseOrder";
+  let normalizedBody: AnyRecord | UpdateArgs["body"] = body;
+
+  if (needsLineIds && Array.isArray((body as AnyRecord)?.lines)) {
+    const existing = await getObjectById({ tenantId, type, id, fields: ["lines"] });
+    const existingLines = Array.isArray((existing as AnyRecord)?.lines) ? (existing as AnyRecord).lines as AnyRecord[] : [];
+
+    const reserveIds: string[] = [];
+    let maxNum = 0;
+    for (const ln of existingLines) {
+      const lid = (ln as AnyRecord)?.id ?? (ln as AnyRecord)?.lineId;
+      if (typeof lid === "string" && lid.trim()) {
+        reserveIds.push(lid.trim());
+        const m = /^L(\d+)$/i.exec(lid.trim());
+        if (m) {
+          const n = Number(m[1]);
+          if (!Number.isNaN(n) && n > maxNum) maxNum = n;
+        }
+      }
+    }
+
+    const startAt = maxNum > 0 ? maxNum + 1 : 1;
+    normalizedBody = {
+      ...body,
+      lines: ensureLineIds((body as AnyRecord).lines as AnyRecord[], { startAt, reserveIds }) as AnyRecord,
+    };
+  }
   const identity = new Set([PK_ATTR, SK_ATTR, "tenantId", "type", "id", "createdAt", "updatedAt"]);
   const sets: string[] = [];
   const names: Record<string, string> = {};
   const values: Record<string, unknown> = {};
 
-  for (const [k, v] of Object.entries(body || {})) {
+  for (const [k, v] of Object.entries(normalizedBody || {})) {
     if (identity.has(k)) continue;
     const nk = `#n_${k.replace(/[^A-Za-z0-9_]/g, "_")}`;
     const vk = `:v_${k.replace(/[^A-Za-z0-9_]/g, "_")}`;

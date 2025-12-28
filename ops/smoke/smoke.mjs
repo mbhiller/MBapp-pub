@@ -3039,7 +3039,6 @@ const tests = {
       }
     };
   },
-
   "smoke:outbound:reserve-fulfill-release-cycle": async () => {
     await ensureBearer();
 
@@ -3250,6 +3249,53 @@ const tests = {
     };
   },
 
+  "smoke:salesOrders:draft-lines-server-assign-ids": async () => {
+    await ensureBearer();
+
+    const { partyId } = await seedParties(api);
+    const prod = await createProduct({ name: "SO-LineIds" });
+    if (!prod.ok) return { test: "salesOrders:draft-lines-server-assign-ids", result: "FAIL", prod };
+    const inv = await createInventoryForProduct(prod.body?.id, "SO-LineIds" );
+    if (!inv.ok) return { test: "salesOrders:draft-lines-server-assign-ids", result: "FAIL", inv };
+    const itemId = inv.body?.id;
+
+    const create = await post(
+      `/objects/salesOrder`,
+      {
+        type: "salesOrder",
+        status: "draft",
+        partyId,
+        lines: [
+          { itemId, uom: "ea", qty: 3 },
+          { itemId, uom: "ea", qty: 2 }
+        ]
+      },
+      { "Idempotency-Key": idem() }
+    );
+    if (!create.ok) return { test: "salesOrders:draft-lines-server-assign-ids", result: "FAIL", create };
+
+    const createLines = Array.isArray(create.body?.lines) ? create.body.lines : [];
+    const createIds = createLines.map(l => l?.id ?? l?.lineId).filter(Boolean);
+    const allHaveIds = createLines.length === 2 && createIds.length === 2 && createIds.every(id => typeof id === "string" && id.trim().length > 0);
+    const uniqueIds = new Set(createIds).size === createIds.length;
+
+    const soId = create.body?.id;
+    const got = soId ? await get(`/objects/salesOrder/${encodeURIComponent(soId)}`) : { ok: false, status: 0, body: {} };
+    const persistedLines = Array.isArray(got.body?.lines) ? got.body.lines : [];
+    const persistedIds = persistedLines.map(l => l?.id ?? l?.lineId).filter(Boolean);
+    const persistedHaveIds = persistedLines.length === 2 && persistedIds.length === 2 && persistedIds.every(id => typeof id === "string" && id.trim().length > 0);
+
+    const pass = create.ok && got.ok && allHaveIds && uniqueIds && persistedHaveIds;
+    return {
+      test: "salesOrders:draft-lines-server-assign-ids",
+      result: pass ? "PASS" : "FAIL",
+      createLines,
+      persistedLines,
+      create,
+      got
+    };
+  },
+
   "smoke:salesOrders:commit-strict-shortage": async () => {
     await ensureBearer();
 
@@ -3369,6 +3415,89 @@ const tests = {
   },
 
   /* ===================== Purchase Orders ===================== */
+  "smoke:purchaseOrders:draft-create-edit-lines": async () => {
+    await ensureBearer();
+
+    const { vendorId } = await seedVendor(api);
+
+    const prodA = await createProduct({ name: "PO-LineIds-A" });
+    const prodB = await createProduct({ name: "PO-LineIds-B" });
+    const prodC = await createProduct({ name: "PO-LineIds-C" });
+    if (!prodA.ok || !prodB.ok || !prodC.ok) {
+      return { test: "purchaseOrders:draft-create-edit-lines", result: "FAIL", prodA, prodB, prodC };
+    }
+
+    const invA = await createInventoryForProduct(prodA.body?.id, "PO-LineIds-ItemA");
+    const invB = await createInventoryForProduct(prodB.body?.id, "PO-LineIds-ItemB");
+    const invC = await createInventoryForProduct(prodC.body?.id, "PO-LineIds-ItemC");
+    if (!invA.ok || !invB.ok || !invC.ok) {
+      return { test: "purchaseOrders:draft-create-edit-lines", result: "FAIL", invA, invB, invC };
+    }
+
+    const create = await post(
+      `/objects/purchaseOrder`,
+      {
+        type: "purchaseOrder",
+        status: "draft",
+        vendorId,
+        lines: [
+          { itemId: invA.body?.id, uom: "ea", qty: 2 },
+          { itemId: invB.body?.id, uom: "ea", qty: 4 }
+        ]
+      },
+      { "Idempotency-Key": idem() }
+    );
+    if (!create.ok) return { test: "purchaseOrders:draft-create-edit-lines", result: "FAIL", create };
+
+    const poId = create.body?.id;
+    const createLines = Array.isArray(create.body?.lines) ? create.body.lines : [];
+    const createIds = createLines.map(l => l?.id ?? l?.lineId).filter(Boolean);
+    const createAllHaveIds = createLines.length === 2 && createIds.length === 2 && createIds.every(id => typeof id === "string" && id.trim().length > 0);
+    const createUniqueIds = new Set(createIds).size === createIds.length;
+
+    const keepLine = createLines[0] || {};
+    const removedLineId = createLines[1]?.id ?? createLines[1]?.lineId;
+
+    const update = await put(`/objects/purchaseOrder/${encodeURIComponent(poId)}`, {
+      vendorId,
+      status: "draft",
+      lines: [
+        {
+          id: keepLine.id ?? keepLine.lineId,
+          itemId: keepLine.itemId,
+          uom: keepLine.uom || "ea",
+          qty: (Number(keepLine.qty) || 0) + 1
+        },
+        { itemId: invC.body?.id, uom: "ea", qty: 5 }
+      ]
+    });
+    if (!update.ok) return { test: "purchaseOrders:draft-create-edit-lines", result: "FAIL", create, update };
+
+    const got = poId ? await get(`/objects/purchaseOrder/${encodeURIComponent(poId)}`) : { ok: false, status: 0, body: {} };
+    const persistedLines = Array.isArray(got.body?.lines) ? got.body.lines : [];
+    const persistedIds = persistedLines.map(l => l?.id ?? l?.lineId).filter(Boolean);
+    const persistedAllHaveIds = persistedLines.length === 2 && persistedIds.length === 2 && persistedIds.every(id => typeof id === "string" && id.trim().length > 0);
+    const persistedIdsSet = new Set(persistedIds);
+
+    const keptPresent = !!(keepLine.id ?? keepLine.lineId) && persistedIdsSet.has(keepLine.id ?? keepLine.lineId);
+    const removedGone = removedLineId ? !persistedIdsSet.has(removedLineId) : true;
+    const newLinePresent = persistedLines.some(l => l.itemId === invC.body?.id);
+
+    const pass = create.ok && update.ok && got.ok && createAllHaveIds && createUniqueIds && persistedAllHaveIds && keptPresent && removedGone && newLinePresent;
+    return {
+      test: "purchaseOrders:draft-create-edit-lines",
+      result: pass ? "PASS" : "FAIL",
+      createLines,
+      updateLines: Array.isArray(update.body?.lines) ? update.body.lines : [],
+      persistedLines,
+      removedLineId,
+      keptLineId: keepLine.id ?? keepLine.lineId,
+      create,
+      update,
+      got
+    };
+  },
+
   "smoke:purchasing:happy": async ()=>{
     await ensureBearer();
 

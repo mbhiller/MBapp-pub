@@ -2578,7 +2578,8 @@ export interface components {
             tags?: string[];
         };
         PurchaseOrderLine: {
-            id: string;
+            /** @description Server-assigned on create; included in responses */
+            id?: string;
             /** @description InventoryItem.id */
             itemId: string;
             productId?: string | null;
@@ -2853,7 +2854,8 @@ export interface components {
             }[];
         };
         SalesOrderLine: {
-            id: string;
+            /** @description Server-assigned on create; included in responses */
+            id?: string;
             itemId: string;
             productId?: string | null;
             description?: string | null;

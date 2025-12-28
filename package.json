@@ -90,7 +90,9 @@
     "smoke:outbound:reserve-fulfill-release-cycle": "node ops/smoke/smoke.mjs smoke:outbound:reserve-fulfill-release-cycle",
     "smoke:po:receive-line-negative-qty": "node ops/smoke/smoke.mjs smoke:po:receive-line-negative-qty",
     "smoke:po:receive-with-location-counters": "node ops/smoke/smoke.mjs smoke:po:receive-with-location-counters",
-    "smoke:sales:fulfill-without-reserve": "node ops/smoke/smoke.mjs smoke:sales:fulfill-without-reserve"
+    "smoke:sales:fulfill-without-reserve": "node ops/smoke/smoke.mjs smoke:sales:fulfill-without-reserve",
+    "smoke:purchaseOrders:draft-create-edit-lines": "node ops/smoke/smoke.mjs smoke:purchaseOrders:draft-create-edit-lines",
+    "smoke:salesOrders:draft-lines-server-assign-ids": "node ops/smoke/smoke.mjs smoke:salesOrders:draft-lines-server-assign-ids"
   },
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "^3.882.0",
