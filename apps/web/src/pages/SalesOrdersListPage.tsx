@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
+import { ViewSelector } from "../components/ViewSelector";
+import { mapViewToSOFilters } from "../lib/viewFilterMappers";
+import type { ViewConfig } from "../hooks/useViewFilters";
 
 type SalesOrder = {
   id: string;
@@ -23,6 +26,7 @@ function formatError(err: unknown): string {
 }
 
 export default function SalesOrdersListPage() {
+  const [searchParams] = useSearchParams();
   const { token, tenantId } = useAuth();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
@@ -31,6 +35,7 @@ export default function SalesOrdersListPage() {
   const [next, setNext] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [appliedView, setAppliedView] = useState<ViewConfig | null>(null);
 
   const queryParams = useMemo(() => {
     const q: Record<string, string | number | boolean | undefined> = {
@@ -72,6 +77,25 @@ export default function SalesOrdersListPage() {
     fetchPage();
   }, [fetchPage]);
 
+  // Handle View application: apply mapped filters and refresh the list
+  const handleApplyView = useCallback(
+    (mappedState: Record<string, any>) => {
+      const newQ = mappedState.q !== undefined ? mappedState.q : filter.q;
+      const newStatus = mappedState.status !== undefined ? mappedState.status : filter.status;
+      setSearch(newQ);
+      setStatus(newStatus);
+      setFilter({ q: newQ, status: newStatus });
+      // fetchPage will be called by useEffect when filter changes
+    },
+    [filter]
+  );
+
+  // Current filter state for View save/overwrite operations
+  const currentFilterState = {
+    q: filter.q,
+    status: filter.status,
+  };
+
   const onSearch = () => {
     setFilter({ q: search.trim(), status });
   };
@@ -81,12 +105,52 @@ export default function SalesOrdersListPage() {
     setFilter((prev) => ({ ...prev, status: value }));
   };
 
+  // Initialize from URL params: viewId
+  useEffect(() => {
+    const urlViewId = searchParams.get("viewId") || "";
+
+    // Handle ?viewId=<id>: fetch and apply the view
+    if (urlViewId) {
+      (async () => {
+        try {
+          const view = await apiFetch<ViewConfig>(`/views/${urlViewId}`, {
+            token: token || undefined,
+            tenantId,
+          });
+          if (view) {
+            setAppliedView(view);
+            const mapped = mapViewToSOFilters(view);
+            if (mapped.applied.q !== undefined) {
+              setSearch(mapped.applied.q);
+            }
+            if (mapped.applied.status !== undefined) {
+              setStatus(mapped.applied.status);
+            }
+            setFilter((prev) => ({
+              q: mapped.applied.q !== undefined ? mapped.applied.q : prev.q,
+              status: mapped.applied.status !== undefined ? mapped.applied.status : prev.status,
+            }));
+          }
+        } catch (err) {
+          // Silently fail if view not found; user can select from ViewSelector
+        }
+      })();
+    }
+  }, [searchParams, token, tenantId]);
+
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h1>Sales Orders</h1>
         <Link to="/sales-orders/new">Create Sales Order</Link>
       </div>
+
+      <ViewSelector
+        entityType="salesOrder"
+        mapViewToFilterState={mapViewToSOFilters}
+        onApplyView={handleApplyView}
+        currentFilterState={currentFilterState}
+      />
 
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <input

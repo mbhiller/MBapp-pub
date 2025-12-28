@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
@@ -14,6 +14,12 @@ type Workspace = {
   [key: string]: any;
 };
 
+type ViewMetadata = {
+  id: string;
+  name?: string;
+  entityType?: string;
+};
+
 function formatError(err: unknown): string {
   const e = err as any;
   const parts = [] as string[];
@@ -21,6 +27,109 @@ function formatError(err: unknown): string {
   if (e?.code) parts.push(`code ${e.code}`);
   if (e?.message) parts.push(e.message);
   return parts.join(" · ") || "Request failed";
+}
+
+// Helper: map entityType to list page route
+function getListPageRoute(entityType?: string): string | null {
+  const routes: Record<string, string> = {
+    purchaseOrder: "/purchase-orders",
+    salesOrder: "/sales-orders",
+    inventoryItem: "/inventory",
+    party: "/parties",
+    event: "/events",
+    product: "/products",
+    location: "/locations",
+  };
+  return routes[entityType || ""] || null;
+}
+
+// Component: render a single view link with metadata + error handling
+function ViewLink({
+  viewId,
+  token,
+  tenantId,
+}: {
+  viewId: string;
+  token?: string;
+  tenantId?: string;
+}) {
+  const [view, setView] = useState<ViewMetadata | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchViewMetadata = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const result = await apiFetch<ViewMetadata>(`/views/${encodeURIComponent(viewId)}`, {
+          token: token || undefined,
+          tenantId,
+        });
+        if (result) {
+          setView(result);
+        }
+      } catch (err) {
+        setError(formatError(err));
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchViewMetadata();
+  }, [viewId, token, tenantId]);
+
+  // If we have view metadata and a valid entityType, render as deep link
+  if (view?.entityType && !loading) {
+    const listPageRoute = getListPageRoute(view.entityType);
+    if (listPageRoute) {
+      return (
+        <li key={viewId} style={{ marginBottom: 8 }}>
+          <Link
+            to={`${listPageRoute}?viewId=${encodeURIComponent(viewId)}`}
+            style={{ color: "#08a", textDecoration: "none", fontWeight: 500 }}
+            title={`Open ${view.name || viewId} in ${view.entityType} list`}
+          >
+            {view.name || viewId}
+          </Link>
+          <span style={{ fontSize: 12, color: "#666", marginLeft: 8 }}>
+            ({view.entityType})
+          </span>
+        </li>
+      );
+    }
+  }
+
+  // If loading, show placeholder
+  if (loading) {
+    return (
+      <li key={viewId} style={{ marginBottom: 8, color: "#999" }}>
+        {viewId} (loading...)
+      </li>
+    );
+  }
+
+  // If error, show non-blocking error with fallback link to Views page
+  if (error) {
+    return (
+      <li key={viewId} style={{ marginBottom: 8 }}>
+        <Link to={`/views/${encodeURIComponent(viewId)}`} style={{ color: "#08a", textDecoration: "none" }}>
+          {viewId}
+        </Link>
+        <span style={{ fontSize: 12, color: "#f77", marginLeft: 8 }}>
+          (metadata error: {error})
+        </span>
+      </li>
+    );
+  }
+
+  // If no view metadata, render fallback link to Views detail page
+  return (
+    <li key={viewId} style={{ marginBottom: 8 }}>
+      <Link to={`/views/${encodeURIComponent(viewId)}`} style={{ color: "#08a", textDecoration: "none" }}>
+        {viewId}
+      </Link>
+    </li>
+  );
 }
 
 export default function WorkspaceDetailPage() {
@@ -109,14 +218,19 @@ export default function WorkspaceDetailPage() {
               <div style={{ marginTop: 4, color: "#666" }}>(none)</div>
             ) : (
               <ul style={{ marginTop: 4, paddingLeft: 20 }}>
-                {workspace.views.map((viewId, idx) => (
-                  <li key={idx}>
-                    {typeof viewId === "string" ? (
-                      <Link to={`/views/${viewId}`}>{viewId}</Link>
-                    ) : (
-                      JSON.stringify(viewId)
-                    )}
-                  </li>
+                {workspace.views.map((viewId) => (
+                  typeof viewId === "string" ? (
+                    <ViewLink
+                      key={viewId}
+                      viewId={viewId}
+                      token={token || undefined}
+                      tenantId={tenantId}
+                    />
+                  ) : (
+                    <li key={JSON.stringify(viewId)} style={{ marginBottom: 8, color: "#999" }}>
+                      {JSON.stringify(viewId)} (invalid format)
+                    </li>
+                  )
                 ))}
               </ul>
             )}

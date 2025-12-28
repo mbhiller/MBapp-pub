@@ -2,6 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
+import { ViewSelector } from "../components/ViewSelector";
+import { mapViewToPOFilters } from "../lib/viewFilterMappers";
+import type { ViewConfig } from "../hooks/useViewFilters";
 
 type PurchaseOrder = {
   id: string;
@@ -36,6 +39,7 @@ export default function PurchaseOrdersListPage() {
   const [vendorFilter, setVendorFilter] = useState<string>("");
   const [vendorMode, setVendorMode] = useState<boolean>(false);
   const [vendorIdLocked, setVendorIdLocked] = useState<boolean>(false);
+  const [appliedView, setAppliedView] = useState<ViewConfig | null>(null);
 
   const fetchPage = useCallback(
     async (cursor?: string) => {
@@ -66,21 +70,67 @@ export default function PurchaseOrdersListPage() {
     [tenantId, token, statusFilter, vendorFilter, vendorMode]
   );
 
-  // Initialize from URL params: vendorId and vendorMode
+  // Initialize from URL params: vendorId, vendorMode, and viewId
   useEffect(() => {
     const urlVendor = searchParams.get("vendorId") || "";
     const urlVendorModeRaw = searchParams.get("vendorMode") || "";
     const urlVendorMode = urlVendorModeRaw === "1" || urlVendorModeRaw.toLowerCase() === "true";
+    const urlViewId = searchParams.get("viewId") || "";
+
     if (urlVendor) {
       setVendorFilter(urlVendor);
       setVendorIdLocked(true);
     }
     if (urlVendorMode) setVendorMode(true);
-  }, [searchParams]);
+
+    // Handle ?viewId=<id>: fetch and apply the view
+    if (urlViewId) {
+      (async () => {
+        try {
+          const view = await apiFetch<ViewConfig>(`/views/${urlViewId}`, {
+            token: token || undefined,
+            tenantId,
+          });
+          if (view) {
+            setAppliedView(view);
+            const mapped = mapViewToPOFilters(view);
+            if (mapped.applied.statusFilter !== undefined) {
+              setStatusFilter(mapped.applied.statusFilter);
+            }
+            if (mapped.applied.vendorFilter !== undefined) {
+              setVendorFilter(mapped.applied.vendorFilter);
+            }
+          }
+        } catch (err) {
+          // Silently fail if view not found; user can select from ViewSelector
+        }
+      })();
+    }
+  }, [searchParams, token, tenantId]);
 
   useEffect(() => {
     fetchPage();
   }, [fetchPage]);
+
+  // Handle View application: apply mapped filters and refresh the list
+  const handleApplyView = useCallback(
+    (mappedState: Record<string, any>) => {
+      if (mappedState.statusFilter !== undefined) {
+        setStatusFilter(mappedState.statusFilter);
+      }
+      if (mappedState.vendorFilter !== undefined) {
+        setVendorFilter(mappedState.vendorFilter);
+      }
+      // fetchPage will be called by useEffect when filters change
+    },
+    []
+  );
+
+  // Current filter state for View save/overwrite operations
+  const currentFilterState = {
+    status: statusFilter,
+    vendorId: vendorFilter,
+  };
 
   // Fetch vendor names for display
   useEffect(() => {
@@ -115,6 +165,13 @@ export default function PurchaseOrdersListPage() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h1>Purchase Orders</h1>
       </div>
+
+      <ViewSelector
+        entityType="purchaseOrder"
+        mapViewToFilterState={mapViewToPOFilters}
+        onApplyView={handleApplyView}
+        currentFilterState={currentFilterState}
+      />
 
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
