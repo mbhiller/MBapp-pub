@@ -6029,6 +6029,180 @@ const tests = {
         detail: "Draft lines missing backorderRequestIds"
       } : {})
     };
+  },
+
+  // === Sprint H: Web-style reliability smoke (list + detail + join) ===
+  "smoke:webish:purchaseOrders:list-detail-join": async () => {
+    await ensureBearer();
+
+    // Step 1: Create vendor
+    const { vendorId } = await seedVendor(api);
+    if (!vendorId) {
+      return { test: "webish:purchaseOrders:list-detail-join", result: "FAIL", reason: "vendor-creation-failed" };
+    }
+
+    // Step 2: Create products and inventory
+    const prodA = await createProduct({ name: `ListDetail-A-${Date.now()}` });
+    const prodB = await createProduct({ name: `ListDetail-B-${Date.now()}` });
+    if (!prodA.ok || !prodB.ok) {
+      return { test: "webish:purchaseOrders:list-detail-join", result: "FAIL", reason: "product-creation-failed", prodA, prodB };
+    }
+
+    const invA = await createInventoryForProduct(prodA.body?.id, `ListDetail-ItemA-${Date.now()}`);
+    const invB = await createInventoryForProduct(prodB.body?.id, `ListDetail-ItemB-${Date.now()}`);
+    if (!invA.ok || !invB.ok) {
+      return { test: "webish:purchaseOrders:list-detail-join", result: "FAIL", reason: "inventory-creation-failed", invA, invB };
+    }
+
+    // Step 3: Create PO draft with 2 lines
+    const createPO = await post(
+      `/objects/purchaseOrder`,
+      {
+        type: "purchaseOrder",
+        status: "draft",
+        vendorId,
+        lines: [
+          { itemId: invA.body?.id, uom: "ea", qty: 5 },
+          { itemId: invB.body?.id, uom: "ea", qty: 3 }
+        ]
+      },
+      { "Idempotency-Key": idem() }
+    );
+    if (!createPO.ok || !createPO.body?.id) {
+      return { test: "webish:purchaseOrders:list-detail-join", result: "FAIL", reason: "po-creation-failed", createPO };
+    }
+
+    const createdPoId = createPO.body.id;
+    const createdLines = Array.isArray(createPO.body?.lines) ? createPO.body.lines : [];
+
+    // Step 4: Immediately GET the created PO to verify persistence
+    const createdDetailRes = await get(`/objects/purchaseOrder/${encodeURIComponent(createdPoId)}`);
+    if (!createdDetailRes.ok) {
+      return {
+        test: "webish:purchaseOrders:list-detail-join",
+        result: "FAIL",
+        reason: "created-po-not-fetchable",
+        debug: { createdPoId, status: createdDetailRes.status }
+      };
+    }
+
+    const createdDetail = createdDetailRes.body;
+    if (createdDetail?.type !== "purchaseOrder" || createdDetail?.status !== "draft" || !createdDetail?.vendorId) {
+      return {
+        test: "webish:purchaseOrders:list-detail-join",
+        result: "FAIL",
+        reason: "created-po-missing-fields",
+        debug: {
+          createdPoId,
+          type: createdDetail?.type,
+          status: createdDetail?.status,
+          vendorId: createdDetail?.vendorId
+        }
+      };
+    }
+
+    // Step 5: List draft POs (first page only, no ordering dependency)
+    const listQuery = {
+      type: "purchaseOrder",
+      filter: JSON.stringify({ status: { eq: "draft" } }),
+      limit: 50
+    };
+
+    const listRes = await get(`/objects/purchaseOrder`, listQuery);
+    if (!listRes.ok || !Array.isArray(listRes.body?.items) || listRes.body.items.length === 0) {
+      return {
+        test: "webish:purchaseOrders:list-detail-join",
+        result: "FAIL",
+        reason: "list-failed-or-empty",
+        debug: {
+          ok: listRes.ok,
+          status: listRes.status,
+          itemCount: Array.isArray(listRes.body?.items) ? listRes.body.items.length : 0
+        }
+      };
+    }
+
+    const listItems = listRes.body.items;
+    const listPageInfo = listRes.body?.pageInfo || {};
+
+    // Pick a PO from the list (prefer one with vendorId)
+    const listedPO = listItems.find((po) => po?.id && po?.vendorId) || listItems[0];
+    if (!listedPO?.id) {
+      return {
+        test: "webish:purchaseOrders:list-detail-join",
+        result: "FAIL",
+        reason: "no-valid-po-in-list",
+        debug: { listCount: listItems.length, first5Ids: listItems.slice(0, 5).map((p) => p?.id) }
+      };
+    }
+
+    const listedPoId = listedPO.id;
+
+    // Step 6: Fetch detail for the listed PO
+    const listedDetailRes = await get(`/objects/purchaseOrder/${encodeURIComponent(listedPoId)}`);
+    if (!listedDetailRes.ok || listedDetailRes.body?.id !== listedPoId) {
+      return {
+        test: "webish:purchaseOrders:list-detail-join",
+        result: "FAIL",
+        reason: "listed-po-detail-fetch-failed",
+        debug: { listedPoId, ok: listedDetailRes.ok, status: listedDetailRes.status }
+      };
+    }
+
+    const listedDetail = listedDetailRes.body;
+    const listedDetailLines = Array.isArray(listedDetail?.lines) ? listedDetail.lines : [];
+
+    // Step 7: Panel join - fetch vendor for the listed PO
+    const listedVendorId = listedDetail?.vendorId;
+    if (!listedVendorId) {
+      return {
+        test: "webish:purchaseOrders:list-detail-join",
+        result: "FAIL",
+        reason: "listed-po-missing-vendorId",
+        debug: { listedPoId, listedDetail: snippet(listedDetail, 300) }
+      };
+    }
+
+    const vendorRes = await get(`/objects/party/${encodeURIComponent(listedVendorId)}`);
+    const vendorOk = vendorRes.ok && !!vendorRes.body?.name;
+
+    // Assertions
+    const hasPageInfo = !!(listPageInfo && typeof listPageInfo === "object");
+    const pageInfoHasNext = "hasNext" in listPageInfo || "nextCursor" in listPageInfo || "next" in listPageInfo;
+    const createdPoFetchOk = createdDetailRes.ok && createdDetail?.type === "purchaseOrder";
+    const listOk = listRes.ok && listItems.length > 0;
+    const listedDetailFetchOk = listedDetailRes.ok && listedDetail?.id === listedPoId;
+    const vendorJoinOk = vendorOk;
+    const linesPresent = listedDetailLines.length > 0;
+
+    const pass = hasPageInfo && pageInfoHasNext && createdPoFetchOk && listOk && listedDetailFetchOk && vendorJoinOk && linesPresent;
+
+    return {
+      test: "webish:purchaseOrders:list-detail-join",
+      result: pass ? "PASS" : "FAIL",
+      assertions: {
+        pageInfo: { present: hasPageInfo, hasNextField: pageInfoHasNext },
+        createdPoFetchOk,
+        listOk,
+        listedDetailFetchOk,
+        vendorJoinOk,
+        linesPresent
+      },
+      ...(pass ? {} : {
+        debug: {
+          createdPoId,
+          createdStatus: createdDetail?.status,
+          createdVendorId: createdDetail?.vendorId,
+          listCount: listItems.length,
+          first5Ids: listItems.slice(0, 5).map((p) => p?.id),
+          listedPoId,
+          listedStatus: listedDetail?.status,
+          listedVendorId,
+          listedLineCount: listedDetailLines.length,
+          vendorFetched: vendorOk
+        }
+      })
+    };
   }
 };
 

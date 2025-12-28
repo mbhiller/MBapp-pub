@@ -68,7 +68,8 @@ $smokes = @(
   'smoke:common:pagination',
   'smoke:common:error-shapes',
   'smoke:vendor-filter-preferred',
-  'smoke:suggest-po-with-vendor'
+  'smoke:suggest-po-with-vendor',
+  'smoke:webish:purchaseOrders:list-detail-join'
 )
 
 $results = @()

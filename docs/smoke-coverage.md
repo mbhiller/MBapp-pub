@@ -537,6 +537,7 @@ npm run smokes:cleanup
 | **smoke:objects:list-filter-soId+itemId** | *(Planned Sprint XXI)* 1. Create SO with 2 backorder lines 2. GET /objects/backorderRequest?filter.soId={soId}&filter.itemId={itemId1} | Only items matching both soId AND itemId returned (AND logic) | `/objects/backorderRequest?filter.soId=...&filter.itemId=...` |
 | **smoke:movements:filter-by-poLine** | 1. Create product + item, PO, submit, approve 2. Receive with lot/location 3. GET /inventory/{id}/movements?refId=poId&poLineId=lineId | Movements filtered by refId AND poLineId; lot/location captured | `/inventory/{id}/movements` |
 | **smoke:objects:pageInfo-present** | 1. GET /objects/purchaseOrder?limit=2 | Response has items array AND (pageInfo OR legacy `next`) | `/objects/purchaseOrder` |
+| **smoke:webish:purchaseOrders:list-detail-join** | 1. Create vendor, products, items, and PO draft 2. GET created PO detail (verify type, status, vendorId) 3. List draft POs (first page, 50 items) 4. Pick any PO from list (prefer one with vendorId) 5. GET detail for picked PO 6. GET vendor detail for join validation | Created PO is fetchable; list returns results with pageInfo; listed PO detail fetch succeeds; vendor join succeeds; **No ordering dependency** (does not scan pages to find created PO) | `/objects/purchaseOrder`, `/objects/purchaseOrder/{id}`, `/objects/party/{vendorId}` |
 
 ### Registrations (Sprint IV)
 

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { View, Text, ActivityIndicator, FlatList, Pressable, Modal, TextInput } from "react-native";
+import { View, Text, ActivityIndicator, FlatList, Pressable, Modal, TextInput, ScrollView } from "react-native";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { useObjects } from "../features/_shared/useObjects";
 import { FEATURE_PO_QUICK_RECEIVE } from "../features/_shared/flags";
@@ -11,6 +11,8 @@ import { VendorGuardBanner } from "../features/_shared/VendorGuardBanner";
 import PartySelectorModal from "../features/parties/PartySelectorModal";
 import { updateObject } from "../api/client";
 import { useTheme } from "../providers/ThemeProvider";
+import { ScannerPanel } from "../features/_shared/ScannerPanel";
+import { resolveScan } from "../lib/scanResolve";
 
 export default function PurchaseOrderDetailScreen() {
   const route = useRoute<any>();
@@ -34,11 +36,129 @@ export default function PurchaseOrderDetailScreen() {
   const [history, setHistory] = React.useState<{ open: boolean; itemId?: string; lineId?: string }>({ open: false });
   const [vendorModalOpen, setVendorModalOpen] = React.useState(false);
 
+  // Scan-to-receive mode: track pending receives keyed by lineId
+  const [scanMode, setScanMode] = React.useState(false);
+  const [scanInput, setScanInput] = React.useState("");
+  const [pendingReceives, setPendingReceives] = React.useState<Map<string, number>>(new Map());
+  const [scanHistory, setScanHistory] = React.useState<Array<{ lineId: string; itemId: string; delta: number }>>([])
+
   if (isLoading) return <ActivityIndicator />;
 
   // Deterministic idempotency key per (poId, lineId, qty, lot, location)
   const makeIdk = (poId: string, lineId: string, n: number, l?: string, loc?: string) =>
     `po:${poId}#ln:${lineId}#q:${n}#lot:${l || ""}#loc:${loc || ""}`;
+
+  // Helper: find all lines matching an itemId
+  const findLinesForItem = (itemId: string) =>
+    lines.filter((line: any) => String(line.itemId).toLowerCase() === String(itemId).toLowerCase());
+
+  // Helper: calculate remaining qty for a line
+  const getRemainingQty = (line: any) =>
+    Math.max(0, Number(line.qty ?? 0) - Number(line.receivedQty ?? 0));
+
+  // Helper: apply a scan result
+  const onScanResult = async (scan: string) => {
+    try {
+      const result = await resolveScan(scan);
+      if (!result.ok) {
+        toast(`Scan not recognized: ${result.error.reason ?? "unknown"}`, "info");
+        return;
+      }
+
+      const { itemId } = result.value;
+      const matchingLines = findLinesForItem(itemId);
+      if (matchingLines.length === 0) {
+        toast(`No line found for item ${itemId}`, "info");
+        return;
+      }
+
+      // Use first matching line
+      const targetLine = matchingLines[0];
+      const lineId = String(targetLine.id ?? targetLine.lineId);
+      const remaining = getRemainingQty(targetLine);
+
+      if (remaining <= 0) {
+        toast(`Item ${itemId} is fully received`, "info");
+        return;
+      }
+
+      // Increment pending receive by 1, capped at remaining
+      const currentPending = pendingReceives.get(lineId) ?? 0;
+      const newPending = Math.min(currentPending + 1, remaining);
+      const updated = new Map(pendingReceives);
+      updated.set(lineId, newPending);
+      setPendingReceives(updated);
+
+      // Track scan in history
+      setScanHistory((prev) => [
+        ...prev,
+        { lineId, itemId, delta: 1 },
+      ]);
+
+      setScanInput("");
+      toast(`Added 1x ${itemId}`, "success");
+    } catch (err: any) {
+      console.error(err);
+      toast(err?.message || "Scan resolution error", "error");
+    }
+  };
+
+  // Helper: undo last scan
+  const undoLastScan = () => {
+    if (scanHistory.length === 0) return;
+    const last = scanHistory[scanHistory.length - 1];
+    const updated = new Map(pendingReceives);
+    const current = updated.get(last.lineId) ?? 0;
+    if (current > 0) {
+      updated.set(last.lineId, current - 1);
+      setPendingReceives(updated);
+    }
+    setScanHistory((prev) => prev.slice(0, -1));
+    toast("Undid last scan", "info");
+  };
+
+  // Helper: clear all pending
+  const clearPendingReceives = () => {
+    setPendingReceives(new Map());
+    setScanHistory([]);
+    toast("Cleared pending receives", "info");
+  };
+
+  // Helper: submit all pending receives
+  const submitPendingReceives = async () => {
+    if (pendingReceives.size === 0) {
+      toast("No pending receives", "info");
+      return;
+    }
+
+    if (!po?.id) {
+      toast("PO not loaded", "error");
+      return;
+    }
+
+    try {
+      const linesToReceive = Array.from(pendingReceives.entries()).map(([lineId, deltaQty]) => ({
+        lineId,
+        deltaQty,
+        ...(defaultLot ? { lot: defaultLot } : {}),
+        ...(defaultLocationId ? { locationId: defaultLocationId } : {}),
+      }));
+
+      // Generate idempotency key for the entire batch
+      // Using timestamp + count to ensure uniqueness across scan sessions
+      const idempotencyKey = `po:${po.id}#scan-batch:${Date.now()}#lines:${linesToReceive.length}`;
+
+      await receiveLines(po.id, linesToReceive, { idempotencyKey });
+      toast(`Received ${linesToReceive.length} line(s)`, "success");
+      setPendingReceives(new Map());
+      setScanHistory([]);
+      setScanMode(false);
+      await refetch();
+    } catch (err: any) {
+      console.error(err);
+      toast(err?.message || "Submit failed", "error");
+    }
+  };
 
   async function onReceiveLine() {
     if (!po?.id || !modal.lineId) return;
@@ -270,6 +390,93 @@ export default function PurchaseOrderDetailScreen() {
               }}
             />
           </View>
+        </View>
+      )}
+
+      {/* Scan-to-Receive Mode */}
+      {receivable && (
+        <View style={{ marginTop: 12, paddingBottom: 12, borderTopWidth: 1, borderTopColor: "#ccc", paddingTop: 12 }}>
+          {!scanMode ? (
+            <Btn
+              label="Scan to Receive"
+              onPress={() => setScanMode(true)}
+            />
+          ) : (
+            <View style={{ gap: 12 }}>
+              <Text style={{ fontWeight: "700" }}>Scan to Receive</Text>
+
+              {/* Scanner panel */}
+              <ScannerPanel
+                value={scanInput}
+                onChange={(raw) => {
+                  setScanInput(raw);
+                  if (raw.trim()) onScanResult(raw);
+                }}
+              />
+
+              {/* Pending receives list */}
+              {pendingReceives.size > 0 && (
+                <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: "#e0e0e0" }}>
+                  <Text style={{ fontWeight: "600", marginBottom: 8 }}>
+                    Pending Receives ({pendingReceives.size})
+                  </Text>
+                  <ScrollView style={{ maxHeight: 200 }}>
+                    {Array.from(pendingReceives.entries()).map(([lineId, delta]) => {
+                      const line = lines.find(
+                        (l: any) => String(l.id ?? l.lineId) === lineId
+                      );
+                      if (!line) return null;
+                      const ordered = Number(line.qty ?? 0);
+                      const received = Number(line.receivedQty ?? 0);
+                      const remaining = ordered - received;
+                      return (
+                        <View
+                          key={lineId}
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            paddingVertical: 6,
+                            paddingHorizontal: 8,
+                            backgroundColor: "#f5f5f5",
+                            borderRadius: 6,
+                            marginBottom: 6,
+                            gap: 8,
+                          }}
+                        >
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontWeight: "600" }}>{line.itemId}</Text>
+                            <Text style={{ fontSize: 12, color: "#666" }}>
+                              {ordered} ordered, {received} received, {remaining} remaining
+                            </Text>
+                            <Text style={{ fontSize: 12, fontWeight: "600", color: "#4CAF50" }}>
+                              +{delta} pending
+                            </Text>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              )}
+
+              {/* Actions */}
+              <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                {scanHistory.length > 0 && (
+                  <Btn label="Undo Last" onPress={undoLastScan} />
+                )}
+                {pendingReceives.size > 0 && (
+                  <Btn label="Clear All" onPress={clearPendingReceives} />
+                )}
+                {pendingReceives.size > 0 && (
+                  <Btn
+                    label={`Submit ${pendingReceives.size} line(s)`}
+                    onPress={submitPendingReceives}
+                  />
+                )}
+                <Btn label="Cancel" onPress={() => setScanMode(false)} />
+              </View>
+            </View>
+          )}
         </View>
       )}
 
