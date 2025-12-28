@@ -1,7 +1,9 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
 import { ddb, tableObjects } from "../common/ddb";
 import { GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
+import { createMovement } from "../inventory/movements";
 import { resolveTenantId } from "../common/tenant";
+import { logger } from "../common/logger";
 
 type LineReq = { lineId: string; deltaQty: number; reason?: string; locationId?: string; lot?: string };
 type SOLine = { id: string; itemId: string; qty: number; uom?: string };
@@ -64,28 +66,30 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
       }
     }
 
-    // Emit inventory movements with action 'release'
+    // Emit inventory movements with action 'release' using shared dual-write helper
     const now = new Date().toISOString();
     for (const r of reqLines) {
       const line = soLines.get(r.lineId)!;
-      const mv = {
-        pk: tenantId,
-        sk: `inventoryMovement#${rid()}`,
-        id: rid("mv"),
-        type: "inventoryMovement",
-        docType: "inventoryMovement",
-        action: "release",
-        itemId: line.itemId,
-        qty: Number(r.deltaQty),
-        reason: r.reason ?? "release",
-        soId: so.id,
-        soLineId: line.id,
-        ...(r.locationId ? { locationId: r.locationId } : {}),
-        ...(r.lot ? { lot: r.lot } : {}),
-        createdAt: now,
-        updatedAt: now,
-      };
-      await ddb.send(new PutCommand({ TableName: tableObjects, Item: mv }));
+      try {
+        await createMovement({
+          tenantId,
+          itemId: line.itemId,
+          action: "release" as any,
+          qty: Number(r.deltaQty),
+          note: r.reason ?? "release",
+          soId: so.id,
+          soLineId: line.id,
+          locationId: r.locationId ?? undefined,
+          lot: r.lot ?? undefined,
+        });
+      } catch (err) {
+        // Log error but don't fail the entire release (best-effort semantics)
+        logger.warn({ tenantId }, "so-release: movement write error", { 
+          lineId: r.lineId, 
+          itemId: line.itemId, 
+          error: String(err) 
+        });
+      }
     }
 
     return json(200, so);

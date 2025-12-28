@@ -2,6 +2,7 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
 import { ddb, tableObjects } from "../common/ddb";
 import { GetCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
+import { createMovement } from "../inventory/movements";
 import { resolveTenantId } from "../common/tenant";
 import { badRequest, conflictError, internalError, notFound } from "../common/responses";
 import { logger } from "../common/logger";
@@ -117,28 +118,30 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
       }
     }
 
-    // Write inventoryMovement rows (action: fulfill)
+    // Write inventoryMovement rows (action: fulfill) using shared dual-write helper
     let mvCount = 0;
     for (const r of reqLines) {
       const line = linesById.get(r.lineId)!;
-      const item = {
-        pk: tenantId,
-        sk: `inventoryMovement#${rid()}`,
-        id: rid(),
-        type: "inventoryMovement",
-        docType: "inventoryMovement",
-        action: "fulfill",
-        itemId: line.itemId,
-        qty: Number(r.deltaQty),
-        soId: so.id,
-        soLineId: line.id,
-        locationId: r.locationId,
-        lot: r.lot,
-        createdAt: now,
-        updatedAt: now,
-      };
-      await ddb.send(new PutCommand({ TableName: tableObjects, Item: item }));
-      mvCount++;
+      try {
+        await createMovement({
+          tenantId,
+          itemId: line.itemId,
+          action: "fulfill" as any,
+          qty: Number(r.deltaQty),
+          soId: so.id,
+          soLineId: line.id,
+          locationId: r.locationId ?? undefined,
+          lot: r.lot ?? undefined,
+        });
+        mvCount++;
+      } catch (err) {
+        // Log error but don't fail the entire fulfill (best-effort semantics)
+        logger.warn(logCtx, "so-fulfill: movement write error", { 
+          lineId: r.lineId, 
+          itemId: line.itemId, 
+          error: String(err) 
+        });
+      }
     }
     logger.info(logCtx, "so-fulfill.movements", { count: mvCount });
 

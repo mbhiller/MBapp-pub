@@ -1893,31 +1893,51 @@ const tests = {
     const putawayMvId = putaway.body?.movementId;
     if (putawayMvId) recordCreated({ type: 'inventoryMovement', id: putawayMvId, route: '/inventory/:id:putaway', meta: { action: 'putaway', qty: 1, toLocationId: locBId, lot: 'LOT-LOC-MBL' } });
 
-    // Query GET /inventory/movements?locationId={locBId} with retries
-    // Poll up to 10 attempts with 250ms delay, looking for the putaway movement
-    let items = [];
-    let putawayFound = false;
+    // Query GET /inventory/movements?locationId={locBId} with minimal retry
+    // Timeline index ensures movement appears immediately; 5-10s max safety window.
+    // Quick retries (2-3x) with 250ms backoff to handle transient delays.
     const expectedQty = 1;
     const expectedLot = "LOT-LOC-MBL";
     
-    for (let attempt = 1; attempt <= 10; attempt++) {
-      const movementsResp = await get(`/inventory/movements`, { locationId: locBId, limit: 50, sort: "desc" });
+    let items = [];
+    let putawayFound = false;
+    let attempt = 0;
+    const startTime = Date.now();
+    const maxElapsedMs = 10000; // 10s safety window
+    let backoffMs = 250;
+    let lastByLocStatus = null;
+    let lastByLocErrorBody = null;
+    let lastByLocNext = null;
+    const requestQuery = { locationId: locBId, limit: 50, sort: "desc" };
+    
+    while (Date.now() - startTime < maxElapsedMs && !putawayFound) {
+      attempt++;
+      
+      const movementsResp = await get(`/inventory/movements`, requestQuery);
+      lastByLocStatus = movementsResp?.status ?? null;
+      lastByLocNext = movementsResp?.body?.next ?? movementsResp?.body?.pageInfo?.nextCursor ?? null;
       if (!movementsResp.ok) {
-        // On final attempt, return the error
-        if (attempt === 10) {
-          return { test: "inventory-movements-by-location", result: "FAIL", step: "getMovementsByLocation", attempt, movementsResp };
+        // Non-fatal error, capture error body and retry after short backoff
+        try {
+          lastByLocErrorBody = snippet(movementsResp?.body, 600);
+        } catch {}
+        if (attempt < 3) {
+          await new Promise(r => setTimeout(r, backoffMs));
+          backoffMs = Math.min(backoffMs + 250, 500);
         }
-        // Otherwise retry
-        await new Promise(r => setTimeout(r, 250));
         continue;
       }
 
       items = movementsResp.body?.items ?? [];
       if (!Array.isArray(items)) {
-        if (attempt === 10) {
-          return { test: "inventory-movements-by-location", result: "FAIL", step: "assertItemsArray", attempt, items };
+        // Non-fatal error, capture error body and retry after short backoff
+        try {
+          lastByLocErrorBody = snippet(movementsResp?.body, 600);
+        } catch {}
+        if (attempt < 3) {
+          await new Promise(r => setTimeout(r, backoffMs));
+          backoffMs = Math.min(backoffMs + 250, 500);
         }
-        await new Promise(r => setTimeout(r, 250));
         continue;
       }
 
@@ -1929,16 +1949,14 @@ const tests = {
         (m.lot ?? "") === expectedLot
       );
 
-      if (putawayFound) {
-        // Found it early, stop retrying
-        break;
-      }
-
-      // Not found yet, wait and retry (unless this was the last attempt)
-      if (attempt < 10) {
-        await new Promise(r => setTimeout(r, 250));
+      // If not found on first attempt, retry once more quickly
+      if (!putawayFound && attempt < 2) {
+        await new Promise(r => setTimeout(r, backoffMs));
+        backoffMs = Math.min(backoffMs + 250, 500);
       }
     }
+    
+    const elapsedMs = Date.now() - startTime;
 
     // If we still didn't find it after retries, fetch by-item movements for diagnostics
     if (!putawayFound) {
@@ -1957,6 +1975,15 @@ const tests = {
         }));
       }
 
+      // Safeguard: if first page was empty but had next token, try one follow-up page
+      let followUpPage2Count = null;
+      if (Array.isArray(items) && items.length === 0 && lastByLocNext) {
+        const followUpResp = await get(`/inventory/movements`, { ...requestQuery, next: lastByLocNext });
+        if (followUpResp.ok && Array.isArray(followUpResp.body?.items)) {
+          followUpPage2Count = followUpResp.body.items.length;
+        }
+      }
+
       return {
         test: "inventory-movements-by-location",
         result: "FAIL",
@@ -1965,7 +1992,16 @@ const tests = {
         expectedAction: "putaway",
         expectedQty,
         expectedLot,
-        byLocationItems: items,
+        attempts: attempt,
+        elapsedMs,
+        byLocationLastStatus: lastByLocStatus,
+        byLocationLastError: lastByLocErrorBody,
+        byLocationNextTokenPresent: !!lastByLocNext,
+        byLocationNextToken: lastByLocNext,
+        byLocationItemsCount: Array.isArray(items) ? items.length : 0,
+        byLocationRequestQuery: requestQuery,
+        byLocationItems: items.slice(0, 10),
+        followUpPage2ItemsCount: followUpPage2Count,
         diagnosticMovements
       };
     }

@@ -1,6 +1,6 @@
 # MBapp Development Cadence (copy/paste into a new chat)
 
-**Navigation:** [Roadmap](MBapp-Roadmap-Master-v10.0.md) · [Status/Working](MBapp-Working.md) · [Foundations](SPRINT_XXVI_FOUNDATIONS_REPORT.md) · [Verification](smoke-coverage.md)  
+**Navigation:** [Roadmap](MBapp-Roadmap.md) · [Status/Working](MBapp-Status.md) · [Foundations](MBapp-Foundations.md) · [Verification](smoke-coverage.md)  
 **Last Updated:** 2025-12-28
 
 ---
@@ -29,8 +29,11 @@
 
 ### 3B) Copilot EDIT prompts (E1…En)
 - Each prompt includes its label in the prompt text (e.g., `E3 (EDIT MODE): ...`).
-- Each prompt includes the **Definition of Done** (below).
+- Each prompt includes the Definition of Done (below).
 - Prompts are scoped tightly (explicit files / minimal surface area).
+- **Docs updates are required when relevant:** Every E-prompt must include a docs line item (minimum: update `docs/MBapp-Status.md` if behavior/workflow changed; plus any feature-area docs touched).
+- All prompts must be in fenced code blocks for copy/paste into Copilot.
+
 
 ### 3C) Commands (labeled run list)
 - Provide a labeled command list for:
@@ -57,7 +60,9 @@
 ## Step 4 — Implementation (your job)
 - Run E1…En in Copilot → fix-forward with ChatGPT as needed.
 - Run typechecks → local smokes → CI smokes (per rules below).
-- Cleanup + docs updates + push + PR.
+- **Update docs as necessary** (minimum: `docs/MBapp-Status.md` if behavior/workflow changed).
+- Cleanup + push + PR.
+
 
 ---
 
@@ -96,7 +101,7 @@
   - `npm run spec:bundle`
   - `npm run spec:types:api`
   - `npm run spec:types:mobile`
-- Docs updated where behavior/flows changed (minimum: `docs/MBapp-Working.md`, plus any sprint doc if used).
+- Docs updated where behavior/flows changed (minimum: `docs/MBapp-Status.md`, plus any sprint doc if used).
 
 ### ✅ Verification Evidence
 - Relevant typecheck(s) executed and clean.

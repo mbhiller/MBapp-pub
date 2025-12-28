@@ -4,6 +4,7 @@ import { ddb, tableObjects } from "../common/ddb";
 import { GetCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import { getObjectById } from "../objects/repo";
 import { getPurchaseOrder, updatePurchaseOrder } from "../shared/db";
+import { createMovement } from "../inventory/movements";
 import { featureVendorGuardEnabled, featureEventsSimulate } from "../flags";
 import { maybeDispatch } from "../events/dispatcher";
 import { conflictError, badRequest, internalError, notFound } from "../common/responses";
@@ -253,30 +254,28 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
       totals[r.lineId] = (totals[r.lineId] ?? 0) + Number(r.deltaQty ?? 0);
       const line = linesById.get(r.lineId);
       if (line) line.receivedQty = (Number(line.receivedQty ?? 0) + Number(r.deltaQty ?? 0));
-      const mvId = rid("mv");
+      
+      // Write movement via shared dual-write helper (canonical + timeline index)
       const rawItemId = linesById.get(r.lineId)?.itemId;
-      const mv = {
-        pk: tenantId,
-        sk: `inventoryMovement#${mvId}`,
-        id: mvId,
-        type: "inventoryMovement",
-        docType: "inventoryMovement",
-        at: now,
-        action: "receive",
-        qty: Number(r.deltaQty ?? 0),
-        refId: po.id,
-        poLineId: r.lineId,
-        itemId: rawItemId == null ? undefined : String(rawItemId),
-        uom: linesById.get(r.lineId)?.uom ?? "ea",
-        lot: r.lot ?? undefined,
-        locationId: (r as any).location ?? r.locationId ?? undefined,
-        createdAt: now,
-        updatedAt: now,
-      };
-      await ddb.send(new PutCommand({ TableName: tableObjects, Item: mv as any }));
-      // Inventory counters update (call deriveCounters or similar if available)
-      // For this sprint, just ensure onHand increases by deltaQty
-      // (Assume counters are recomputed elsewhere or on demand)
+      try {
+        await createMovement({
+          tenantId,
+          itemId: rawItemId == null ? "" : String(rawItemId),
+          action: "receive" as any,
+          qty: Number(r.deltaQty ?? 0),
+          refId: po.id,
+          poLineId: r.lineId,
+          lot: r.lot ?? undefined,
+          locationId: (r as any).location ?? r.locationId ?? undefined,
+        });
+      } catch (err) {
+        // Log error but don't fail the entire receive (best-effort semantics)
+        logger.warn(logCtx, "po.receive: movement write error", { 
+          lineId: r.lineId, 
+          itemId: rawItemId, 
+          error: String(err) 
+        });
+      }
     }
 
     // --- Backorder fulfillment ---

@@ -1,13 +1,28 @@
 # Smoke Test Coverage (Sprint IV)
 
+**Navigation:** [Roadmap](MBapp-Roadmap.md) · [Status/Working](MBapp-Status.md) · [Foundations](MBapp-Foundations.md) · [Cadence](MBapp-Cadence.md)  
+**Last Updated:** 2025-12-28
+
+---
+
 ## Overview
 
 Smoke tests are integration tests for critical API flows. All tests use idempotency keys for safe retry and include party/vendor seeding. Run with `node ops/smoke/smoke.mjs <test-name>`.
+
+**CI Smoke Manifest:** The definitive list of tests run in CI is maintained in [ops/ci-smokes.json](../ops/ci-smokes.json). Additional flows exist in `ops/smoke/smoke.mjs` but are opt-in only.
 
 - Default tenant: any tenant starting with **SmokeTenant** (e.g., SmokeTenant, SmokeTenant-qa). Override only by setting `MBAPP_SMOKE_ALLOW_NON_SMOKE_TENANT=1` (dangerous).
 - `SMOKE_RUN_ID` is emitted in the preflight log; set `SMOKE_RUN_ID` explicitly to tag runs or let the runner generate one.
   - The runner records a manifest per run in `ops/smoke/.manifests/<SMOKE_RUN_ID>.json` capturing created entities (type, id, route, meta).
   - Use the cleanup script to delete only artifacts from a specific `SMOKE_RUN_ID` via allowlisted single-delete endpoints.
+
+**Consistency Contract:**
+- `GET /inventory/movements?locationId=...` and `GET /inventory/{itemId}/movements` use a **time-ordered index** (pk=tenantId, sk=`inventoryMovementAt#{at}#{movementId}`) to retrieve movements in chronological order.
+  - This eliminates sparse-locationId pagination issues: filtering by locationId/itemId on time-ordered data is O(limit).
+  - Newly written movements appear immediately in the time-ordered index due to dual-write in `createMovement()`.
+- Both endpoints use **consistent reads** within the tenant partition to avoid write-after-read gaps.
+- **Smoke test determinism:** `smoke:inventory:movements-by-location` relies on the timeline index to ensure the newly written putaway movement appears in the by-location list immediately (within 1-2 poll attempts). Without the timeline index, pagination before filtering would cause transient failures.
+- Response shape is unchanged; backward compatible with existing clients.
 
 ---
 
@@ -556,25 +571,27 @@ npm run smokes:cleanup
 
 ## 2. Coverage by Module
 
-| Module | Smoke Tests | Status | Notes |
-|--------|------------|--------|-------|
-| **Inventory** | onhand, guards, onhand-batch, list-movements, movements-by-location, inventory:crud | ✅ Complete | CRUD + guards + batch ops + item-based filter + location-based filter + Sprint XXVII CRUD smoke (in CI) |
-| **Sales Orders** | sales:happy, sales:guards, sales:fulfill-without-reserve, outbound:reserve-fulfill-release-cycle, salesOrders:commit-strict-shortage (CI), salesOrders:commit-nonstrict-backorder (CI) | ✅ Complete | Lifecycle + guardrails + outbound patterns; strict shortage returns 409; non-strict shortage creates backorder (CI-covered); fulfill semantics validated |
-| **Purchase Orders** | purchasing:happy, purchasing:guards, po:save-from-suggest, po:quick-receive, po:receive-line*, po:receive-line-batch, po:receive-line-idem-* | ✅ Complete | Lifecycle, receipt variants, idempotency, vendor guard, events |
-| **Purchase Orders (Sprint E adds)** | po:receive-with-location-counters, po:receive-line-negative-qty | ✅ Added | Location-aware receive validation + bad-request guard for non-positive deltaQty |
-| **Parties** | parties:happy, parties:crud | ✅ Complete | CRUD lifecycle + search with idempotency + eventual consistency retry (in CI) |
-| **Products** | products:crud | ✅ Complete (Sprint XXVII) | CRUD lifecycle + search with idempotency + eventual consistency retry (in CI) |
-| **Pagination & Filtering** | objects:list-pagination, objects:list-filter-soId, objects:pageInfo-present, movements:filter-by-poLine | ✅ Complete | Cursor pagination, query param filters (filter.*) |
-| **Feature Flags** | po:vendor-guard:on, po:vendor-guard:off, po:emit-events | ✅ Complete | Header overrides, simulation |
-| **EPC** | epc:resolve | ✅ Complete | 404 case only |
-| **Registrations** | registrations:crud, registrations:filters | ✅ Complete (Sprint IV) | CRUD lifecycle + filters (eventId, partyId, status); feature-flagged (default OFF) |
-| **Views** | views:crud | ✅ Complete (Sprint XXVIII) | CRUD lifecycle + list pagination + q/entityType filters + eventual consistency retry (in CI) |
-| **Workspaces** | workspaces:list | ✅ Complete (Sprint XXVIII) | List + q/entityType filters + pagination (read-only v1) |
-| **Events** | events:enabled-noop | ✅ Complete (Sprint XXVIII) | Event dispatcher noop/simulate flag gating (in CI) |
-| **Backorders** | objects:list-filter-soId, objects:list-filter-itemId (planned), objects:list-filter-status (planned), objects:list-filter-soId+itemId (planned) | ✅ Partial (Sprint XX); 🔄 Planned (Sprint XXI) | soId + pagination working (Sprint XX); itemId, status, combo filters planned (Sprint XXI) |
-| **Routing** | ❌ None | ⚠️ Gap | Spec defines /routing/graph, /routing/plan (deprecated in Sprint III?) — not tested |
-| **Scanner** | ❌ None | ⚠️ Gap | Spec defines sessions, actions, simulate — not tested |
-| **Audit** | ❌ None | ⚠️ Gap | Spec defines /admin/audit — not tested |
+**See:** [Module Coverage Matrix](MBapp-Status.md#module-coverage-matrix) in MBapp-Status.md for the canonical, up-to-date module coverage tracking (Spec/Backend/Smokes/UI status for all 16 modules).
+
+**This section focuses on test coverage details** — which specific smoke tests validate each module, and what flows are covered. For overall module implementation status, refer to the canonical matrix.
+
+### Test Coverage Summary by Module
+
+| Module | Key Smoke Tests | Coverage Notes |
+|--------|----------------|----------------|
+| **Inventory** | onhand, guards, onhand-batch, list-movements, movements-by-location, inventory:crud | CRUD + guards + batch ops + filters (item/location) |
+| **Sales Orders** | sales:happy, sales:guards, sales:fulfill-without-reserve, outbound:reserve-fulfill-release-cycle, salesOrders:commit-* | Lifecycle + guardrails + outbound patterns + strict/non-strict shortage |
+| **Purchase Orders** | purchasing:happy, purchasing:guards, po:save-from-suggest, po:quick-receive, po:receive-line*, po:receive-with-location-counters | Lifecycle + receipt variants + idempotency + vendor guard + events |
+| **Parties** | parties:happy, parties:crud | CRUD lifecycle + search + eventual consistency (in CI) |
+| **Products** | products:crud | CRUD lifecycle + search + eventual consistency (in CI) |
+| **Registrations** | registrations:crud, registrations:filters | CRUD + filters (eventId, partyId, status); feature-flagged (in CI) |
+| **Views** | views:crud | CRUD + list pagination + q/entityType filters + eventual consistency (in CI) |
+| **Workspaces** | workspaces:list | List + q/entityType filters + pagination (in CI) |
+| **Events** | events:enabled-noop | Event dispatcher flag gating (in CI) |
+| **Pagination & Filtering** | objects:list-pagination, objects:list-filter-soId, objects:pageInfo-present, movements:filter-by-poLine | Cursor pagination + query filters |
+| **Feature Flags** | po:vendor-guard:on, po:vendor-guard:off, po:emit-events | Header overrides + simulation |
+
+**Gaps:** Routing, Scanner, Audit (spec-defined but not smoke-tested)
 
 ---
 
@@ -701,12 +718,14 @@ Sprint XXVIII Flows (Views + Workspaces v1)
 
 ---
 
-## 5. 
----
+## 4. ARCHIVED: Proposed New Flows (Sprint III) — IMPLEMENTED
 
-## 4. Proposed New Flows (Sprint III)
+**Note:** The flows below were proposed in Sprint III and have since been **implemented and added to CI**. This section is preserved for historical reference only. See [ops/ci-smokes.json](../ops/ci-smokes.json) for the current CI smoke manifest.
 
-### smoke:views:crud
+<details>
+<summary>Click to expand archived Sprint III proposals</summary>
+
+### smoke:views:crud (IMPLEMENTED ✅)
 
 **Purpose**: Validate views create/read/update/delete operations.
 
@@ -779,9 +798,10 @@ Sprint XXVIII Flows (Views + Workspaces v1)
 - `X-Feature-Events-Enabled: 1` (env: FEATURE_EVENT_DISPATCH_ENABLED)
 - `X-Feature-Events-Simulate: 1` (env: FEATURE_EVENT_DISPATCH_SIMULATE)
 
+</details>
+
 ---
 
-## 8. References
 ## 5. Running Smoke Tests
 
 ### Prerequisites
@@ -868,10 +888,13 @@ Exit code: 0 (PASS), 1 (FAIL)
 - **No real event bus tests**: Can't verify downstream consumers receive events
 - **Dev-only header overrides**: Feature flag headers only work in dev/CI (prod ignores)
 - **No concurrent test isolation**: Tests share DemoTenant; sequential execution recommended
+- **List/index reads may lag**: DynamoDB GSI projections and list endpoints (e.g., `GET /inventory/movements?locationId=X`) may not immediately reflect recently created items due to eventual consistency
+- **Smokes poll before failing**: Tests that query list/index endpoints retry for up to 10 seconds with exponential backoff (200ms → 1000ms) before reporting failure
+- **Avoid assuming immediate list visibility**: After creating an item, prefer querying by primary key (e.g., `GET /inventory/{id}/movements`) for immediate read-your-writes consistency; list queries may require polling
 
 ---
 
-## 8. References
+## 7. References
 
 - **Smoke Test File**: [ops/smoke/smoke.mjs](ops/smoke/smoke.mjs) (2508 lines, 25+ flows)
 - **Smoke Seeds**: [ops/smoke/seed/](ops/smoke/seed/) (routing.ts, parties.ts, vendor seeding)
@@ -880,8 +903,3 @@ Exit code: 0 (PASS), 1 (FAIL)
 - **CORS/Feature Headers**: [apps/api/src/index.ts](../apps/api/src/index.ts) line ~103
 - **CI Smokes Config**: [ops/ci-smokes.json](../ops/ci-smokes.json)
 - **CI Runner**: [ops/tools/run-ci-smokes.mjs](../ops/tools/run-ci-smokes.mjs)
-
----
-
-**Last Updated**: Dec 23, 2025 (Sprint XXVIII)  
-**Status**: 25 test flows implemented (includes Views/Workspaces v1 + Events noop testing)
