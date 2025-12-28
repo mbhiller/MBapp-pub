@@ -13,6 +13,7 @@ import { updateObject } from "../api/client";
 import { useTheme } from "../providers/ThemeProvider";
 import { ScannerPanel } from "../features/_shared/ScannerPanel";
 import { resolveScan } from "../lib/scanResolve";
+import { pickBestMatchingLineId, incrementCapped } from "../features/_shared/scanLineSelect";
 
 export default function PurchaseOrderDetailScreen() {
   const route = useRoute<any>();
@@ -66,16 +67,19 @@ export default function PurchaseOrderDetailScreen() {
       }
 
       const { itemId } = result.value;
-      const matchingLines = findLinesForItem(itemId);
-      if (matchingLines.length === 0) {
+      const lineId = pickBestMatchingLineId({
+        lines,
+        itemId,
+        getLineId: (line: any) => String(line?.id ?? line?.lineId ?? ""),
+        getLineItemId: (line: any) => (line?.itemId != null ? String(line.itemId) : undefined),
+        getRemaining: (line: any) => Math.max(0, Number(line?.qty ?? 0) - Number(line?.receivedQty ?? 0)),
+      });
+      if (!lineId) {
         toast(`No line found for item ${itemId}`, "info");
         return;
       }
-
-      // Use first matching line
-      const targetLine = matchingLines[0];
-      const lineId = String(targetLine.id ?? targetLine.lineId);
-      const remaining = getRemainingQty(targetLine);
+      const targetLine = lines.find((ln: any) => String(ln?.id ?? ln?.lineId ?? "") === lineId);
+      const remaining = targetLine ? getRemainingQty(targetLine) : 0;
 
       if (remaining <= 0) {
         toast(`Item ${itemId} is fully received`, "info");
@@ -83,10 +87,7 @@ export default function PurchaseOrderDetailScreen() {
       }
 
       // Increment pending receive by 1, capped at remaining
-      const currentPending = pendingReceives.get(lineId) ?? 0;
-      const newPending = Math.min(currentPending + 1, remaining);
-      const updated = new Map(pendingReceives);
-      updated.set(lineId, newPending);
+      const updated = incrementCapped(pendingReceives, lineId, remaining, 1);
       setPendingReceives(updated);
 
       // Track scan in history
