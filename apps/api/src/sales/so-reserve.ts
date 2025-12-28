@@ -7,6 +7,8 @@ import * as InvOnHandBatch from "../inventory/onhand-batch";
 import { listMovementsByItem } from "../inventory/movements";
 import { deriveCountersByLocation } from "../inventory/counters";
 import { resolveTenantId } from "../common/tenant";
+import { badRequest, conflictError, internalError, notFound } from "../common/responses";
+import { logger } from "../common/logger";
 
 type LineReq = { lineId: string; deltaQty: number; locationId?: string; lot?: string };
 type SOLine = { id: string; itemId: string; qty: number; uom?: string; qtyCommitted?: number };
@@ -18,10 +20,7 @@ type SalesOrder = {
 };
 
 const DEBUG = process.env.MBAPP_DEBUG === "1" || process.env.DEBUG === "1";
-const log = (e: APIGatewayProxyEventV2, tag: string, data: Record<string, any>) => {
-  if (!(DEBUG)) return; const reqId = (e.requestContext as any)?.requestId;
-  try { console.log(JSON.stringify({ tag, reqId, ...data })); } catch {}
-};
+const reqIdOf = (e: APIGatewayProxyEventV2) => (e.requestContext as any)?.requestId;
 
 const json = (s: number, b: unknown): APIGatewayProxyResultV2 => ({
   statusCode: s,
@@ -46,35 +45,38 @@ async function loadSO(tenantId: string, id: string): Promise<SalesOrder|null> {
 function rid(prefix="mv") { return `${prefix}_${Math.random().toString(36).slice(2,8)}${Date.now().toString(36).slice(-4)}`; }
 
 export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
+  const requestId = reqIdOf(event);
+  const baseCtx = { requestId };
   try {
     let tenantId: string;
     try { tenantId = tid(event); } catch (err: any) {
       const status = err?.statusCode ?? 400;
-      return json(status, { message: err?.message ?? "Tenant header mismatch" });
+      return badRequest(err?.message ?? "Tenant header mismatch", undefined, requestId);
     }
     const id = event.pathParameters?.id;
-    if (!tenantId || !id) return json(400, { message: "Missing tenant or id" });
+    if (!tenantId || !id) return badRequest("Missing tenant or id", undefined, requestId);
+    const logCtx = { ...baseCtx, tenantId, route: event.rawPath ?? event.requestContext?.http?.path, method: event.requestContext?.http?.method };
 
     const body = parse<{ lines: LineReq[] }>(event);
     const reqLines = Array.isArray(body?.lines) ? body.lines : [];
     if (reqLines.length === 0) return json(400, { message: "lines[] required" });
 
     const so = await loadSO(tenantId, id);
-    if (!so) return json(404, { message: "Sales order not found" });
-    log(event, "so-reserve.load", { id: so.id, status: so.status, reqLines });
+    if (!so) return notFound("Sales order not found", requestId);
+    logger.info(logCtx, "so-reserve.load", { soId: so.id, status: so.status, reqLines });
 
     // ✅ Allow reserve from submitted OR committed (matches smoke)
     if (!["submitted", "committed"].includes(so.status)) {
-      log(event, "so-reserve.guard", { reason: "bad_status", status: so.status });
-      return json(409, { message: `Cannot reserve from status=${so.status}` });
+      logger.warn(logCtx, "so-reserve.guard", { reason: "bad_status", status: so.status });
+      return conflictError(`Cannot reserve from status=${so.status}`, undefined, requestId);
     }
 
     const soLines = new Map<string, SOLine>((so.lines ?? []).map(l => [l.id, l]));
     for (const l of reqLines) {
       if (!l?.lineId || typeof l.deltaQty !== "number" || l.deltaQty <= 0) {
-        return json(400, { message: "Each line requires { lineId, deltaQty>0 }" });
+        return badRequest("Each line requires { lineId, deltaQty>0 }", undefined, requestId);
       }
-      if (!soLines.has(l.lineId)) return json(404, { message: `Unknown lineId ${l.lineId}` });
+      if (!soLines.has(l.lineId)) return notFound(`Unknown lineId ${l.lineId}`, requestId);
     }
 
     // Availability checks: handle lines with locationId specifically, others via aggregate batch
@@ -137,7 +139,10 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
       }
     }
 
-    if (shortages.length) return json(409, { message: "Insufficient availability to reserve", shortages });
+    if (shortages.length) {
+      logger.warn(logCtx, "so-reserve.shortage", { shortages });
+      return conflictError("Insufficient availability to reserve", { shortages }, requestId);
+    }
 
     // Create inventory movement rows for each line request
     const now = new Date().toISOString();
@@ -165,6 +170,7 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
 
     return json(200, so);
   } catch (err: any) {
-    return json(500, { message: err?.message ?? "Internal Server Error" });
+    logger.error({ requestId }, "so-reserve.error", { message: err?.message });
+    return internalError(err, requestId);
   }
 }

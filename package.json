@@ -86,7 +86,11 @@
     "smoke:inventory:adjust-negative": "node ops/smoke/smoke.mjs smoke:inventory:adjust-negative",
     "smoke:inventory:onhand-by-location": "node ops/smoke/smoke.mjs smoke:inventory:onhand-by-location",
     "smoke:suggest-po-with-vendor": "node ops/smoke/smoke.mjs smoke:suggest-po-with-vendor",
-    "smoke:vendor-filter-preferred": "node ops/smoke/smoke.mjs smoke:vendor-filter-preferred"
+    "smoke:vendor-filter-preferred": "node ops/smoke/smoke.mjs smoke:vendor-filter-preferred",
+    "smoke:outbound:reserve-fulfill-release-cycle": "node ops/smoke/smoke.mjs smoke:outbound:reserve-fulfill-release-cycle",
+    "smoke:po:receive-line-negative-qty": "node ops/smoke/smoke.mjs smoke:po:receive-line-negative-qty",
+    "smoke:po:receive-with-location-counters": "node ops/smoke/smoke.mjs smoke:po:receive-with-location-counters",
+    "smoke:sales:fulfill-without-reserve": "node ops/smoke/smoke.mjs smoke:sales:fulfill-without-reserve"
   },
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "^3.882.0",

@@ -6,8 +6,9 @@ import { getObjectById } from "../objects/repo";
 import { getPurchaseOrder, updatePurchaseOrder } from "../shared/db";
 import { featureVendorGuardEnabled, featureEventsSimulate } from "../flags";
 import { maybeDispatch } from "../events/dispatcher";
-import { conflictError, badRequest } from "../common/responses";
+import { conflictError, badRequest, internalError, notFound } from "../common/responses";
 import { resolveTenantId } from "../common/tenant";
+import { logger } from "../common/logger";
 
 /** Utilities */
 const json = (statusCode: number, body: any): APIGatewayProxyResultV2 => ({
@@ -15,6 +16,7 @@ const json = (statusCode: number, body: any): APIGatewayProxyResultV2 => ({
   headers: { "content-type": "application/json" },
   body: JSON.stringify(body),
 });
+const reqIdOf = (event: APIGatewayProxyEventV2) => (event.requestContext as any)?.requestId;
 const parse = <T = any>(e: APIGatewayProxyEventV2): T => { try { return JSON.parse(e.body || "{}"); } catch { return {} as any; } };
 function rid(prefix = "mv") { return `${prefix}_${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36).slice(-4)}`; }
 
@@ -109,17 +111,21 @@ async function receivedSoFar(tenantId: string, poId: string): Promise<Record<str
 
 /** Handler */
 export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
+  const requestId = reqIdOf(event);
+  let logCtx: { requestId?: string; tenantId?: string; route?: string; path?: string; method?: string; userId?: string } = { requestId };
   try {
     let tenantId: string;
     try {
       tenantId = resolveTenantId(event);
     } catch (err: any) {
       const status = err?.statusCode ?? 400;
-      return json(status, { error: err?.code ?? "TenantError", message: err?.message ?? "Tenant resolution failed" });
+      return badRequest(err?.message ?? "Tenant resolution failed", { code: err?.code ?? "TenantError" }, requestId);
     }
     
     const id = event.pathParameters?.id;
-    if (!id) return json(400, { message: "Missing id" });
+    if (!id) return badRequest("Missing id", undefined, requestId);
+
+    logCtx = { ...logCtx, tenantId, route: event.rawPath ?? event.requestContext?.http?.path, method: event.requestContext?.http?.method };
 
     const idk = (event.headers?.["Idempotency-Key"] || event.headers?.["idempotency-key"] || null) as string | null;
 
@@ -147,13 +153,22 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
         }
       }
     }
-    if (reqLines.length === 0) return json(400, { message: "lines[] required" });
+    if (reqLines.length === 0) {
+      logger.warn(logCtx, "po.receive: missing lines", { tenantId, poId: id });
+      return badRequest("lines[] required", { code: "LINES_REQUIRED" }, requestId);
+    }
 
+    logger.info(logCtx, "po.receive: loading PO", { tenantId, poId: id, idempotencyKey: idk, lineCount: reqLines.length });
     const po = await loadPO(tenantId, id);
-    if (!po) return json(404, { message: "PO not found" });
+    if (!po) {
+      logger.warn(logCtx, "po.receive: PO not found", { tenantId, poId: id });
+      return notFound("PO not found (PO_NOT_FOUND)", requestId);
+    }
+    const logExtra = { tenantId, poId: po.id, vendorId: po.vendorId, lineCount: reqLines.length, idempotencyKey: idk };
 
     // Key-based idempotency (safe to short-circuit before validation)
     if (idk && await alreadyAppliedKey(tenantId, po.id, idk)) {
+      logger.info(logCtx, "po.receive: idempotency key hit", { ...logExtra, idempotencyKey: idk });
       const fresh = await loadPO(tenantId, po.id);
       return json(200, fresh ?? po);
     }
@@ -163,22 +178,30 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     const deniedStatuses = ["cancelled", "closed", "canceled"];
     const poStatusNorm = String(po.status ?? "").toLowerCase();
     if (!allowedStatuses.includes(poStatusNorm)) {
-      return json(409, { message: "PO not receivable in current status", code: "PO_STATUS_NOT_RECEIVABLE", status: po.status });
+      logger.warn(logCtx, "po.receive: status not receivable", { ...logExtra, status: po.status });
+      return conflictError(
+        "PO not receivable in current status",
+        { code: "PO_STATUS_NOT_RECEIVABLE", status: po.status },
+        requestId
+      );
     }
 
     // --- Vendor guard (friendly 400s) ----------------------------------------
     if (featureVendorGuardEnabled(event)) {
       if (!po.vendorId) {
-        return json(400, { message: "Vendor required", code: "VENDOR_REQUIRED" });
+        logger.warn(logCtx, "po.receive: vendor missing", { ...logExtra });
+        return badRequest("Vendor required", { code: "VENDOR_REQUIRED" }, requestId);
       }
       try {
         const party = await getObjectById({ tenantId, type: "party", id: String(po.vendorId) });
         const hasVendorRole = Array.isArray((party as any)?.roles) && (party as any).roles.includes("vendor");
         if (!hasVendorRole) {
-          return json(400, { message: "Selected party is not a vendor", code: "VENDOR_ROLE_MISSING" });
+          logger.warn(logCtx, "po.receive: vendor role missing", { ...logExtra });
+          return badRequest("Selected party is not a vendor", { code: "VENDOR_ROLE_MISSING" }, requestId);
         }
       } catch {
-        return json(400, { message: "Vendor required", code: "VENDOR_REQUIRED" });
+        logger.warn(logCtx, "po.receive: vendor load failed", { ...logExtra });
+        return badRequest("Vendor required", { code: "VENDOR_REQUIRED" }, requestId);
       }
     }
     // -------------------------------------------------------------------------
@@ -191,13 +214,15 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     for (const r of reqLines) {
       const delta = Number(r.deltaQty ?? 0);
       if (delta <= 0) {
-        return badRequest(`deltaQty must be positive for line ${r.lineId}`, { lineId: r.lineId, deltaQty: delta });
+        logger.warn(logCtx, "po.receive: non-positive delta", { ...logExtra, lineId: r.lineId, deltaQty: delta });
+        return badRequest(`deltaQty must be positive for line ${r.lineId}`, { lineId: r.lineId, deltaQty: delta }, requestId);
       }
       const ordered = Number(linesById.get(r.lineId)?.qty ?? 0);
       const received = Number(prior[r.lineId] ?? 0);
       const remaining = Math.max(0, ordered - received);
       const next = received + delta;
       if (next > ordered) {
+        logger.warn(logCtx, "po.receive: receive exceeds remaining", { ...logExtra, lineId: r.lineId, ordered, received, remaining, attemptedDelta: delta });
         return conflictError(
           `Receive would exceed ordered quantity for line ${r.lineId}`,
           {
@@ -207,7 +232,8 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
             received,
             remaining,
             attemptedDelta: delta,
-          }
+          },
+          requestId
         );
       }
     }
@@ -215,6 +241,7 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     // Payload signature idempotency (AFTER validation - only mark successful operations as idempotent)
     const sig = hashStr(`${po.id ?? id}::${canonicalizeLines(reqLines)}`);
     if (await alreadyAppliedSig(tenantId, po.id, sig)) {
+      logger.info(logCtx, "po.receive: payload signature hit", { ...logExtra, signature: sig });
       const fresh = await loadPO(tenantId, po.id);
       return json(200, fresh ?? po);
     }
@@ -302,9 +329,12 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
       if (got < Number(ln.qty ?? 0)) { allFull = false; break; }
     }
     const nextStatus = allFull ? "fulfilled" : "partially-received";
+    logger.info(logCtx, "po.receive: computed next status", { ...logExtra, nextStatus });
 
     // Persist PO status using the same helper as submit/approve
     const updated = await updatePurchaseOrder(id, tenantId, { status: nextStatus, lines: po.lines } as any);
+
+    logger.info(logCtx, "po.receive: updated PO", { ...logExtra, nextStatus });
 
     // Mark idempotency AFTER successful write (both key and payload signature)
     if (idk) await markAppliedKey(tenantId, po.id, idk);
@@ -335,13 +365,14 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
         }
       }
     } catch (e) {
-      console.warn("dispatchEvent failed", e);
+      logger.warn(logCtx, "po.receive: dispatchEvent failed", { ...logExtra, error: (e as any)?.message });
     }
 
     const out = devMeta ? { ...updated, _dev: { ...((updated as any)._dev || {}), ...devMeta } } : updated;
+    logger.info(logCtx, "po.receive: success", { ...logExtra, nextStatus });
     return json(200, out);
   } catch (err: any) {
-    console.error(err);
-    return json(500, { message: err?.message ?? "Internal Server Error" });
+    logger.error(logCtx, "po.receive: unhandled error", { error: err?.message, stack: err?.stack });
+    return internalError(err?.message ?? "Internal Server Error", requestId);
   }
 }

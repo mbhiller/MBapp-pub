@@ -6,6 +6,8 @@ import * as InvOnHandBatch from "../inventory/onhand-batch";
 import { getObjectById, createObject } from "../objects/repo";
 import { resolveTenantId } from "../common/tenant";
 import { listMovementsByItem, createMovement } from "../inventory/movements";
+import { badRequest, conflictError, internalError, notFound } from "../common/responses";
+import { logger } from "../common/logger";
 
 type SOStatus =
   | "draft"
@@ -36,11 +38,7 @@ type SalesOrder = {
 };
 
 const DEBUG = process.env.MBAPP_DEBUG === "1" || process.env.DEBUG === "1";
-const log = (event: APIGatewayProxyEventV2, tag: string, data: Record<string, any>) => {
-  if (!DEBUG) return;
-  const reqId = (event.requestContext as any)?.requestId;
-  try { console.log(JSON.stringify({ tag, reqId, ...data })); } catch {}
-};
+const reqIdOf = (event: APIGatewayProxyEventV2) => (event.requestContext as any)?.requestId;
 
 const json = (statusCode: number, body: unknown): APIGatewayProxyResultV2 => ({
   statusCode,
@@ -150,10 +148,13 @@ async function computeReservationStatus(
 }
 
 export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
+  const requestId = reqIdOf(event);
+  const baseCtx = { requestId };
   try {
     const tenantId = tenantIdOf(event);
     const id = event.pathParameters?.id;
-    if (!tenantId || !id) return json(400, { message: "Missing tenant or id" });
+    if (!tenantId || !id) return badRequest("Missing tenant or id", undefined, requestId);
+    const logCtx = { ...baseCtx, tenantId, route: event.rawPath ?? event.requestContext?.http?.path, method: event.requestContext?.http?.method };
 
     const inventoryCache = new Map<string, any>();
     const productCache = new Map<string, any>();
@@ -182,12 +183,14 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     const strict = isStrict(event);
 
     const so = await loadSO(tenantId, id);
-    if (!so) return json(404, { message: "Sales order not found" });
-    log(event, "so-commit.load", { id: so.id, status: so.status, lines: (so.lines ?? []).length, strict });
+    if (!so) return notFound("Sales order not found", requestId);
+    const lineCount = (so.lines ?? []).length;
+    logger.info(logCtx, "so-commit.load", { soId: so.id, status: so.status, lineCount, strict });
 
     // Allow from submitted/approved; if already committed, idempotent
     if (so.status !== "submitted" && so.status !== "approved" && so.status !== "committed") {
-      return json(409, { message: `Cannot commit from status=${so.status}` });
+      logger.warn(logCtx, "so-commit.guard", { reason: "bad_status", status: so.status });
+      return conflictError(`Cannot commit from status=${so.status}`, undefined, requestId);
     }
 
     const lines: SOLine[] = Array.isArray(so.lines) ? so.lines : [];
@@ -197,7 +200,7 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
       const before = so.status;
       if (so.status === "submitted" || so.status === "approved") so.status = "committed";
       await saveSO(so);
-      log(event, "so-commit.saved", { id: so.id, before, after: so.status, reason: "no_lines" });
+      logger.info(logCtx, "so-commit.saved", { soId: so.id, before, after: so.status, reason: "no_lines" });
       return json(200, so);
     }
 
@@ -241,10 +244,11 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
         shortages.push({ lineId: l.id, itemId: l.itemId, backordered });
       }
     }
-    log(event, "so-commit.availability", { itemIds, availability, shortages, strict });
+    logger.info(logCtx, "so-commit.availability", { itemIds, availability, shortages, strict });
 
     if (strict && shortages.length > 0) {
-      return json(409, { message: "Insufficient availability", shortages });
+      logger.warn(logCtx, "so-commit.shortage", { shortages });
+      return conflictError("Insufficient availability", { shortages }, requestId);
     }
 
     // Non-strict: proceed and mark committed (idempotently).
@@ -268,7 +272,7 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     }
     
     await saveSO(so);
-    log(event, "so-commit.saved", { id: so.id, before, after: so.status, strict, shortagesCount: shortages.length });
+    logger.info(logCtx, "so-commit.saved", { soId: so.id, before, after: so.status, strict, shortagesCount: shortages.length });
 
     // Emit commit movements for each line (only if transitioning to committed to ensure idempotency)
     if (!wasAlreadyCommitted) {
@@ -288,10 +292,10 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
         );
         
         // Only emit commit movement if there is outstanding reservation
-        if (reservedOutstanding <= 0) {
-          log(event, "so-commit.skip-line", { lineId: line.id, reason: "no-reservation", reservedOutstanding });
-          continue;
-        }
+         if (reservedOutstanding <= 0) {
+           logger.info(logCtx, "so-commit.skip-line", { lineId: line.id, reason: "no-reservation", reservedOutstanding });
+           continue;
+         }
         
         // Commit qty is the lesser of reservedOutstanding or line.qty
         const committedQty = Math.min(reservedOutstanding, Number(line.qty ?? 0));
@@ -312,7 +316,7 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
         movementsEmitted++;
       }
       
-      log(event, "so-commit.movements", { soId: so.id, movementsEmitted });
+         logger.info(logCtx, "so-commit.movements", { soId: so.id, movementsEmitted });
     }
 
     // Create BackorderRequest rows for actionable shortages (reorderEnabled only)
@@ -354,7 +358,7 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     // Return order plus shortages[] (for UI awareness)
     return json(200, { ...so, shortages: shortages.length ? shortages : undefined });
   } catch (err: any) {
-    log(event, "so-commit.error", { message: err?.message });
-    return json(500, { message: err?.message ?? "Internal Server Error" });
+    logger.error({ requestId: reqIdOf(event) }, "so-commit.error", { message: err?.message });
+    return internalError(err, requestId);
   }
 }
