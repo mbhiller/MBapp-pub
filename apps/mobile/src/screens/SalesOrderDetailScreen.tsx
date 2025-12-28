@@ -18,6 +18,7 @@ import { copyText } from "../features/_shared/copy";
 import { useSalesOrderAvailability } from "../features/salesOrders/useAvailabilityBatch";
 import { ScannerPanel } from "../features/_shared/ScannerPanel";
 import { resolveScan } from "../lib/scanResolve";
+import { pickBestMatchingLineId, incrementCapped } from "../features/_shared/scanLineSelect";
 
 export default function SalesOrderDetailScreen() {
   const route = useRoute<any>();
@@ -138,25 +139,26 @@ export default function SalesOrderDetailScreen() {
       }
 
       const { itemId } = result.value;
-      const matchingLines = findLinesForItem(itemId);
-      if (matchingLines.length === 0) {
+      const lineId = pickBestMatchingLineId({
+        lines,
+        itemId,
+        getLineId: (line: any) => String(line?.id ?? line?.lineId ?? ""),
+        getLineItemId: (line: any) => (line?.itemId != null ? String(line.itemId) : undefined),
+        getRemaining: (line: any) => Math.max(0, Number(line?.qty ?? 0) - Number(line?.qtyFulfilled ?? 0)),
+      });
+      if (!lineId) {
         toast(`No line found for item ${itemId}`, "info");
         return;
       }
-
-      const targetLine = matchingLines[0];
-      const lineId = String(targetLine.id ?? targetLine.lineId);
-      const remaining = getRemainingQtyToFulfill(targetLine);
+      const targetLine = lines.find((ln: any) => String(ln?.id ?? ln?.lineId ?? "") === lineId);
+      const remaining = targetLine ? getRemainingQtyToFulfill(targetLine) : 0;
 
       if (remaining <= 0) {
         toast(`Item ${itemId} is fully fulfilled`, "info");
         return;
       }
 
-      const currentPending = pendingFulfills.get(lineId) ?? 0;
-      const newPending = Math.min(currentPending + 1, remaining);
-      const updated = new Map(pendingFulfills);
-      updated.set(lineId, newPending);
+      const updated = incrementCapped(pendingFulfills, lineId, remaining, 1);
       setPendingFulfills(updated);
 
       setScanHistory((prev) => [
