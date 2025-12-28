@@ -884,9 +884,12 @@ cd apps/mobile && npm run typecheck
 - Mobile PO detail screen: per-line Receive modal wired via centralized `poActions.receiveLine()`; toasts + disabled states aligned to shared pattern.
 - **Mobile scan-to-receive + scan-to-fulfill:**
   - New `resolveScan()` utility (apps/mobile/src/lib/scanResolve.ts) prioritizes: inventory ID → EPC API lookup → QR format → error.
-  - PO Detail: Scan-to-receive with pending-state Map, undo, clear, batch submit with idempotency (`po:${id}#scan-batch:${timestamp}#lines:${count}`).
-  - SO Detail: Scan-to-fulfill mirrors PO pattern; idempotency keys on batch fulfill.
+  - PO Detail: Scan-to-receive implemented in apps/mobile/src/screens/PurchaseOrderDetailScreen.tsx; pending-state Map keyed by lineId, +1 per scan, capped by remaining (`qty - receivedQty`); supports undo/clear; batch submit includes `Idempotency-Key` (`po:${id}#scan:${SMOKE_RUN_ID|timestamp}#lines:${count}`).
+  - SO Detail: Scan-to-fulfill implemented in apps/mobile/src/screens/SalesOrderDetailScreen.tsx; same aggregation pattern (+1 per scan, cap by fulfillable remaining); batch submit includes `Idempotency-Key` (`so:${id}#scan:${SMOKE_RUN_ID|timestamp}#lines:${count}`).
   - `fulfillSalesOrder()` API accepts both `FulfillLine[]` and `{ lines: FulfillLine[] }` for backward compatibility; normalizes before POST.
+  - Idempotency: All batch submits send `Idempotency-Key`; same key safely retries the same batch without double-apply; different runs produce different keys.
+  - Scan line selection rule: When multiple SO/PO lines share the same itemId, scanning targets a line with remaining > 0 and prefers the line with the greatest remaining. Ties break deterministically by original order.
+  - Idempotency key stability tip: During dev runs, setting `EXPO_PUBLIC_SMOKE_RUN_ID` (or `SMOKE_RUN_ID`) makes scan-batch `Idempotency-Key` stable for retries.
 
 **Smokes (green)**
 - `smoke:inventory:onhand`, `smoke:inventory:guards`, `smoke:inventory:onhand-batch`, `smoke:inventory:list-movements`
