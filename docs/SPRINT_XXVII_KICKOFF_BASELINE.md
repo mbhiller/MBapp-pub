@@ -217,7 +217,7 @@ Files untracked: 0
 - [ ] Mobile: Navigation route registration
 - [ ] Smoke: smoke:products:crud test (full CRUD flow)
 - [ ] Smoke: ops/ci-smokes.json updated with new smoke
-- [ ] Docs: MBapp-Working.md entry for Sprint XXVII
+- [ ] Docs: MBapp-Status.md entry for Sprint XXVII
 - [ ] Docs: smoke-coverage.md row for products:crud
 - [ ] Docs: MBapp-Backend-Guide.md Products/Inventory section
 

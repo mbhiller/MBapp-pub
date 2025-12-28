@@ -1,6 +1,6 @@
 # MBapp — Master Roadmap (Tiers 1 → 10)
 
-**Navigation:** [Status/Working](MBapp-Status.md) · [Foundations](MBapp-Foundations.md) · [Cadence](MBapp-Cadence.md) · [Verification](smoke-coverage.md)  
+**Navigation:** [Status/Working](MBapp-Working.md) · [Foundations](SPRINT_XXVI_FOUNDATIONS_REPORT.md) · [Cadence](cadence.md) · [Verification](smoke-coverage.md)  
 **Last Updated:** 2025-12-28
 
 This is the **living**, presentation‑ready roadmap for MBapp. It consolidates and supersedes prior versions (v3.2, v3.3, v4.0, v5.0).  
@@ -22,8 +22,6 @@ Each Tier uses the same structure so we can later expand any Phase into a detail
 ---
 
 # 🧰 Tier 1 — Core Platform & Modules (Phases 1.0–1.3)
-
-**Current Status:** See [Module Coverage Matrix](MBapp-Status.md#module-coverage-matrix) and [Current State Summary](MBapp-Status.md#current-state-summary) in MBapp-Status.md for up-to-date implementation status, CI posture, and recent deliveries.
 
 ### 1.0 Foundations ✅ Implemented (Sprints A–D)
 - 🎯 Normalize object model and client API; seed shared utilities.
@@ -59,8 +57,6 @@ Each Tier uses the same structure so we can later expand any Phase into a detail
 ---
 
 # 🐎 Tier 2 — Operations: Events, Resources, Animals, Auctions (Phases 2.0–2.6)
-
-**Current Status:** See [Module Coverage Matrix](MBapp-Status.md#module-coverage-matrix) for Events, Registrations, Resources, Reservations implementation status (all feature-flagged).
 
 ### 2.0 Events & Registrations v1 ✅ Implemented (Feature-Gated)
 - 🎯 Mobile wizard; capacity & duplicate checks; fee rules.
@@ -386,7 +382,7 @@ Each Tier uses the same structure so we can later expand any Phase into a detail
 
 ## ✅ Next Steps
 1) Use this roadmap as the **source** for detailed sprint plans (per Phase).  
-2) Generate/maintain **MBapp-Status.md** (hybrid tracker with checklists, smokes, retro logs).  
+2) Generate/maintain **MBapp-Working.md** (hybrid tracker with checklists, smokes, retro logs).  
 3) Keep this doc living: update timestamps and mark phases as delivered.
 
 

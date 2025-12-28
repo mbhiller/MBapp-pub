@@ -1,21 +1,181 @@
 # MBapp Foundations Report
 
-**Navigation:** [Roadmap](MBapp-Roadmap.md) · [Status/Working](MBapp-Status.md) · [Cadence](MBapp-Cadence.md) · [Verification](smoke-coverage.md)  
+**Navigation:** [Roadmap](MBapp-Roadmap-Master-v10.0.md) · [Status/Working](MBapp-Working.md) · [Cadence](cadence.md) · [Verification](smoke-coverage.md)  
 **Last Updated:** 2025-12-28
 
 ---
 
-## Purpose
+## Sprint XLI: Inventory Putaway + Cycle Count Operations (2025-12-25)
 
-This document defines the **structural standards and invariants** for the MBapp codebase:
-- Object model contracts (what fields/types every module uses)
-- API patterns (idempotency, pagination, error handling, feature flags)
-- Web and mobile UI conventions (routing, forms, guards, navigation)
-- Smoke test conventions (naming, structure, cleanup rules)
-- Spec-to-types generation workflow
+- **New endpoints:**
+  - POST `/inventory/{id}:putaway` – Move inventory to a location with optional source location audit trail.
+  - POST `/inventory/{id}:cycle-count` – Reconcile inventory by physical count with delta computation.
+- **New movement actions:** Extended InventoryMovement action enum from 6 to 8:
+  - `putaway` – Location transfer (counter no-op; audit trail only).
+  - `cycle_count` – Physical count with delta (like adjust; updates onHand if delta ≠ 0).
+- **Web UI enhancements:**
+  - InventoryDetailPage now displays Putaway and Cycle Count action buttons.
+  - Putaway modal: qty, toLocationId (required), fromLocationId (optional audit), lot, note; uses LocationPicker.
+  - Cycle Count modal: countedQty (required), locationId (optional), lot, note; uses LocationPicker.
+  - Both modals include idempotency keys; success reloads inventory data.
+- **Opt-in smoke tests:**
+  - `smoke:inventory:putaway` – Creates locations A+B, product, inventory; ensures onHand ≥ 1; calls putaway (A→B, qty=1); asserts movement and onHand unchanged.
+  - `smoke:inventory:cycle-count` – Creates product, inventory; ensures onHand = 5; calls cycle-count (countedQty=2, delta=-3); asserts onHand = 2 and movement with delta.
+  - **Command:** `node ops/smoke/smoke.mjs smoke:inventory:putaway` or `smoke:inventory:cycle-count` (not in CI list).
 
-**For roadmap planning:** See [MBapp-Roadmap.md](MBapp-Roadmap.md)  
-**For current status & coverage:** See [MBapp-Status.md](MBapp-Status.md)
+**Inventory actions (canonical):**
+- POST `/inventory/{id}:adjust` — stock delta (may be negative), supports lot/locationId/note.
+- Movement action union: receive, reserve, commit, fulfill, adjust, release, putaway, cycle_count.
+- Counters: putaway is a no-op; cycle_count behaves like adjust (onHand += delta).
+
+## Sprint XL: Locations Updates
+
+- Location is now a first-class object (SSOT) exposed via `/objects/location`.
+- Added web `/locations` page for listing, creating, editing, and pagination.
+- PO receive now uses `LocationPicker` with manual override fallback retained.
+- New opt-in smokes added: `smoke:locations:crud` and updated `smoke:po-receive-lot-location-assertions` to create/use a real location.
+
+# Sprint XXVI–XXVII — Tier 1–4 Foundations Report
+Note: Historical sections below reflect state as of 2025-12-23; later sprints are captured in addenda above.
+**Generated:** 2025-12-23  
+**Scope:** Mobile + Web client foundations for production-ready MVP
+
+---
+
+## Addendum — Purchasing + Locations + Inventory (2025-12-25 to 2025-12-26)
+
+**What Shipped:**
+
+- **Partial Receive Transitions:**
+  - PO lines track `receivedQty` vs `qty` to allow incremental receiving.
+  - Status transitions: `approved` → first receive (partial if receivedQty < qty) → `received` when all lines fully received.
+  - API guards prevent receive-after-cancel and receive-after-close; relevant error codes returned.
+
+- **Vendor Guard Enforcement Codes:**
+  - `ensurePartyRole()` in `apps/api/src/common/validators.ts` now validates vendor/customer roles via `Party.roles[]` only (no partyRole object dependency).
+  - Error response for missing role: `party_missing_required_role:vendor` with details `{ code: "PARTY_ROLE_MISSING", partyId, requiredRole, roles }`.
+  - Feature flag `FEATURE_ENFORCE_VENDOR_ROLE` supported; dev header `X-Feature-Enforce-Vendor` allows bypass in non-prod.
+
+- **Locations Schema + Objects Permission Fallback:**
+  - Location is now a first-class object exposed via `/objects/location` with SSOT schema.
+  - Web `/locations` page added for listing, creating, editing, and pagination.
+  - Generic `objects:read` / `objects:write` permissions act as fallback for new types (e.g., location) when specific permissions (e.g., `location:read`) are not granted.
+
+- **LocationPicker Integration:**
+  - PO receive UI uses `LocationPicker` for lot + location selection with manual override fallback retained.
+  - Movements persisted with `lot` and `locationId` fields; queryable via `refId` + `poLineId`.
+
+- **Inventory Putaway + Cycle-Count Endpoints:**
+  - **POST `/inventory/{id}:putaway`** — Move inventory to a location; accepts `qty`, `toLocationId` (required), `fromLocationId` (optional audit), `lot`, `note`. Creates movement with action `putaway` (counter no-op; audit trail only).
+  - **POST `/inventory/{id}:cycle-count`** — Reconcile inventory by physical count; accepts `countedQty` (required), `locationId` (optional), `lot`, `note`. Computes delta, writes `cycle_count` movement (like adjust; updates onHand if delta ≠ 0).
+  - Movement action union extended from 6 to 8: receive, reserve, commit, fulfill, adjust, release, putaway, cycle_count.
+  - Shared movement writer in `apps/api/src/inventory/movements.ts` ensures consistent PK/SK and field persistence.
+
+- **Lot/Location End-to-End:**
+  - Web InventoryDetailPage displays Putaway and Cycle Count action buttons with modals using LocationPicker.
+  - Movements list includes lot/location/refId/poLineId; movements queryable by these fields.
+
+**Smoke Coverage:**
+
+- `smoke:close-the-loop-partial-receive` — Validates incremental receive transitions and status updates.
+- `smoke:po-receive-after-cancel-guard` — Ensures API rejects receive on cancelled POs.
+- `smoke:po-receive-after-close-guard` — Ensures API rejects receive on closed POs.
+- `smoke:vendor-guard-enforced` — Validates party role enforcement with `party_missing_required_role:vendor` error path.
+- `smoke:po-receive-lot-location-assertions` — Verifies lot + locationId persist to movements and are queryable.
+- `smoke:locations:crud` — Tests Location CRUD via `/objects/location`.
+- `smoke:inventory:putaway` — Creates locations, product, inventory; ensures onHand ≥ 1; calls putaway; asserts movement created and onHand unchanged.
+- `smoke:inventory:cycle-count` — Creates product, inventory; ensures onHand = 5; calls cycle-count (countedQty=2, delta=-3); asserts onHand = 2 and movement includes delta.
+
+**Seeding Robustness:**
+
+- `ops/smoke/seed/parties.ts` now implements `ensurePartyRole(api, partyId, role)` with retry logic (up to 8 attempts with 150ms sleep) to handle eventual consistency when roles are set via GET → union → PUT.
+- `seedVendor()` and `seedCustomer()` create parties with roles at creation time and verify via `ensurePartyRole()`, returning party object for debug output.
+- Smokes include `steps.vendorDebug` and `steps.customerDebug` with exact partyId + roles to diagnose intermittent `party_missing_required_role:*` failures.
+- Debug output includes the party object returned after role ensure, proving the partyId and roles[] used at the failing step.
+
+---
+
+## Roadmap Alignment (Tier 1–4)
+
+This section aligns the Sprint XXVI–XXVII Foundations checklist to the Tiered roadmap in [MBapp-Roadmap-Master-v10.0.md](MBapp-Roadmap-Master-v10.0.md).
+
+| Checklist Item | Tier | Roadmap Area | Backend | Mobile | Web | Smokes | Notes |
+|---|---|---|---|---|---|---|---|
+| Remove localhost fallback in `ops/smoke/smoke.mjs` | 1 | Core Platform & Modules | ✅ | ✅ | ✅ | ✅ | Fail fast if MBAPP_API_BASE unset (Sprint XXVI) |
+| Create `apps/web/.env.sample` (AWS defaults) | 1 | Core Platform & Modules | ✅ | ✅ | ✅ | ✅ | Documented env setup for web (Sprint XXVI) |
+| Shared web fetch/error/pagination (`lib/http.ts`) | 1 | Core Platform & Modules | ✅ | ✅ | ✅ | ✅ | Auth headers + error normalization (Sprint XXVI) |
+| Web AuthProvider + Layout + Router | 1 | Core Platform & Modules | ✅ | ✅ | ✅ | ✅ | Foundation for all Tier 1–4 screens (Sprint XXVI) |
+| Parties — Web pages (List/Detail/Create/Edit) | 1 | Core Identity (Parties) | ✅ | ✅ | ✅ | ✅ | API complete; web+mobile CRUD delivered (Sprint XXVI) |
+| Parties — Mobile screens (Create/Edit + routes) | 1 | Core Identity (Parties) | ✅ | ✅ | ✅ | ✅ | Adds reusable form pattern on mobile (Sprint XXVI) |
+| Products — Web/Mobile forms (Create/Edit) | 1.2 | Commerce Core | ✅ | ✅ | ✅ | ✅ | Web ProductForm + mobile screens delivered (Sprint XXVII) |
+| Inventory — Web read-only (List/Detail) | 1.2 | Commerce Core | ✅ | ✅ | ✅ | ✅ | Show onHand + movements; adjust later (Sprint XXVII) |
+| Locations — SSOT + Web + Receiving integration | 1.2 | Commerce Core | ✅ | 🟨 (receive UI supports lot/locationId; no dedicated Locations screens) | ✅ | 🟨 | Sprint XL (2025-12-25) |
+| Update docs + add parties/products/inventory smokes | 1 | Delivery Notes | ✅ | ✅ | ✅ | ✅ | smoke:parties:crud + smoke:products:crud + smoke:inventory:crud (Sprint XXVI–XXVII) |
+| Locations SSOT + Web + Receiving integration | 1.2 | Commerce Core / Inventory | ✅ | (mobile unchanged) | ✅ | 🟨 | Sprint XL |
+
+Legend: ✅ done · 🟨 partial · ⬜ missing (planned)
+
+## Addendum — Post Sprint XXVII Foundations (Sprints XXXV–XL, 2025-12-25)
+
+- Web Purchasing workflow shipped:
+  - `/backorders` (bulk ignore + suggest-po; multi-vendor chooser)
+  - `/purchase-orders` list + detail (submit/approve/receive/cancel/close)
+  - PO Activity from inventory movements
+- Vendor guard enforcement validated (FEATURE_ENFORCE_VENDOR_ROLE + `X-Feature-Enforce-Vendor` in non-prod)
+- Receiving fidelity:
+  - per-line `lot`/`locationId` → persisted to inventory movements
+  - movements queryable via `refId` + `poLineId`
+- Locations foundation shipped:
+  - `/objects/location` CRUD
+  - `/locations` web page
+  - `LocationPicker` in PO receive with manual override fallback
+
+### Gap Matrix (Tier 1–2) — Post Sprint XXVII
+
+| Capability | Backend | Mobile | Web | Smokes | Note |
+|---|---|---|---|---|---|
+| Parties CRUD + roles | ✅ | ✅ | ✅ | ✅ | Complete: web+mobile CRUD; role guards enforced; smokes passing |
+| Products CRUD | ✅ | ✅ | ✅ | ✅ | Complete: web ProductForm + mobile create/edit screens; smokes passing |
+| Inventory CRUD + OnHand | ✅ | 🟨 | ✅ | ✅ | Read flows complete; adjust/create UI missing on mobile |
+| Sales Order create/commit | ✅ | ✅ | ⬜ | ✅ | Mobile has create+commit; web missing |
+| Backorders + suggest‑po + receive loop | ✅ | 🟨 | ⬜ | ✅ | End‑to‑end smokes green; minimal UI |
+| Views CRUD | ✅ | ⬜ | ⬜ | 🟨 | Handlers exist; smokes exist (not in CI) |
+| Workspaces CRUD | ✅ | 🟨 | ⬜ | 🟨 | Hub stub on mobile; CRUD UI missing |
+| Auth/config | ✅ | ✅ | ✅ | ✅ | Web has AuthProvider; smokes use bearer/env (Sprint XXVI) |
+| Web Backorders + Suggest-PO + Receive loop | ✅ | ✅/🟨 | ✅ | ✅ | Sprints XXXIII–XXXV |
+| Locations SSOT + pickers | ✅ | 🟨 | ✅ | 🟨 | Sprint XL |
+
+### Recommended Sprint Sequence (XXVI–XXVIII)
+
+#### Sprint XXVI — Web foundation + Parties vertical slice ✅ COMPLETE
+- Scope:
+  - Web: `lib/http.ts`, AuthProvider, Router, Layout
+  - Web: Parties List/Detail/Create/Edit + shared `PartyForm`
+  - Mobile: Create/Edit Party screens + route wiring
+  - Ops: remove localhost fallback; add parties smoke
+- Acceptance:
+  - Web can authenticate and call API; Parties CRUD works
+  - Mobile Parties create/edit works end‑to‑end
+  - Smokes: run full suite + new parties smoke (expected: 39/39 PASS)
+
+#### Sprint XXVII — Products + Inventory forms + OnHand polish ✅ COMPLETE
+- Scope:
+  - Web: Products Create/Edit; Inventory List/Detail (read‑only)
+  - Mobile: Products Create/Edit; Inventory adjust stub
+  - Shared: small onHand/movements presentation polish
+- Acceptance:
+  - Products CRUD on both clients
+  - Inventory read flows visible on web; adjust planned on mobile
+  - Smokes: full suite + 2 new CRUD flows (expected: 41/41 PASS)
+
+#### Sprint XXVIII — Close‑the‑loop surfaced (SO → BO → Suggest‑PO → Receive) — NEXT
+- Scope:
+  - Web: read‑only surfaces (SO detail shows BO links; PO detail shows receive history)
+  - Mobile: ensure receive actions and backorder linkouts are consistent
+  - Docs: user flows and troubleshooting notes
+- Acceptance:
+  - Clients show the loop state consistently; actions available on mobile
+  - Smokes: re‑run end‑to‑end purchasing/sales flows (expected: 42/42 PASS)
 
 ---
 
@@ -86,44 +246,7 @@ const TENANT = process.env.MBAPP_TENANT_ID ?? "DemoTenant";
 
 ---
 
----
-
-## 2. API Patterns
-
-### 2.1 Idempotency & Error Handling
-- All mutating endpoints (`POST /purchase-orders`, `POST /purchase-orders/{id}/submit`, etc.) accept optional `idempotencyKey` header
-- Duplicate submissions within TTL window (24h default) return same response (200/201) with `X-Idempotency-Cached: true`
-- Standard error contract: `{ code: string, message: string, details?: object }`
-- Business rule violations return 409 Conflict with domain error codes (e.g., `PO_STATUS_NOT_RECEIVABLE`)
-
-### 2.2 Pagination & Filtering
-- List endpoints support `?limit=N` (default 25, max 100) and `?nextToken=XYZ`
-- Filters use query params: `?status=draft`, `?vendorId=abc123`
-- Response shape: `{ items: T[], nextToken?: string }`
-
-### 2.3 Feature Flags
-- Header override pattern: `X-Feature-{FlagName}: 1` (dev/staging only)
-- Example: `X-Feature-Enforce-Vendor: 1` enables vendor guard in non-prod
-- All flags default OFF; must be explicitly enabled per environment
-
-### 2.4 Object Model Contracts
-
-See [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) for full OpenAPI definitions. Key patterns:
-
-**Status Lifecycles:**
-- Purchase Orders: `draft → submitted → approved → (partially-)received → fulfilled → closed` (also `cancelled`)
-- Sales Orders: `draft → submitted → approved → (partially-)fulfilled → completed` (also `cancelled`)
-- Inventory Movements: `pending → completed` (no cancellation)
-
-**Hyphenation Convention:** Multi-word statuses use hyphens: `partially-received`, `partially-fulfilled`
-
-**Timestamps:** All entities have `createdAt` (ISO 8601), mutating operations add `updatedAt`
-
-**Reference IDs:** Cross-module references use consistent naming: `vendorId`, `productId`, `customerId`, `locationId`, `poId`, `soId`
-
----
-
-## 3. Mobile UI Patterns (apps/mobile/src/screens)
+## 2. Mobile UI Inventory (apps/mobile/src/screens)
 
 | Module | List Screen | Detail Screen | Create/Edit | Search/Filter | Status |
 |--------|------------|---------------|-------------|---------------|--------|
@@ -157,7 +280,7 @@ See [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) for full OpenAPI defin
 
 ---
 
-## 4. Web UI Patterns (apps/web/src)
+## 3. Web UI Inventory (apps/web/src)
 
 NOTE: The block below reflected Sprint XXVI–XXVII state. As of 2025-12-25 web has real pages.
 
@@ -201,68 +324,7 @@ apps/web/src/
 
 ---
 
-## 5. Smoke Test Conventions
-
-**File:** [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs)  
-**Naming:** `smoke:{module}:{flow}` (e.g., `smoke:po:submit-approve-receive`)  
-**Cleanup Rules:**
-- Draft objects created during tests are automatically deleted by cleanup hooks
-- Approved/submitted objects are left in place (require manual cleanup or separate archival script)
-- Test isolation: Each smoke creates unique objects with timestamp-based names
-
-**Structure Pattern:**
-```javascript
-export async function smoke_module_flow(API_BASE, authToken) {
-  const ctx = { createdIds: [] };
-  try {
-    // 1. Setup
-    const obj = await createDraft(...);
-    ctx.createdIds.push(obj.id);
-    
-    // 2. Action sequence
-    await submitDraft(obj.id);
-    await performAction(obj.id);
-    
-    // 3. Assertions
-    assert.strictEqual(obj.status, 'expected-status');
-    
-    return { pass: true };
-  } catch (err) {
-    return { pass: false, error: err.message };
-  } finally {
-    await cleanup(ctx.createdIds);
-  }
-}
-```
-
-**Opt-In Proofs:** Tests that verify specific guards/flags use descriptive names: `smoke:vendor-guard-enforced`, `smoke:po-receive-after-close-guard`
-
----
-
-## 6. Spec & Types Generation Workflow
-
-**Source of Truth:** [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) (OpenAPI 3.0)  
-**Type Generation:**
-1. Edit `spec/MBapp-Modules.yaml` when adding/changing API contracts
-2. Run `npm run generate-types` (in workspace root or `apps/api/`)
-3. Generated types appear in `apps/api/src/generated/openapi-types.ts`
-4. Import types in handlers: `import { PurchaseOrder, CreatePurchaseOrderRequest } from './generated/openapi-types';`
-
-**Contract-First Workflow:**
-- Spec changes happen BEFORE code changes (prevents drift)
-- Breaking changes require version bumps (e.g., `/v2/purchase-orders`)
-- Additive changes (new optional fields) are safe and preferred
-
-**Validation:** All API handlers should validate request bodies against spec schemas using generated types
-
----
-
-## 7. Archive: Sprint XXVI+ Report Notes (Historical)
-
-<details>
-<summary>Original Sprint XXVI-XXVII Foundations Report + Subsequent Addenda</summary>
-
-### Sprint XLI: Inventory Putaway + Cycle Count Operations (2025-12-26) (Tier 1–4 MVP)
+## 4. API Endpoint Mapping (Tier 1–4 MVP)
 
 ### 4.1 Objects CRUD (Foundation)
 
@@ -501,7 +563,7 @@ export async function smoke_module_flow(API_BASE, authToken) {
 
 #### Testing & Documentation
 - [ ] Add `smoke:parties:create-edit` test to [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs)
-- [ ] Update [docs/MBapp-Status.md](../docs/MBapp-Status.md) with Sprint XXVI summary
+- [ ] Update [docs/MBapp-Working.md](../docs/MBapp-Working.md) with Sprint XXVI summary
 - [ ] Update [docs/smoke-coverage.md](../docs/smoke-coverage.md) with new test
 - [ ] Verify web typecheck passes: `cd apps/web && npm run typecheck`
 - [ ] Verify mobile typecheck passes: `cd apps/mobile && npm run typecheck`
@@ -545,5 +607,3 @@ export async function smoke_module_flow(API_BASE, authToken) {
 - **Smokes (opt-in proofs):** `smoke:close-the-loop`, `smoke:close-the-loop-multi-vendor`, `smoke:close-the-loop-partial-receive`, `smoke:vendor-guard-enforced`, `smoke:po-receive-after-close-guard`, `smoke:po-receive-after-cancel-guard`, `smoke:po-receive-lot-location-assertions`.
 
 **End of Report**
-
-</details>

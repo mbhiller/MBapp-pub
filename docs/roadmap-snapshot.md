@@ -116,11 +116,11 @@ After Sprint III passes, we update:
    - Views & Workspaces endpoint stabilization  
    - EventBridge/SNS connector schema stubs (v1 contract only; no impl yet)
 
-2. **[docs/MBapp-Roadmap-Master-v10.0.md](MBapp-Roadmap-Master-v10.0.md)**  
+2. **[docs/MBapp-Roadmap.md](MBapp-Roadmap.md)**  
    - Mark Tier 1.3 complete; update "Outcome" (production-ready core platform)  
    - Tier 2.0 kickoff (Events & Registrations v1 detail plan)
 
-3. **[docs/MBapp-Working.md](MBapp-Working.md)**  
+3. **[docs/MBapp-Status.md](MBapp-Status.md)**  
    - Sprint III results section: Views CRUD behavior, workspace role filtering, event dispatcher toggles  
    - Link to next sprint (Tier 2.0 Events & Registrations)
 
@@ -139,8 +139,8 @@ After Sprint III passes, we update:
 ## References
 
 - **Spec:** [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) (Views & Workspace schemas, endpoints)
-- **Roadmap:** [docs/MBapp-Roadmap-Master-v10.0.md](MBapp-Roadmap-Master-v10.0.md#-tier-1--core-platform--modules-phases-10--13)  
+- **Roadmap:** [docs/MBapp-Roadmap.md](MBapp-Roadmap.md#-tier-1--core-platform--modules-phases-10--13)  
 - **Sprint planning:** [docs/sprint_kickoff.md](sprint_kickoff.md)
 - **Tier 1 model:** [docs/MBapp-Relationships.md](MBapp-Relationships.md#1-identity-model-tier-1-core)
 - **Flags config:** [apps/api/src/flags.ts](../apps/api/src/flags.ts)  
-- **Recent history:** [docs/MBapp-Working.md](MBapp-Working.md) (Sprints A–I summaries)
+- **Recent history:** [docs/MBapp-Status.md](MBapp-Status.md) (Sprints A–I summaries)

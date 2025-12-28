@@ -1,110 +1,8 @@
 # MBapp Status / Working
 
-**Navigation:** [Roadmap](MBapp-Roadmap.md) · [Foundations](MBapp-Foundations.md) · [Cadence](MBapp-Cadence.md) · [Verification](smoke-coverage.md)  
+**Navigation:** [Roadmap](MBapp-Roadmap-Master-v10.0.md) · [Foundations](SPRINT_XXVI_FOUNDATIONS_REPORT.md) · [Cadence](cadence.md) · [Verification](smoke-coverage.md)  
 **Last Updated:** 2025-12-28  
-**Workflow & DoD:** See [MBapp-Cadence.md](MBapp-Cadence.md) for canonical workflow, Definition of Done, and testing rules.
-
----
-
-## Current State Summary
-
-**Recent Deliveries (Sprint C, 2025-12-27):**
-- ✅ Web backorders workflow: vendor filtering, multi-PO creation, bulk actions
-- ✅ PO receive with location/lot defaults, idempotency, backorder linkage
-- ✅ VendorPicker component with search + manual entry fallback
-- ✅ Inventory adjust modal with per-location breakdown
-- ✅ Close-the-loop smokes: multi-vendor PO creation + receive validation
-
-**CI Posture:**
-- 38/38 smoke tests passing in CI (Sprint XXV baseline)
-- New tests added: vendor-filter-preferred, suggest-po-with-vendor, inventory:onhand-by-location, inventory:adjust-negative
-- Smoke coverage tracked in [smoke-coverage.md](smoke-coverage.md)
-
-**What's Next:**
-- Sprint III planning: Events plumbing, receive UX polish, query performance groundwork
-- See [Recent Deliveries](#recent-deliveries) below for detailed sprint history
-- See [Archive / Sprint History](#archive--sprint-history) for complete historical context
-
----
-
-## Module Coverage Matrix
-
-Legend: ✅ done • 🟨 stub/partial • ⬜ planned
-
-| Module              | Spec | Backend | Smokes | UI Stubs | Notes / Next |
-|---------------------|:----:|:-------:|:------:|:--------:|--------------|
-| Products            | ✅   | ✅      | ✅     | 🟨       | List stable (newest-first + refresh) |
-| Inventory           | ✅   | ✅      | ✅     | ✅       | List stabilized (refresh/sort/limit) |
-| SalesOrders         | ✅   | ✅      | ✅     | ✅       | List stabilized: newest-first + create-return scroll-to-top |
-| PurchaseOrders      | ✅   | ✅      | ✅     | ✅       | List stabilized: same behavior as Sales |
-| BackOrders          | ✅   | ✅      | ✅     | ✅       | Bulk actions + vendor filter; card styling aligned |
-| Party (CRM)         | ✅   | ✅      | ✅     | 🟨       | Hook unification |
-| RoutePlans          | ✅   | ✅      | ✅     | 🟨       | Hook unification |
-| Scans / EPC         | 🟨   | ✅      | 🟨     | ⬜       | Add seed+resolve (optional) |
-| Organizations       | 🟨   | 🟨      | 🟨     | ⬜       | Basic objects exist; UX later |
-| Events              | ✅   | ✅      | ✅     | ✅       | List sorting fixed (newest-first) |
-| Registrations       | ✅   | ✅      | ✅     | ✅       | CRUD + filters completed (Sprints IV/XI) |
-| Resources           | ✅   | ✅      | ✅     | ✅       | List/detail + seed/badges completed (Sprints V/VIII/XII) |
-| Reservations        | ✅   | ✅      | ✅     | ✅       | CRUD + conflicts + availability completed (Sprints V–VII) |
-| Workspaces/Views    | 🟨   | 🟨      | ⬜     | 🟨       | Minimal present |
-| Scorecards/Reports  | ⬜   | ⬜      | ⬜     | ⬜       | Later tier |
-| Settings/Config     | ⬜   | ⬜      | ⬜     | ⬜       | Global flags, tenants |
-
----
-
-## Feature Flags Active
-
-This section documents flags used across the backend (AWS Lambda) and mobile (Expo) to control feature rollout and dev/test behaviors.
-
-### Feature Flags Mapping
-
-| Feature | Backend Env | Mobile Env | Dev/CI Header Override | Mobile __DEV__ Override | Default |
-|---------|------------|------------|----------------------|------------------------|--------|
-| **Registrations** | `FEATURE_REGISTRATIONS_ENABLED` | `EXPO_PUBLIC_FEATURE_REGISTRATIONS_ENABLED` | `X-Feature-Registrations-Enabled` | No | `false` |
-| **Reservations** | `FEATURE_RESERVATIONS_ENABLED` | `EXPO_PUBLIC_FEATURE_RESERVATIONS_ENABLED` | `X-Feature-Reservations-Enabled` | Yes (`true`) | `false` |
-| **Views** | `FEATURE_VIEWS_ENABLED` | _(none)_ | `X-Feature-Views-Enabled` | No | `false` |
-| **Event Dispatch** | `FEATURE_EVENT_DISPATCH_ENABLED` | _(none)_ | `X-Feature-Events-Enabled` | No | `false` |
-| **Event Simulate** | `FEATURE_EVENT_DISPATCH_SIMULATE` | _(none)_ | `X-Feature-Events-Simulate` | No | `false` |
-
-**Notes:**
-- Backend flags (env + header override) defined in [apps/api/src/flags.ts](../apps/api/src/flags.ts)
-- Mobile flags defined in [apps/mobile/src/features/_shared/flags.ts](../apps/mobile/src/features/_shared/flags.ts)
-- Header overrides only work in dev/CI (ignored in prod for security)
-- Mobile Views/Events have no local flag (controlled by backend only)
-- Reservations mobile flag: `__DEV__ ? true : (env === "true" || env === "1")`
-- Registrations mobile flag: `env === "true" || env === "1"` (no __DEV__ override)
-
-### Auth Policy & Module Visibility
-
-The mobile ModuleHub fetches `GET /auth/policy` to determine which modules are visible and enabled:
-
-- **Fail-closed behavior:** If `/auth/policy` returns `null` or fails, ModuleHub shows an error banner and displays no tiles (empty module list).
-- **Runtime policy:** JWT `mbapp.policy` claim is `Record<string, boolean>` (e.g., `{ "parties:read": true, "event:read": true }`) used by backend `hasPerm`/`requirePerm` for enforcement.
-- **Permission matching:** Mobile uses wildcard matching on the policy map:
-  - `"*"` → superuser (all permissions allowed)
-  - `"*:*"` or `"*:all"` → all resources and actions
-  - `"*:<action>"` → all resources with a specific action (e.g., `*:read`)
-  - `"<type>:*"` → all actions on a specific type (e.g., `parties:*`)
-  - Case-insensitive matching of permission strings.
-
-**Development note:** The `/auth/policy` endpoint ([apps/api/src/auth/policy.ts](../apps/api/src/auth/policy.ts)) currently returns a dev stub with `scopes: ["*:*"]` array plus user/roles/tenants/version/issuedAt. This is NOT the same as the JWT policy claim. In production, the endpoint should derive scopes from JWT roles (see TODO at line 9).
-
----
-
-## Known Issues / Limitations
-
-- **Multi-PO navigation UX:** When multiple POs are created from suggest-po, no batch summary or navigation guide is shown (Sprint A follow-up)
-- **VendorGuard precheck UX:** No proactive banner/inline checks before submit/approve/receive when vendor role is missing (Sprint A follow-up)
-- **Recurring reservations:** Out-of-scope for v1 (Sprint V notes)
-- **Availability patterns:** "Closed Sundays" style patterns deferred (Sprint V notes)
-- **Capacity/multi-resource reservations:** Design-only in v1 (Sprint V notes)
-- **Auth policy derivation:** `/auth/policy` endpoint uses dev stub; production should derive scopes from JWT roles (see TODO in apps/api/src/auth/policy.ts line 9)
-
----
-
-## Recent Deliveries
-
-Full sprint summaries for the last 5 completed sprints. For older history, see [Archive / Sprint History](#archive--sprint-history).
+**Workflow & DoD:** See [cadence.md](cadence.md) for canonical workflow, Definition of Done, and testing rules.
 
 ---
 
@@ -469,35 +367,6 @@ Follow-ups:
   - Set env: `$env:MBAPP_API_BASE = "https://..."; $env:MBAPP_BEARER = "..."; $env:MBAPP_TENANT_ID = "SmokeTenant"`
   - Run smoke test: `node ops/smoke/smoke.mjs smoke:inventory:movements-by-location`
   - Web verification: Navigate to `/locations` → click a location name → see movements with action/refId filters + load-more button; click inventory item link to verify putaway movements on detail page.
-
----
-
-## Archive / Sprint History
-
-Historical sprint deliveries and technical implementation details. For current state, see sections above.
-
-### Sources of Truth (SSOT)
-
-Authoritative references for system design and implementation:
-
-- **Roadmap:** [docs/MBapp-Roadmap.md](MBapp-Roadmap.md)
-- **Object schemas / contracts:** [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml)
-- **API implementation entrypoints:** [apps/api/src/index.ts](../apps/api/src/index.ts) + per-module handlers under `apps/api/src/*`
-- **Mobile route names:** [apps/mobile/src/navigation/types.ts](../apps/mobile/src/navigation/types.ts) + [RootStack.tsx](../apps/mobile/src/navigation/RootStack.tsx)
-- **Mobile module tiles + required permissions:** [apps/mobile/src/features/_shared/modules.ts](../apps/mobile/src/features/_shared/modules.ts)
-- **Feature flags:**
-  - Backend: [apps/api/src/flags.ts](../apps/api/src/flags.ts)
-  - Mobile: [apps/mobile/src/features/_shared/flags.ts](../apps/mobile/src/features/_shared/flags.ts)
-- **Dev seed tooling:** [apps/mobile/src/screens/DevTools.tsx](../apps/mobile/src/screens/DevTools.tsx)
-- **Smokes (source):** [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs)
-- **CI smoke matrix:** [ops/ci-smokes.json](../ops/ci-smokes.json)
-- **Sales Availability UX (Sprint XVIII):**
-  - Mobile hook: [apps/mobile/src/features/salesOrders/useAvailabilityBatch.ts](../apps/mobile/src/features/salesOrders/useAvailabilityBatch.ts)
-  - Mobile detail screen: [apps/mobile/src/screens/SalesOrderDetailScreen.tsx](../apps/mobile/src/screens/SalesOrderDetailScreen.tsx)
-  - Backend batch endpoint: [apps/api/src/inventory/onhand-batch.ts](../apps/api/src/inventory/onhand-batch.ts)
-  - Backend availability logic: [apps/api/src/sales/so-reserve.ts](../apps/api/src/sales/so-reserve.ts) and [so-commit.ts](../apps/api/src/sales/so-commit.ts)
-
----
 
 ## Sprint XL: Locations Updates
 
@@ -1293,3 +1162,445 @@ When filtering causes `collected >= limit` before reaching DynamoDB's `LastEvalu
 - **Soft focus refetch:** Use `useFocusEffect` + `InteractionManager.runAfterInteractions` for background refresh without data clearing.
 - **Create-return behavior:** After creating a record, set `scrollToTopOnNextFocus.current = true` before navigation; on return, scroll to top after refetch so new item is immediately visible; normal back navigation preserves scroll position via `maintainVisibleContentPosition={{ minIndexForVisible: 0 }}`.
 - **Dev seed UI:** All seed actions live in DevTools screen; per-screen seed buttons removed from list screens.
+
+---
+
+### Sprint V Option 2 – Implementation Notes
+- Flag: FEATURE_RESERVATIONS_ENABLED (env) with dev/CI header override X-Feature-Reservations-Enabled.
+- Overlap rule: (aStart < bEnd) && (bStart < aEnd).
+- Endpoints: POST /reservations:check-conflicts, GET /resources/{id}/availability (flag-gated).
+- Smokes: npm run smoke:resources:crud; npm run smoke:reservations:crud; npm run smoke:reservations:conflicts; npm run smokes:run:ci:win.
+
+**EXAMPLE PR TEMPLATE**
+
+## PR Description Template (paste into PR)
+# PR title
+Sprint F — <short summary>
+
+# Summary
+<one-liner on theme/goal>
+
+# Scope
+- Spec: …
+- Backend: …
+- Mobile: …
+- Smokes: …
+
+# How to verify (manual)
+1) …
+2) …
+
+# Smoke suite
+```
+node ops/smoke.mjs smoke:po:suggest-multivendor
+node ops/smoke.mjs smoke:backorders:bulk
+node ops/smoke.mjs smoke:epc:seed-and-resolve   # optional
+```
+
+# Expected PASS examples
+```json
+{"test":"po-suggest-multivendor","result":"PASS","drafts":2}
+{"test":"backorders-bulk","result":"PASS","converted":3,"ignored":1}
+```
+
+# Risks / mitigations
+- …
+
+# Migration
+- None (or steps)
+
+# Checklist
+- [ ] Spec updated & linted
+- [ ] Backend handlers & router wired
+- [ ] Mobile stubs updated
+- [ ] Smokes PASS
+- [ ] Working.md updated
+
+---
+
+## All Modules Coverage Tracker
+Legend: ✅ done • 🟨 stub/partial • ⬜ planned
+
+| Module              | Spec | Backend | Smokes | UI Stubs | Notes / Next |
+|---------------------|:----:|:-------:|:------:|:--------:|--------------|
+| Products            | ✅   | ✅      | ✅     | 🟨       | List stable (newest-first + refresh) |
+| Inventory           | ✅   | ✅      | ✅     | ✅       | List stabilized (refresh/sort/limit) |
+| SalesOrders         | ✅   | ✅      | ✅     | ✅       | List stabilized: newest-first + create-return scroll-to-top |
+| PurchaseOrders      | ✅   | ✅      | ✅     | ✅       | List stabilized: same behavior as Sales |
+| BackOrders          | ✅   | ✅      | ✅     | ✅       | Bulk actions + vendor filter; card styling aligned |
+| Party (CRM)         | ✅   | ✅      | ✅     | 🟨       | Hook unification |
+| RoutePlans          | ✅   | ✅      | ✅     | 🟨       | Hook unification |
+| Scans / EPC         | 🟨   | ✅      | 🟨     | ⬜       | Add seed+resolve (optional) |
+| Organizations       | 🟨   | 🟨      | 🟨     | ⬜       | Basic objects exist; UX later |
+| Events              | ✅   | ✅      | ✅     | ✅       | List sorting fixed (newest-first) |
+| Registrations       | ✅   | ✅      | ✅     | ✅       | CRUD + filters completed (Sprints IV/XI) |
+| Resources           | ✅   | ✅      | ✅     | ✅       | List/detail + seed/badges completed (Sprints V/VIII/XII) |
+| Reservations        | ✅   | ✅      | ✅     | ✅       | CRUD + conflicts + availability completed (Sprints V–VII) |
+| Workspaces/Views    | 🟨   | 🟨      | ⬜     | 🟨       | Minimal present |
+| Scorecards/Reports  | ⬜   | ⬜      | ⬜     | ⬜       | Later tier |
+| Settings/Config     | ⬜   | ⬜      | ⬜     | ⬜       | Global flags, tenants |
+
+---
+
+## Sources of Truth (SSOT)
+
+Authoritative references for system design and implementation:
+
+- **Roadmap:** [docs/MBapp-Roadmap-Master-v10.0.md](MBapp-Roadmap-Master-v10.0.md)
+- **Object schemas / contracts:** [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml)
+- **API implementation entrypoints:** [apps/api/src/index.ts](../apps/api/src/index.ts) + per-module handlers under `apps/api/src/*`
+- **Mobile route names:** [apps/mobile/src/navigation/types.ts](../apps/mobile/src/navigation/types.ts) + [RootStack.tsx](../apps/mobile/src/navigation/RootStack.tsx)
+- **Mobile module tiles + required permissions:** [apps/mobile/src/features/_shared/modules.ts](../apps/mobile/src/features/_shared/modules.ts)
+- **Feature flags:**
+  - Backend: [apps/api/src/flags.ts](../apps/api/src/flags.ts)
+  - Mobile: [apps/mobile/src/features/_shared/flags.ts](../apps/mobile/src/features/_shared/flags.ts)
+- **Dev seed tooling:** [apps/mobile/src/screens/DevTools.tsx](../apps/mobile/src/screens/DevTools.tsx)
+- **Smokes (source):** [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs)
+- **CI smoke matrix:** [ops/ci-smokes.json](../ops/ci-smokes.json)
+- **Sales Availability UX (Sprint XVIII):**
+  - Mobile hook: [apps/mobile/src/features/salesOrders/useAvailabilityBatch.ts](../apps/mobile/src/features/salesOrders/useAvailabilityBatch.ts)
+  - Mobile detail screen: [apps/mobile/src/screens/SalesOrderDetailScreen.tsx](../apps/mobile/src/screens/SalesOrderDetailScreen.tsx)
+  - Backend batch endpoint: [apps/api/src/inventory/onhand-batch.ts](../apps/api/src/inventory/onhand-batch.ts)
+  - Backend availability logic: [apps/api/src/sales/so-reserve.ts](../apps/api/src/sales/so-reserve.ts) and [so-commit.ts](../apps/api/src/sales/so-commit.ts)
+
+---
+
+## Feature Flags Reference
+
+This section documents flags used across the backend (AWS Lambda) and mobile (Expo) to control feature rollout and dev/test behaviors.
+
+### Feature Flags Mapping
+
+| Feature | Backend Env | Mobile Env | Dev/CI Header Override | Mobile __DEV__ Override | Default |
+|---------|------------|------------|----------------------|------------------------|--------|
+| **Registrations** | `FEATURE_REGISTRATIONS_ENABLED` | `EXPO_PUBLIC_FEATURE_REGISTRATIONS_ENABLED` | `X-Feature-Registrations-Enabled` | No | `false` |
+| **Reservations** | `FEATURE_RESERVATIONS_ENABLED` | `EXPO_PUBLIC_FEATURE_RESERVATIONS_ENABLED` | `X-Feature-Reservations-Enabled` | Yes (`true`) | `false` |
+| **Views** | `FEATURE_VIEWS_ENABLED` | _(none)_ | `X-Feature-Views-Enabled` | No | `false` |
+| **Event Dispatch** | `FEATURE_EVENT_DISPATCH_ENABLED` | _(none)_ | `X-Feature-Events-Enabled` | No | `false` |
+| **Event Simulate** | `FEATURE_EVENT_DISPATCH_SIMULATE` | _(none)_ | `X-Feature-Events-Simulate` | No | `false` |
+
+**Notes:**
+- Backend flags (env + header override) defined in [apps/api/src/flags.ts](../apps/api/src/flags.ts)
+- Mobile flags defined in [apps/mobile/src/features/_shared/flags.ts](../apps/mobile/src/features/_shared/flags.ts)
+- Header overrides only work in dev/CI (ignored in prod for security)
+- Mobile Views/Events have no local flag (controlled by backend only)
+- Reservations mobile flag: `__DEV__ ? true : (env === "true" || env === "1")`
+- Registrations mobile flag: `env === "true" || env === "1"` (no __DEV__ override)
+
+### Auth Policy & Module Visibility
+
+The mobile ModuleHub fetches `GET /auth/policy` to determine which modules are visible and enabled:
+
+- **Fail-closed behavior:** If `/auth/policy` returns `null` or fails, ModuleHub shows an error banner and displays no tiles (empty module list).
+- **Runtime policy:** JWT `mbapp.policy` claim is `Record<string, boolean>` (e.g., `{ "parties:read": true, "event:read": true }`) used by backend `hasPerm`/`requirePerm` for enforcement.
+- **Permission matching:** Mobile uses wildcard matching on the policy map:
+  - `"*"` → superuser (all permissions allowed)
+  - `"*:*"` or `"*:all"` → all resources and actions
+  - `"*:<action>"` → all resources with a specific action (e.g., `*:read`)
+  - `"<type>:*"` → all actions on a specific type (e.g., `parties:*`)
+  - Case-insensitive matching of permission strings.
+
+**Development note:** The `/auth/policy` endpoint ([apps/api/src/auth/policy.ts](../apps/api/src/auth/policy.ts)) currently returns a dev stub with `scopes: ["*:*"]` array plus user/roles/tenants/version/issuedAt. This is NOT the same as the JWT policy claim. In production, the endpoint should derive scopes from JWT roles (see TODO at line 9).
+
+---
+# NEXT SPRINT
+## Sprint III — Plan (Events plumbing, UX polish, and query perf)
+
+**Goals**
+1) **Events plumbing (stub → pluggable):** introduce a thin dispatcher contract with provider adapters; keep simulate path.
+2) **Receive UX polish:** richer line history (group by lot/location), better empty/edge states, and consistent toasts.
+3) **Query perf groundwork:** optional `MBAPP_USE_GSI1` for `/inventory/{id}/movements` (no migration by default), plus internal metrics for query size.
+4) **CI & smokes:** extend events and movements coverage; keep vendor guard tests.
+
+**API Scope**
+- `events/dispatcher`: provider interface + default no-op; wire `MBAPP_EVENTS_PROVIDER` (`noop|log|eventbridge`), still safe when unset.
+- `GET /inventory/{id}/movements`: behind `MBAPP_USE_GSI1`, try GSI1 path; otherwise current pk/prefix+filter.
+- Keep `/purchasing/po/{id}:receive` semantics; add `_meta.applied: true` in `_dev` when idempotency short-circuit returns early (dev only).
+
+**Mobile Scope**
+- PO detail: “Receive history” chip shows grouped lines (lot/location buckets, total qty).
+- Vendor banner CTA: quick-link to Party picker.
+- Lists: maintain infinite scroll; show “No results / End of list” consistently.
+
+**Smokes & CI**
+- New/updated:
+  - `smoke:events:simulate` (assert `_dev.emitted:true` on receive)
+  - `smoke:movements:gsi1-parity` (optional; PASS if either path returns same rows)
+- Matrix runs vendor guard on/off, idempotent retries, and filter by `poLineId`.
+
+**Acceptance (DoD)**
+- All existing smokes remain green; new smokes pass locally and in CI.
+- Events path is configurable and harmless when provider unset.
+- Movements endpoint returns identical results with/without GSI flag in small datasets.
+
+**Risks / Mitigations**
+- Divergence between pk-scan and GSI results → parity smoke + feature flag default OFF.
+- Event provider misconfig → default noop, explicit logs when provider missing.
+
+**Files to touch**
+- `apps/api/src/events/dispatcher.ts` (provider interface, maybe adapters)
+- `apps/api/src/purchasing/po-receive.ts` (uses dispatcher; `_dev` meta tweak in dev)
+- `apps/api/src/inventory/movements.ts` (optional GSI path)
+- `ops/smoke/smoke.mjs` (new smokes)
+- Mobile PO detail & ReceiveHistorySheet (grouping/UI polish)
+
+
+
+
+## Receive Idempotency (Details)
+
+- **Key-based**: Provide `Idempotency-Key` to retry safely; same key = same outcome.
+- **Payload-signature**: We also hash the canonical `lines[]` payload (sorted `lineId`, `deltaQty`, plus `lot/locationId`).  
+  If the same payload arrives with a different key (common in mobile retry storms), we return **200** with current PO and do not double-apply.
+
+**Client tip**  
+Use a stable key for a given (poId, lineId, qty, lot, location), e.g.:
+
+**Notes / Deferred optimization**
+- 📌 **Future:** *Inventory movements: add GSI1 (partition key `ITEM#<itemId>`, time-ordered sort) and toggle read path behind `MBAPP_USE_GSI1`.* We’ll pick this up in the optimization sprint.
+
+### Known Limitations / Future Polish (Sprint XVIII)
+- **BackordersList filtering:** No backend support yet for SO or itemId filtering. CTA from SO detail navigates to global open backorders list. Recommend adding `soId` query param + backend filter when needed.
+- **409 UX for Cancel/Close:** Currently show generic toast only (status-based guards don't include structured shortage detail like Reserve/Commit). No action needed unless we want parity; current UX acceptable.
+
+### Future Epic — Config-Driven Business Processes (Deferred)
+We will add light orchestration for cross-object flows (e.g., Registration → communications → Reservation → Sales Order).
+Entrance criteria:
+- ≥3 recurring flows; stable object lifecycles; measurable manual overhead.
+
+Non-negotiables:
+- Idempotent steps; config-first “recipes” (YAML/JSON) for steps like createObject, sendEmail, prompt/awaitSignal.
+- Observability: store a short timeline (steps, startedAt, lastError).
+
+No-regret prep (ongoing):
+- Keep Idempotency-Key and X-Request-Id plumbing.
+- Maintain createdAt/updatedAt on objects.
+- Add (disabled) `emitEvent` stubs at key actions for painless activation later.
+
+## Sprint III — Results
+
+- **Summary:** Views/Workspaces v1 delivered behind feature flags; event dispatcher simulate path implemented (noop provider in dev/simulate).
+
+- **Smokes:**
+  - `smoke:views:crud` — PASS (create → list → update → delete stored config)
+  - `smoke:workspaces:list` — PASS (v1 list semantics; empty result is valid for v1)
+  - `smoke:events:enabled-noop` — PASS (response includes `_dev` metadata; `_dev.provider == "noop"`)
+
+---
+
+## Sprint X — Parties (read-only) + dev seed
+
+**Scope & Features**
+- Module tile gated by permission `parties:read`.
+- PartyListScreen: search + optional role filter, error banner, tap-to-detail.
+- PartyDetailScreen: read-only detail with error banner + retry.
+- Fixed party label resolution and roleFlags typing; PartyPicker/PartySelectorModal no longer rely on `.name`.
+- __DEV__ seed Party button for testing (uses `/objects/party` with optional partyRole alignment).
+
+**How to Verify**
+```bash
+cd apps/mobile && npm run typecheck
+```
+
+**Manual QA**
+- Seed a party (dev button), refresh list (search + role filter), then open detail.
+- Confirm error banners show and retry works when fetch fails.
+
+---
+
+## Sprint XI — Registrations Enabled + Parties UX Improvements
+
+**Registrations**
+- Mobile flag: `FEATURE_REGISTRATIONS_ENABLED` now respects `EXPO_PUBLIC_FEATURE_REGISTRATIONS_ENABLED` (removed `__DEV__` forced false). Registrations tile appears when enabled.
+- Backend `/registrations` returns 200; related registrations render on EventDetail and PartyDetail (client-side filter by `eventId`/`partyId`, up to 20, tappable to RegistrationDetail).
+- __DEV__ Seed Registration button (when present) creates minimal registration; CI now includes registrations smokes via `ops/ci-smokes.json`.
+
+**Parties**
+- Dev seed creates `partyRole` (customer/vendor) after creating the party to match smoke canonical setup.
+- PartyListScreen: shows created/updated timestamps, adds a "NEW" badge for items created within 10 minutes, sorts newest-first, and fixes role filtering client-side (checks `roleFlags` and `roles`).
+
+**Verify**
+```bash
+cd apps/mobile && npm run typecheck
+node ops/tools/run-ci-smokes.mjs
+```
+
+- **Flags:** Defaults OFF; can be overridden in dev/CI via headers:
+  - `FEATURE_VIEWS_ENABLED` / `X-Feature-Views-Enabled`
+  - `FEATURE_EVENT_DISPATCH_ENABLED` / `X-Feature-Events-Enabled`
+  - `FEATURE_EVENT_DISPATCH_SIMULATE` / `X-Feature-Events-Simulate`
+
+- **Notes / Tech debt:**
+  - Workspaces v1 exposes minimal listing and view references; full tile composition and rich workspace UX deferred to v2.
+  - Dispatcher simulate path is noop and safe; plan to wire real provider (EventBridge/SNS) behind flags later.
+  - Consider mapping or migration utilities between legacy Views and future Workspace tile schema when evolving v2.
+
+---
+
+## Sprint IV — Results
+
+- **Summary:** Registrations v1 delivered (CRUD + filters); feature-flagged (default OFF); objects-repo pattern with tenant/RBAC enforcement.
+
+- **Endpoints:**
+  - `POST /registrations` — Create registration (201 Created)
+  - `GET /registrations` — List with filters: eventId, partyId, status (200 OK)
+  - `GET /registrations/{id}` — Get single registration (200 OK)
+  - `PUT /registrations/{id}` — Update registration (200 OK)
+  - `DELETE /registrations/{id}` — Delete registration (204 No Content)
+
+- **Schema (spec/MBapp-Modules.yaml):**
+  - Registration: { eventId, partyId, division?, class?, status: draft|submitted|confirmed|cancelled, fees: [{ code, amount, qty? }], notes? }
+  - Extends ObjectBase (id, tenantId, type, createdAt, updatedAt)
+
+- **Smokes:**
+  - `smoke:registrations:crud` — PASS (create → get → update status to 'confirmed' → delete → verify removal)
+  - `smoke:registrations:filters` — PASS (3 created, filters: byEvent=2, byParty=2, byStatus=2)
+
+- **Flags:** Default OFF; dev-header override in non-prod:
+  - `FEATURE_REGISTRATIONS_ENABLED` / `X-Feature-Registrations-Enabled`
+
+- **API Polish:**
+  - DELETE returns 204 No Content (empty body, RFC 7231 compliant)
+  - Added `noContent()` response helper to `apps/api/src/common/responses.ts`
+
+- **Notes / Next:**
+  - Payments and capacity management out-of-scope for v1
+  - Consider: search (q filter), mobile RegistrationHub screen, registration actions (:cancel, :checkin, :checkout)
+  - No migrations; filters via in-memory post-query (keeps schema clean)
+
+- **Polish:**
+  - Added `?q` search to GET /registrations (case-insensitive substring on id, partyId, division, class)
+  - Minimal mobile RegistrationsListScreen (search + create modal, feature-flagged)
+  - All smokes passing (registrations:crud, registrations:filters incl. q filter)
+  - No schema/migrations
+
+---
+
+## ✅ Sprint V — Resources/Reservations Foundation (Completed 2025-12-21)
+
+**Theme:** Add Resource and Reservation objects with overlap conflict detection; custom endpoints for availability checks.
+
+**Scope**
+- **Objects**: Resource and Reservation (both via generic `/objects/:type` CRUD).
+- **Custom endpoints**:
+  - `POST /reservations:check-conflicts` — validate time slot (returns conflicts array or 409).
+  - `GET /resources/{id}/availability?from=ISO&to=ISO` — list busy periods.
+- **Overlap rule**: (aStart < bEnd) && (bStart < aEnd).
+- **Conflict response**: 409 with `{ code: "conflict", message, details: { conflicts: [...] } }`.
+- **Feature flag**: `FEATURE_RESERVATIONS_ENABLED` (default false, dev header override).
+- **RBAC**: `resource:read|write`, `reservation:read|write` permissions.
+- **Mobile**: Read-only preview; write actions deferred to Sprint VI.
+
+**Acceptance Criteria (Sprint V foundation)**
+- ✅ Spec compiles (YAML valid, OpenAPI 3.0.3).
+- ✅ TypeScript types generated from spec (Resource, Reservation, request/response schemas).
+- ✅ Generic `/objects/:type` CRUD works for resources and reservations.
+- ✅ Overlap validation enforced on create/update; 409 on conflict.
+- ✅ `POST /reservations:check-conflicts` returns 200 (available) or 409 (conflict).
+- ✅ `GET /resources/{id}/availability` returns busy periods in requested time range.
+- ✅ Feature flag gates endpoints (PROD only env; non-prod allows dev header override).
+- ✅ RBAC permissions enforced (`resource:*`, `reservation:*`).
+- ✅ All smoke flows pass:
+  - `smoke:reservations:crud` — create, list, update, delete reservations.
+  - `smoke:reservations:conflicts` — check-conflicts returns 409 on overlap.
+  - `smoke:resources:availability` — availability query returns busy periods.
+- ✅ Mobile app: read-only preview (ResourcesList, ReservationsList screens); no write actions visible.
+
+**Deliverables**
+1. Spec: Added Resource, Reservation, ReservationsCheckConflictsRequest/Response, ResourceAvailabilityResponse schemas; endpoints with 409 error, flag annotations.
+2. API:
+   - Flag definition in `apps/api/src/flags.ts`.
+   - Overlap validation in `apps/api/src/objects/create.ts` and `update.ts`.
+   - `apps/api/src/reservations/check-conflicts.ts` handler.
+   - `apps/api/src/resources/availability.ts` handler.
+   - Routing wired in `apps/api/src/index.ts`.
+3. Smokes: Three new flows in `ops/smoke/smoke.mjs`.
+4. Mobile: Read-only preview screens (feature-flagged).
+
+**Notes / Next**
+- Actions (cancel, start, end) deferred to Sprint VI+.
+- Recurring reservations, availability patterns (e.g., "closed Sundays") out-of-scope v1.
+- Capacity/multi-resource reservations (e.g., "need both Arena & Stall") design only in v1.
+
+---
+
+## ✅ Sprint VI — Reservations Write UI (Option A) (Completed 2025-12-21)
+
+**Theme:** Mobile create/edit reservation screens with conflict handling.
+
+**Scope (Mobile-focused)**
+- Added `CreateReservationScreen` with ResourcePicker, ISO datetime inputs, status selector.
+- Added `EditReservationScreen` with pre-populated form from existing reservation.
+- Conflict handling: 409 responses display friendly error + list of conflicting reservations with "View" actions.
+- Feature flag: `FEATURE_RESERVATIONS_ENABLED` (env: `EXPO_PUBLIC_FEATURE_RESERVATIONS_ENABLED=true`, default: false).
+- Create/Edit entry points hidden when flag is OFF; screens remain registered.
+
+**Mobile Files**
+- `apps/mobile/src/screens/CreateReservationScreen.tsx` — new reservation form with ResourcePicker.
+- `apps/mobile/src/screens/EditReservationScreen.tsx` — edit existing reservation.
+- `apps/mobile/src/features/reservations/api.ts` — added `createReservation()`, `updateReservation()` with 409 enrichment.
+- `apps/mobile/src/features/_shared/flags.ts` — `FEATURE_RESERVATIONS_ENABLED` via env.
+- `apps/mobile/src/screens/ReservationsListScreen.tsx` — "+ Create Reservation" button (flag-gated).
+- `apps/mobile/src/screens/ReservationDetailScreen.tsx` — "Edit Reservation" button (flag-gated).
+
+**Conflict Handling**
+- On 409: parse `err.code === "conflict"` and `err.conflicts` array.
+- Display error message + conflict list with IDs and times (if available).
+- "View" action navigates to conflicting reservation detail.
+
+**How to Enable**
+- Set `EXPO_PUBLIC_FEATURE_RESERVATIONS_ENABLED=true` in `.env` or `.env.local`.
+- Restart Expo dev server.
+
+**Definition of Done**
+- ✅ Create/Edit screens functional with ResourcePicker integration.
+- ✅ ISO datetime validation (startsAt < endsAt).
+- ✅ 409 conflicts show user-friendly message + navigable conflict list.
+- ✅ Feature flag hides Create/Edit CTAs when disabled.
+- ✅ Mobile typecheck passes.
+
+---
+
+## Sprint VII – Availability-First Reservation UX (Mobile)
+
+**Theme:** Empower users to self-resolve conflicts by showing busy blocks and suggesting next available slots.
+
+**Scope:** Mobile-only enhancements + smoke test extension. No API/infra changes (uses existing `/resources/{id}/availability` endpoint).
+
+**Mobile Files Modified:**
+1. `apps/mobile/src/features/reservations/api.ts` – New `getResourceAvailability()` helper
+2. `apps/mobile/src/screens/CreateReservationScreen.tsx` – Availability display + "Use next available slot"
+3. `apps/mobile/src/screens/EditReservationScreen.tsx` – Identical availability UX
+4. `apps/mobile/src/screens/ReservationsListScreen.tsx` – ResourceId + Status filters
+
+**Features:**
+- **Busy Blocks Display (Steps 1–3):** On resource selection, fetch + display next 14 days of busy blocks (from `GET /resources/{id}/availability`). Updates when resourceId changes.
+- **Next Available Slot Button (Step 6):** When conflict error occurs, user taps "Use next available slot" → algorithm iteratively searches up to 20 slots → auto-fills suggested start/end times → clears error → user submits.
+- **Suggestion Algorithm (Step 6):** Iterative search with MAX_ITERATIONS=20; finds first non-overlapping [suggestedStart, suggestedStart + duration] against sorted busyBlocks array; uses interval overlap rule `(a.start < b.end) && (b.start < a.end)`.
+- **List Filters (Steps 4–5):** Client-side composition: ResourceId (case-insensitive partial match) + Status (buttons: All/pending/confirmed/cancelled) both applied together via `filteredReservations` compute.
+
+**Smoke Enhancement (Step 7):**
+- Extended `smoke:reservations:conflicts` flow with Step 5: GET `/resources/{id}/availability?from=T0-1h&to=T1+1h` after conflict creation.
+- Validates: 200 status, `body.busy` is array, reservation A present (by ID OR overlapping block).
+- Output includes: `availabilityEndpoint: { busyBlocks, hasReservationA, hasOverlap }`.
+
+**Definition of Done**
+- ✅ Availability panels render on Create/Edit screens.
+- ✅ Busy blocks fetch on resourceId change (14-day window).
+- ✅ "Use next available slot" suggestion fills form + clears conflict error.
+- ✅ ReservationsListScreen filters apply together (no field-level isolation).
+- ✅ Smoke test validates availability endpoint includes reservation in conflict response.
+- ✅ Mobile typecheck passes.
+- ✅ Smoke syntax valid.
+
+**Verification**
+```bash
+# Mobile implementation
+cd apps/mobile && npm run typecheck
+
+# Smoke test syntax
+node -c ops/smoke/smoke.mjs
+
+# Run availability conflict test (requires API deployed with FEATURE_RESERVATIONS_ENABLED=true)
+node ops/smoke/smoke.mjs smoke:reservations:conflicts
+```

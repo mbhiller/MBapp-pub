@@ -1,6 +1,6 @@
 # Sprint XXVII — Products + Inventory Vertical Slice Plan
 **Generated:** 2025-12-23  
-**Based on:** SPRINT_XXVI_FOUNDATIONS_REPORT.md + baseline validation  
+**Based on:** MBapp-Foundations.md + baseline validation  
 **Scope:** Products CRUD + Inventory read-only (web + mobile) + smoke coverage
 
 ---
@@ -15,7 +15,7 @@
 - ✅ Git clean on `feat/tier1-sprint-XXVI`
 
 ### Roadmap Alignment (Tier 1.2 — Commerce Core)
-From [MBapp-Roadmap-Master-v10.0.md](MBapp-Roadmap-Master-v10.0.md):
+From [MBapp-Roadmap.md](MBapp-Roadmap.md):
 - **Tier 1.2**: Commerce Core — Products + Inventory at MVP (read + write for Products, read-only for Inventory)
 - **Recommended Sequence**: Parties (✅ Sprint XXVI) → Products + Inventory (Sprint XXVII) → Sales Orders (Sprint XXVIII)
 
@@ -397,7 +397,7 @@ export async function smoke_products_crud() {
 
 ## 6. Documentation Updates
 
-### 6.1 [docs/MBapp-Working.md](../docs/MBapp-Working.md)
+### 6.1 [docs/MBapp-Status.md](../docs/MBapp-Status.md)
 
 **Add entry under "Sprint XXVII":**
 ```markdown
@@ -525,7 +525,7 @@ export async function smoke_products_crud() {
 - [ ] Test uses eventual consistency retry (5×200ms) for read verification
 
 ### 7.5 Documentation
-- [ ] [docs/MBapp-Working.md](../docs/MBapp-Working.md) updated with Sprint XXVII entry
+- [ ] [docs/MBapp-Status.md](../docs/MBapp-Status.md) updated with Sprint XXVII entry
 - [ ] [docs/smoke-coverage.md](../docs/smoke-coverage.md) includes smoke:products:crud row
 - [ ] [docs/MBapp-Backend-Guide.md](../docs/MBapp-Backend-Guide.md) documents Products/Inventory endpoints + field schemas
 
@@ -562,7 +562,7 @@ export async function smoke_products_crud() {
 
 ### Documentation (docs/)
 
-- [ ] **MBapp-Working.md** — Add Sprint XXVII entry with deliverables + file list
+- [ ] **MBapp-Status.md** — Add Sprint XXVII entry with deliverables + file list
 - [ ] **smoke-coverage.md** — Add smoke:products:crud row to coverage table
 - [ ] **MBapp-Backend-Guide.md** — Add Products/Inventory endpoint documentation
 

@@ -1,6 +1,6 @@
 # MBapp Development Cadence (copy/paste into a new chat)
 
-**Navigation:** [Roadmap](MBapp-Roadmap.md) · [Status/Working](MBapp-Status.md) · [Foundations](MBapp-Foundations.md) · [Verification](smoke-coverage.md)  
+**Navigation:** [Roadmap](MBapp-Roadmap-Master-v10.0.md) · [Status/Working](MBapp-Working.md) · [Foundations](SPRINT_XXVI_FOUNDATIONS_REPORT.md) · [Verification](smoke-coverage.md)  
 **Last Updated:** 2025-12-28
 
 ---
@@ -96,7 +96,7 @@
   - `npm run spec:bundle`
   - `npm run spec:types:api`
   - `npm run spec:types:mobile`
-- Docs updated where behavior/flows changed (minimum: `docs/MBapp-Status.md`, plus any sprint doc if used).
+- Docs updated where behavior/flows changed (minimum: `docs/MBapp-Working.md`, plus any sprint doc if used).
 
 ### ✅ Verification Evidence
 - Relevant typecheck(s) executed and clean.
