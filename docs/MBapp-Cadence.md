@@ -32,6 +32,7 @@
 - Each prompt includes the Definition of Done (below).
 - Prompts are scoped tightly (explicit files / minimal surface area).
 - **Docs updates are required when relevant:** Every E-prompt must include a docs line item (minimum: update `docs/MBapp-Status.md` if behavior/workflow changed; plus any feature-area docs touched).
+- **Foundations/contract changes must include docs:** If an EDIT modifies foundational patterns (shared utils, endpoint contracts, status guards), explicitly add docs updates to `docs/MBapp-Foundations.md` (preferred) and/or `docs/MBapp-Status.md` in the prompt.
 - All prompts must be in fenced code blocks for copy/paste into Copilot.
 
 

@@ -93,7 +93,8 @@
     "smoke:sales:fulfill-without-reserve": "node ops/smoke/smoke.mjs smoke:sales:fulfill-without-reserve",
     "smoke:purchaseOrders:draft-create-edit-lines": "node ops/smoke/smoke.mjs smoke:purchaseOrders:draft-create-edit-lines",
     "smoke:salesOrders:draft-lines-server-assign-ids": "node ops/smoke/smoke.mjs smoke:salesOrders:draft-lines-server-assign-ids",
-    "smoke:webish:purchaseOrders:list-detail-join": "node ops/smoke/smoke.mjs smoke:webish:purchaseOrders:list-detail-join"
+    "smoke:webish:purchaseOrders:list-detail-join": "node ops/smoke/smoke.mjs smoke:webish:purchaseOrders:list-detail-join",
+    "smoke:salesOrders:patch-lines": "node ops/smoke/smoke.mjs smoke:salesOrders:patch-lines"
   },
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "^3.882.0",

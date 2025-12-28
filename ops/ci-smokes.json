@@ -16,6 +16,7 @@
   "smoke:sales:reserve-with-location",
   "smoke:sales:commit-with-location",
   "smoke:sales:fulfill-without-reserve",
+  "smoke:salesOrders:patch-lines",
   "smoke:outbound:reserve-fulfill-release-cycle",
   "smoke:vendor-filter-preferred",
   "smoke:suggest-po-with-vendor",
