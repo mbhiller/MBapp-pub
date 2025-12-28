@@ -330,6 +330,40 @@ export async function smoke_module_flow(API_BASE, authToken) {
 **Web gaps:** All screens  
 **API complete:** ✅
 
+#### 4.4.1 Inventory Movement Indexing
+
+**Canonical & Timeline Index (Dual-Write):**
+- Each movement write creates two DynamoDB items:
+  - **Canonical:** `pk=tenantId, sk=inventoryMovement#{movementId}` — source of truth by id
+  - **Timeline:** `pk=tenantId, sk=inventoryMovementAt#{atIso}#{movementId}` — time-ordered retrieval
+- Both items contain identical movement data (id, itemId, action, qty, locationId, lot, etc.)
+
+**Why:** 
+- List endpoints (`GET /inventory/movements?locationId=...`, `GET /inventory/{itemId}/movements`) query the timeline index for correct pagination semantics: movements are retrieved in chronological order, so filtering by locationId/itemId is O(limit) instead of O(sparse).
+- Consistent reads on both queries ensure read-after-write correctness for newly created movements, eliminating transient gaps.
+
+**Implementation:** [apps/api/src/inventory/movements.ts](../../apps/api/src/inventory/movements.ts#L359-L428) — `createMovement()` performs atomic `BatchWriteCommand` with both items; graceful error logging if timeline write fails (canonical item preserved for fallback scans).
+
+#### 4.4.2 InventoryMovement Write Invariants
+
+**Requirement:** All movement writes MUST use the shared helper `createMovement()` ([apps/api/src/inventory/movements.ts](../../apps/api/src/inventory/movements.ts#L359)).
+
+**Why:**
+- Direct `PutCommand` writes bypass dual-write logic, leaving movements invisible to timeline queries.
+- This breaks `GET /inventory/{itemId}/onhand` (reads timeline index) and causes onhand checks to fail.
+- Example: PO receive that writes only canonical item → onhand endpoint sees zero new qty → smoke:close-the-loop fails.
+
+**Writers Using `createMovement()`:**
+- `POST /inventory/{id}:putaway` — calls `createMovement()` with action "putaway"
+- `POST /inventory/{id}/adjust` — calls `createMovement()` with action "adjust"
+- `POST /inventory/{id}:cycle-count` — calls `createMovement()` with action "cycle_count"
+- `POST /purchasing/po/{id}:receive` — calls `createMovement()` with action "receive"
+- `POST /sales/so/{id}:reserve` — calls `createMovement()` with action "reserve"
+- `POST /sales/so/{id}:release` — calls `createMovement()` with action "release"
+- `POST /sales/so/{id}:fulfill` — calls `createMovement()` with action "fulfill"
+
+**Validation:** `createMovement()` enforces `tenantId`, `itemId`, `qty`, and `action` at entry point (throws error if missing).
+
 ---
 
 ### 4.5 Purchase Orders

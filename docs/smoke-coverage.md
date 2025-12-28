@@ -16,6 +16,14 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
   - The runner records a manifest per run in `ops/smoke/.manifests/<SMOKE_RUN_ID>.json` capturing created entities (type, id, route, meta).
   - Use the cleanup script to delete only artifacts from a specific `SMOKE_RUN_ID` via allowlisted single-delete endpoints.
 
+**Consistency Contract:**
+- `GET /inventory/movements?locationId=...` and `GET /inventory/{itemId}/movements` use a **time-ordered index** (pk=tenantId, sk=`inventoryMovementAt#{at}#{movementId}`) to retrieve movements in chronological order.
+  - This eliminates sparse-locationId pagination issues: filtering by locationId/itemId on time-ordered data is O(limit).
+  - Newly written movements appear immediately in the time-ordered index due to dual-write in `createMovement()`.
+- Both endpoints use **consistent reads** within the tenant partition to avoid write-after-read gaps.
+- **Smoke test determinism:** `smoke:inventory:movements-by-location` relies on the timeline index to ensure the newly written putaway movement appears in the by-location list immediately (within 1-2 poll attempts). Without the timeline index, pagination before filtering would cause transient failures.
+- Response shape is unchanged; backward compatible with existing clients.
+
 ---
 
 ## Quick Start (TL;DR)

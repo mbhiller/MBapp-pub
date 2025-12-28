@@ -1893,8 +1893,9 @@ const tests = {
     const putawayMvId = putaway.body?.movementId;
     if (putawayMvId) recordCreated({ type: 'inventoryMovement', id: putawayMvId, route: '/inventory/:id:putaway', meta: { action: 'putaway', qty: 1, toLocationId: locBId, lot: 'LOT-LOC-MBL' } });
 
-    // Query GET /inventory/movements?locationId={locBId} with retry logic
-    // Total timeout: 30s, backoff: 250ms → 2000ms (capped, x1.5)
+    // Query GET /inventory/movements?locationId={locBId} with minimal retry
+    // Timeline index ensures movement appears immediately; 5-10s max safety window.
+    // Quick retries (2-3x) with 250ms backoff to handle transient delays.
     const expectedQty = 1;
     const expectedLot = "LOT-LOC-MBL";
     
@@ -1902,34 +1903,41 @@ const tests = {
     let putawayFound = false;
     let attempt = 0;
     const startTime = Date.now();
-    const maxElapsedMs = 30000;
+    const maxElapsedMs = 10000; // 10s safety window
     let backoffMs = 250;
     let lastByLocStatus = null;
     let lastByLocErrorBody = null;
+    let lastByLocNext = null;
+    const requestQuery = { locationId: locBId, limit: 50, sort: "desc" };
     
-    while (Date.now() - startTime < maxElapsedMs) {
+    while (Date.now() - startTime < maxElapsedMs && !putawayFound) {
       attempt++;
       
-      const movementsResp = await get(`/inventory/movements`, { locationId: locBId, limit: 50, sort: "desc" });
+      const movementsResp = await get(`/inventory/movements`, requestQuery);
       lastByLocStatus = movementsResp?.status ?? null;
+      lastByLocNext = movementsResp?.body?.next ?? movementsResp?.body?.pageInfo?.nextCursor ?? null;
       if (!movementsResp.ok) {
-        // Non-fatal error, capture error body and retry after backoff
+        // Non-fatal error, capture error body and retry after short backoff
         try {
           lastByLocErrorBody = snippet(movementsResp?.body, 600);
         } catch {}
-        await new Promise(r => setTimeout(r, backoffMs));
-        backoffMs = Math.min(Math.floor(backoffMs * 1.5), 2000);
+        if (attempt < 3) {
+          await new Promise(r => setTimeout(r, backoffMs));
+          backoffMs = Math.min(backoffMs + 250, 500);
+        }
         continue;
       }
 
       items = movementsResp.body?.items ?? [];
       if (!Array.isArray(items)) {
-        // Non-fatal error, capture error body and retry after backoff
+        // Non-fatal error, capture error body and retry after short backoff
         try {
           lastByLocErrorBody = snippet(movementsResp?.body, 600);
         } catch {}
-        await new Promise(r => setTimeout(r, backoffMs));
-        backoffMs = Math.min(Math.floor(backoffMs * 1.5), 2000);
+        if (attempt < 3) {
+          await new Promise(r => setTimeout(r, backoffMs));
+          backoffMs = Math.min(backoffMs + 250, 500);
+        }
         continue;
       }
 
@@ -1941,14 +1949,11 @@ const tests = {
         (m.lot ?? "") === expectedLot
       );
 
-      if (putawayFound) {
-        // Found it, stop retrying
-        break;
+      // If not found on first attempt, retry once more quickly
+      if (!putawayFound && attempt < 2) {
+        await new Promise(r => setTimeout(r, backoffMs));
+        backoffMs = Math.min(backoffMs + 250, 500);
       }
-
-      // Not found yet, wait and retry
-      await new Promise(r => setTimeout(r, backoffMs));
-      backoffMs = Math.min(Math.floor(backoffMs * 1.5), 2000);
     }
     
     const elapsedMs = Date.now() - startTime;
@@ -1970,6 +1975,15 @@ const tests = {
         }));
       }
 
+      // Safeguard: if first page was empty but had next token, try one follow-up page
+      let followUpPage2Count = null;
+      if (Array.isArray(items) && items.length === 0 && lastByLocNext) {
+        const followUpResp = await get(`/inventory/movements`, { ...requestQuery, next: lastByLocNext });
+        if (followUpResp.ok && Array.isArray(followUpResp.body?.items)) {
+          followUpPage2Count = followUpResp.body.items.length;
+        }
+      }
+
       return {
         test: "inventory-movements-by-location",
         result: "FAIL",
@@ -1982,7 +1996,12 @@ const tests = {
         elapsedMs,
         byLocationLastStatus: lastByLocStatus,
         byLocationLastError: lastByLocErrorBody,
+        byLocationNextTokenPresent: !!lastByLocNext,
+        byLocationNextToken: lastByLocNext,
+        byLocationItemsCount: Array.isArray(items) ? items.length : 0,
+        byLocationRequestQuery: requestQuery,
         byLocationItems: items.slice(0, 10),
+        followUpPage2ItemsCount: followUpPage2Count,
         diagnosticMovements
       };
     }
