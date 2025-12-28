@@ -1,0 +1,54 @@
+{
+  "smokeRunId": "smk-1766949844697-qak0",
+  "base": "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com",
+  "tenantHeader": "SmokeTenant",
+  "jwtTenant": "SmokeTenant",
+  "startedAt": "2025-12-28T19:24:04.702Z",
+  "finishedAt": "2025-12-28T19:24:08.437Z",
+  "entries": [
+    {
+      "type": "party",
+      "id": "ecpdrqb4bu5xo3kwyuotvp",
+      "route": "/objects/party",
+      "meta": {
+        "name": "smk-1766949844697-qak0-Seed Person",
+        "status": 200
+      },
+      "createdAt": "2025-12-28T19:24:05.140Z"
+    },
+    {
+      "type": "product",
+      "id": "qf1j7ecy5fkwfissvt598",
+      "route": "/objects/product",
+      "meta": {
+        "name": "Smoke SO NonStrict",
+        "sku": "smk-1766949844697-qak0-SKU-gkakp",
+        "status": 200
+      },
+      "createdAt": "2025-12-28T19:24:05.734Z"
+    },
+    {
+      "type": "inventory",
+      "id": "s2z5r6pdv5e5vcktxbsfav",
+      "route": "/objects/inventory",
+      "meta": {
+        "name": "smk-1766949844697-qak0-SmokeSO-NonStrict-1766949845734",
+        "productId": "qf1j7ecy5fkwfissvt598",
+        "status": 200
+      },
+      "createdAt": "2025-12-28T19:24:05.870Z"
+    },
+    {
+      "type": "backorderRequest",
+      "id": "bo_bogk2wpz",
+      "route": "/objects/backorderRequest/search",
+      "meta": {
+        "status": "open",
+        "soId": "9weqpe9r3rghk2746wcq1o",
+        "itemId": "s2z5r6pdv5e5vcktxbsfav",
+        "qty": 4
+      },
+      "createdAt": "2025-12-28T19:24:08.433Z"
+    }
+  ]
+}

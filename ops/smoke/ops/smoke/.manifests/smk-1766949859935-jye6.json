@@ -1,0 +1,42 @@
+{
+  "smokeRunId": "smk-1766949859935-jye6",
+  "base": "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com",
+  "tenantHeader": "SmokeTenant",
+  "jwtTenant": "SmokeTenant",
+  "startedAt": "2025-12-28T19:24:19.936Z",
+  "finishedAt": "2025-12-28T19:24:23.059Z",
+  "entries": [
+    {
+      "type": "party",
+      "id": "rf8igfr1r1e7op0zej6iri",
+      "route": "/objects/party",
+      "meta": {
+        "name": "smk-1766949859935-jye6-Seed Vendor",
+        "status": 200
+      },
+      "createdAt": "2025-12-28T19:24:20.541Z"
+    },
+    {
+      "type": "product",
+      "id": "mo5d95ptgqde6xx1rdbqtg",
+      "route": "/objects/product",
+      "meta": {
+        "name": "RecvLine",
+        "sku": "smk-1766949859935-jye6-SKU-3ppap",
+        "status": 200
+      },
+      "createdAt": "2025-12-28T19:24:20.941Z"
+    },
+    {
+      "type": "inventory",
+      "id": "nl05ov6n2kv0v5ku0cs4g",
+      "route": "/objects/inventory",
+      "meta": {
+        "name": "smk-1766949859935-jye6-RecvLineItem-1766949860941",
+        "productId": "mo5d95ptgqde6xx1rdbqtg",
+        "status": 200
+      },
+      "createdAt": "2025-12-28T19:24:21.014Z"
+    }
+  ]
+}

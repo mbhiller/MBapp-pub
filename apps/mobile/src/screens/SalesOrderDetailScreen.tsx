@@ -172,6 +172,16 @@ export default function SalesOrderDetailScreen() {
     }
   };
 
+  // Helper: create stable idempotency key for a single submit attempt
+  // Uses SMOKE_RUN_ID when present; falls back to a timestamp captured once.
+  const makeScanIdempotencyKey = (soId: string, lineCount: number) => {
+    const runToken =
+      (typeof process !== "undefined" && (process as any)?.env?.EXPO_PUBLIC_SMOKE_RUN_ID) ||
+      (typeof process !== "undefined" && (process as any)?.env?.SMOKE_RUN_ID) ||
+      String(Date.now());
+    return `so:${soId}#scan:${runToken}#lines:${lineCount}`;
+  };
+
   const undoLastScan = () => {
     if (scanHistory.length === 0) return;
     const last = scanHistory[scanHistory.length - 1];
@@ -210,7 +220,8 @@ export default function SalesOrderDetailScreen() {
         ...(defaultLot ? { lot: defaultLot } : {}),
       }));
 
-      const idempotencyKey = `so:${id}#scan-batch:${Date.now()}#lines:${linesToFulfill.length}`;
+      // Capture a stable idempotency key for this submit attempt
+      const idempotencyKey = makeScanIdempotencyKey(id, linesToFulfill.length);
 
       await fulfillSalesOrder(id, linesToFulfill, { idempotencyKey });
       toast(`Fulfilled ${linesToFulfill.length} line(s)`, "success");
@@ -609,7 +620,7 @@ export default function SalesOrderDetailScreen() {
           onPress={() => {
             const payload = fulfillPayload();
             if (!payload.lines.length) { toast("Nothing to fulfill", "info"); return; }
-            return run("Fulfill", () => fulfillSalesOrder(id!, payload));
+            return run("Fulfill", () => fulfillSalesOrder(id!, payload.lines));
           }}
           style={{ paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderRadius: 8, opacity: !canFulfill ? 0.5 : 1 }}
         >
