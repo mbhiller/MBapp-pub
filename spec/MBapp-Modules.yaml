@@ -1241,9 +1241,9 @@ components:
               type: string
     PurchaseOrderLine:
       type: object
-      required: [id, itemId, qty, uom]
+      required: [itemId, qty, uom]
       properties:
-        id:          { type: string }
+        id:          { type: string, description: "Server-assigned on create; included in responses" }
         itemId:      { type: string, description: InventoryItem.id }
         productId:   { type: string, nullable: true }
         description: { type: string, nullable: true }
@@ -1678,9 +1678,9 @@ components:
                 backordered: { type: number }
     SalesOrderLine:
       type: object
-      required: [id, itemId, qty, uom]
+      required: [itemId, qty, uom]
       properties:
-        id:            { type: string }
+        id:            { type: string, description: "Server-assigned on create; included in responses" }
         itemId:        { type: string }
         productId:     { type: string, nullable: true }
         description:   { type: string, nullable: true }

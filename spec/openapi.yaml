@@ -3598,13 +3598,13 @@ components:
     PurchaseOrderLine:
       type: object
       required:
-        - id
         - itemId
         - qty
         - uom
       properties:
         id:
           type: string
+          description: Server-assigned on create; included in responses
         itemId:
           type: string
           description: InventoryItem.id
@@ -4205,13 +4205,13 @@ components:
     SalesOrderLine:
       type: object
       required:
-        - id
         - itemId
         - qty
         - uom
       properties:
         id:
           type: string
+          description: Server-assigned on create; included in responses
         itemId:
           type: string
         productId:

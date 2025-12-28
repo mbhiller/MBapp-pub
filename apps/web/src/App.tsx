@@ -24,6 +24,8 @@ import WorkspaceDetailPage from "./pages/WorkspaceDetailPage";
 import BackordersListPage from "./pages/BackordersListPage";
 import PurchaseOrdersListPage from "./pages/PurchaseOrdersListPage";
 import PurchaseOrderDetailPage from "./pages/PurchaseOrderDetailPage";
+import CreatePurchaseOrderPage from "./pages/CreatePurchaseOrderPage";
+import EditPurchaseOrderPage from "./pages/EditPurchaseOrderPage";
 import LocationsListPage from "./pages/LocationsListPage";
 import LocationDetailPage from "./pages/LocationDetailPage";
 import InventoryMovementsPage from "./pages/InventoryMovementsPage";
@@ -77,7 +79,9 @@ export default function App() {
           <Route path="/workspaces/:id" element={<WorkspaceDetailPage />} />
           <Route path="/backorders" element={<BackordersListPage />} />
           <Route path="/purchase-orders" element={<PurchaseOrdersListPage />} />
+          <Route path="/purchase-orders/new" element={<CreatePurchaseOrderPage />} />
           <Route path="/purchase-orders/:id" element={<PurchaseOrderDetailPage />} />
+          <Route path="/purchase-orders/:id/edit" element={<EditPurchaseOrderPage />} />
           <Route path="/locations" element={<LocationsListPage />} />
           <Route path="/locations/:id" element={<LocationDetailPage />} />
         </Routes>

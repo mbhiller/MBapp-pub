@@ -37,12 +37,18 @@
   - Receive guards: deltaQty > 0, idempotency key, status checks (not cancelled/closed), refetch after receive
   - Status display normalizes hyphens to underscores (partially-received, etc.)
 
+- **`/purchase-orders/new` + `/purchase-orders/:id/edit`** — Web now supports draft PO create/edit with full line editing via shared LineArrayEditor (same pattern as Sales Orders).
+
 **Quick Links:**
 - Web: `/backorders`
 - Web: `/purchase-orders`
 - Web: `/purchase-orders/:id`
 
 ### Components (New & Enhanced)
+
+- **`LineArrayEditor` (new, shared)** — apps/web/src/components/LineArrayEditor.tsx
+  - Client-stable row keys (not persisted), add/remove/edit inline table for lines
+  - Used by both SalesOrder and PurchaseOrder forms; enables PO draft create/edit lines on web
 
 - **`VendorPicker` (new)** — apps/web/src/components/VendorPicker.tsx
   - Dropdown select with search filtering by name/ID
@@ -100,6 +106,8 @@ npm run spec:types:mobile
 ### Smoke Tests Added
 
 **CI-enabled tests** (run in CI pipeline):
+- `smoke:salesOrders:draft-lines-server-assign-ids` — Creates SO draft with lines missing `id`; asserts server assigns line ids and they persist.
+- `smoke:purchaseOrders:draft-create-edit-lines` — Creates PO draft with 2 lines, edits draft to drop one and add one; asserts kept line id persists, removed line disappears, new line gets server id.
 - `smoke:vendor-filter-preferred` — Validates backorder search filtered by `preferredVendorId`
   - Creates 2 vendors, 2 products with different preferred vendors
   - Creates SO for only item1 (triggers backorder for vendor1)
@@ -116,6 +124,8 @@ npm run spec:types:mobile
 ```json
 "flows": [
   ...existing tests...,
+  "smoke:salesOrders:draft-lines-server-assign-ids",
+  "smoke:purchaseOrders:draft-create-edit-lines",
   "smoke:vendor-filter-preferred",
   "smoke:suggest-po-with-vendor"
 ]
