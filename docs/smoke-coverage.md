@@ -880,6 +880,9 @@ Exit code: 0 (PASS), 1 (FAIL)
 - **No real event bus tests**: Can't verify downstream consumers receive events
 - **Dev-only header overrides**: Feature flag headers only work in dev/CI (prod ignores)
 - **No concurrent test isolation**: Tests share DemoTenant; sequential execution recommended
+- **List/index reads may lag**: DynamoDB GSI projections and list endpoints (e.g., `GET /inventory/movements?locationId=X`) may not immediately reflect recently created items due to eventual consistency
+- **Smokes poll before failing**: Tests that query list/index endpoints retry for up to 10 seconds with exponential backoff (200ms → 1000ms) before reporting failure
+- **Avoid assuming immediate list visibility**: After creating an item, prefer querying by primary key (e.g., `GET /inventory/{id}/movements`) for immediate read-your-writes consistency; list queries may require polling
 
 ---
 

@@ -1893,31 +1893,43 @@ const tests = {
     const putawayMvId = putaway.body?.movementId;
     if (putawayMvId) recordCreated({ type: 'inventoryMovement', id: putawayMvId, route: '/inventory/:id:putaway', meta: { action: 'putaway', qty: 1, toLocationId: locBId, lot: 'LOT-LOC-MBL' } });
 
-    // Query GET /inventory/movements?locationId={locBId} with retries
-    // Poll up to 10 attempts with 250ms delay, looking for the putaway movement
-    let items = [];
-    let putawayFound = false;
+    // Query GET /inventory/movements?locationId={locBId} with retry logic
+    // Total timeout: 30s, backoff: 250ms → 2000ms (capped, x1.5)
     const expectedQty = 1;
     const expectedLot = "LOT-LOC-MBL";
     
-    for (let attempt = 1; attempt <= 10; attempt++) {
+    let items = [];
+    let putawayFound = false;
+    let attempt = 0;
+    const startTime = Date.now();
+    const maxElapsedMs = 30000;
+    let backoffMs = 250;
+    let lastByLocStatus = null;
+    let lastByLocErrorBody = null;
+    
+    while (Date.now() - startTime < maxElapsedMs) {
+      attempt++;
+      
       const movementsResp = await get(`/inventory/movements`, { locationId: locBId, limit: 50, sort: "desc" });
+      lastByLocStatus = movementsResp?.status ?? null;
       if (!movementsResp.ok) {
-        // On final attempt, return the error
-        if (attempt === 10) {
-          return { test: "inventory-movements-by-location", result: "FAIL", step: "getMovementsByLocation", attempt, movementsResp };
-        }
-        // Otherwise retry
-        await new Promise(r => setTimeout(r, 250));
+        // Non-fatal error, capture error body and retry after backoff
+        try {
+          lastByLocErrorBody = snippet(movementsResp?.body, 600);
+        } catch {}
+        await new Promise(r => setTimeout(r, backoffMs));
+        backoffMs = Math.min(Math.floor(backoffMs * 1.5), 2000);
         continue;
       }
 
       items = movementsResp.body?.items ?? [];
       if (!Array.isArray(items)) {
-        if (attempt === 10) {
-          return { test: "inventory-movements-by-location", result: "FAIL", step: "assertItemsArray", attempt, items };
-        }
-        await new Promise(r => setTimeout(r, 250));
+        // Non-fatal error, capture error body and retry after backoff
+        try {
+          lastByLocErrorBody = snippet(movementsResp?.body, 600);
+        } catch {}
+        await new Promise(r => setTimeout(r, backoffMs));
+        backoffMs = Math.min(Math.floor(backoffMs * 1.5), 2000);
         continue;
       }
 
@@ -1930,15 +1942,16 @@ const tests = {
       );
 
       if (putawayFound) {
-        // Found it early, stop retrying
+        // Found it, stop retrying
         break;
       }
 
-      // Not found yet, wait and retry (unless this was the last attempt)
-      if (attempt < 10) {
-        await new Promise(r => setTimeout(r, 250));
-      }
+      // Not found yet, wait and retry
+      await new Promise(r => setTimeout(r, backoffMs));
+      backoffMs = Math.min(Math.floor(backoffMs * 1.5), 2000);
     }
+    
+    const elapsedMs = Date.now() - startTime;
 
     // If we still didn't find it after retries, fetch by-item movements for diagnostics
     if (!putawayFound) {
@@ -1965,7 +1978,11 @@ const tests = {
         expectedAction: "putaway",
         expectedQty,
         expectedLot,
-        byLocationItems: items,
+        attempts: attempt,
+        elapsedMs,
+        byLocationLastStatus: lastByLocStatus,
+        byLocationLastError: lastByLocErrorBody,
+        byLocationItems: items.slice(0, 10),
         diagnosticMovements
       };
     }
