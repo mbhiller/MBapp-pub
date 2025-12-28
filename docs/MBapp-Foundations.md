@@ -364,6 +364,29 @@ export async function smoke_module_flow(API_BASE, authToken) {
 
 **Validation:** `createMovement()` enforces `tenantId`, `itemId`, `qty`, and `action` at entry point (throws error if missing).
 
+#### 4.4.3 Inventory Movement Read Fallback
+
+**Defensive Pattern:**
+- Readers (`listMovementsByItem()` and `listMovementsByLocation()`) query the **timeline index** first (`inventoryMovementAt#...`).
+- If timeline returns **zero results and no pagination cursor**, the reader runs a **fallback query** against the **canonical index** (`inventoryMovement#...`).
+- Fallback results are sorted, filtered, and returned with the same schema as timeline results.
+
+**Why:**
+- This guards against accidental bugs where a movement writer skips dual-write and writes only the canonical record.
+- Without the fallback, such movements would be permanently invisible to clients until the bug is fixed and data is replayed.
+- With the fallback, clients still receive correct data; the bug is surfaced via warning logs so it can be detected early.
+
+**Logging:**
+- When fallback is triggered, a warning is logged with:
+  - `movementTimelineMissing=true`
+  - `tenantId`, `itemId`, count of results recovered from canonical index
+  - A note describing the probable cause
+- Example: "Movements found in canonical index but missing from timeline index. A movement writer may have skipped dual-write."
+
+**Non-Goal:**
+- The fallback is **NOT a substitute for dual-write**. The contract remains: all writers MUST use `createMovement()`.
+- The fallback is a **safety net** for operational resilience during troubleshooting and incident response.
+
 ---
 
 ### 4.5 Purchase Orders

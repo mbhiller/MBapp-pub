@@ -5,6 +5,7 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, QueryCommand, BatchWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { PutCommand } from "@aws-sdk/lib-dynamodb";
 import { resolveTenantId } from "../common/tenant";
+import { logger } from "../common/logger";
 
 type SortDir = "asc" | "desc";
 
@@ -157,7 +158,84 @@ async function repoListMovementsByItem(
     if (ta === tb) return 0;
     return ta < tb ? -1 * dir : 1 * dir;
   });
+  // Defensive fallback: if timeline index returned no results and no pagination cursor,
+  // query the canonical index as a safety net in case a writer accidentally skipped dual-write.
+  // This is a guard against bugs where movements are written but not in the timeline index.
+  if (matches.length === 0 && !lastKey) {
+    const canonicalPrefix = "inventoryMovement#";
+    const wantItemId = String(itemId);
 
+    try {
+      const fallbackOut = await ddb.send(new QueryCommand({
+        TableName: TABLE,
+        KeyConditionExpression: "pk = :pk AND begins_with(sk, :sk)",
+        ExpressionAttributeValues: { ":pk": tenantId, ":sk": canonicalPrefix },
+        ConsistentRead: true,
+        Limit: requestedLimit * 10, // Scan a bit wider since canonical isn't ordered by time
+      }));
+
+      const canonicalRaw = (fallbackOut.Items ?? []) as any[];
+      const fallbackMatches: InventoryMovement[] = canonicalRaw
+        .filter((m) => {
+          const isMovement = m?.docType === "inventoryMovement" || m?.type === "inventoryMovement";
+          if (!isMovement) return false;
+          return String(m?.itemId) === wantItemId;
+        })
+        .map((m) => {
+          const action =
+            asAction(m?.action) ??
+            asAction(m?.movement) ??
+            asAction(m?.act) ??
+            asAction(m?.verb);
+          if (!action) return undefined;
+          return {
+            id: String(m.id),
+            itemId: String(m.itemId),
+            action,
+            qty: Number(m.qty ?? 0),
+            at: m.at || m.createdAt,
+            note: m.note,
+            actorId: m.actorId,
+            refId: m.refId,
+            poLineId: m.poLineId,
+            soId: m.soId,
+            soLineId: m.soLineId,
+            lot: m.lot,
+            locationId: m.locationId,
+            docType: "inventoryMovement",
+            createdAt: m.createdAt,
+          } as InventoryMovement;
+        })
+        .filter(Boolean) as InventoryMovement[];
+
+      if (fallbackMatches.length > 0) {
+        // Sort fallback results the same way as timeline results
+        fallbackMatches.sort((a, b) => {
+          const ta = Date.parse(a.at ?? a.createdAt ?? "0");
+          const tb = Date.parse(b.at ?? b.createdAt ?? "0");
+          if (ta === tb) return 0;
+          return ta < tb ? -1 * dir : 1 * dir;
+        });
+
+        // Log warning: timeline index is missing for these movements
+        logger.warn(
+          { tenantId } as any,
+          `movementTimelineMissing=true itemId=${itemId} count=${fallbackMatches.length}`,
+          {
+            note: "Movements found in canonical index but missing from timeline index. A movement writer may have skipped dual-write. Returning canonical results as fallback.",
+          }
+        );
+
+        matches = fallbackMatches;
+      }
+    } catch (err) {
+      // If fallback query fails, log but don't break; return empty timeline results
+      logger.warn(
+        { tenantId } as any,
+        `fallbackMovementQuery failed itemId=${itemId} error=${String(err)}`
+      );
+    }
+  }
   // Trim to the requested page size
   const items = matches.slice(0, requestedLimit);
 
