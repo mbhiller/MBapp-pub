@@ -29,8 +29,15 @@ export async function releaseSalesOrder(id: string, payload: { lines: ReleaseLin
   return unwrap(res);
 }
 
-export async function fulfillSalesOrder(id: string, payload: { lines: FulfillLine[] }) {
-  const res = await apiClient.post(`/sales/so/${encodeURIComponent(id)}:fulfill`, payload);
+export async function fulfillSalesOrder(
+  id: string,
+  arg2: FulfillLine[] | { lines: FulfillLine[] },
+  opts?: { idempotencyKey?: string }
+) {
+  const lines = Array.isArray(arg2) ? arg2 : (arg2?.lines ?? []);
+  const payload = { lines };
+  const headers = opts?.idempotencyKey ? { "Idempotency-Key": opts.idempotencyKey } : undefined;
+  const res = await apiClient.post(`/sales/so/${encodeURIComponent(id)}:fulfill`, payload, headers);
   return unwrap(res);
 }
 

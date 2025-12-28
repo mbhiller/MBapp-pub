@@ -16,6 +16,8 @@ import {
 import { useToast } from "../features/_shared/Toast";
 import { copyText } from "../features/_shared/copy";
 import { useSalesOrderAvailability } from "../features/salesOrders/useAvailabilityBatch";
+import { ScannerPanel } from "../features/_shared/ScannerPanel";
+import { resolveScan } from "../lib/scanResolve";
 
 export default function SalesOrderDetailScreen() {
   const route = useRoute<any>();
@@ -32,6 +34,12 @@ export default function SalesOrderDetailScreen() {
   const [locationModalOpen, setLocationModalOpen] = React.useState(false);
   const [locationQuery, setLocationQuery] = React.useState("");
   const [locationOptions, setLocationOptions] = React.useState<any[]>([]);
+
+  // Scan-to-fulfill mode: track pending fulfills keyed by lineId
+  const [scanMode, setScanMode] = React.useState(false);
+  const [scanInput, setScanInput] = React.useState("");
+  const [pendingFulfills, setPendingFulfills] = React.useState<Map<string, number>>(new Map());
+  const [scanHistory, setScanHistory] = React.useState<Array<{ lineId: string; itemId: string; delta: number }>>([])
 
   const so = data;
   const lines = (so?.lines ?? []) as any[];
@@ -112,6 +120,109 @@ export default function SalesOrderDetailScreen() {
       };
     }).filter((l) => l.lineId && l.deltaQty > 0);
     return { lines: mapped };
+  };
+
+  // Scan-to-fulfill helpers (mirror PO receive logic)
+  const findLinesForItem = (itemId: string) =>
+    lines.filter((line: any) => String(line.itemId).toLowerCase() === String(itemId).toLowerCase());
+
+  const getRemainingQtyToFulfill = (line: any) =>
+    Math.max(0, Number(line.qty ?? 0) - Number(line.qtyFulfilled ?? 0));
+
+  const onScanResult = async (scan: string) => {
+    try {
+      const result = await resolveScan(scan);
+      if (!result.ok) {
+        toast(`Scan not recognized: ${result.error.reason ?? "unknown"}`, "info");
+        return;
+      }
+
+      const { itemId } = result.value;
+      const matchingLines = findLinesForItem(itemId);
+      if (matchingLines.length === 0) {
+        toast(`No line found for item ${itemId}`, "info");
+        return;
+      }
+
+      const targetLine = matchingLines[0];
+      const lineId = String(targetLine.id ?? targetLine.lineId);
+      const remaining = getRemainingQtyToFulfill(targetLine);
+
+      if (remaining <= 0) {
+        toast(`Item ${itemId} is fully fulfilled`, "info");
+        return;
+      }
+
+      const currentPending = pendingFulfills.get(lineId) ?? 0;
+      const newPending = Math.min(currentPending + 1, remaining);
+      const updated = new Map(pendingFulfills);
+      updated.set(lineId, newPending);
+      setPendingFulfills(updated);
+
+      setScanHistory((prev) => [
+        ...prev,
+        { lineId, itemId, delta: 1 },
+      ]);
+
+      setScanInput("");
+      toast(`Added 1x ${itemId}`, "success");
+    } catch (err: any) {
+      console.error(err);
+      toast(err?.message || "Scan resolution error", "error");
+    }
+  };
+
+  const undoLastScan = () => {
+    if (scanHistory.length === 0) return;
+    const last = scanHistory[scanHistory.length - 1];
+    const updated = new Map(pendingFulfills);
+    const current = updated.get(last.lineId) ?? 0;
+    if (current > 0) {
+      updated.set(last.lineId, current - 1);
+      setPendingFulfills(updated);
+    }
+    setScanHistory((prev) => prev.slice(0, -1));
+    toast("Undid last scan", "info");
+  };
+
+  const clearPendingFulfills = () => {
+    setPendingFulfills(new Map());
+    setScanHistory([]);
+    toast("Cleared pending fulfills", "info");
+  };
+
+  const submitPendingFulfills = async () => {
+    if (pendingFulfills.size === 0) {
+      toast("No pending fulfills", "info");
+      return;
+    }
+
+    if (!id) {
+      toast("SO not loaded", "error");
+      return;
+    }
+
+    try {
+      const linesToFulfill = Array.from(pendingFulfills.entries()).map(([lineId, deltaQty]) => ({
+        lineId,
+        deltaQty,
+        ...(defaultLocationId ? { locationId: defaultLocationId } : {}),
+        ...(defaultLot ? { lot: defaultLot } : {}),
+      }));
+
+      const idempotencyKey = `so:${id}#scan-batch:${Date.now()}#lines:${linesToFulfill.length}`;
+
+      await fulfillSalesOrder(id, linesToFulfill, { idempotencyKey });
+      toast(`Fulfilled ${linesToFulfill.length} line(s)`, "success");
+      setPendingFulfills(new Map());
+      setScanHistory([]);
+      setScanMode(false);
+      await refetch();
+      await refetchAvailability();
+    } catch (err: any) {
+      console.error(err);
+      toast(err?.message || "Submit failed", "error");
+    }
   };
 
   async function run(label: string, fn: () => Promise<any>) {
@@ -354,6 +465,113 @@ export default function SalesOrderDetailScreen() {
           )}
         </View>
       )}
+
+      {/* Scan-to-Fulfill Mode */}
+      {canFulfill && (
+        <View style={{ marginTop: 12, paddingBottom: 12, borderTopWidth: 1, borderTopColor: "#ccc", paddingTop: 12 }}>
+          {!scanMode ? (
+            <Pressable
+              onPress={() => setScanMode(true)}
+              style={{ paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderRadius: 8, backgroundColor: "#f5f5f5" }}
+            >
+              <Text>Scan to Fulfill</Text>
+            </Pressable>
+          ) : (
+            <View style={{ gap: 12 }}>
+              <Text style={{ fontWeight: "700" }}>Scan to Fulfill</Text>
+
+              {/* Scanner panel */}
+              <ScannerPanel
+                value={scanInput}
+                onChange={(raw) => {
+                  setScanInput(raw);
+                  if (raw.trim()) onScanResult(raw);
+                }}
+              />
+
+              {/* Pending fulfills list */}
+              {pendingFulfills.size > 0 && (
+                <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: "#e0e0e0" }}>
+                  <Text style={{ fontWeight: "600", marginBottom: 8 }}>
+                    Pending Fulfills ({pendingFulfills.size})
+                  </Text>
+                  <ScrollView style={{ maxHeight: 200 }}>
+                    {Array.from(pendingFulfills.entries()).map(([lineId, delta]) => {
+                      const line = lines.find(
+                        (l: any) => String(l.id ?? l.lineId) === lineId
+                      );
+                      if (!line) return null;
+                      const ordered = Number(line.qty ?? 0);
+                      const fulfilled = Number(line.qtyFulfilled ?? 0);
+                      const remaining = ordered - fulfilled;
+                      return (
+                        <View
+                          key={lineId}
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            paddingVertical: 6,
+                            paddingHorizontal: 8,
+                            backgroundColor: "#f5f5f5",
+                            borderRadius: 6,
+                            marginBottom: 6,
+                            gap: 8,
+                          }}
+                        >
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontWeight: "600" }}>{line.itemId}</Text>
+                            <Text style={{ fontSize: 12, color: "#666" }}>
+                              {ordered} ordered, {fulfilled} fulfilled, {remaining} remaining
+                            </Text>
+                            <Text style={{ fontSize: 12, fontWeight: "600", color: "#2196F3" }}>
+                              +{delta} pending
+                            </Text>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              )}
+
+              {/* Actions */}
+              <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                {scanHistory.length > 0 && (
+                  <Pressable
+                    onPress={undoLastScan}
+                    style={{ paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderRadius: 8, backgroundColor: "#fff3cd" }}
+                  >
+                    <Text>Undo Last</Text>
+                  </Pressable>
+                )}
+                {pendingFulfills.size > 0 && (
+                  <Pressable
+                    onPress={clearPendingFulfills}
+                    style={{ paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderRadius: 8, backgroundColor: "#f8d7da" }}
+                  >
+                    <Text>Clear All</Text>
+                  </Pressable>
+                )}
+                {pendingFulfills.size > 0 && (
+                  <Pressable
+                    onPress={submitPendingFulfills}
+                    style={{ paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderRadius: 8, backgroundColor: "#d4edda" }}
+                  >
+                    <Text>Submit {pendingFulfills.size} line(s)</Text>
+                  </Pressable>
+                )}
+                <Pressable
+                  onPress={() => setScanMode(false)}
+                  style={{ paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderRadius: 8, backgroundColor: "#e2e3e5" }}
+                >
+                  <Text>Cancel</Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
+        </View>
+      )}
+
       <View style={{ marginTop: 12, flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
         <Pressable disabled={!canSubmit} onPress={() => run("Submit", () => submitSalesOrder(id!))} style={{ paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderRadius: 8, opacity: !canSubmit ? 0.5 : 1 }}>
           <Text>Submit</Text>

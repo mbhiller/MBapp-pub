@@ -125,8 +125,9 @@ export async function reserveSalesOrder(id: string, lines: LineDelta[]) {
   return apiClient.post<SalesOrder>(`/sales/so/${encodeURIComponent(id)}:reserve`, { lines });
 }
 
-export async function fulfillSalesOrder(id: string, lines: LineDelta[]) {
-  return apiClient.post<SalesOrder>(`/sales/so/${encodeURIComponent(id)}:fulfill`, { lines });
+export async function fulfillSalesOrder(id: string, lines: LineDelta[], opts?: { idempotencyKey?: string }) {
+  const headers = opts?.idempotencyKey ? { "Idempotency-Key": opts.idempotencyKey } : undefined;
+  return apiClient.post<SalesOrder>(`/sales/so/${encodeURIComponent(id)}:fulfill`, { lines }, headers);
 }
 
 export async function releaseSalesOrder(id: string, lines: LineDelta[]) {

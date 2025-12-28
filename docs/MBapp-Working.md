@@ -882,11 +882,17 @@ cd apps/mobile && npm run typecheck
 - Inventory create hardening: verb coercion and **reserve guard** (409 if qty > available).
 - List APIs include optional `pageInfo`; mobile hook surfaces it without breaking `{ items, total? }`.
 - Mobile PO detail screen: per-line Receive modal wired via centralized `poActions.receiveLine()`; toasts + disabled states aligned to shared pattern.
+- **Mobile scan-to-receive + scan-to-fulfill:**
+  - New `resolveScan()` utility (apps/mobile/src/lib/scanResolve.ts) prioritizes: inventory ID → EPC API lookup → QR format → error.
+  - PO Detail: Scan-to-receive with pending-state Map, undo, clear, batch submit with idempotency (`po:${id}#scan-batch:${timestamp}#lines:${count}`).
+  - SO Detail: Scan-to-fulfill mirrors PO pattern; idempotency keys on batch fulfill.
+  - `fulfillSalesOrder()` API accepts both `FulfillLine[]` and `{ lines: FulfillLine[] }` for backward compatibility; normalizes before POST.
 
 **Smokes (green)**
 - `smoke:inventory:onhand`, `smoke:inventory:guards`, `smoke:inventory:onhand-batch`, `smoke:inventory:list-movements`
 - `smoke:po:receive-line`, `smoke:po:receive-line-batch`
 - `smoke:po:receive-line-idem-different-key` (new)
+- `smoke:webish:purchaseOrders:list-detail-join` (new, web-style reliability test)
 
 **Notes**
 - `PurchaseOrder.vendorId` remains the party with vendor role (guard enforced on create/update).
