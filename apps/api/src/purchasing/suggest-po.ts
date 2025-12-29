@@ -130,6 +130,36 @@ async function loadProductVendorAndMoq(
   return { vendorId, moq };
 }
 
+/**
+ * Load MOQ from product without changing vendor selection.
+ * Used when vendorId is already determined (from override or backorder).
+ */
+async function loadMinOrderQtyFromProduct(
+  tenantId: string,
+  productId: string
+): Promise<number | null> {
+  const prod = (await getObjectById({
+    tenantId,
+    type: "product",
+    id: String(productId),
+    fields: ["minOrderQty", "moq"],
+  }).catch(() => null)) as
+    | null
+    | {
+        minOrderQty?: number | null;
+        moq?: number | null;
+      };
+
+  const moq =
+    typeof prod?.minOrderQty === "number"
+      ? prod!.minOrderQty
+      : typeof prod?.moq === "number"
+      ? (prod as any).moq
+      : null;
+
+  return moq;
+}
+
 export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   const auth: any = (event as any).requestContext?.authorizer?.mbapp || {};
   const tenantId: string = auth.tenantId;
@@ -187,6 +217,20 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
         const { vendorId: derivedVendorId, moq } = await loadProductVendorAndMoq(tenantId, productId);
         vendorId = derivedVendorId ? String(derivedVendorId).trim() : null;
         minOrderQty = moq;
+      }
+    }
+
+    // If vendorId is now set (from override or BO), but MOQ not yet loaded, load it now
+    if (vendorId && minOrderQty === null) {
+      const itemId = bo.itemId ? String(bo.itemId) : null;
+      let productId: string | null = bo.productId ?? null;
+
+      if (!productId && itemId) {
+        productId = await loadInventoryForProductId(tenantId, itemId);
+      }
+
+      if (productId) {
+        minOrderQty = await loadMinOrderQtyFromProduct(tenantId, productId);
       }
     }
 

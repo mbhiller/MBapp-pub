@@ -19,6 +19,7 @@ import { useSalesOrderAvailability } from "../features/salesOrders/useAvailabili
 import { ScannerPanel } from "../features/_shared/ScannerPanel";
 import { resolveScan } from "../lib/scanResolve";
 import { pickBestMatchingLineId, incrementCapped } from "../features/_shared/scanLineSelect";
+import { apiClient } from "../api/client";
 
 export default function SalesOrderDetailScreen() {
   const route = useRoute<any>();
@@ -26,6 +27,9 @@ export default function SalesOrderDetailScreen() {
   const id = route.params?.id as string | undefined;
   const { data, isLoading, refetch } = useObjects<any>({ type: "salesOrder", id });
   const toast = useToast();
+  
+  // Normalize Sales Order from useObjects response
+  const so = (data as any)?.body ?? data ?? null;
 
   const [commitHint, setCommitHint] = React.useState<{ type: "success" | "error"; message: string } | null>(null);
   
@@ -42,7 +46,57 @@ export default function SalesOrderDetailScreen() {
   const [pendingFulfills, setPendingFulfills] = React.useState<Map<string, number>>(new Map());
   const [scanHistory, setScanHistory] = React.useState<Array<{ lineId: string; itemId: string; delta: number }>>([])
 
-  const so = data;
+  // Backorder status breakdown
+  const [backorderBreakdown, setBackorderBreakdown] = React.useState<{ open: number; ignored: number; converted: number; fulfilled: number; total: number; totalQty: number }>({ open: 0, ignored: 0, converted: 0, fulfilled: 0, total: 0, totalQty: 0 });
+  const [backorderBreakdownLoading, setBackorderBreakdownLoading] = React.useState(false);
+
+  // Fetch backorder status breakdown
+  const fetchBackorderBreakdown = React.useCallback(async () => {
+    if (!id) return;
+    setBackorderBreakdownLoading(true);
+    try {
+      const allBackorders: any[] = [];
+      for (const status of ["open", "ignored", "converted", "fulfilled"]) {
+        try {
+          const res: any = await apiClient.post("/objects/backorderRequest/search", { soId: id, status });
+          const items = res?.body?.items ?? res?.items ?? [];
+          if (Array.isArray(items)) allBackorders.push(...items);
+        } catch (err) {
+          console.warn(`Failed to fetch backorders with status ${status}:`, err);
+        }
+      }
+      
+      const breakdown = {
+        open: 0,
+        ignored: 0,
+        converted: 0,
+        fulfilled: 0,
+        total: 0,
+        totalQty: 0,
+      };
+      for (const bo of allBackorders) {
+        breakdown.total++;
+        breakdown.totalQty += bo.qty ?? 0;
+        const boStatus = (bo.status ?? "open") as keyof typeof breakdown;
+        if (boStatus in breakdown && boStatus !== "total" && boStatus !== "totalQty") {
+          breakdown[boStatus as Exclude<keyof typeof breakdown, "total" | "totalQty">]++;
+        }
+      }
+      setBackorderBreakdown(breakdown);
+    } catch (err) {
+      console.error("Failed to fetch backorder breakdown:", err);
+    } finally {
+      setBackorderBreakdownLoading(false);
+    }
+  }, [id]);
+
+  // Fetch backorder breakdown when component loads or soId changes
+  React.useEffect(() => {
+    if (id) {
+      fetchBackorderBreakdown();
+    }
+  }, [id, fetchBackorderBreakdown]);
+
   const lines = (so?.lines ?? []) as any[];
   const backorders = (so?.backorders ?? []) as any[];
 
@@ -231,6 +285,7 @@ export default function SalesOrderDetailScreen() {
       setScanHistory([]);
       setScanMode(false);
       await refetch();
+      await fetchBackorderBreakdown();
       await refetchAvailability();
     } catch (err: any) {
       console.error(err);
@@ -252,6 +307,7 @@ export default function SalesOrderDetailScreen() {
         toast(`${label} ok`, "success");
       }
       await refetch();
+      await fetchBackorderBreakdown();
       await refetchAvailability();
     } catch (e: any) {
       console.error(e);
@@ -355,12 +411,12 @@ export default function SalesOrderDetailScreen() {
       </View>
       <Text>Status: {so?.status}</Text>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
-        {backorders.length > 0 ? (
+        {backorders.length > 0 || backorderBreakdown.total > 0 ? (
           <Pressable onPress={() => so?.id ? nav.navigate("BackordersList", { soId: so.id }) : nav.navigate("BackordersList")}>
-            <BackorderHeaderBadge count={backorders.length} />
+            <BackorderHeaderBadge count={backorders.length} breakdown={backorderBreakdown} />
           </Pressable>
         ) : (
-          <BackorderHeaderBadge count={backorders.length} />
+          <BackorderHeaderBadge count={backorders.length} breakdown={backorderBreakdown} />
         )}
       </View>
 

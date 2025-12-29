@@ -8,6 +8,13 @@
 
 ## Current State Summary
 
+### Backorder → PO → Receive Loop Polish — ✅ Complete (Sprint I)
+- **MOQ Bump Fix:** suggest-po now applies minOrderQty regardless of vendor source (override/backorder derivation).
+- **Visibility:** Web/Mobile SO detail shows backorder status breakdown (open/converted/fulfilled/ignored); PO detail shows per-line backorder linkage.
+- **Mobile Ignore:** BackordersListScreen supports bulk Ignore action to remove unwanted backorders.
+- **Smoke Coverage:** New tests for partial fulfillment and MOQ bumping; full CI suite passing.
+- **Key Endpoints:** `/objects/backorderRequest/search` (status breakdown), `/purchasing/suggest-po` (MOQ-aware), PO receive (fulfillment tracking).
+
 ### Patch-lines Parity (SO/PO) — ✅ Complete (Sprint G)
 - **Endpoints:** `/sales/so/{id}:patch-lines` and `/purchasing/po/{id}:patch-lines` implemented with identical sequencing.
 - **ID stability:** Server assigns stable `L{n}` IDs; removed IDs are reserved and **never reused** (guaranteed no id churn).
@@ -17,23 +24,23 @@
 - **CI coverage:** Both `smoke:salesOrders:patch-lines` and `smoke:purchaseOrders:patch-lines` validate id stability and no-reuse guarantee.
 - **Next:** Broader web modules to adopt the shared line editor; mobile edit UIs can later align on the same contract.
 
-**Recent Deliveries (Sprint C, 2025-12-27):**
-- ✅ Web backorders workflow: vendor filtering, multi-PO creation, bulk actions
-- ✅ PO receive with location/lot defaults, idempotency, backorder linkage
-- ✅ VendorPicker component with search + manual entry fallback
-- ✅ Inventory adjust modal with per-location breakdown
-- ✅ Close-the-loop smokes: multi-vendor PO creation + receive validation
-- ✅ **Sprint G patch-lines parity complete:** SO and PO handlers aligned with identical sequencing, stable L{n} IDs, reserved ID guarantee, and structured error contract.
+**Recent Deliveries (Sprint I, 2025-12-28):**
+- ✅ **Backend MOQ loading fix:** suggest-po applies minOrderQty after vendor determined (from override, backorder, or product).
+- ✅ **Two new smoke tests:** smoke:backorders:partial-fulfill (partial receive → partial backorder fulfillment) and smoke:suggest-po:moq (MOQ bump verification).
+- ✅ **Web PO detail backorder linkage:** Per-line backorder IDs with filtered deep-link to backorders list.
+- ✅ **Web SO detail backorder breakdown:** Status badges (open/converted/fulfilled/ignored) show lifecycle per SO.
+- ✅ **Mobile SO detail backorder breakdown:** Fetches all statuses, displays count breakdown with status chips.
+- ✅ **Mobile backorders Ignore action:** Bulk Ignore workflow integrated (pre-existing, confirmed working).
 
 **CI Posture:**
-- 38/38 smoke tests passing in CI (Sprint XXV baseline)
-- New tests added: vendor-filter-preferred, suggest-po-with-vendor, inventory:onhand-by-location, inventory:adjust-negative
-- Smoke coverage tracked in [smoke-coverage.md](smoke-coverage.md)
+- 40/40 smoke tests passing in CI (was 38/38, added 2 new tests)
+- Tests added this sprint: smoke:backorders:partial-fulfill, smoke:suggest-po:moq
+- All tests documented in [smoke-coverage.md](smoke-coverage.md)
 
 **What's Next:**
-- Sprint III planning: Events plumbing, receive UX polish, query performance groundwork
-- See [Recent Deliveries](#recent-deliveries) below for detailed sprint history
-- See [Archive / Sprint History](#archive--sprint-history) for complete historical context
+- Sprint planning: Further receive UX polish, inventory visibility, mobile flow refinements
+- See [Recent Deliveries](#recent-deliveries) below for complete sprint history
+- See [Archive / Sprint History](#archive--sprint-history) for historical context
 
 ---
 
@@ -45,8 +52,8 @@ Legend: ✅ done • 🟨 stub/partial • ⬜ planned
 |---------------------|:----:|:-------:|:------:|:--------:|--------------|
 | Products            | ✅   | ✅      | ✅     | 🟨       | List stable (newest-first + refresh) |
 | Inventory           | ✅   | ✅      | ✅     | ✅       | List stabilized (refresh/sort/limit) |
-| SalesOrders         | ✅   | ✅      | ✅     | ✅       | List stabilized: newest-first + create-return scroll-to-top |
-| PurchaseOrders      | ✅   | ✅      | ✅     | ✅       | List stabilized: same behavior as Sales |
+| SalesOrders         | ✅   | ✅      | ✅     | ✅       | List stabilized: newest-first + create-return scroll-to-top; Detail shows backorder resolution breakdown (open/converted/fulfilled/ignored) |
+| PurchaseOrders      | ✅   | ✅      | ✅     | ✅       | Detail shows backorder linkage per line; suggest-po applies MOQ regardless of vendor source |
 | BackOrders          | ✅   | ✅      | ✅     | ✅       | Bulk actions + vendor filter; card styling aligned |
 | Party (CRM)         | ✅   | ✅      | ✅     | 🟨       | Hook unification |
 | RoutePlans          | ✅   | ✅      | ✅     | 🟨       | Hook unification |

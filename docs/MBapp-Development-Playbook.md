@@ -1,4 +1,4 @@
-# MBapp Development Playbook — Parties‑First, Contract‑First, Vertical Slices
+## MBapp Development Playbook — Parties‑First, Contract‑First, Vertical Slices
 _Compiled for: feat/sprint-100825_
 
 This playbook turns the Roadmap v10.0, Relationships, Backend Guide, Frontend Guide, and Working doc into an execution plan that guarantees every roadmap feature is actually built, tested, and shippable.
