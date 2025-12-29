@@ -7,7 +7,7 @@ import { getObjectById, createObject } from "../objects/repo";
 import { resolveTenantId } from "../common/tenant";
 import { listMovementsByItem, createMovement } from "../inventory/movements";
 import { badRequest, conflictError, internalError, notFound } from "../common/responses";
-import { logger } from "../common/logger";
+import { logger, emitDomainEvent } from "../common/logger";
 
 type SOStatus =
   | "draft"
@@ -317,6 +317,18 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
       }
       
          logger.info(logCtx, "so-commit.movements", { soId: so.id, movementsEmitted });
+
+      // Emit domain event
+      emitDomainEvent(logCtx, "SalesOrderCommitted", {
+        objectType: "salesOrder",
+        objectId: so.id,
+        statusBefore: before,
+        statusAfter: so.status,
+        strict,
+        shortagesCount: shortages.length,
+        movementsEmitted,
+        result: "success",
+      });
     }
 
     // Create BackorderRequest rows for actionable shortages (reorderEnabled only)

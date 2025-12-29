@@ -9,7 +9,7 @@ import { featureVendorGuardEnabled, featureEventsSimulate } from "../flags";
 import { maybeDispatch } from "../events/dispatcher";
 import { conflictError, badRequest, internalError, notFound } from "../common/responses";
 import { resolveTenantId } from "../common/tenant";
-import { logger } from "../common/logger";
+import { logger, emitDomainEvent } from "../common/logger";
 
 /** Utilities */
 const json = (statusCode: number, body: any): APIGatewayProxyResultV2 => ({
@@ -334,6 +334,18 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     const updated = await updatePurchaseOrder(id, tenantId, { status: nextStatus, lines: po.lines } as any);
 
     logger.info(logCtx, "po.receive: updated PO", { ...logExtra, nextStatus });
+
+    // Emit domain event
+    const totalQtyReceived = reqLines.reduce((sum, r) => sum + Number(r.deltaQty ?? 0), 0);
+    emitDomainEvent(logCtx, "PurchaseOrderReceived", {
+      objectType: "purchaseOrder",
+      objectId: po.id,
+      lineCount: reqLines.length,
+      totalQtyReceived,
+      statusBefore: po.status,
+      statusAfter: nextStatus,
+      result: "success",
+    });
 
     // Mark idempotency AFTER successful write (both key and payload signature)
     if (idk) await markAppliedKey(tenantId, po.id, idk);

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
+import { track, trackScreenView } from "../lib/telemetry";
+import * as Sentry from "@sentry/browser";
 import {
   submitPurchaseOrder,
   approvePurchaseOrder,
@@ -134,6 +136,13 @@ export default function PurchaseOrderDetailPage() {
     const defaults = loadReceiveDefaults(tenantId);
     setReceiveDefaults(defaults);
   }, [tenantId]);
+
+  // Track screen view on mount
+  useEffect(() => {
+    if (id) {
+      trackScreenView("PurchaseOrderDetail", { objectType: "purchaseOrder", objectId: id });
+    }
+  }, [id]);
 
   const fetchPo = useCallback(async () => {
     if (!id) return;
@@ -282,6 +291,12 @@ export default function PurchaseOrderDetailPage() {
   const handleReceive = async () => {
     if (!id || !po?.lines) return;
 
+    // Track modal opened
+    track("POReceiveModal_Opened", {
+      objectType: "purchaseOrder",
+      objectId: id,
+    });
+
     // Client-side validation
     const newErrors: Record<string, string> = {};
     const linesToReceive = Object.entries(lineState)
@@ -332,6 +347,15 @@ export default function PurchaseOrderDetailPage() {
     setActionLoading(true);
     setActionError(null);
     setActionInfo(null);
+
+    // Track attempt
+    track("PO_Receive_Clicked", {
+      objectType: "purchaseOrder",
+      objectId: id,
+      result: "attempt",
+      lineCount: linesToReceive.length,
+    });
+
     try {
       // Generate idempotency key
       const uuid = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -359,8 +383,36 @@ export default function PurchaseOrderDetailPage() {
       setLineErrors({});
       await fetchPo();
       setActionInfo(`Received ${linesToReceive.length} line(s).`);
+
+      // Track success
+      track("PO_Receive_Clicked", {
+        objectType: "purchaseOrder",
+        objectId: id,
+        result: "success",
+        lineCount: linesToReceive.length,
+      });
     } catch (err: any) {
       setActionError(renderFriendly(err));
+
+      // Track failure
+      const errorCode = err?.code ?? err?.status ?? "UNKNOWN_ERROR";
+      track("PO_Receive_Clicked", {
+        objectType: "purchaseOrder",
+        objectId: id,
+        result: "fail",
+        lineCount: linesToReceive.length,
+        errorCode,
+      });
+
+      // Capture exception in Sentry
+      Sentry.captureException(err, {
+        tags: {
+          tenantId: tenantId ?? "unknown",
+          objectType: "purchaseOrder",
+          objectId: id,
+          action: "receive",
+        },
+      });
     } finally {
       setActionLoading(false);
     }

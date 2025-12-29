@@ -1,6 +1,6 @@
 import * as React from "react";
 import { View, Text, ActivityIndicator, FlatList, Pressable, Modal, TextInput, ScrollView } from "react-native";
-import { useNavigation, useRoute } from "@react-navigation/native";
+import { useNavigation, useRoute, useFocusEffect } from "@react-navigation/native";
 import { useObjects } from "../features/_shared/useObjects";
 import { FEATURE_PO_QUICK_RECEIVE } from "../features/_shared/flags";
 import { saveFromSuggestion, receiveLine, receiveLines, submit, approve, cancel, close } from "../features/purchasing/poActions";
@@ -14,6 +14,7 @@ import { useTheme } from "../providers/ThemeProvider";
 import { ScannerPanel } from "../features/_shared/ScannerPanel";
 import { resolveScan } from "../lib/scanResolve";
 import { pickBestMatchingLineId, incrementCapped } from "../features/_shared/scanLineSelect";
+import { track, trackScreenView } from "../lib/telemetry";
 
 export default function PurchaseOrderDetailScreen() {
   const route = useRoute<any>();
@@ -36,6 +37,15 @@ export default function PurchaseOrderDetailScreen() {
 
   const [history, setHistory] = React.useState<{ open: boolean; itemId?: string; lineId?: string }>({ open: false });
   const [vendorModalOpen, setVendorModalOpen] = React.useState(false);
+
+  // Track screen view on focus
+  useFocusEffect(
+    React.useCallback(() => {
+      if (id) {
+        trackScreenView("PurchaseOrderDetail", { objectType: "purchaseOrder", objectId: id });
+      }
+    }, [id])
+  );
 
   // Scan-to-receive mode: track pending receives keyed by lineId
   const [scanMode, setScanMode] = React.useState(false);
@@ -147,14 +157,22 @@ export default function PurchaseOrderDetailScreen() {
       return;
     }
 
-    try {
-      const linesToReceive = Array.from(pendingReceives.entries()).map(([lineId, deltaQty]) => ({
-        lineId,
-        deltaQty,
-        ...(defaultLot ? { lot: defaultLot } : {}),
-        ...(defaultLocationId ? { locationId: defaultLocationId } : {}),
-      }));
+    const linesToReceive = Array.from(pendingReceives.entries()).map(([lineId, deltaQty]) => ({
+      lineId,
+      deltaQty,
+      ...(defaultLot ? { lot: defaultLot } : {}),
+      ...(defaultLocationId ? { locationId: defaultLocationId } : {}),
+    }));
 
+    // Track attempt
+    track("PO_ScanReceive_Submitted", {
+      objectType: "purchaseOrder",
+      objectId: po.id,
+      result: "attempt",
+      lineCount: linesToReceive.length,
+    });
+
+    try {
       // Capture a stable idempotency key for this submit attempt
       const idempotencyKey = makeScanIdempotencyKey(po.id, linesToReceive.length);
 
@@ -164,9 +182,41 @@ export default function PurchaseOrderDetailScreen() {
       setScanHistory([]);
       setScanMode(false);
       await refetch();
+
+      // Track success
+      track("PO_ScanReceive_Submitted", {
+        objectType: "purchaseOrder",
+        objectId: po.id,
+        result: "success",
+        lineCount: linesToReceive.length,
+      });
     } catch (err: any) {
       console.error(err);
       toast(err?.message || "Submit failed", "error");
+
+      // Track failure
+      const errorCode = err?.code ?? err?.status ?? "UNKNOWN_ERROR";
+      track("PO_ScanReceive_Submitted", {
+        objectType: "purchaseOrder",
+        objectId: po.id,
+        result: "fail",
+        lineCount: linesToReceive.length,
+        errorCode,
+      });
+
+      // Capture exception in Sentry (dynamic require)
+      try {
+        const Sentry = require("@sentry/react-native");
+        Sentry.captureException(err, {
+          tags: {
+            objectType: "purchaseOrder",
+            objectId: po.id,
+            action: "scan-receive",
+          },
+        });
+      } catch {
+        // Sentry not available
+      }
     }
   };
 
@@ -283,13 +333,56 @@ export default function PurchaseOrderDetailScreen() {
         <Pressable
           disabled={!canApprove}
           onPress={async () => {
+            // Track attempt
+            if (po?.id) {
+              track("PO_Approve_Clicked", {
+                objectType: "purchaseOrder",
+                objectId: po.id,
+                result: "attempt",
+              });
+            }
+
             try {
               await approve(po?.id);
               toast("Approved", "success");
               await refetch();
+
+              // Track success
+              if (po?.id) {
+                track("PO_Approve_Clicked", {
+                  objectType: "purchaseOrder",
+                  objectId: po.id,
+                  result: "success",
+                });
+              }
             } catch (e: any) {
               console.error(e);
               toast(e?.message || "Approve failed", "error");
+
+              // Track failure
+              if (po?.id) {
+                const errorCode = e?.code ?? e?.status ?? "UNKNOWN_ERROR";
+                track("PO_Approve_Clicked", {
+                  objectType: "purchaseOrder",
+                  objectId: po.id,
+                  result: "fail",
+                  errorCode,
+                });
+
+                // Capture exception in Sentry (dynamic require)
+                try {
+                  const Sentry = require("@sentry/react-native");
+                  Sentry.captureException(e, {
+                    tags: {
+                      objectType: "purchaseOrder",
+                      objectId: po.id,
+                      action: "approve",
+                    },
+                  });
+                } catch {
+                  // Sentry not available
+                }
+              }
             }
           }}
           style={{ paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 8, opacity: canApprove ? 1 : 0.5 }}

@@ -67,7 +67,7 @@ Legend: ✅ done • 🟨 stub/partial • ⬜ planned
 | Resources           | ✅   | ✅      | ✅     | ✅       | List/detail + seed/badges completed (Sprints V/VIII/XII) |
 | Reservations        | ✅   | ✅      | ✅     | ✅       | CRUD + conflicts + availability completed (Sprints V–VII) |
 | Workspaces/Views    | ✅   | ✅      | ✅     | 🟨       | Views: Web CRUD; Web lists (SO/PO/Inventory/Parties/Products) can save/apply views; Mobile WorkspaceHub deep-links views into SO/PO/Inventory/Parties/Products lists with apply/clear; Workspaces: API aliases views, Web list/detail |
-| Telemetry/Analytics | 🟨   | 🟨      | ⬜     | 🟨       | Web: Sentry scaffold ✅ (env-config); Web: PostHog scaffold ✅ (env-config); Mobile: Sentry scaffold ✅; Mobile: PostHog scaffold ✅; Backorder Ignore instrumented end-to-end (domain+UX); OTEL future |
+| Telemetry/Analytics | 🟨   | 🟨      | ⬜     | 🟨       | **Sprint L ✅:** SO Commit, PO Receive, PO Approve instrumented end-to-end (API domain events + Web/Mobile UX events); Backorder Ignore ✅; PII sanitization helper ✅; Sentry error capture ✅; PostHog scaffolds ✅ (web/mobile env-config); OTEL future |
 | Scorecards/Reports  | ⬜   | ⬜      | ⬜     | ⬜       | Later tier |
 | Settings/Config     | ⬜   | ⬜      | ⬜     | ⬜       | Global flags, tenants |
 

@@ -4,7 +4,7 @@ import { getPurchaseOrder, updatePurchaseOrder } from "../shared/db";
 import { getObjectById } from "../objects/repo";
 import { featureVendorGuardEnabled } from "../flags";
 import { badRequest, conflictError, internalError, notFound } from "../common/responses";
-import { logger } from "../common/logger";
+import { logger, emitDomainEvent } from "../common/logger";
 
 const reqIdOf = (event: APIGatewayProxyEventV2) => (event.requestContext as any)?.requestId;
 
@@ -34,6 +34,16 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
 
     const updated = await updatePurchaseOrder(id, tenantId, { status: "approved" } as any);
     logger.info(logCtx, "po-approve.saved", { poId: po.id, before: po.status, after: "approved" });
+    
+    // Emit domain event
+    emitDomainEvent(logCtx, "PurchaseOrderApproved", {
+      objectType: "purchaseOrder",
+      objectId: po.id,
+      statusBefore: "submitted",
+      statusAfter: "approved",
+      result: "success",
+    });
+    
     return { statusCode: 200, headers: { "content-type": "application/json" }, body: JSON.stringify(updated) };
   } catch (err: any) {
     logger.error(logCtx, "po-approve.error", { message: err?.message });
