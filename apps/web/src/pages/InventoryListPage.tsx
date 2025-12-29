@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { apiFetch } from "../lib/http";
+import { SaveViewButton } from "../components/SaveViewButton";
 import { useAuth } from "../providers/AuthProvider";
 
 type InventoryItem = {
@@ -66,6 +67,11 @@ export default function InventoryListPage() {
     setFilter(search.trim());
   };
 
+  const currentViewFilters = [
+    filter.trim() ? { field: "q", op: "contains", value: filter.trim() } : null,
+    productIdFilter ? { field: "productId", op: "eq", value: productIdFilter } : null,
+  ].filter(Boolean) as Array<{ field: string; op: string; value: any }>;
+
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -87,6 +93,11 @@ export default function InventoryListPage() {
         <button onClick={onSearch} disabled={loading}>
           Search
         </button>
+        <SaveViewButton
+          entityType="inventoryItem"
+          filters={currentViewFilters}
+          buttonLabel="Save as View"
+        />
       </div>
 
       {error && (

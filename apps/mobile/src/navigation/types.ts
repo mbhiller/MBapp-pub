@@ -22,11 +22,11 @@ export type RootStackParamList = {
   DevTools: undefined;
 
   // Parties
-  PartyList: { role?: string; q?: string } | undefined;
+  PartyList: { role?: string; q?: string; viewId?: string } | undefined;
   PartyDetail: { id?: string; mode?: "new" } | undefined;
 
   // Inventory
-  InventoryList: undefined;
+  InventoryList: { viewId?: string } | undefined;
   InventoryDetail: DetailParams;
 
   // Resources
@@ -34,11 +34,11 @@ export type RootStackParamList = {
   ResourceDetail: DetailParams;
 
   // Purchasing
-  PurchaseOrdersList: undefined;
+  PurchaseOrdersList: { viewId?: string } | undefined;
   PurchaseOrderDetail: DetailParams;
 
   // Sales
-  SalesOrdersList: undefined;
+  SalesOrdersList: { viewId?: string } | undefined;
   SalesOrderDetail: DetailParams;
 
   // Backorders
@@ -67,7 +67,7 @@ export type RootStackParamList = {
   EventDetail: DetailParams;
   
   // Products (Sprint XIV)
-  ProductsList: undefined;
+  ProductsList: { viewId?: string } | undefined;
   ProductDetail: DetailParams;
   CreateProduct: undefined;
   EditProduct: { id: string };

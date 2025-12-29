@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../lib/http";
+import { SaveViewButton } from "../components/SaveViewButton";
 import { useAuth } from "../providers/AuthProvider";
 
 type Party = {
@@ -63,6 +64,10 @@ export default function PartiesListPage() {
     setFilter(search.trim());
   };
 
+  const currentViewFilters = [
+    filter.trim() ? { field: "q", op: "contains", value: filter.trim() } : null,
+  ].filter(Boolean) as Array<{ field: string; op: string; value: any }>;
+
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -80,6 +85,11 @@ export default function PartiesListPage() {
         <button onClick={onSearch} disabled={loading}>
           {loading ? "Searching..." : "Search"}
         </button>
+        <SaveViewButton
+          entityType="party"
+          filters={currentViewFilters}
+          buttonLabel="Save as View"
+        />
       </div>
 
       {error ? <div style={{ color: "#b00020" }}>{error}</div> : null}

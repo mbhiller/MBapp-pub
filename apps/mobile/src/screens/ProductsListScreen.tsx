@@ -1,12 +1,15 @@
 // apps/mobile/src/screens/ProductsListScreen.tsx
 import * as React from "react";
 import { View, Text, TextInput, FlatList, Pressable, ActivityIndicator, InteractionManager } from "react-native";
-import { useNavigation, useFocusEffect } from "@react-navigation/native";
+import { useNavigation, useFocusEffect, useRoute } from "@react-navigation/native";
+import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { listProducts } from "../features/products/api";
 import type { Product } from "../features/products/types";
 import type { RootStackParamList } from "../navigation/types";
 import { useTheme } from "../providers/ThemeProvider";
+import { useViewsApi } from "../features/views/hooks";
+import { mapViewToMobileState, type SavedView } from "../features/views/applyView";
 
 const PAGE_SIZE = __DEV__ ? 200 : 20;
 
@@ -15,12 +18,15 @@ type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 export default function ProductsListScreen() {
   const t = useTheme();
   const navigation = useNavigation<NavigationProp>();
+  const route = useRoute<RouteProp<RootStackParamList, "ProductsList">>();
+  const { get: getView } = useViewsApi();
   const [q, setQ] = React.useState("");
   const [items, setItems] = React.useState<Product[]>([]);
   const [next, setNext] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isLoadingMore, setIsLoadingMore] = React.useState(false);
   const [lastError, setLastError] = React.useState<string | null>(null);
+  const [appliedView, setAppliedView] = React.useState<SavedView | null>(null);
 
   React.useEffect(() => {
     setItems([]);
@@ -41,6 +47,26 @@ export default function ProductsListScreen() {
       return () => task.cancel?.();
     }, [refetch])
   );
+
+  React.useEffect(() => {
+    const id = route.params?.viewId;
+    if (!id) return;
+    (async () => {
+      try {
+        const view = await getView(id);
+        const result = mapViewToMobileState("product", view);
+        setAppliedView(view);
+        if (result.applied.q !== undefined) setQ(result.applied.q ?? "");
+      } catch (e) {
+        if (__DEV__) console.warn("Failed to apply view", e);
+      }
+    })();
+  }, [route.params?.viewId, getView]);
+
+  const clearView = () => {
+    setAppliedView(null);
+    setQ("");
+  };
 
   const loadProducts = async () => {
     setIsLoading(true);
@@ -165,6 +191,28 @@ export default function ProductsListScreen() {
 
   return (
     <View style={{ flex: 1, padding: 12, backgroundColor: t.colors.bg }}>
+      {appliedView && (
+        <View
+          style={{
+            padding: 10,
+            borderRadius: 8,
+            borderWidth: 1,
+            borderColor: t.colors.border,
+            backgroundColor: t.colors.card,
+            marginBottom: 8,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <Text style={{ color: t.colors.text, fontWeight: "600" }}>
+            Active View: {appliedView.name || appliedView.id}
+          </Text>
+          <Pressable onPress={clearView}>
+            <Text style={{ color: t.colors.primary, fontWeight: "700" }}>Clear</Text>
+          </Pressable>
+        </View>
+      )}
       {/* Error Banner */}
       {lastError && (
         <View

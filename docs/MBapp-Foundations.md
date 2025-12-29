@@ -139,7 +139,7 @@ See [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) for full OpenAPI defin
 | **Resources** | ✅ ResourcesListScreen | ✅ ResourceDetailScreen | ❌ Missing | ❌ No filter UI | **Read-only** |
 | **Route Plans** | ✅ RoutePlanListScreen | ✅ RoutePlanDetailScreen | ✅ Create plan button | ❌ No filter UI | **Partial** — Create exists, no edit |
 | **Views** | ❌ Missing | ❌ Missing | ❌ Missing | ❌ N/A | **Not implemented** |
-| **Workspaces** | ✅ WorkspaceHubScreen (hub only) | ❌ Missing | ❌ Missing | ❌ N/A | **Stub only** — No CRUD |
+| **Workspaces** | ✅ WorkspaceHubScreen (hub only) | ❌ Missing | ❌ Missing | ✅ Search/filter in hub | **List-only** — No apply/detail/edit |
 
 ### Mobile API Integration Summary
 
@@ -465,18 +465,25 @@ export async function smoke_module_flow(API_BASE, authToken) {
 
 | Endpoint | Method | Status | Mobile | Web | MVP Need |
 |----------|--------|--------|--------|-----|----------|
-| `/views` | GET | ✅ | ❌ | ❌ | **Required for saved filters** |
-| `/views` | POST | ✅ | ❌ | ❌ | **Required** |
-| `/views/{id}` | GET | ✅ | ❌ | ❌ | **Required** |
-| `/views/{id}` | PUT | ✅ | ❌ | ❌ | **Required** |
-| `/views/{id}` | DELETE | ✅ | ❌ | ❌ | Optional |
-| `/workspaces` | GET | ✅ | ❌ | ❌ | Optional (nice-to-have) |
-| `/workspaces` | POST | ✅ | ❌ | ❌ | Optional |
-| `/workspaces/{id}` | GET | ✅ | ❌ | ❌ | Optional |
+| `/views` | GET | ✅ | ❌ | ✅ | **Required for saved filters** |
+| `/views` | POST | ✅ | ❌ | ✅ | **Required** |
+| `/views/{id}` | GET | ✅ | ❌ | ✅ | **Required** |
+| `/views/{id}` | PUT | ✅ | ❌ | ✅ | **Required** |
+| `/views/{id}` | DELETE | ✅ | ❌ | ✅ | Optional |
+| `/workspaces` | GET | ✅ (aliases views) | 🟨 (hub list only) | 🟨 (list/detail) | Optional (nice-to-have) |
+| `/workspaces` | POST | ✅ (aliases views) | 🟨 (hub list only) | 🟨 (list/detail) | Optional |
+| `/workspaces/{id}` | GET | ✅ (aliases views) | 🟨 (hub list only) | 🟨 (list/detail) | Optional |
 
-**Mobile gaps:** Complete Views/Workspaces UI (API exists, no screens)  
-**Web gaps:** All screens  
-**API complete:** ✅
+- **Web Views:** Pages exist for list/new/detail/edit at `/views`, `/views/new`, `/views/:id`, `/views/:id/edit`.
+- **Web Workspaces:** Pages exist for list/detail at `/workspaces`, `/workspaces/:id`; no create/edit UI.
+- **Workspaces v1 model:** `/workspaces` endpoints currently read/write `type="view"` items (a “views hub” wrapper in v1); no distinct workspace storage yet.
+- **Feature flags:** `FEATURE_VIEWS_ENABLED` / `X-Feature-Views-Enabled` are historical/client gating. Handlers use RBAC; no server-side flag guard today.
+
+- **List pages:** Sales Orders, Purchase Orders, Inventory, Parties, and Products can apply `?viewId` and save current filters as a View (optional shared flag) directly from the list UI.
+
+**Mobile gaps:** Views UI absent; Workspaces hub lists items but cannot apply/open views.  
+**Web gaps:** Workspaces create/edit missing; view apply/save present for SO/PO/Inventory/Parties/Products, other modules pending.  
+**API complete:** ✅ (v1 aliasing behavior as above)
 
 ---
 
