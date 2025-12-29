@@ -2,6 +2,7 @@
 import * as React from "react";
 import { View, Text, ActivityIndicator, Pressable, ScrollView, Alert } from "react-native";
 import { useRoute, useNavigation, useFocusEffect } from "@react-navigation/native";
+import { track, trackScreenView } from "../lib/telemetry";
 import { useObjects } from "../features/_shared/useObjects";
 import { useColors } from "../features/_shared/useColors";
 import { apiClient } from "../api/client";
@@ -80,6 +81,13 @@ export default function BackorderDetailScreen() {
     }, [refetch])
   );
 
+  // Track screen view when loaded
+  React.useEffect(() => {
+    if (id && backorder?.id) {
+      trackScreenView("BackorderDetail", { objectType: "backorderRequest", objectId: id });
+    }
+  }, [id, backorder?.id]);
+
   const handleIgnore = async () => {
     if (!id || backorder?.status !== "open") return;
     
@@ -96,9 +104,18 @@ export default function BackorderDetailScreen() {
             try {
               await apiClient.post(`/objects/backorderRequest/${encodeURIComponent(id)}:ignore`, {});
               toast("Backorder ignored", "success");
+                // UX event: ignore clicked (success)
+                track("BO_Ignore_Clicked", { objectType: "backorderRequest", objectId: id, result: "success" });
               await refetch?.();
             } catch (err: any) {
               console.error(err);
+                // UX event: ignore clicked (fail)
+                track("BO_Ignore_Clicked", { objectType: "backorderRequest", objectId: id, result: "fail", errorCode: err?.code || err?.status });
+                // Sentry capture with tags (safe dynamic require)
+                try {
+                  const Sentry = require("@sentry/react-native");
+                  Sentry.captureException(err, { tags: { objectType: "backorderRequest", objectId: id } });
+                } catch {}
               Alert.alert("Error", err?.message || "Failed to ignore backorder");
             } finally {
               setActionLoading(false);

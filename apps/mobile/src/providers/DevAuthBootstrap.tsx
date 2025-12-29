@@ -1,6 +1,8 @@
 // apps/mobile/src/providers/DevAuthBootstrap.tsx
 import * as React from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+// Sentry used via dynamic require to avoid hard dependency when DSN not configured
+import { setTelemetryContext } from "../lib/telemetry";
 import { apiClient, setBearerToken, setTenantId, _debugConfig } from "../api/client";
 
 const TOKEN_KEY  = "mbapp.dev.token";
@@ -22,6 +24,12 @@ export function DevAuthBootstrap({ children }: { children: React.ReactNode }) {
         ]);
         const tenant = storedTenant || DEV_TENANT;
         setTenantId(tenant);
+        // Tag Sentry with source and tenantId (no unsafe actorId decode)
+        try {
+          const Sentry = require("@sentry/react-native");
+          Sentry.setTag("source", "mobile");
+          if (tenant) Sentry.setTag("tenantId", tenant);
+        } catch {}
 
         if (storedToken) {
           setBearerToken(storedToken);
@@ -49,6 +57,8 @@ export function DevAuthBootstrap({ children }: { children: React.ReactNode }) {
             [TENANT_KEY, tenant],
           ]);
           console.log("DevAuthBootstrap: obtained new token", _debugConfig());
+          // Update telemetry context
+          setTelemetryContext({ tenantId: tenant });
         } else {
           console.warn("DevAuthBootstrap: dev-login returned no token");
         }

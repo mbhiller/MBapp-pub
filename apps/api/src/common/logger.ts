@@ -46,3 +46,24 @@ export const logger = {
   warn: (ctx: LogCtx | undefined, msg: string, extra?: Extra) => log("warn", ctx, msg, extra),
   error: (ctx: LogCtx | undefined, msg: string, extra?: Extra) => log("error", ctx, msg, extra),
 };
+
+/**
+ * Emit a structured domain event backed by the logger.
+ * Adds envelope fields and merges user-provided payload.
+ */
+export function emitDomainEvent(
+  ctx: LogCtx | undefined,
+  eventName: string,
+  payload?: Record<string, unknown>
+) {
+  const base = clean({
+    eventName,
+    ts: new Date().toISOString(),
+    source: "api",
+    tenantId: ctx?.tenantId,
+    actorId: ctx?.userId,
+    actorType: ctx?.userId ? undefined : "system",
+  });
+  const out = payload ? { ...base, ...payload } : base;
+  log("info", ctx, `[DOMAIN_EVENT] ${eventName}`, out);
+}

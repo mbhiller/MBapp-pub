@@ -1,7 +1,8 @@
 // apps/mobile/App.tsx
 import "react-native-gesture-handler";
 import * as React from "react";
-import { NavigationContainer } from "@react-navigation/native";
+import { NavigationContainer, createNavigationContainerRef } from "@react-navigation/native";
+import { setPostHogClient, setScreen } from "./lib/telemetry";
 import RootStack from "./navigation/RootStack"
 import { ThemeProvider } from "./providers/ThemeProvider";
 import { RolesProvider } from "./providers/RolesProvider";
@@ -21,6 +22,27 @@ function parseEnvRoles(): string[] {
 
 export default function App() {
   const initialRoles = React.useMemo(parseEnvRoles, []);
+  // Initialize telemetry (guarded; safe no-ops if keys missing)
+  React.useEffect(() => {
+    const sentryDsn = process.env.EXPO_PUBLIC_SENTRY_DSN as string | undefined;
+    if (sentryDsn) {
+      try {
+        const Sentry = require("@sentry/react-native");
+        Sentry.init({ dsn: sentryDsn });
+      } catch {}
+    }
+    const phKey = process.env.EXPO_PUBLIC_POSTHOG_API_KEY as string | undefined;
+    const phHost = process.env.EXPO_PUBLIC_POSTHOG_HOST as string | undefined;
+    if (phKey) {
+      try {
+        const PostHog = require("posthog-react-native");
+        const client = new PostHog(phKey, { host: phHost || "https://app.posthog.com" });
+        setPostHogClient(client);
+      } catch {}
+    }
+  }, []);
+
+  const navRef = createNavigationContainerRef();
 
   return (
     <ToastProvider>
@@ -28,7 +50,17 @@ export default function App() {
         <RolesProvider initialRoles={initialRoles}>
           <QueryClientProvider client={queryClient}>
             <DevAuthBootstrap>
-              <NavigationContainer>
+              <NavigationContainer
+                ref={navRef}
+                onReady={() => {
+                  const route = navRef.getCurrentRoute();
+                  setScreen(route?.name);
+                }}
+                onStateChange={() => {
+                  const route = navRef.getCurrentRoute();
+                  setScreen(route?.name);
+                }}
+              >
                 <RootStack />
               </NavigationContainer>
             </DevAuthBootstrap>
