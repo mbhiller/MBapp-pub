@@ -11,6 +11,7 @@
   "smoke:events:enabled-noop",
   "smoke:close-the-loop",
   "smoke:backorders:partial-fulfill",
+  "smoke:backorders:ignore",
   "smoke:suggest-po:moq",
   "smoke:salesOrders:draft-lines-server-assign-ids",
   "smoke:salesOrders:commit-strict-shortage",

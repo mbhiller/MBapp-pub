@@ -1,7 +1,7 @@
 # MBapp Foundations Report
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Status/Working](MBapp-Status.md) · [Cadence](MBapp-Cadence.md) · [Verification](smoke-coverage.md)  
-**Last Updated:** 2025-12-28
+**Last Updated:** 2025-12-29
 
 ---
 
@@ -465,7 +465,9 @@ export async function smoke_module_flow(API_BASE, authToken) {
 
 **What triggers a BackorderRequest:**
 - SO commit with `strict: false` and insufficient inventory creates BackorderRequest for each shortage line (status: `open`).
-- BackorderRequest has fields: `{ id, soId, soLineId, itemId, qty, createdAt, status }`.
+- BackorderRequest has fields: `{ id, soId, soLineId, itemId, qty, createdAt, status, preferredVendorId, fulfilledQty?, remainingQty? }`.
+  - `fulfilledQty` and `remainingQty`: nullable, server-maintained during PO receive (not client-writable).
+  - **No reverse index:** PO lines store `backorderRequestIds[]`; backorders do NOT store PO IDs (navigate via PO detail).
 - Status lifecycle: `open` → (converted by suggest-po) → `converted` OR (user ignores) → `ignored` OR (PO partial receive) → `open/converted` OR (PO full receive) → `fulfilled`.
 
 **suggest-po MOQ behavior (Sprint I):**
@@ -483,10 +485,13 @@ export async function smoke_module_flow(API_BASE, authToken) {
 - Validation in smoke test: `smoke:backorders:partial-fulfill` creates backorder qty=10, receives qty=5, asserts status=`converted`, remainingQty=5, fulfilledQty=5.
 
 **Visibility (Web + Mobile):**
-- **Web PO detail:** Shows linked backorder IDs per line with filtered deep-link to backorders list (vendorId/itemId pre-filter).
-- **Web SO detail:** Fetches `/objects/backorderRequest/search?filter.soId={soId}` with all statuses (open/ignored/converted/fulfilled) and displays status breakdown badge with counts and total units.
+- **Web backorder detail:** `/backorders/:id` shows full context (SO link, item link, vendor link), fulfillment progress bar (when fulfilledQty present), and ignore action button.
+- **Mobile backorder detail:** `BackorderDetail` screen shows full context with navigate buttons, fulfillment progress, and ignore action with confirmation alert.
+- **Web PO detail:** Shows linked backorder IDs per line; chips now link directly to `/backorders/:id` detail page.
+- **Web SO detail:** Breakdown badges (open/converted/fulfilled/ignored) are clickable, linking to filtered backorders list by status.
 - **Mobile SO detail:** Fetches all backorder statuses via `apiClient.post('/objects/backorderRequest/search', { filter: { soId } })` with status param loop; displays BackorderHeaderBadge with optional breakdown (open/converted/fulfilled/ignored with unit counts).
-- **Mobile backorders list:** Supports bulk Ignore action via `/objects/backorderRequest/{id}:ignore` to mark backorders as ignored (status → `ignored`).
+- **Mobile backorders list:** Tap row → detail; long-press → multi-select for bulk ignore/convert actions.
+- **Web backorders list:** Row click → detail (stopPropagation on checkbox/actions to preserve multi-select).
 
 **API complete:** ✅  
 **Smoke coverage:** `smoke:backorders:partial-fulfill`, `smoke:suggest-po:moq`  
@@ -659,6 +664,419 @@ export async function smoke_module_flow(API_BASE, authToken) {
 - Sprint XXVIII: Sales Orders (already has mobile create, add web + edit)
 - Sprint XXIX: Purchase Orders + Backorders integration
 - Sprint XXX: Views/Workspaces (saved filters, role-aware dashboards)
+
+---
+
+## 7. UI System & Design Direction
+
+### 7.1 UI Technology Stack (Locked)
+
+**Web UI Foundation:**
+- **Framework:** React 18+ with TypeScript
+- **Styling:** TailwindCSS (utility-first CSS framework)
+- **Component Library:** shadcn/ui (copy-paste components built on Radix UI primitives)
+- **Routing:** React Router v6
+- **State Management:** React hooks + Context API (no global state library by default)
+
+**Mobile UI Foundation:**
+- **Framework:** React Native (Expo managed workflow)
+- **Styling:** React Native StyleSheet API + useColors hook (custom theming)
+- **Navigation:** React Navigation v6 (native stack navigator)
+- **State Management:** React hooks + Context API
+
+**Rationale:**
+- **TailwindCSS:** Utility-first enables rapid prototyping without CSS file proliferation; tree-shaking ensures minimal bundle size.
+- **shadcn/ui:** Copy-paste model means full control over components (no hidden dependencies); built on accessible Radix primitives.
+- **No Material-UI/Ant Design:** Avoid opinionated design systems that constrain customization and bloat bundle size.
+
+**Future Design Contract (Post-MVP):**
+- Establish design tokens (colors, spacing, typography) shared between web and mobile.
+- Formalize component API contracts (props, states, events) for cross-platform consistency where applicable.
+- Mobile may adopt React Native Paper or similar if native component patterns diverge significantly from web.
+
+**Status:** ✅ **Locked** — All new web UI must use TailwindCSS + shadcn/ui; no alternative styling approaches without architectural review.
+
+---
+
+### 7.2 Multi-UX Discipline (User Personas)
+
+MBapp serves **three primary UX disciplines** with distinct interaction patterns:
+
+#### A) Operator UX (Primary Focus)
+**Target Users:** Warehouse operators, receiving clerks, inventory managers, fulfillment staff  
+**Interaction Patterns:**
+- High-frequency repetitive tasks (scan → verify → confirm)
+- Touch-first mobile UI (large buttons, minimal text input)
+- Bulk actions (select multiple → apply action)
+- Defaults and auto-fill to minimize data entry
+- Immediate feedback (success toasts, error alerts)
+- Offline-capable where feasible (future: local queue + sync)
+
+**Key Screens:**
+- BackordersListScreen → bulk ignore/convert
+- PurchaseOrderDetailScreen → quick receive with defaults
+- InventoryListScreen → filters + quick navigation
+- SalesOrderDetailScreen → backorder visibility + actions
+
+**Design Principles:**
+- **Speed over completeness:** Operators need fast, predictable flows (not comprehensive dashboards).
+- **Error recovery:** Clear actionable messages; allow retry without losing context.
+- **Keyboard/scan support:** Enter key submits forms; barcode scans auto-populate fields.
+
+#### B) Manager/Analyst UX (Secondary)
+**Target Users:** Purchasing managers, sales managers, operations analysts  
+**Interaction Patterns:**
+- Filtering and searching large datasets (views, saved filters)
+- Batch operations (suggest PO from multiple backorders)
+- Multi-step wizards (create PO → review → submit → approve)
+- Reporting and status breakdowns (backorder lifecycle, PO approval queues)
+- Cross-module navigation (SO → backorders → PO → inventory)
+
+**Key Screens:**
+- BackordersListPage (web) → vendor filter + suggest-PO modal
+- PurchaseOrdersListPage (web) → status filters + bulk actions
+- SalesOrderDetailPage → backorder breakdown badges (clickable to filtered list)
+
+**Design Principles:**
+- **Context preservation:** Deep links maintain filter state (shareable URLs).
+- **Discoverability:** Related entities linked (SO → backorders → PO).
+- **Batch transparency:** Show skipped items with reasons (suggest-PO modal).
+
+#### C) Audit/Debug UX (Tertiary)
+**Target Users:** System admins, support engineers, developers  
+**Interaction Patterns:**
+- Inspecting raw object state (ID, timestamps, status history)
+- Tracing requests via requestId (error messages → CloudWatch logs)
+- Testing feature flags (dev headers override backend flags)
+- Smoke test execution and manifest inspection
+
+**Key Screens:**
+- DevToolsScreen (mobile) → feature flag toggles, environment display
+- Error messages → include requestId for log correlation
+- Smoke test runner → manifest output with created entity IDs
+
+**Design Principles:**
+- **Transparency:** Show underlying IDs, request metadata, error details.
+- **Copy-friendly:** Long-press to copy IDs, error messages, log snippets.
+- **Flag visibility:** Dev mode shows current flag states and overrides.
+
+**Status:** ✅ **Active** — Operator UX is primary focus; Manager UX receives polish as needed; Audit UX is dev-only (no prod UI).
+
+---
+
+## 8. Telemetry & Analytics Foundations
+
+### 8.1 Telemetry Stack (Locked)
+
+**Product Analytics:**
+- **Tool:** PostHog (self-hosted or cloud)
+- **Scope:** User behavior tracking, feature adoption, funnel analysis
+- **Events:** Domain events (backorder_ignored, po_received) + UX events (screen_viewed, button_clicked)
+- **Session replay:** Enabled for web (opt-in for mobile)
+
+**Error Tracking:**
+- **Tool:** Sentry
+- **Scope:** Client-side errors (React/React Native), backend errors (Lambda exceptions)
+- **Context:** Minimum tags: `tenantId`, `actorId`, `environment`, `release`
+- **Breadcrumbs:** Navigation, API calls, user actions (sanitized, no PII)
+
+**Observability (Future):**
+- **Tool:** OpenTelemetry (OTEL) → AWS CloudWatch / Honeycomb / Datadog
+- **Scope:** Distributed tracing (API Gateway → Lambda → DynamoDB)
+- **Metrics:** Request latency, error rates, DynamoDB throttling
+- **Status:** ⬜ Planned (post-MVP)
+
+**Rationale:**
+- **PostHog:** Open-source with self-hosting option; feature flags + A/B testing built-in; no vendor lock-in.
+- **Sentry:** Industry standard for error tracking; excellent React/React Native integrations; affordable pricing.
+- **OTEL:** Future-proof observability; AWS-native with CloudWatch integration; enables cross-service tracing.
+
+**Status:** 🟨 **Partial** — Sentry integrated (backend + mobile); PostHog planned; OTEL not yet implemented.
+
+---
+
+### 8.2 Telemetry Contract (Event Envelope)
+
+**Standard Event Shape:**
+```typescript
+type TelemetryEvent = {
+  // Core identifiers (required)
+  eventName: string;          // e.g., "backorder_ignored", "po_received"
+  timestamp: string;          // ISO 8601 timestamp
+  sessionId: string;          // Client-generated session UUID
+  
+  // Actor context (required)
+  tenantId: string;           // Always present (multi-tenant isolation)
+  actorId?: string;           // User ID (omit for anonymous/unauthenticated)
+  
+  // Object context (required for domain events)
+  objectType?: string;        // e.g., "backorderRequest", "purchaseOrder"
+  objectId?: string;          // e.g., "bo_abc123", "po_xyz789"
+  
+  // UX context (required for UX events)
+  screen?: string;            // Mobile: "BackorderDetail", Web: route path
+  component?: string;         // e.g., "IgnoreButton", "SuggestPoModal"
+  
+  // Additional metadata (optional)
+  properties?: Record<string, any>;  // Event-specific data (sanitized)
+  
+  // Environment (required)
+  platform: "web" | "mobile";  // Client platform
+  appVersion?: string;         // Semantic version (e.g., "1.2.3")
+  environment: "dev" | "staging" | "prod";  // Deployment environment
+};
+```
+
+**Envelope Rules:**
+1. **Never send PII:** No customer names, addresses, emails, phone numbers in `properties`.
+2. **Always send tenant:** All events must include `tenantId` for isolation and filtering.
+3. **Object references only:** Send object IDs, not full object payloads (query backend for details).
+4. **Timestamps in UTC:** Always ISO 8601 format (`new Date().toISOString()`).
+5. **Session continuity:** `sessionId` persists across screens/routes within a single app launch.
+
+---
+
+### 8.3 Event Families & Examples
+
+#### A) Domain Events (Business Logic)
+**Purpose:** Track domain state transitions and user-driven workflows.
+
+**Examples:**
+```typescript
+// Backorder ignored by operator
+{
+  eventName: "backorder_ignored",
+  timestamp: "2025-12-29T10:30:00.000Z",
+  sessionId: "sess_abc123",
+  tenantId: "DemoTenant",
+  actorId: "user_xyz",
+  objectType: "backorderRequest",
+  objectId: "bo_12345",
+  properties: {
+    previousStatus: "open",
+    source: "detail_screen"  // vs "bulk_action"
+  },
+  platform: "mobile",
+  environment: "prod"
+}
+
+// PO received (partial or full)
+{
+  eventName: "po_received",
+  timestamp: "2025-12-29T10:35:00.000Z",
+  sessionId: "sess_abc123",
+  tenantId: "DemoTenant",
+  actorId: "user_xyz",
+  objectType: "purchaseOrder",
+  objectId: "po_67890",
+  properties: {
+    lineCount: 3,
+    totalQtyReceived: 150,
+    isPartialReceive: true,
+    newStatus: "partially_received"
+  },
+  platform: "web",
+  environment: "prod"
+}
+
+// Suggest-PO executed (multi-vendor)
+{
+  eventName: "suggest_po_executed",
+  timestamp: "2025-12-29T10:40:00.000Z",
+  sessionId: "sess_def456",
+  tenantId: "DemoTenant",
+  actorId: "user_xyz",
+  properties: {
+    backorderCount: 5,
+    vendorCount: 2,
+    draftCount: 2,
+    skippedCount: 1,
+    source: "backorders_list"  // vs "so_detail"
+  },
+  platform: "web",
+  environment: "prod"
+}
+```
+
+#### B) UX Events (Interaction Tracking)
+**Purpose:** Track user navigation, feature discovery, and interaction patterns.
+
+**Examples:**
+```typescript
+// Screen viewed (mobile)
+{
+  eventName: "screen_viewed",
+  timestamp: "2025-12-29T10:25:00.000Z",
+  sessionId: "sess_abc123",
+  tenantId: "DemoTenant",
+  actorId: "user_xyz",
+  screen: "BackorderDetail",
+  properties: {
+    objectId: "bo_12345",
+    referrer: "BackordersList"  // Previous screen
+  },
+  platform: "mobile",
+  environment: "prod"
+}
+
+// Button clicked (web)
+{
+  eventName: "button_clicked",
+  timestamp: "2025-12-29T10:30:00.000Z",
+  sessionId: "sess_def456",
+  tenantId: "DemoTenant",
+  actorId: "user_xyz",
+  screen: "/backorders/bo_12345",
+  component: "IgnoreButton",
+  properties: {
+    objectId: "bo_12345"
+  },
+  platform: "web",
+  environment: "prod"
+}
+
+// Filter applied
+{
+  eventName: "filter_applied",
+  timestamp: "2025-12-29T10:28:00.000Z",
+  sessionId: "sess_def456",
+  tenantId: "DemoTenant",
+  actorId: "user_xyz",
+  screen: "/backorders",
+  component: "VendorFilter",
+  properties: {
+    filterType: "vendorId",
+    vendorId: "vendor_abc"  // Reference only, not vendor name
+  },
+  platform: "web",
+  environment: "prod"
+}
+```
+
+#### C) Error Events (Failure Tracking)
+**Purpose:** Track client-side errors, API failures, and validation errors.
+
+**Examples:**
+```typescript
+// API error (network failure)
+{
+  eventName: "api_error",
+  timestamp: "2025-12-29T10:32:00.000Z",
+  sessionId: "sess_abc123",
+  tenantId: "DemoTenant",
+  actorId: "user_xyz",
+  screen: "BackorderDetail",
+  properties: {
+    endpoint: "/objects/backorderRequest/bo_12345:ignore",
+    method: "POST",
+    statusCode: 500,
+    errorCode: "INTERNAL_SERVER_ERROR",
+    requestId: "req_xyz123"  // For log correlation
+  },
+  platform: "mobile",
+  environment: "prod"
+}
+
+// Validation error (user input)
+{
+  eventName: "validation_error",
+  timestamp: "2025-12-29T10:33:00.000Z",
+  sessionId: "sess_def456",
+  tenantId: "DemoTenant",
+  actorId: "user_xyz",
+  screen: "/purchase-orders/po_67890",
+  component: "ReceiveModal",
+  properties: {
+    fieldName: "deltaQty",
+    errorCode: "RECEIVE_EXCEEDS_REMAINING",
+    attemptedValue: 100,  // Sanitized numeric value
+    maxAllowed: 50
+  },
+  platform: "web",
+  environment: "prod"
+}
+```
+
+---
+
+### 8.4 Foundation-by-Accretion Rule (Telemetry)
+
+**Principle:** Every sprint that adds domain behavior or UX surface area must also add telemetry instrumentation.
+
+**Minimum Coverage per Sprint:**
+1. **1–3 domain events** for new state transitions or workflows (e.g., backorder ignored, PO received).
+2. **1–3 UX events** for new screens or primary user actions (e.g., screen viewed, button clicked).
+3. **Error events** for any new API endpoints or validation rules (captured automatically by Sentry + error boundaries).
+
+**Examples:**
+- **Sprint J (Backorder Detail):** Added `backorder_ignored` (domain), `screen_viewed` (UX), `button_clicked` (UX).
+- **Sprint I (PO Receive):** Added `po_received` (domain), `receive_modal_opened` (UX), `api_error` (automatic via Sentry).
+
+**Guardrails:**
+- **No event sprawl:** Limit to 3–5 events per feature; avoid logging every button click.
+- **Event naming:** Use `snake_case` for event names (e.g., `backorder_ignored`, not `BackorderIgnored`).
+- **Property discipline:** Only include properties that inform product decisions (not debugging data).
+
+**Status:** 🟨 **Partial** — Domain events implemented for core workflows; UX events partially instrumented; full coverage planned for post-MVP.
+
+---
+
+### 8.5 Sentry Context Requirements (Minimum)
+
+**All Sentry errors must include these tags/context:**
+
+**Required Tags:**
+```typescript
+{
+  tenantId: string;      // Always present (multi-tenant isolation)
+  actorId?: string;      // User ID (if authenticated)
+  environment: string;   // "dev" | "staging" | "prod"
+  platform: string;      // "web" | "mobile" | "api"
+}
+```
+
+**Required Context (where applicable):**
+```typescript
+{
+  // Object context (for domain errors)
+  objectType?: string;   // e.g., "backorderRequest", "purchaseOrder"
+  objectId?: string;     // e.g., "bo_abc123", "po_xyz789"
+  
+  // Route/screen context
+  route?: string;        // Web: "/backorders/bo_abc123", Mobile: "BackorderDetail"
+  screen?: string;       // Mobile screen name
+  
+  // Request context (for API errors)
+  requestId?: string;    // API Gateway request ID (from error response)
+  endpoint?: string;     // e.g., "/objects/backorderRequest/bo_123:ignore"
+  method?: string;       // HTTP method
+}
+```
+
+**Implementation:**
+- **Web:** Set Sentry context in AuthProvider (tenantId, actorId) + ErrorBoundary (route).
+- **Mobile:** Set Sentry context in DevAuthBootstrap (tenantId, actorId) + navigation listener (screen).
+- **API:** Lambda handler sets context from event (tenantId, actorId, requestId, route).
+
+**Example (React Error Boundary):**
+```typescript
+import * as Sentry from "@sentry/react";
+
+function ErrorBoundary({ children }: { children: React.ReactNode }) {
+  const { tenantId, actorId } = useAuth();
+  const location = useLocation();
+  
+  React.useEffect(() => {
+    Sentry.setTag("tenantId", tenantId);
+    Sentry.setTag("actorId", actorId || "anonymous");
+    Sentry.setContext("route", { path: location.pathname });
+  }, [tenantId, actorId, location]);
+  
+  return <Sentry.ErrorBoundary fallback={<ErrorFallback />}>{children}</Sentry.ErrorBoundary>;
+}
+```
+
+**Status:** 🟨 **Partial** — Sentry integrated; minimum context implemented for backend; web/mobile context pending.
 
 ---
 

@@ -1,7 +1,7 @@
 # MBapp Development Cadence (copy/paste into a new chat)
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Status/Working](MBapp-Status.md) · [Foundations](MBapp-Foundations.md) · [Verification](smoke-coverage.md)  
-**Last Updated:** 2025-12-28
+**Last Updated:** 2025-12-29
 
 ---
 
@@ -104,6 +104,17 @@ Note: Include documentation updates in each labeled edit prompt when behavior or
   - `npm run spec:types:api`
   - `npm run spec:types:mobile`
 - Docs updated where behavior/flows changed (minimum: `docs/MBapp-Status.md`, plus any sprint doc if used).
+
+### ✅ Telemetry & UX Instrumentation
+- **Foundation-by-Accretion Rule:** New domain workflows or UX surface area must include telemetry.
+  - **1–3 domain events** for new state transitions (e.g., `backorder_ignored`, `po_received`).
+  - **1–3 UX events** for new screens or primary actions (e.g., `screen_viewed`, `button_clicked`).
+  - **Error events** captured automatically via Sentry error boundaries + API error handlers.
+- **Sentry context minimums (where applicable):**
+  - Required tags: `tenantId`, `actorId` (if authenticated), `environment`, `platform`.
+  - Required context: `objectType`/`objectId` (for domain errors), `route`/`screen` (for UX errors), `requestId` (for API errors).
+- **Event envelope compliance:** Use standard TelemetryEvent shape (see [MBapp-Foundations.md](MBapp-Foundations.md#82-telemetry-contract-event-envelope)).
+- **Guardrails:** No event sprawl (limit 3–5 events per feature); no PII in event properties; snake_case event names.
 
 ### ✅ Verification Evidence
 - Relevant typecheck(s) executed and clean.

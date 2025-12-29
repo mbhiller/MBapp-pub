@@ -2650,6 +2650,14 @@ components:
           type: string
         qty:
           type: number
+        fulfilledQty:
+          type: number
+          nullable: true
+          description: Server-maintained qty fulfilled via PO receive
+        remainingQty:
+          type: number
+          nullable: true
+          description: Server-maintained remaining qty to fulfill
         createdAt:
           type: string
           format: date-time

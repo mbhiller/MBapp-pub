@@ -12,6 +12,46 @@
 
 **Scope:** End-to-end backorders → purchase orders with vendor filtering, smart defaults, optimistic UX, and smoke test coverage.
 
+### Sprint J — Backorder Request Runtime Fulfillment Tracking + Ignore Action + Web Detail Page (2025-12-29)
+
+**Theme:** Add runtime fulfillment fields to BackorderRequest schema, ensure `:ignore` action has CI smoke coverage, and create web backorder detail page with full navigation wiring.
+
+**Deliverables:**
+- **E1 (Spec + Types):** Added `fulfilledQty` and `remainingQty` to BackorderRequest schema (nullable, not required). Regenerated all generated types (api, mobile). No breaking changes—fields are server-computed during PO receive.
+- **E2 (Smoke Coverage):** Created `smoke:backorders:ignore` test validating status transition (open→ignored), worklist exclusion (no longer in open results), and search filtering (appears in ignored results). Added to CI suite (28 total tests).
+- **E3 (Web Detail Page):** Created BackorderDetailPage.tsx with:
+  - Full detail view: qty, status, created timestamp, fulfillment progress (if fulfilledQty/remainingQty present)
+  - Related context cards: SO (with link), item (with link), vendor (with link)
+  - Ignore action (status=open only)
+  - Navigation wiring:
+    - `/backorders/:id` route added to App.tsx
+    - BackordersListPage: rows clickable to navigate to detail (stopPropagation on checkbox/action cells)
+    - SalesOrderDetailPage: breakdown badges clickable (link to filtered backorders list by status)
+    - PurchaseOrderDetailPage: backorder ID chips link directly to detail page
+  - Typecheck: web app typecheck passes after all changes
+- **E4 (Mobile Detail Screen):** Created BackorderDetailScreen.tsx with:
+  - Full detail view: qty, status, timestamps, fulfillment progress (if fulfilledQty/remainingQty present)
+  - Related context cards: SO (with navigate button), item (with navigate button), vendor (with navigate button)
+  - Ignore action (status=open only, with confirmation alert)
+  - Navigation wiring:
+    - `BackorderDetail: { id: string }` route added to types.ts
+    - BackorderDetailScreen added to RootStack.tsx
+    - BackordersListScreen: tap row to navigate to detail, long-press for multi-select (preserves bulk actions UX)
+  - Typecheck: mobile app typecheck passes after all changes
+
+**Smoke Coverage:**
+- `smoke:backorders:ignore` — CI test (28/28 passing)
+
+**Routes Updated (Web):**
+- `/backorders/:id` — New BackorderDetailPage with full context + ignore action
+- `/backorders` — List rows clickable
+- `/sales-orders/:id` — Breakdown badges now link to filtered backorders list
+- `/purchase-orders/:id` — Backorder chips link to detail page
+
+**Screens Updated (Mobile):**
+- `BackorderDetail` — New screen with full context + ignore action
+- `BackordersList` — Rows tap to detail, long-press for multi-select
+
 ### Error Contract & RequestId Debugging
 - Standard error envelope: `{ code, message, requestId, details? }` (errors include the API Gateway `requestId` when available).
 - RequestId source: API Gateway context; propagated into structured logs (JSON with requestId, tenant, user, route, method).

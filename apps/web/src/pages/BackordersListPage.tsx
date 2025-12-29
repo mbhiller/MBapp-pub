@@ -534,8 +534,8 @@ export default function BackordersListPage() {
                   );
                 })
               : items.map((bo) => (
-                  <tr key={bo.id}>
-                    <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                  <tr key={bo.id} onClick={() => window.location.href = `/backorders/${bo.id}`} style={{ cursor: "pointer" }}>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }} onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"
                         checked={!!selected[bo.id]}
@@ -544,7 +544,7 @@ export default function BackordersListPage() {
                     </td>
                     <td style={{ padding: 8, border: "1px solid #ccc" }}>
                       {bo.itemId ? (
-                        <Link to={`/inventory/${bo.itemId}`}>{bo.itemId}</Link>
+                        <Link to={`/inventory/${bo.itemId}`} onClick={(e) => e.stopPropagation()}>{bo.itemId}</Link>
                       ) : (
                         "—"
                       )}
@@ -552,7 +552,7 @@ export default function BackordersListPage() {
                     <td style={{ padding: 8, border: "1px solid #ccc" }}>{bo.qty ?? 0}</td>
                     <td style={{ padding: 8, border: "1px solid #ccc" }}>
                       {bo.soId ? (
-                        <Link to={`/sales-orders/${bo.soId}`}>{bo.soId}</Link>
+                        <Link to={`/sales-orders/${bo.soId}`} onClick={(e) => e.stopPropagation()}>{bo.soId}</Link>
                       ) : (
                         "—"
                       )}
@@ -563,7 +563,7 @@ export default function BackordersListPage() {
                         ? vendorNameById[bo.preferredVendorId] ?? bo.preferredVendorId
                         : "Unassigned"}
                     </td>
-                    <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }} onClick={(e) => e.stopPropagation()}>
                       {bo.status === "open" && (
                         <button
                           onClick={() => handleIgnore(bo.id)}

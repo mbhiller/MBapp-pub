@@ -557,24 +557,44 @@ export default function SalesOrderDetailPage() {
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <span style={{ fontSize: 13, fontWeight: 500, color: "#333" }}>Backorders:</span>
                 {backorderBreakdown.open > 0 && (
-                  <div style={{ padding: "4px 8px", background: "#fee", color: "#b00020", borderRadius: 3, fontSize: 12, fontWeight: 500 }}>
-                    Open {backorderBreakdown.open}
-                  </div>
+                  <Link 
+                    to={`/backorders?soId=${id}&status=open`} 
+                    style={{ textDecoration: "none" }}
+                  >
+                    <div style={{ padding: "4px 8px", background: "#fee", color: "#b00020", borderRadius: 3, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
+                      Open {backorderBreakdown.open}
+                    </div>
+                  </Link>
                 )}
                 {backorderBreakdown.converted > 0 && (
-                  <div style={{ padding: "4px 8px", background: "#f0f7ff", color: "#1976d2", borderRadius: 3, fontSize: 12, fontWeight: 500 }}>
-                    Converted {backorderBreakdown.converted}
-                  </div>
+                  <Link 
+                    to={`/backorders?soId=${id}&status=converted`} 
+                    style={{ textDecoration: "none" }}
+                  >
+                    <div style={{ padding: "4px 8px", background: "#f0f7ff", color: "#1976d2", borderRadius: 3, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
+                      Converted {backorderBreakdown.converted}
+                    </div>
+                  </Link>
                 )}
                 {backorderBreakdown.fulfilled > 0 && (
-                  <div style={{ padding: "4px 8px", background: "#e8f5e9", color: "#2e7d32", borderRadius: 3, fontSize: 12, fontWeight: 500 }}>
-                    Fulfilled {backorderBreakdown.fulfilled}
-                  </div>
+                  <Link 
+                    to={`/backorders?soId=${id}&status=fulfilled`} 
+                    style={{ textDecoration: "none" }}
+                  >
+                    <div style={{ padding: "4px 8px", background: "#e8f5e9", color: "#2e7d32", borderRadius: 3, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
+                      Fulfilled {backorderBreakdown.fulfilled}
+                    </div>
+                  </Link>
                 )}
                 {backorderBreakdown.ignored > 0 && (
-                  <div style={{ padding: "4px 8px", background: "#f5f5f5", color: "#666", borderRadius: 3, fontSize: 12, fontWeight: 500 }}>
-                    Ignored {backorderBreakdown.ignored}
-                  </div>
+                  <Link 
+                    to={`/backorders?soId=${id}&status=ignored`} 
+                    style={{ textDecoration: "none" }}
+                  >
+                    <div style={{ padding: "4px 8px", background: "#f5f5f5", color: "#666", borderRadius: 3, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
+                      Ignored {backorderBreakdown.ignored}
+                    </div>
+                  </Link>
                 )}
                 <span style={{ fontSize: 11, color: "#999" }}>
                   ({backorderBreakdown.totalQty} units)

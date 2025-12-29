@@ -966,15 +966,12 @@ export default function PurchaseOrderDetailPage() {
                     </div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                       {line.backorderRequestIds!.map((boId) => {
-                        // Build link to backorders list with filters to help locate this backorder
-                        const params = new URLSearchParams({ status: "open" });
-                        if (po.vendorId) params.set("vendorId", po.vendorId);
-                        if (itemId && itemId !== "—") params.set("itemId", itemId);
+                        // Primary link goes to backorder detail page
                         return (
                           <Link
                             key={boId}
-                            to={`/backorders?${params.toString()}`}
-                            title={`View backorder ${boId}`}
+                            to={`/backorders/${boId}`}
+                            title={`View backorder ${boId} detail`}
                             style={{
                               display: "inline-block",
                               padding: "4px 12px",

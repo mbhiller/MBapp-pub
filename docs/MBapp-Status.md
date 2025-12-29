@@ -1,19 +1,22 @@
 # MBapp Status / Working
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Foundations](MBapp-Foundations.md) · [Cadence](MBapp-Cadence.md) · [Verification](smoke-coverage.md)  
-**Last Updated:** 2025-12-28  
+**Last Updated:** 2025-12-29  
 **Workflow & DoD:** See [MBapp-Cadence.md](MBapp-Cadence.md) for canonical workflow, Definition of Done, and testing rules.
 
 ---
 
 ## Current State Summary
 
-### Backorder → PO → Receive Loop Polish — ✅ Complete (Sprint I)
+### Backorder → PO → Receive Loop Polish — ✅ Complete (Sprint I + Sprint J)
 - **MOQ Bump Fix:** suggest-po now applies minOrderQty regardless of vendor source (override/backorder derivation).
+- **Runtime Tracking:** BackorderRequest schema includes `fulfilledQty` and `remainingQty` (nullable, server-maintained during PO receive).
 - **Visibility:** Web/Mobile SO detail shows backorder status breakdown (open/converted/fulfilled/ignored); PO detail shows per-line backorder linkage.
+- **Detail Pages:** Web `/backorders/:id` and Mobile `BackorderDetail` screens show full context (SO/item/vendor links), fulfillment progress, and ignore action.
+- **Navigation:** SO detail badges link to filtered backorders; PO chips link to backorder detail; list rows navigate to detail.
 - **Mobile Ignore:** BackordersListScreen supports bulk Ignore action to remove unwanted backorders.
-- **Smoke Coverage:** New tests for partial fulfillment and MOQ bumping; full CI suite passing.
-- **Key Endpoints:** `/objects/backorderRequest/search` (status breakdown), `/purchasing/suggest-po` (MOQ-aware), PO receive (fulfillment tracking).
+- **Smoke Coverage:** Tests for ignore action, partial fulfillment, and MOQ bumping; full CI suite passing (28 tests).
+- **Key Endpoints:** `/objects/backorderRequest/search` (status breakdown), `/purchasing/suggest-po` (MOQ-aware), PO receive (fulfillment tracking), `:ignore` action.
 
 ### Patch-lines Parity (SO/PO) — ✅ Complete (Sprint G)
 - **Endpoints:** `/sales/so/{id}:patch-lines` and `/purchasing/po/{id}:patch-lines` implemented with identical sequencing.
@@ -33,8 +36,8 @@
 - ✅ **Mobile backorders Ignore action:** Bulk Ignore workflow integrated (pre-existing, confirmed working).
 
 **CI Posture:**
-- 40/40 smoke tests passing in CI (was 38/38, added 2 new tests)
-- Tests added this sprint: smoke:backorders:partial-fulfill, smoke:suggest-po:moq
+- 28/28 smoke tests passing in CI (Sprint I added smoke:backorders:partial-fulfill, smoke:suggest-po:moq; Sprint J added smoke:backorders:ignore)
+- Latest additions: smoke:backorders:ignore (Sprint J)
 - All tests documented in [smoke-coverage.md](smoke-coverage.md)
 
 **What's Next:**
@@ -54,7 +57,7 @@ Legend: ✅ done • 🟨 stub/partial • ⬜ planned
 | Inventory           | ✅   | ✅      | ✅     | ✅       | List stabilized (refresh/sort/limit) |
 | SalesOrders         | ✅   | ✅      | ✅     | ✅       | List stabilized: newest-first + create-return scroll-to-top; Detail shows backorder resolution breakdown (open/converted/fulfilled/ignored) |
 | PurchaseOrders      | ✅   | ✅      | ✅     | ✅       | Detail shows backorder linkage per line; suggest-po applies MOQ regardless of vendor source |
-| BackOrders          | ✅   | ✅      | ✅     | ✅       | Bulk actions + vendor filter; card styling aligned |
+| BackOrders          | ✅   | ✅      | ✅     | ✅       | Detail pages (web/mobile) with SO/PO/item deep-links; bulk ignore + vendor filter; fulfillment progress tracking |
 | Party (CRM)         | ✅   | ✅      | ✅     | 🟨       | Hook unification |
 | RoutePlans          | ✅   | ✅      | ✅     | 🟨       | Hook unification |
 | Scans / EPC         | 🟨   | ✅      | 🟨     | ⬜       | Add seed+resolve (optional) |
@@ -64,6 +67,7 @@ Legend: ✅ done • 🟨 stub/partial • ⬜ planned
 | Resources           | ✅   | ✅      | ✅     | ✅       | List/detail + seed/badges completed (Sprints V/VIII/XII) |
 | Reservations        | ✅   | ✅      | ✅     | ✅       | CRUD + conflicts + availability completed (Sprints V–VII) |
 | Workspaces/Views    | ✅   | ✅      | ✅     | 🟨       | Views: Web CRUD; Web lists (SO/PO/Inventory/Parties/Products) can save/apply views; Mobile WorkspaceHub deep-links views into SO/PO/Inventory/Parties/Products lists with apply/clear; Workspaces: API aliases views, Web list/detail |
+| Telemetry/Analytics | 🟨   | 🟨      | ⬜     | 🟨       | Sentry integrated (backend + mobile); PostHog planned; OTEL future; Domain events for core workflows (backorder, PO receive); UX events partial; Full event coverage post-MVP |
 | Scorecards/Reports  | ⬜   | ⬜      | ⬜     | ⬜       | Later tier |
 | Settings/Config     | ⬜   | ⬜      | ⬜     | ⬜       | Global flags, tenants |
 

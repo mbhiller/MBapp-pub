@@ -263,6 +263,8 @@ components:
         soLineId:    { type: string }
         itemId:      { type: string }
         qty:         { type: number }
+        fulfilledQty: { type: number, nullable: true, description: 'Server-maintained qty fulfilled via PO receive' }
+        remainingQty: { type: number, nullable: true, description: 'Server-maintained remaining qty to fulfill' }
         createdAt:   { type: string, format: date-time }
         status:      { type: string, enum: [open, ignored, converted, fulfilled], default: open }
     Class:
