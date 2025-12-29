@@ -10,6 +10,7 @@ export type ViewConfig = {
   name?: string;
   entityType?: string;
   description?: string;
+  shared?: boolean;
   filters?: Array<{ field: string; op: string; value: any }>;
   sort?: { field: string; dir?: "asc" | "desc" };
 };

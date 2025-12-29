@@ -9,13 +9,17 @@
 
 Smoke tests are integration tests for critical API flows. All tests use idempotency keys for safe retry and include party/vendor seeding. Run with `node ops/smoke/smoke.mjs <test-name>`.
 
-**CI Smoke Manifest:** The definitive list of tests run in CI is maintained in [ops/ci-smokes.json](../ops/ci-smokes.json). Additional flows exist in `ops/smoke/smoke.mjs` but are opt-in only.
+**CI Smoke Manifest:** The definitive list of tests run in CI is maintained in [ops/ci-smokes.json](../ops/ci-smokes.json). Additional flows exist in `ops/smoke/smoke.mjs` but are opt-in only. CI includes both `smoke:views:crud` and `smoke:workspaces:list`.
 
 **CI-covered patch-lines flows (Sprint G):**
 - `smoke:salesOrders:patch-lines` — Creates SO draft with 2 lines (L1, L2), updates L1 qty, removes L2, adds new line; asserts new line receives L3 (not reused L2), `idReused: false`, and all IDs stable.
 - `smoke:purchaseOrders:patch-lines` — Mirrors SO flow for PO; validates identical id assignment behavior, no id reuse, and stable L{n} sequence.
 
 **Guarantee:** Both smokes validate that removed line IDs are **reserved and never reused** by the server, ensuring stable line identity across edits.
+
+**CI-covered Views/Workspaces flows (Sprint H):**
+- `smoke:views:crud` — Creates view with unique timestamped name, validates CRUD operations (create, list with `q=<exact name>`, get, update, delete). Uses 5-attempt retry with 300ms delay for eventual consistency. **Deterministic:** filters by exact unique name instead of paginating through all views.
+- `smoke:workspaces:list` — Creates 2 temp views with unique smokeTag names and different entityTypes, validates filtering by `q=<tag>` and `entityType=<type>`. **Pollution-resistant:** uses unique run timestamp in names and filters by created view IDs, not generic patterns.
 
 - Default tenant: any tenant starting with **SmokeTenant** (e.g., SmokeTenant, SmokeTenant-qa). Override only by setting `MBAPP_SMOKE_ALLOW_NON_SMOKE_TENANT=1` (dangerous).
 - `SMOKE_RUN_ID` is emitted in the preflight log; set `SMOKE_RUN_ID` explicitly to tag runs or let the runner generate one.

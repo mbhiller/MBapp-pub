@@ -1,24 +1,40 @@
 import * as React from "react";
 import { View, Text, TextInput, FlatList, Pressable, ActivityIndicator, InteractionManager } from "react-native";
-import { useNavigation, useFocusEffect } from "@react-navigation/native";
+import { useNavigation, useFocusEffect, useRoute } from "@react-navigation/native";
+import type { RouteProp } from "@react-navigation/native";
 import { useObjects } from "../features/_shared/useObjects";
 import { useTheme } from "../providers/ThemeProvider";
 import { apiClient } from "../api/client";
 import { useToast } from "../features/_shared/Toast";
 import { createParty, addPartyRole } from "../features/parties/api";
 import { upsertInventoryItem } from "../features/inventory/api";
+import { useViewsApi } from "../features/views/hooks";
+import { mapViewToMobileState, type SavedView } from "../features/views/applyView";
+import type { RootStackParamList } from "../navigation/types";
 
 export default function SalesOrdersListScreen() {
   const nav = useNavigation<any>();
+  const route = useRoute<RouteProp<RootStackParamList, "SalesOrdersList">>();
   const t = useTheme();
   const toast = useToast();
   const listRef = React.useRef<FlatList<any>>(null);
   const scrollToTopOnNextFocus = React.useRef(false);
+  const { get: getView } = useViewsApi();
+  const defaultSort = React.useMemo(() => ({ by: "updatedAt", dir: "desc" as const }), []);
   const [q, setQ] = React.useState("");
-  const { data, isLoading, refetch } = useObjects<any>({
+  const [appliedView, setAppliedView] = React.useState<SavedView | null>(null);
+  const [filters, setFilters] = React.useState<{ filter?: Record<string, any>; sort?: { by?: string; dir?: "asc" | "desc" } }>({
+    filter: undefined,
+    sort: defaultSort,
+  });
+  const filterJSON = React.useMemo(() => JSON.stringify(filters.filter ?? {}), [filters.filter]);
+  const sortJSON = React.useMemo(() => JSON.stringify(filters.sort ?? defaultSort), [filters.sort, defaultSort]);
+
+  const { data, isLoading, refetch, reset } = useObjects<any>({
     type: "salesOrder",
     q,
-    query: { sort: "desc", by: "updatedAt" },
+    filter: filters.filter,
+    query: { sort: filters.sort?.dir ?? "desc", by: filters.sort?.by ?? "updatedAt" },
     params: { limit: __DEV__ ? 200 : 50 },
   });
 
@@ -35,7 +51,7 @@ export default function SalesOrdersListScreen() {
     });
   }, [rawItems]);
 
-  React.useEffect(() => { refetch(); }, [q, refetch]);
+  React.useEffect(() => { refetch(); }, [q, filterJSON, sortJSON, refetch]);
   useFocusEffect(
     React.useCallback(() => {
       const task = InteractionManager.runAfterInteractions(async () => {
@@ -48,6 +64,33 @@ export default function SalesOrdersListScreen() {
       return () => task.cancel?.();
     }, [refetch])
   );
+
+  React.useEffect(() => {
+    const id = route.params?.viewId;
+    if (!id) return;
+    (async () => {
+      try {
+        const view = await getView(id);
+        const result = mapViewToMobileState("salesOrder", view);
+        setAppliedView(view);
+        if (result.applied.q !== undefined) setQ(result.applied.q ?? "");
+        setFilters({
+          filter: result.applied.filter,
+          sort: result.applied.sort ?? defaultSort,
+        });
+        reset?.();
+      } catch (e) {
+        if (__DEV__) console.warn("Failed to apply view", e);
+      }
+    })();
+  }, [route.params?.viewId, getView, defaultSort, reset]);
+
+  const clearView = () => {
+    setAppliedView(null);
+    setFilters({ filter: undefined, sort: defaultSort });
+    setQ("");
+    reset?.();
+  };
 
   const ensurePartyId = async (): Promise<string> => {
     try {
@@ -105,6 +148,16 @@ export default function SalesOrdersListScreen() {
 
   return (
     <View style={{ flex: 1, padding: 12, backgroundColor: t.colors.bg }}>
+      {appliedView && (
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 10, borderRadius: 8, borderWidth: 1, borderColor: t.colors.border, backgroundColor: t.colors.card, marginBottom: 8 }}>
+          <Text style={{ color: t.colors.text, fontWeight: "600" }}>
+            Active View: {appliedView.name || appliedView.id}
+          </Text>
+          <Pressable onPress={clearView}>
+            <Text style={{ color: t.colors.primary, fontWeight: "700" }}>Clear</Text>
+          </Pressable>
+        </View>
+      )}
       <TextInput
         placeholder="Search sales orders"
         placeholderTextColor={t.colors.textMuted}

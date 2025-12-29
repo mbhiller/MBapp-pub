@@ -3,16 +3,29 @@ import React, { useState } from "react";
 import { View, Text, TextInput, ScrollView, Pressable, RefreshControl, Alert } from "react-native";
 import { useColors } from "../features/_shared/useColors";
 import { useWorkspaceItems } from "../features/workspaces/hooks";
+import type { RootStackParamList } from "../navigation/types";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+
+type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 const ENTITY_TYPES = [
   { label: "All", value: undefined },
   { label: "Purchase Order", value: "purchaseOrder" },
   { label: "Sales Order", value: "salesOrder" },
-  { label: "Inventory", value: "inventory" },
+  { label: "Inventory", value: "inventoryItem" },
   { label: "Party", value: "party" },
+  { label: "Product", value: "product" },
 ];
 
-export default function WorkspaceHubScreen({ navigation }: any) {
+const ROUTE_BY_ENTITY: Record<string, keyof RootStackParamList> = {
+  purchaseOrder: "PurchaseOrdersList",
+  salesOrder: "SalesOrdersList",
+  inventoryItem: "InventoryList",
+  party: "PartyList",
+  product: "ProductsList",
+};
+
+export default function WorkspaceHubScreen({ navigation }: { navigation: NavigationProp }) {
   const t = useColors();
   const [q, setQ] = useState("");
   const [entityType, setEntityType] = useState<string | undefined>(undefined);
@@ -20,9 +33,12 @@ export default function WorkspaceHubScreen({ navigation }: any) {
   const { data, isLoading, error, refetch } = useWorkspaceItems({ q, entityType });
 
   const handleItemPress = (item: any) => {
-    // TODO: Navigate to existing list-view route if present
-    // For now, show a toast
-    Alert.alert("Open View", `Opening "${item.name}" view is not implemented yet.`);
+    const route = ROUTE_BY_ENTITY[item?.entityType];
+    if (!route) {
+      Alert.alert("Unsupported", `No list screen for entity type: ${item?.entityType ?? "unknown"}`);
+      return;
+    }
+    navigation.navigate(route as any, { viewId: item.id } as any);
   };
 
   return (

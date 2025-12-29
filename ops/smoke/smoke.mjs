@@ -4848,11 +4848,11 @@ const tests = {
   
   "smoke:views:crud": async ()=>{
     await ensureBearer();
-    
-    // Fixed: use consistent entityType + timestamped unique name for pagination/search robustness
-    const entityType = "inventoryItem"; // Common in test environment
-    const uniqueName = smokeTag(`SmokeView-${Date.now()}`);
-    let itemsScanned = 0;
+
+    // Use consistent entityType + timestamped unique name for deterministic q= filtering
+    const entityType = "inventoryItem";
+    const timestamp = Date.now();
+    const uniqueName = smokeTag(`SmokeView-${timestamp}`);
     
     // 1) CREATE view
     const create = await post(`/views`, {
@@ -4867,60 +4867,38 @@ const tests = {
     const viewId = create.body.id;
     const createdView = create.body;
 
-    // 2) LIST views with pagination + retry + filtering
-    // Retry up to 5 times (200ms backoff) to account for eventual consistency
-    let found = null;
-    let listResults = [];
+    // 2) LIST views with exact q= filter + retry for eventual consistency
+    // Use q=<exact unique name> to find view deterministically without pagination depth limits
     const maxAttempts = 5;
-    const delayMs = 200;
-    
+    const delayMs = 300;
+    let found = null;
+    let lastListResponse = null;
+
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       if (attempt > 0) await sleep(delayMs);
-      
-      // Query with filters: entityType + q (name search) + pagination
-      let cursor = undefined;
-      let pageCount = 0;
-      const maxPages = 3; // Scan up to 3 pages
-      itemsScanned = 0;
-      found = null;
-      
-      while (pageCount < maxPages && !found) {
-        const listQuery = { entityType, q: uniqueName, limit: 100 };
-        if (cursor) listQuery.next = cursor;
-        
-        const list = await get(`/views`, listQuery);
-        if (!list.ok || !Array.isArray(list.body?.items)) {
-          // On list failure, continue retrying (don't fail immediately)
-          break;
-        }
-        
-        listResults = list.body.items;
-        itemsScanned += listResults.length;
-        
-        // Search for created view by ID within this page
-        found = listResults.find(v => v.id === viewId);
+
+      const listQuery = { entityType, q: uniqueName, limit: 50 };
+      const list = await get(`/views`, listQuery);
+      lastListResponse = list;
+
+      if (list.ok && Array.isArray(list.body?.items)) {
+        // Search for created view by ID in first page only (q= should narrow results)
+        found = list.body.items.find(v => v.id === viewId);
         if (found) break;
-        
-        // Move to next page if cursor available
-        cursor = list.body.next;
-        if (!cursor) break; // No more pages
-        pageCount++;
       }
-      
-      // If found, exit retry loop early
-      if (found) break;
     }
-    
+
     if (!found) {
       return {
         test:"views:crud",
         result:"FAIL",
-        reason:"view-not-in-list",
+        reason:"view-not-in-list-after-retries",
         debug: {
           created: { id: viewId, name: uniqueName, entityType },
-          listQuery: { entityType, q: uniqueName, limit: 100 },
-          itemsScanned,
-          sampledItems: listResults.slice(0, 3)
+          listQuery: { entityType, q: uniqueName, limit: 50 },
+          attempts: maxAttempts,
+          lastListItems: lastListResponse?.body?.items?.length ?? 0,
+          sampledItems: lastListResponse?.body?.items?.slice(0, 3)
         }
       };
     }
@@ -4985,18 +4963,18 @@ const tests = {
 
   "smoke:workspaces:list": async ()=>{
     await ensureBearer();
-    
-    // Sprint III: Test /workspaces filters (q, entityType)
-    // Enable FEATURE_VIEWS_ENABLED via dev header for all requests
+
+    // Sprint H: Test /workspaces filters (q, entityType) with unique smokeTag to avoid pollution
+    const runTimestamp = Date.now();
     const featureHeaders = { "X-Feature-Views-Enabled": "true" };
     const listHdr = { ...baseHeaders(), ...featureHeaders };
-    
-    // 1) Create two temp views with different entityTypes
+
+    // 1) Create two temp views with different entityTypes using unique smokeTag
     const createA = await fetch(`${API}/views`, {
       method: "POST",
       headers: listHdr,
       body: JSON.stringify({
-        name: smokeTag("WS Test A"),
+        name: smokeTag(`WS-Test-A-${runTimestamp}`),
         entityType: "purchaseOrder",
         filters: [{ field: "status", op: "eq", value: "submitted" }],
         columns: ["id", "vendorId", "total"]
@@ -5008,12 +4986,12 @@ const tests = {
     }
     const viewIdA = bodyA.id;
     recordCreated({ type: 'view', id: viewIdA, route: '/views', meta: { name: bodyA?.name, entityType: bodyA?.entityType } });
-    
+
     const createB = await fetch(`${API}/views`, {
       method: "POST",
       headers: listHdr,
       body: JSON.stringify({
-        name: smokeTag("WS Sample B"),
+        name: smokeTag(`WS-Sample-B-${runTimestamp}`),
         entityType: "salesOrder",
         filters: [{ field: "status", op: "eq", value: "committed" }],
         columns: ["id", "customerId", "total"]
@@ -5030,39 +5008,36 @@ const tests = {
     }
     const viewIdB = bodyB.id;
     recordCreated({ type: 'view', id: viewIdB, route: '/views', meta: { name: bodyB?.name, entityType: bodyB?.entityType } });
-    
-    // 2) GET /workspaces (all) - baseline
-    const listAll = await fetch(`${API}/workspaces?limit=50`, { headers: listHdr });
-    const allBody = await listAll.json().catch(() => ({}));
-    const allItems = Array.isArray(allBody?.items) ? allBody.items : [];
-    
-    // 3) GET /workspaces?q=Test -> assert at least one item with "Test" in name
-    const listQ = await fetch(`${API}/workspaces?q=Test&limit=50`, { headers: listHdr });
+
+    // 2) GET /workspaces?q=<unique tag> -> assert both created views are in results
+    const uniqueTag = `WS-Test-A-${runTimestamp}`.substring(0, 15); // Use first part of tag for search
+    const listQ = await fetch(`${API}/workspaces?q=${encodeURIComponent(uniqueTag)}&limit=50`, { headers: listHdr });
     const qBody = await listQ.json().catch(() => ({}));
     const qItems = Array.isArray(qBody?.items) ? qBody.items : [];
-    const hasTest = qItems.some(item => item.name && item.name.includes("Test"));
-    
-    if (!hasTest) {
+    const foundA = qItems.some(item => item.id === viewIdA);
+
+    if (!foundA) {
       // Cleanup before failing
       await fetch(`${API}/views/${encodeURIComponent(viewIdA)}`, { method: "DELETE", headers: listHdr });
       await fetch(`${API}/views/${encodeURIComponent(viewIdB)}`, { method: "DELETE", headers: listHdr });
-      return { test:"workspaces:list", result:"FAIL", reason:"q-filter-no-test-items", qItems };
+      return { test:"workspaces:list", result:"FAIL", reason:"q-filter-missing-created-view", qItems: qItems.slice(0, 5) };
     }
-    
-    // 4) GET /workspaces?entityType=purchaseOrder -> assert all items have entityType=purchaseOrder
+
+    // 3) GET /workspaces?entityType=purchaseOrder -> assert viewA is in results and all items have entityType=purchaseOrder
     const listEntity = await fetch(`${API}/workspaces?entityType=purchaseOrder&limit=50`, { headers: listHdr });
     const entityBody = await listEntity.json().catch(() => ({}));
     const entityItems = Array.isArray(entityBody?.items) ? entityBody.items : [];
-    const allPO = entityItems.every(item => item.entityType === "purchaseOrder");
-    
-    if (!allPO) {
+    const foundAinEntity = entityItems.some(item => item.id === viewIdA);
+    const allPO = entityItems.length > 0 && entityItems.every(item => item.entityType === "purchaseOrder");
+
+    if (!foundAinEntity || !allPO) {
       // Cleanup before failing
       await fetch(`${API}/views/${encodeURIComponent(viewIdA)}`, { method: "DELETE", headers: listHdr });
       await fetch(`${API}/views/${encodeURIComponent(viewIdB)}`, { method: "DELETE", headers: listHdr });
-      return { test:"workspaces:list", result:"FAIL", reason:"entityType-filter-mismatch", entityItems };
+      return { test:"workspaces:list", result:"FAIL", reason: !foundAinEntity ? "entityType-filter-missing-view" : "entityType-filter-mismatch", entityItems: entityItems.slice(0, 5) };
     }
-    
-    // 5) Cleanup: delete both temp views
+
+    // 4) Cleanup: delete both temp views
     const delA = await fetch(`${API}/views/${encodeURIComponent(viewIdA)}`, {
       method: "DELETE",
       headers: listHdr
@@ -5071,13 +5046,12 @@ const tests = {
       method: "DELETE",
       headers: listHdr
     });
-    
-    const pass = createA.ok && createB.ok && listAll.ok && hasTest && allPO && delA.ok && delB.ok;
+
+    const pass = createA.ok && createB.ok && foundA && foundAinEntity && allPO && delA.ok && delB.ok;
     return {
       test: "workspaces:list",
       result: pass ? "PASS" : "FAIL",
       counts: {
-        all: allItems.length,
         q: qItems.length,
         byEntity: entityItems.length
       }

@@ -1,23 +1,29 @@
 // apps/mobile/src/screens/PartyListScreen.tsx
 import * as React from "react";
 import { View, Text, FlatList, Pressable, ActivityIndicator, TextInput, InteractionManager } from "react-native";
-import { useNavigation, useFocusEffect } from "@react-navigation/native";
+import { useNavigation, useFocusEffect, useRoute } from "@react-navigation/native";
+import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { findParties } from "../features/parties/api";
 import type { Party } from "../features/parties/api";
 import type { RootStackParamList } from "../navigation/types";
 import { useColors } from "../features/_shared/useColors";
+import { useViewsApi } from "../features/views/hooks";
+import { mapViewToMobileState, type SavedView } from "../features/views/applyView";
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 export default function PartyListScreen() {
   const t = useColors();
   const navigation = useNavigation<NavigationProp>();
+  const route = useRoute<RouteProp<RootStackParamList, "PartyList">>();
+  const { get: getView } = useViewsApi();
   const [items, setItems] = React.useState<Party[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [lastError, setLastError] = React.useState<string | null>(null);
   const [q, setQ] = React.useState("");
   const [role, setRole] = React.useState("");
+  const [appliedView, setAppliedView] = React.useState<SavedView | null>(null);
   const listRef = React.useRef<FlatList<Party>>(null);
 
   React.useEffect(() => {
@@ -33,12 +39,35 @@ export default function PartyListScreen() {
     }, [q, role])
   );
 
+  React.useEffect(() => {
+    const id = route.params?.viewId;
+    if (!id) return;
+    (async () => {
+      try {
+        const view = await getView(id);
+        const result = mapViewToMobileState("party", view);
+        setAppliedView(view);
+        if (result.applied.q !== undefined) setQ(result.applied.q ?? "");
+        if (result.applied.filter?.role !== undefined) setRole(String(result.applied.filter.role ?? ""));
+      } catch (e) {
+        if (__DEV__) console.warn("Failed to apply view", e);
+      }
+    })();
+  }, [route.params?.viewId, getView]);
+
+  const clearView = () => {
+    setAppliedView(null);
+    setQ("");
+    setRole("");
+  };
+
   const load = async () => {
     setIsLoading(true);
     setLastError(null);
     try {
       const parties = await findParties({
         q: q || undefined,
+        role: role || undefined,
       });
       setItems(parties || []);
     } catch (err) {
@@ -135,6 +164,28 @@ export default function PartyListScreen() {
   }, [items, role]);
   return (
     <View style={{ flex: 1, padding: 12, backgroundColor: t.colors.background }}>
+      {appliedView && (
+        <View
+          style={{
+            padding: 10,
+            borderRadius: 8,
+            borderWidth: 1,
+            borderColor: t.colors.border,
+            backgroundColor: t.colors.card,
+            marginBottom: 8,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <Text style={{ color: t.colors.text, fontWeight: "600" }}>
+            Active View: {appliedView.name || appliedView.id}
+          </Text>
+          <Pressable onPress={clearView}>
+            <Text style={{ color: t.colors.primary, fontWeight: "700" }}>Clear</Text>
+          </Pressable>
+        </View>
+      )}
       {lastError && (
         <View
           style={{

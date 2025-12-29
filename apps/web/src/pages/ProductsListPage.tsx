@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../lib/http";
+import { SaveViewButton } from "../components/SaveViewButton";
 import { useAuth } from "../providers/AuthProvider";
 
 type Product = {
@@ -66,6 +67,10 @@ export default function ProductsListPage() {
     setFilter(search.trim());
   };
 
+  const currentViewFilters = [
+    filter.trim() ? { field: "q", op: "contains", value: filter.trim() } : null,
+  ].filter(Boolean) as Array<{ field: string; op: string; value: any }>;
+
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -83,6 +88,11 @@ export default function ProductsListPage() {
         <button onClick={onSearch} disabled={loading}>
           Search
         </button>
+        <SaveViewButton
+          entityType="product"
+          filters={currentViewFilters}
+          buttonLabel="Save as View"
+        />
       </div>
 
       {error && (
