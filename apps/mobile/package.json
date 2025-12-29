@@ -12,13 +12,12 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@sentry/react-native": "^5.15.0",
-    "posthog-react-native": "^5.4.0",
     "@expo/vector-icons": "^15.0.2",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/datetimepicker": "8.4.4",
     "@react-navigation/native": "^7.1.17",
     "@react-navigation/native-stack": "^7.3.26",
+    "@sentry/react-native": "^5.15.0",
     "@tanstack/react-query": "^5.89.0",
     "axios": "^1.11.0",
     "expo": "^54.0.8",
@@ -28,6 +27,7 @@
     "expo-constants": "~18.0.8",
     "expo-file-system": "~19.0.12",
     "expo-status-bar": "~3.0.8",
+    "posthog-react-native": "^4.17.1",
     "react": "19.1.0",
     "react-native": "^0.81.4",
     "react-native-gesture-handler": "~2.28.0",
