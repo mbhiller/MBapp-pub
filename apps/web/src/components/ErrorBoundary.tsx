@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import * as Sentry from "@sentry/browser";
 
 type State = { hasError: boolean; error?: Error };
 
@@ -13,6 +14,9 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error("ErrorBoundary caught", error, errorInfo);
+    try {
+      Sentry.captureException(error, { contexts: { react: errorInfo as any }, tags: { source: "web" } });
+    } catch {}
   }
 
   render() {

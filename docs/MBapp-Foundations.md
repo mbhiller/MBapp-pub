@@ -793,6 +793,26 @@ MBapp serves **three primary UX disciplines** with distinct interaction patterns
 
 **Status:** 🟨 **Partial** — Sentry integrated (backend + mobile); PostHog planned; OTEL not yet implemented.
 
+**Implementation:**
+- **Web helper:** `apps/web/src/lib/telemetry.ts` exports `track(eventName, properties)` (PostHog-backed)
+- **Env vars:** `VITE_POSTHOG_API_KEY`, `VITE_POSTHOG_HOST` (optional, defaults to app.posthog.com)
+- **Safe no-op:** If env vars missing, `track()` does nothing (no crashes)
+- **Envelope fields:** Automatically includes `ts`, `source="web"`, `route` (location.pathname), `tenantId`/`actorId` when available from AuthProvider context
+
+**Mobile scaffolding:**
+- **Helper:** `apps/mobile/src/lib/telemetry.ts` exports `track(eventName, properties)` with envelope (`ts`, `source="mobile"`, `screen`, `tenantId`, optional `actorId`)
+- **Env vars:** `EXPO_PUBLIC_POSTHOG_API_KEY`, `EXPO_PUBLIC_POSTHOG_HOST` (defaults to app.posthog.com)
+- **Sentry:** Init if `EXPO_PUBLIC_SENTRY_DSN` present; tags `source="mobile"` and `tenantId` from DevAuthBootstrap (no unsafe actorId decoding)
+- **Safe no-op:** Missing keys → telemetry helpers are no-ops (no crashes)
+
+**Instrumented Workflow (Example): Backorder Ignore (Web + Mobile)**
+- **UX events:**
+  - `BackorderDetail_Viewed` with `{ objectType: "backorderRequest", objectId }`
+  - `BO_Ignore_Clicked` with `{ objectType: "backorderRequest", objectId, result: "success|fail", errorCode? }`
+- **Domain event (API):**
+  - `BackorderIgnored` emitted from backend with `{ objectType, objectId, soId, itemId, statusBefore, statusAfter, durationMs }`
+- **PII rule:** IDs only in properties; no names/emails.
+
 ---
 
 ### 8.2 Telemetry Contract (Event Envelope)
@@ -833,6 +853,12 @@ type TelemetryEvent = {
 3. **Object references only:** Send object IDs, not full object payloads (query backend for details).
 4. **Timestamps in UTC:** Always ISO 8601 format (`new Date().toISOString()`).
 5. **Session continuity:** `sessionId` persists across screens/routes within a single app launch.
+
+**Domain Events Helper (API):**
+- **Location:** `apps/api/src/common/logger.ts` exports `emitDomainEvent(ctx, eventName, payload)`
+- **Envelope (auto):** `eventName`, `ts`, `source="api"`, `tenantId`, `actorId` (or `actorType="system"`)
+- **Payload (IDs only):** Use `objectType`, `objectId`, optional `soId`, `itemId`, `statusBefore`, `statusAfter`, `result`, `durationMs`, `errorCode`
+- **Example:** `emitDomainEvent(ctx, "BackorderIgnored", { objectType: "backorderRequest", objectId: id, soId, itemId, statusBefore, statusAfter })`
 
 ---
 

@@ -1,4 +1,5 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useMemo, useState, type ReactNode, useEffect } from "react";
+import * as Sentry from "@sentry/browser";
 
 export type AuthContextValue = {
   token: string | null;
@@ -87,6 +88,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({ token, tenantId, apiBase, setToken }),
     [token, tenantId]
   );
+
+  // Attach Sentry tags when auth context is available; safe if Sentry not initialized
+  useEffect(() => {
+    try {
+      // Always tag source=web
+      Sentry.setTag("source", "web");
+      // Only tag tenantId (no unsafe JWT decode for actorId)
+      if (tenantId) Sentry.setTag("tenantId", tenantId);
+      // Clear user on logout
+      if (!token) {
+        Sentry.setUser(null);
+      }
+    } catch {}
+  }, [token, tenantId]);
 
   const showTenantMismatch = Boolean(
     import.meta.env.DEV && token && jwtTenant && jwtTenant !== tenantId

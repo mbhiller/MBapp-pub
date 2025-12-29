@@ -3,6 +3,8 @@ import { Link, useParams, useNavigate } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
 import { getObject } from "../lib/api";
+import { track } from "../lib/telemetry";
+import * as Sentry from "@sentry/browser";
 import { ignoreBackorderRequest, type BackorderRequest } from "../lib/backorders";
 
 type SalesOrder = {
@@ -118,15 +120,33 @@ export default function BackorderDetailPage() {
     fetchDetail();
   }, [id]);
 
+  // Track screen view when backorder is loaded
+  useEffect(() => {
+    if (id && backorder?.id) {
+      track("BackorderDetail_Viewed", { objectType: "backorderRequest", objectId: id });
+    }
+  }, [id, backorder?.id]);
+
   const handleIgnore = async () => {
     if (!id || backorder?.status !== "open" || !token) return;
     setActionLoading(true);
     setActionError(null);
     try {
       await ignoreBackorderRequest(id, { token, tenantId });
+      // UX event: ignore clicked (success)
+      track("BO_Ignore_Clicked", { objectType: "backorderRequest", objectId: id, result: "success" });
       await fetchDetail(); // Refetch to get updated status
     } catch (err) {
       setActionError(formatError(err));
+      // UX event: ignore clicked (fail)
+      const code = (err as any)?.code || (err as any)?.status || undefined;
+      track("BO_Ignore_Clicked", { objectType: "backorderRequest", objectId: id, result: "fail", errorCode: code });
+      // Sentry capture with tags
+      try {
+        Sentry.captureException(err as any, {
+          tags: { tenantId, route: window.location.pathname, objectType: "backorderRequest", objectId: id },
+        });
+      } catch {}
     } finally {
       setActionLoading(false);
     }
