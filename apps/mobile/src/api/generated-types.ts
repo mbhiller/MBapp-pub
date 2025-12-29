@@ -775,7 +775,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Apply patch operations to purchase order lines (draft-only) */
+        /**
+         * Apply patch operations to purchase order lines (draft-only)
+         * @description Patch lines for draft purchase orders only. Non-draft states reject with 409 (PO_NOT_EDITABLE). Server preserves existing line ids and assigns stable ids (e.g., L1, L2, ...) for new lines.
+         */
         post: operations["patchPurchaseOrderLines"];
         delete?: never;
         options?: never;
@@ -1367,7 +1370,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Apply patch operations to sales order lines (draft-only) */
+        /**
+         * Apply patch operations to sales order lines (draft/submitted/approved)
+         * @description Patch lines while the sales order is editable (draft, submitted, or approved). Non-editable states reject with 409. Server preserves existing line ids and assigns stable ids (e.g., L1, L2, ...) for new lines.
+         */
         post: operations["patchSalesOrderLines"];
         delete?: never;
         options?: never;
@@ -2909,9 +2915,9 @@ export interface components {
         PatchLinesOp: {
             /** @enum {string} */
             op: "upsert" | "remove";
-            /** @description Server line id; preferred for matching existing lines */
+            /** @description Server-assigned line id (stable). Preferred for matching existing lines. Server may assign ids like `L1`, `L2`, ... and they are preserved. */
             id?: string;
-            /** @description Client-side temporary key; best-effort for non-persisted lines */
+            /** @description Client-side temporary key for new lines before persistence; best-effort match when `id` is absent. */
             cid?: string;
             /** @description Partial line fields to merge when op=upsert */
             patch?: Record<string, never>;

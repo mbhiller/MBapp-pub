@@ -431,14 +431,18 @@ export async function smoke_module_flow(API_BASE, authToken) {
 
 ---
 
-### PatchLines foundation (SO/PO lines)
+### Shared Line Editing Contract (patch-lines)
 
 **Why:** Stable line identity with minimal diffs and a reusable editor model across web/mobile. Avoids full-array replacements, reduces payload size, and standardizes line edits.
 
 **Contract:**
-- Operations: `ops[]` supports `{ op: "upsert" | "remove", id?, cid?, patch? }`.
-- Apply: server runs shared `applyPatchLines()` without reordering, then assigns missing IDs via `ensureLineIds()`.
-- Guard: endpoints allow patching only while orders are editable (Sales Orders: `draft|submitted|approved`; Purchase Orders: `draft`). Non-editable states return 409 (e.g., `PO_NOT_EDITABLE`).
+- **Server-authoritative `line.id`:** Stable `L{n}` format (L1, L2, L3...) assigned by `ensureLineIds()`. Server preserves existing IDs on updates and assigns new IDs starting from max+1.
+- **Client `cid` key:** Optional temporary key for new lines before persistence; best-effort matching only when `id` is absent.
+- **Normalize → patch → re-normalize:** Clients compute minimal ops, server applies `applyPatchLines()` without reordering, then runs `ensureLineIds()` to assign any missing IDs.
+- **Reserved IDs guarantee:** Removed line IDs are reserved and **never reused** by `ensureLineIds()` to prevent identity churn. New lines always get fresh IDs beyond the max.
+- **Sequencing (SO + PO):** Both endpoints use identical flow: `applyPatchLines()` → reserve removed IDs → `ensureLineIds(startAt: maxExisting+1)`.
+- **Status guards:** Sales Orders allow patching in `draft|submitted|approved`; Purchase Orders are **draft-only**.
+- **Error contract:** Non-editable states return `409 Conflict` with structured details: `{ code: "SO_NOT_EDITABLE" | "PO_NOT_EDITABLE", status: string }`.
 
 **Where:**
 - Shared utility: [apps/api/src/shared/patchLines.ts](../apps/api/src/shared/patchLines.ts)
@@ -448,9 +452,11 @@ export async function smoke_module_flow(API_BASE, authToken) {
 - Spec: [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml)
 
 **How to verify:**
-- Run smoke flow `smoke:salesOrders:patch-lines` in [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) to validate qty update + new line add and that new lines receive server-assigned IDs.
+- `smoke:salesOrders:patch-lines` — Validates update + add, ensures new lines receive server-assigned IDs.
+- `smoke:purchaseOrders:patch-lines` — Mirrors SO behavior; CI-covered.
 
-**Web status:** SalesOrder and PurchaseOrder edit pages use patch-lines via shared helper (E1/E2); broader module screens remain pending.
+**Parity status:** ✅ **Complete (Sprint G)** — Both SO and PO handlers aligned with identical sequencing and error shapes.
+**Web status:** SalesOrder and PurchaseOrder edit pages use patch-lines via shared helper; broader module screens remain pending.
 **API complete:** ✅
 
 ---

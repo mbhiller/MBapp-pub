@@ -3342,14 +3342,17 @@ const tests = {
     if (!inv.ok) return { test: "salesOrders:patch-lines", result: "FAIL", inv };
     const itemId = inv.body?.id;
 
-    // 1) Create draft SO with 1 line (server should assign id)
+    // 1) Create draft SO with 2 lines (server should assign ids)
     const create = await post(
       `/objects/salesOrder`,
       {
         type: "salesOrder",
         status: "draft",
         partyId,
-        lines: [{ itemId, uom: "ea", qty: 2 }],
+        lines: [
+          { itemId, uom: "ea", qty: 2 },
+          { itemId, uom: "ea", qty: 3 },
+        ],
       },
       { "Idempotency-Key": idem() }
     );
@@ -3359,13 +3362,15 @@ const tests = {
     const createLines = Array.isArray(create.body?.lines) ? create.body.lines : [];
     const keepLine = createLines[0] || {};
     const keepLineId = keepLine.id ?? keepLine.lineId;
+    const removeLineId = (createLines[1]?.id ?? createLines[1]?.lineId) || "";
 
-    // 2) Patch-lines: update qty of existing line and add a second line
+    // 2) Patch-lines: update qty of first line, remove second line, add a new third line
     const patch = await post(
       `/sales/so/${encodeURIComponent(soId)}:patch-lines`,
       {
         ops: [
           { op: "upsert", id: keepLineId, patch: { qty: (Number(keepLine.qty) || 0) + 1 } },
+          { op: "remove", id: removeLineId },
           { op: "upsert", patch: { itemId, uom: "ea", qty: 5 } },
         ],
       },
@@ -3373,15 +3378,18 @@ const tests = {
     );
     if (!patch.ok) return { test: "salesOrders:patch-lines", result: "FAIL", patch, create };
 
-    // 3) Fetch SO and assert lines reflect ops; new line has id assigned
+    // 3) Fetch SO and assert: kept line updated, removed line gone, new line has fresh id (not reused)
     const got = await get(`/objects/salesOrder/${encodeURIComponent(soId)}`);
     const lines = Array.isArray(got.body?.lines) ? got.body.lines : [];
     const ids = lines.map(l => l?.id ?? l?.lineId).filter(Boolean);
     const updatedKeep = lines.find(l => (l?.id ?? l?.lineId) === keepLineId);
+    const removedStillPresent = lines.find(l => (l?.id ?? l?.lineId) === removeLineId);
     const addedLine = lines.find(l => (l?.id ?? l?.lineId) !== keepLineId && l.itemId === itemId && Number(l.qty) === 5);
     const addedHasId = addedLine && typeof (addedLine.id ?? addedLine.lineId) === "string" && (addedLine.id ?? addedLine.lineId).trim().length > 0;
+    const addedLineId = addedLine?.id ?? addedLine?.lineId;
+    const idReused = addedLineId === removeLineId;
 
-    const pass = create.ok && patch.ok && got.ok && lines.length === 2 && updatedKeep && Number(updatedKeep.qty) === ((Number(keepLine.qty) || 0) + 1) && addedLine && addedHasId;
+    const pass = create.ok && patch.ok && got.ok && lines.length === 2 && updatedKeep && Number(updatedKeep.qty) === ((Number(keepLine.qty) || 0) + 1) && !removedStillPresent && addedLine && addedHasId && !idReused;
     return {
       test: "salesOrders:patch-lines",
       result: pass ? "PASS" : "FAIL",
@@ -3389,7 +3397,9 @@ const tests = {
       patched: patch.body,
       persistedLines: lines,
       keepLineId,
-      addedLineId: addedLine?.id ?? addedLine?.lineId,
+      removeLineId,
+      addedLineId,
+      idReused,
       create,
       patch,
       got,
@@ -3406,14 +3416,17 @@ const tests = {
     if (!inv.ok) return { test: "purchaseOrders:patch-lines", result: "FAIL", inv };
     const itemId = inv.body?.id;
 
-    // 1) Create draft PO with 1 line (server should assign id)
+    // 1) Create draft PO with 2 lines (server should assign ids)
     const create = await post(
       `/objects/purchaseOrder`,
       {
         type: "purchaseOrder",
         status: "draft",
         vendorId,
-        lines: [{ itemId, uom: "ea", qty: 3 }],
+        lines: [
+          { itemId, uom: "ea", qty: 3 },
+          { itemId, uom: "ea", qty: 4 },
+        ],
       },
       { "Idempotency-Key": idem() }
     );
@@ -3423,13 +3436,15 @@ const tests = {
     const createLines = Array.isArray(create.body?.lines) ? create.body.lines : [];
     const keepLine = createLines[0] || {};
     const keepLineId = keepLine.id ?? keepLine.lineId;
+    const removeLineId = (createLines[1]?.id ?? createLines[1]?.lineId) || "";
 
-    // 2) Patch-lines: update qty of existing line and add a second line
+    // 2) Patch-lines: update qty of first line, remove second line, add a new third line
     const patch = await post(
       `/purchasing/po/${encodeURIComponent(poId)}:patch-lines`,
       {
         ops: [
           { op: "upsert", id: keepLineId, patch: { qty: (Number(keepLine.qty) || 0) + 2 } },
+          { op: "remove", id: removeLineId },
           { op: "upsert", patch: { itemId, uom: "ea", qty: 7 } },
         ],
       },
@@ -3437,15 +3452,18 @@ const tests = {
     );
     if (!patch.ok) return { test: "purchaseOrders:patch-lines", result: "FAIL", patch, create };
 
-    // 3) Fetch PO and assert lines reflect ops; new line has id assigned
+    // 3) Fetch PO and assert: kept line updated, removed line gone, new line has fresh id (not reused)
     const got = await get(`/objects/purchaseOrder/${encodeURIComponent(poId)}`);
     const lines = Array.isArray(got.body?.lines) ? got.body.lines : [];
     const ids = lines.map(l => l?.id ?? l?.lineId).filter(Boolean);
     const updatedKeep = lines.find(l => (l?.id ?? l?.lineId) === keepLineId);
+    const removedStillPresent = lines.find(l => (l?.id ?? l?.lineId) === removeLineId);
     const addedLine = lines.find(l => (l?.id ?? l?.lineId) !== keepLineId && l.itemId === itemId && Number(l.qty) === 7);
     const addedHasId = addedLine && typeof (addedLine.id ?? addedLine.lineId) === "string" && (addedLine.id ?? addedLine.lineId).trim().length > 0;
+    const addedLineId = addedLine?.id ?? addedLine?.lineId;
+    const idReused = addedLineId === removeLineId;
 
-    const pass = create.ok && patch.ok && got.ok && lines.length === 2 && updatedKeep && Number(updatedKeep.qty) === ((Number(keepLine.qty) || 0) + 2) && addedLine && addedHasId;
+    const pass = create.ok && patch.ok && got.ok && lines.length === 2 && updatedKeep && Number(updatedKeep.qty) === ((Number(keepLine.qty) || 0) + 2) && !removedStillPresent && addedLine && addedHasId && !idReused;
     return {
       test: "purchaseOrders:patch-lines",
       result: pass ? "PASS" : "FAIL",
@@ -3453,7 +3471,9 @@ const tests = {
       patched: patch.body,
       persistedLines: lines,
       keepLineId,
-      addedLineId: addedLine?.id ?? addedLine?.lineId,
+      removeLineId,
+      addedLineId,
+      idReused,
       create,
       patch,
       got,

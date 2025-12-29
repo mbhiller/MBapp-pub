@@ -8,13 +8,22 @@
 
 ## Current State Summary
 
+### Patch-lines Parity (SO/PO) — ✅ Complete (Sprint G)
+- **Endpoints:** `/sales/so/{id}:patch-lines` and `/purchasing/po/{id}:patch-lines` implemented with identical sequencing.
+- **ID stability:** Server assigns stable `L{n}` IDs; removed IDs are reserved and **never reused** (guaranteed no id churn).
+- **Error contract:** Both endpoints return `409 Conflict` with structured `{ code, status }` when not editable (SO_NOT_EDITABLE / PO_NOT_EDITABLE).
+- **Web usage:** Both SalesOrder and PurchaseOrder edit pages use a shared diff helper to compute minimal ops.
+- **Guards:** Sales Orders allow patching in `draft|submitted|approved`; Purchase Orders are draft-only.
+- **CI coverage:** Both `smoke:salesOrders:patch-lines` and `smoke:purchaseOrders:patch-lines` validate id stability and no-reuse guarantee.
+- **Next:** Broader web modules to adopt the shared line editor; mobile edit UIs can later align on the same contract.
+
 **Recent Deliveries (Sprint C, 2025-12-27):**
 - ✅ Web backorders workflow: vendor filtering, multi-PO creation, bulk actions
 - ✅ PO receive with location/lot defaults, idempotency, backorder linkage
 - ✅ VendorPicker component with search + manual entry fallback
 - ✅ Inventory adjust modal with per-location breakdown
 - ✅ Close-the-loop smokes: multi-vendor PO creation + receive validation
-- ✅ PatchLines parity: SO and PO patch-lines endpoints exist (`/sales/so/{id}:patch-lines`, `/purchasing/po/{id}:patch-lines`) and both web edit pages use them via a shared diff helper.
+- ✅ **Sprint G patch-lines parity complete:** SO and PO handlers aligned with identical sequencing, stable L{n} IDs, reserved ID guarantee, and structured error contract.
 
 **CI Posture:**
 - 38/38 smoke tests passing in CI (Sprint XXV baseline)
