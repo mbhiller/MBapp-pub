@@ -1,7 +1,7 @@
 # MBapp Status / Working
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Foundations](MBapp-Foundations.md) · [Cadence](MBapp-Cadence.md) · [Verification](smoke-coverage.md)  
-**Last Updated:** 2025-12-28  
+**Last Updated:** 2025-12-29  
 **Workflow & DoD:** See [MBapp-Cadence.md](MBapp-Cadence.md) for canonical workflow, Definition of Done, and testing rules.
 
 ---
@@ -67,6 +67,7 @@ Legend: ✅ done • 🟨 stub/partial • ⬜ planned
 | Resources           | ✅   | ✅      | ✅     | ✅       | List/detail + seed/badges completed (Sprints V/VIII/XII) |
 | Reservations        | ✅   | ✅      | ✅     | ✅       | CRUD + conflicts + availability completed (Sprints V–VII) |
 | Workspaces/Views    | ✅   | ✅      | ✅     | 🟨       | Views: Web CRUD; Web lists (SO/PO/Inventory/Parties/Products) can save/apply views; Mobile WorkspaceHub deep-links views into SO/PO/Inventory/Parties/Products lists with apply/clear; Workspaces: API aliases views, Web list/detail |
+| Telemetry/Analytics | 🟨   | 🟨      | ⬜     | 🟨       | Sentry integrated (backend + mobile); PostHog planned; OTEL future; Domain events for core workflows (backorder, PO receive); UX events partial; Full event coverage post-MVP |
 | Scorecards/Reports  | ⬜   | ⬜      | ⬜     | ⬜       | Later tier |
 | Settings/Config     | ⬜   | ⬜      | ⬜     | ⬜       | Global flags, tenants |
 
