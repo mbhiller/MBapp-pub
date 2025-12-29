@@ -48,6 +48,38 @@ export const logger = {
 };
 
 /**
+ * Sanitize telemetry payload to prevent PII leakage.
+ * 
+ * Rules:
+ * - Drop PII-ish keys: name, email, phone, address, firstName, lastName (case-insensitive)
+ * - Drop nested objects/arrays (keep primitives only)
+ * - Keep primitives: string, number, boolean, null, undefined
+ * - Keep keys ending in "Id" (e.g., soId, objectId, tenantId)
+ */
+function sanitizeTelemetryPayload(payload?: Record<string, unknown>): Record<string, unknown> {
+  if (!payload) return {};
+
+  const PII_KEYS = /^(name|email|phone|address|firstname|lastname|displayname)$/i;
+  const sanitized: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(payload)) {
+    // Drop PII keys
+    if (PII_KEYS.test(key)) continue;
+
+    // Keep primitives only (drop objects/arrays)
+    const type = typeof value;
+    if (value === null || value === undefined) {
+      sanitized[key] = value;
+    } else if (type === "string" || type === "number" || type === "boolean") {
+      sanitized[key] = value;
+    }
+    // Drop objects, arrays, functions, etc.
+  }
+
+  return sanitized;
+}
+
+/**
  * Emit a structured domain event backed by the logger.
  * Adds envelope fields and merges user-provided payload.
  */
@@ -56,6 +88,9 @@ export function emitDomainEvent(
   eventName: string,
   payload?: Record<string, unknown>
 ) {
+  // Sanitize user-provided payload
+  const sanitized = sanitizeTelemetryPayload(payload);
+
   const base = clean({
     eventName,
     ts: new Date().toISOString(),
@@ -64,6 +99,6 @@ export function emitDomainEvent(
     actorId: ctx?.userId,
     actorType: ctx?.userId ? undefined : "system",
   });
-  const out = payload ? { ...base, ...payload } : base;
+  const out = sanitized ? { ...base, ...sanitized } : base;
   log("info", ctx, `[DOMAIN_EVENT] ${eventName}`, out);
 }

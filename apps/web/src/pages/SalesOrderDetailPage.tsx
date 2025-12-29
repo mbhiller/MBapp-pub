@@ -5,6 +5,8 @@ import { useAuth } from "../providers/AuthProvider";
 import LocationPicker from "../components/LocationPicker";
 import { getOnHandByLocation, type InventoryOnHandByLocationItem } from "../lib/inventory";
 import { listLocations, type Location } from "../lib/locations";
+import { track, trackScreenView } from "../lib/telemetry";
+import * as Sentry from "@sentry/browser";
 
 type SalesOrderLine = {
   id: string;
@@ -90,6 +92,13 @@ export default function SalesOrderDetailPage() {
   const [backordersError, setBackordersError] = useState<string | null>(null);
   const [vendorNameById, setVendorNameById] = useState<Record<string, string>>({});
   const [prefillFromReserve, setPrefillFromReserve] = useState<Record<string, { locationId?: string; lot?: string }>>({});
+
+  // Track screen view on mount
+  useEffect(() => {
+    if (id) {
+      trackScreenView("SalesOrderDetail", { objectType: "salesOrder", objectId: id });
+    }
+  }, [id]);
 
   const fetchBackorders = useCallback(async () => {
     if (!id) return;
@@ -329,6 +338,18 @@ export default function SalesOrderDetailPage() {
         if (action === "commit" || action === "fulfill") {
           await fetchBackorders();
         }
+
+        // Track success for commit action
+        if (action === "commit") {
+          const shortagesCount = 0; // Success path has no shortages
+          track("SO_Commit_Clicked", {
+            objectType: "salesOrder",
+            objectId: id,
+            strict: body?.strict ?? false,
+            result: "success",
+            shortagesCount,
+          });
+        }
       } catch (err) {
         const e = err as any;
         const details = e?.details || {};
@@ -347,7 +368,47 @@ export default function SalesOrderDetailPage() {
             message: details?.message || e?.message || "Insufficient availability",
             rows,
           });
+
+          // Track failure for commit action
+          if (action === "commit") {
+            const errorCode = e?.code ?? details?.code ?? "SHORTAGE_409";
+            track("SO_Commit_Clicked", {
+              objectType: "salesOrder",
+              objectId: id,
+              strict: body?.strict ?? false,
+              result: "fail",
+              errorCode,
+            });
+            Sentry.captureException(err, {
+              tags: {
+                tenantId: tenantId ?? "unknown",
+                objectType: "salesOrder",
+                objectId: id,
+                action: "commit",
+              },
+            });
+          }
           return;
+        }
+
+        // Track other failures for commit action
+        if (action === "commit") {
+          const errorCode = e?.code ?? e?.status ?? "UNKNOWN_ERROR";
+          track("SO_Commit_Clicked", {
+            objectType: "salesOrder",
+            objectId: id,
+            strict: body?.strict ?? false,
+            result: "fail",
+            errorCode,
+          });
+          Sentry.captureException(err, {
+            tags: {
+              tenantId: tenantId ?? "unknown",
+              objectType: "salesOrder",
+              objectId: id,
+              action: "commit",
+            },
+          });
         }
 
         setActionError(formatError(err));
@@ -360,6 +421,16 @@ export default function SalesOrderDetailPage() {
 
   const handleCommit = async () => {
     setShortageInfo(null);
+
+    // Track attempt
+    if (id) {
+      track("SO_Commit_Clicked", {
+        objectType: "salesOrder",
+        objectId: id,
+        strict: strictCommit,
+        result: "attempt",
+      });
+    }
 
     // Helper: defensive accessor for fulfilled qty (handles multiple field names)
     const getFulfilledQty = (line: any) =>

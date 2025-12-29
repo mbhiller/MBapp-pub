@@ -848,7 +848,7 @@ type TelemetryEvent = {
 ```
 
 **Envelope Rules:**
-1. **Never send PII:** No customer names, addresses, emails, phone numbers in `properties`.
+1. **Never send PII:** No customer names, addresses, emails, phone numbers in `properties`. **Auto-enforced:** All telemetry helpers (`track()`, `emitDomainEvent()`) include built-in `sanitizeTelemetryProps()` that drops PII keys (name, email, phone, address, firstName, lastName, displayName) and nested objects/arrays.
 2. **Always send tenant:** All events must include `tenantId` for isolation and filtering.
 3. **Object references only:** Send object IDs, not full object payloads (query backend for details).
 4. **Timestamps in UTC:** Always ISO 8601 format (`new Date().toISOString()`).
@@ -858,6 +858,7 @@ type TelemetryEvent = {
 - **Location:** `apps/api/src/common/logger.ts` exports `emitDomainEvent(ctx, eventName, payload)`
 - **Envelope (auto):** `eventName`, `ts`, `source="api"`, `tenantId`, `actorId` (or `actorType="system"`)
 - **Payload (IDs only):** Use `objectType`, `objectId`, optional `soId`, `itemId`, `statusBefore`, `statusAfter`, `result`, `durationMs`, `errorCode`
+- **Sanitization (auto):** Built-in PII filter drops name/email/phone/address keys and nested objects
 - **Example:** `emitDomainEvent(ctx, "BackorderIgnored", { objectType: "backorderRequest", objectId: id, soId, itemId, statusBefore, statusAfter })`
 
 ---
@@ -886,7 +887,66 @@ type TelemetryEvent = {
   environment: "prod"
 }
 
-// PO received (partial or full)
+// Sales Order committed (Sprint L)
+{
+  eventName: "SalesOrderCommitted",
+  timestamp: "2025-12-29T14:20:00.000Z",
+  sessionId: "sess_def456",
+  tenantId: "DemoTenant",
+  actorId: "user_xyz",
+  objectType: "salesOrder",
+  objectId: "so_78901",
+  properties: {
+    statusBefore: "approved",
+    statusAfter: "committed",
+    strict: false,
+    shortagesCount: 2,
+    movementsEmitted: 5,
+    result: "success"
+  },
+  platform: "api",
+  environment: "prod"
+}
+
+// Purchase Order received (Sprint L)
+{
+  eventName: "PurchaseOrderReceived",
+  timestamp: "2025-12-29T14:25:00.000Z",
+  sessionId: "sess_ghi789",
+  tenantId: "DemoTenant",
+  actorId: "user_xyz",
+  objectType: "purchaseOrder",
+  objectId: "po_67890",
+  properties: {
+    lineCount: 3,
+    totalQtyReceived: 150,
+    statusBefore: "approved",
+    statusAfter: "partially-received",
+    result: "success"
+  },
+  platform: "api",
+  environment: "prod"
+}
+
+// Purchase Order approved (Sprint L)
+{
+  eventName: "PurchaseOrderApproved",
+  timestamp: "2025-12-29T14:15:00.000Z",
+  sessionId: "sess_jkl012",
+  tenantId: "DemoTenant",
+  actorId: "user_xyz",
+  objectType: "purchaseOrder",
+  objectId: "po_67890",
+  properties: {
+    statusBefore: "submitted",
+    statusAfter: "approved",
+    result: "success"
+  },
+  platform: "api",
+  environment: "prod"
+}
+
+// PO received (legacy example — partial or full)
 {
   eventName: "po_received",
   timestamp: "2025-12-29T10:35:00.000Z",
@@ -945,7 +1005,79 @@ type TelemetryEvent = {
   environment: "prod"
 }
 
-// Button clicked (web)
+// Sales Order commit clicked (Sprint L — web)
+{
+  eventName: "SO_Commit_Clicked",
+  timestamp: "2025-12-29T14:20:00.000Z",
+  sessionId: "sess_def456",
+  tenantId: "DemoTenant",
+  actorId: "user_xyz",
+  screen: "/sales-orders/so_78901",
+  properties: {
+    objectType: "salesOrder",
+    objectId: "so_78901",
+    strict: false,
+    result: "success",  // or "attempt", "fail"
+    shortagesCount: 0
+  },
+  platform: "web",
+  environment: "prod"
+}
+
+// Purchase Order receive clicked (Sprint L — web)
+{
+  eventName: "PO_Receive_Clicked",
+  timestamp: "2025-12-29T14:25:00.000Z",
+  sessionId: "sess_ghi789",
+  tenantId: "DemoTenant",
+  actorId: "user_xyz",
+  screen: "/purchase-orders/po_67890",
+  properties: {
+    objectType: "purchaseOrder",
+    objectId: "po_67890",
+    result: "success",  // or "attempt", "fail"
+    lineCount: 3
+  },
+  platform: "web",
+  environment: "prod"
+}
+
+// Purchase Order approve clicked (Sprint L — mobile)
+{
+  eventName: "PO_Approve_Clicked",
+  timestamp: "2025-12-29T14:15:00.000Z",
+  sessionId: "sess_jkl012",
+  tenantId: "DemoTenant",
+  actorId: "user_xyz",
+  screen: "PurchaseOrderDetail",
+  properties: {
+    objectType: "purchaseOrder",
+    objectId: "po_67890",
+    result: "success"  // or "attempt", "fail"
+  },
+  platform: "mobile",
+  environment: "prod"
+}
+
+// Purchase Order scan-receive submitted (Sprint L — mobile)
+{
+  eventName: "PO_ScanReceive_Submitted",
+  timestamp: "2025-12-29T14:28:00.000Z",
+  sessionId: "sess_mno345",
+  tenantId: "DemoTenant",
+  actorId: "user_xyz",
+  screen: "PurchaseOrderDetail",
+  properties: {
+    objectType: "purchaseOrder",
+    objectId: "po_67890",
+    result: "success",  // or "attempt", "fail"
+    lineCount: 5
+  },
+  platform: "mobile",
+  environment: "prod"
+}
+
+// Button clicked (legacy example)
 {
   eventName: "button_clicked",
   timestamp: "2025-12-29T10:30:00.000Z",

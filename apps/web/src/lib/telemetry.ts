@@ -47,6 +47,38 @@ function getActorId(): string | undefined {
 }
 
 /**
+ * Sanitize telemetry properties to prevent PII leakage.
+ * 
+ * Rules:
+ * - Drop PII-ish keys: name, email, phone, address, firstName, lastName (case-insensitive)
+ * - Drop nested objects/arrays (keep primitives only)
+ * - Keep primitives: string, number, boolean, null, undefined
+ * - Keep keys ending in "Id" (e.g., soId, objectId, tenantId)
+ */
+function sanitizeTelemetryProps(props?: Record<string, any>): Record<string, any> {
+	if (!props) return {};
+
+	const PII_KEYS = /^(name|email|phone|address|firstname|lastname|displayname)$/i;
+	const sanitized: Record<string, any> = {};
+
+	for (const [key, value] of Object.entries(props)) {
+		// Drop PII keys
+		if (PII_KEYS.test(key)) continue;
+
+		// Keep primitives only (drop objects/arrays)
+		const type = typeof value;
+		if (value === null || value === undefined) {
+			sanitized[key] = value;
+		} else if (type === "string" || type === "number" || type === "boolean") {
+			sanitized[key] = value;
+		}
+		// Drop objects, arrays, functions, etc.
+	}
+
+	return sanitized;
+}
+
+/**
  * Track a telemetry event.
  * 
  * @param eventName - Event name (e.g., "button_clicked", "screen_viewed")
@@ -58,13 +90,16 @@ export function track(eventName: string, properties?: Record<string, any>): void
 		return;
 	}
 
+	// Sanitize user-provided properties
+	const sanitized = sanitizeTelemetryProps(properties);
+
 	const envelope = {
 		ts: new Date().toISOString(),
 		source: "web",
 		route: window.location.pathname,
 		tenantId: getTenantId(),
 		actorId: getActorId(),
-		...properties,
+		...sanitized,
 	};
 
 	// Remove undefined fields to keep payload clean

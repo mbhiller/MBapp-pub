@@ -1,7 +1,7 @@
 // apps/mobile/src/screens/SalesOrderDetailScreen.tsx
 import * as React from "react";
 import { View, Text, ActivityIndicator, FlatList, Pressable, Alert, TextInput, Modal, ScrollView } from "react-native";
-import { useRoute, useNavigation } from "@react-navigation/native";
+import { useRoute, useNavigation, useFocusEffect } from "@react-navigation/native";
 import { useObjects } from "../features/_shared/useObjects";
 import { BackorderHeaderBadge, BackorderLineBadge } from "../features/backorders/BackorderBadges";
 import {
@@ -20,6 +20,7 @@ import { ScannerPanel } from "../features/_shared/ScannerPanel";
 import { resolveScan } from "../lib/scanResolve";
 import { pickBestMatchingLineId, incrementCapped } from "../features/_shared/scanLineSelect";
 import { apiClient } from "../api/client";
+import { track, trackScreenView } from "../lib/telemetry";
 
 export default function SalesOrderDetailScreen() {
   const route = useRoute<any>();
@@ -49,6 +50,15 @@ export default function SalesOrderDetailScreen() {
   // Backorder status breakdown
   const [backorderBreakdown, setBackorderBreakdown] = React.useState<{ open: number; ignored: number; converted: number; fulfilled: number; total: number; totalQty: number }>({ open: 0, ignored: 0, converted: 0, fulfilled: 0, total: 0, totalQty: 0 });
   const [backorderBreakdownLoading, setBackorderBreakdownLoading] = React.useState(false);
+
+  // Track screen view on focus
+  useFocusEffect(
+    React.useCallback(() => {
+      if (id) {
+        trackScreenView("SalesOrderDetail", { objectType: "salesOrder", objectId: id });
+      }
+    }, [id])
+  );
 
   // Fetch backorder status breakdown
   const fetchBackorderBreakdown = React.useCallback(async () => {
@@ -295,6 +305,19 @@ export default function SalesOrderDetailScreen() {
 
   async function run(label: string, fn: () => Promise<any>) {
     if (!id) return;
+
+    // Track attempt for commit actions
+    const isCommit = label === "Commit" || label === "Commit (strict)";
+    const strict = label === "Commit (strict)";
+    if (isCommit) {
+      track("SO_Commit_Clicked", {
+        objectType: "salesOrder",
+        objectId: id,
+        strict,
+        result: "attempt",
+      });
+    }
+
     try {
       await fn();
       if (label === "Commit") {
@@ -306,11 +329,49 @@ export default function SalesOrderDetailScreen() {
       } else {
         toast(`${label} ok`, "success");
       }
+
+      // Track success for commit actions
+      if (isCommit) {
+        track("SO_Commit_Clicked", {
+          objectType: "salesOrder",
+          objectId: id,
+          strict,
+          result: "success",
+        });
+      }
+
       await refetch();
       await fetchBackorderBreakdown();
       await refetchAvailability();
     } catch (e: any) {
       console.error(e);
+
+      // Track failure for commit actions
+      if (isCommit) {
+        const errorCode = e?.code ?? e?.status ?? "UNKNOWN_ERROR";
+        track("SO_Commit_Clicked", {
+          objectType: "salesOrder",
+          objectId: id,
+          strict,
+          result: "fail",
+          errorCode,
+        });
+
+        // Capture exception in Sentry (dynamic require)
+        try {
+          const Sentry = require("@sentry/react-native");
+          Sentry.captureException(e, {
+            tags: {
+              objectType: "salesOrder",
+              objectId: id,
+              action: "commit",
+            },
+          });
+        } catch {
+          // Sentry not available
+        }
+      }
+
       if (e?.status === 409) {
         // Parse shortages for actionable feedback (reserve/commit)
         const getBody = (): any => {
