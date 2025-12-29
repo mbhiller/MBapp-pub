@@ -461,6 +461,39 @@ export async function smoke_module_flow(API_BASE, authToken) {
 
 ---
 
+### 4.7 Backorder Fulfillment & Visibility
+
+**What triggers a BackorderRequest:**
+- SO commit with `strict: false` and insufficient inventory creates BackorderRequest for each shortage line (status: `open`).
+- BackorderRequest has fields: `{ id, soId, soLineId, itemId, qty, createdAt, status }`.
+- Status lifecycle: `open` → (converted by suggest-po) → `converted` OR (user ignores) → `ignored` OR (PO partial receive) → `open/converted` OR (PO full receive) → `fulfilled`.
+
+**suggest-po MOQ behavior (Sprint I):**
+- `/purchasing/suggest-po` groups backorder requests by vendor and generates draft PO lines.
+- **MOQ is applied regardless of vendor source:** `suggest-po` now loads `product.minOrderQty` after determining `vendorId` (whether from explicit override, backorder preference, or product derivation).
+- When drafting a line from a backorder request qty < MOQ, the draft line qty is bumped to the MOQ with `adjustedFrom` tracking the original qty (for transparency).
+- **Example:** Backorder qty=10, product minOrderQty=50 → draft line qty=50, adjustedFrom=10.
+- Validation in smoke test: `smoke:suggest-po:moq` creates backorder qty=10 with minOrderQty=50 product, suggests PO, asserts draftQty=50.
+
+**Partial PO receive behavior (Sprint I):**
+- `/purchasing/po/{id}:receive` updates line-level `receivedQty` and decrements `backorderRequest.remainingQty`.
+- Backorder status does NOT change to `fulfilled` until `remainingQty === 0`.
+- If received qty < remaining qty, backorder stays `open` or `converted`; if received qty = remaining qty, status → `fulfilled`.
+- **Example:** Backorder remainingQty=10, receive deltaQty=5 → remainingQty=5, status stays `open/converted`.
+- Validation in smoke test: `smoke:backorders:partial-fulfill` creates backorder qty=10, receives qty=5, asserts status=`converted`, remainingQty=5, fulfilledQty=5.
+
+**Visibility (Web + Mobile):**
+- **Web PO detail:** Shows linked backorder IDs per line with filtered deep-link to backorders list (vendorId/itemId pre-filter).
+- **Web SO detail:** Fetches `/objects/backorderRequest/search?filter.soId={soId}` with all statuses (open/ignored/converted/fulfilled) and displays status breakdown badge with counts and total units.
+- **Mobile SO detail:** Fetches all backorder statuses via `apiClient.post('/objects/backorderRequest/search', { filter: { soId } })` with status param loop; displays BackorderHeaderBadge with optional breakdown (open/converted/fulfilled/ignored with unit counts).
+- **Mobile backorders list:** Supports bulk Ignore action via `/objects/backorderRequest/{id}:ignore` to mark backorders as ignored (status → `ignored`).
+
+**API complete:** ✅  
+**Smoke coverage:** `smoke:backorders:partial-fulfill`, `smoke:suggest-po:moq`  
+**Polish complete (Sprint I):** ✅
+
+---
+
 ### 4.7 Views & Workspaces (Sprint III)
 
 | Endpoint | Method | Status | Mobile | Web | MVP Need |

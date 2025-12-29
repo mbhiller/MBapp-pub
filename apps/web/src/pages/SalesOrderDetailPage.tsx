@@ -96,13 +96,25 @@ export default function SalesOrderDetailPage() {
     setBackordersLoading(true);
     setBackordersError(null);
     try {
-      const res = await apiFetch<{ items?: BackorderRequest[] }>("/objects/backorderRequest/search", {
-        method: "POST",
-        token: token || undefined,
-        tenantId,
-        body: { soId: id, status: "open" },
-      });
-      setBackorders(res.items ?? []);
+      // Fetch backorders by status to compute breakdown
+      const allBackorders: BackorderRequest[] = [];
+      
+      for (const status of ["open", "ignored", "converted", "fulfilled"]) {
+        try {
+          const res = await apiFetch<{ items?: BackorderRequest[] }>("/objects/backorderRequest/search", {
+            method: "POST",
+            token: token || undefined,
+            tenantId,
+            body: { soId: id, status },
+          });
+          if (res.items) allBackorders.push(...res.items);
+        } catch (err) {
+          // Continue fetching other statuses
+          console.warn(`Failed to fetch backorders with status ${status}:`, err);
+        }
+      }
+      
+      setBackorders(allBackorders);
     } catch (err) {
       setBackordersError(formatError(err));
     } finally {
@@ -500,6 +512,27 @@ export default function SalesOrderDetailPage() {
     await performAction("fulfill", { lines: payload });
   };
 
+  // Compute backorder status breakdown
+  const backorderBreakdown = useMemo(() => {
+    const breakdown = {
+      open: 0,
+      ignored: 0,
+      converted: 0,
+      fulfilled: 0,
+      total: 0,
+      totalQty: 0,
+    };
+    for (const bo of backorders) {
+      breakdown.total++;
+      breakdown.totalQty += bo.qty ?? 0;
+      const boStatus = (bo.status ?? "open") as keyof typeof breakdown;
+      if (boStatus in breakdown && boStatus !== "total" && boStatus !== "totalQty") {
+        breakdown[boStatus as Exclude<keyof typeof breakdown, "total" | "totalQty">]++;
+      }
+    }
+    return breakdown;
+  }, [backorders]);
+
   const status = order?.status ?? "";
   const canSubmit = status === "draft";
   const canCommit = status === "submitted" || status === "committed" || status === "draft";
@@ -520,9 +553,32 @@ export default function SalesOrderDetailPage() {
         <div style={{ display: "grid", gap: 4 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <h1 style={{ margin: 0 }}>Sales Order Detail</h1>
-            {backorders.length > 0 && (
-              <div style={{ padding: "4px 8px", background: "#fff4e5", color: "#8a3c00", borderRadius: 4, fontSize: 12, fontWeight: 600, border: "1px solid #f2c97d" }}>
-                Backorders: {backorders.length} ({backorders.reduce((sum, bo) => sum + (bo.qty ?? 0), 0)} units)
+            {backorderBreakdown.total > 0 && (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <span style={{ fontSize: 13, fontWeight: 500, color: "#333" }}>Backorders:</span>
+                {backorderBreakdown.open > 0 && (
+                  <div style={{ padding: "4px 8px", background: "#fee", color: "#b00020", borderRadius: 3, fontSize: 12, fontWeight: 500 }}>
+                    Open {backorderBreakdown.open}
+                  </div>
+                )}
+                {backorderBreakdown.converted > 0 && (
+                  <div style={{ padding: "4px 8px", background: "#f0f7ff", color: "#1976d2", borderRadius: 3, fontSize: 12, fontWeight: 500 }}>
+                    Converted {backorderBreakdown.converted}
+                  </div>
+                )}
+                {backorderBreakdown.fulfilled > 0 && (
+                  <div style={{ padding: "4px 8px", background: "#e8f5e9", color: "#2e7d32", borderRadius: 3, fontSize: 12, fontWeight: 500 }}>
+                    Fulfilled {backorderBreakdown.fulfilled}
+                  </div>
+                )}
+                {backorderBreakdown.ignored > 0 && (
+                  <div style={{ padding: "4px 8px", background: "#f5f5f5", color: "#666", borderRadius: 3, fontSize: 12, fontWeight: 500 }}>
+                    Ignored {backorderBreakdown.ignored}
+                  </div>
+                )}
+                <span style={{ fontSize: 11, color: "#999" }}>
+                  ({backorderBreakdown.totalQty} units)
+                </span>
               </div>
             )}
           </div>

@@ -1163,6 +1163,229 @@ const tests = {
       };
     },
 
+    "smoke:backorders:partial-fulfill": async () => {
+      await ensureBearer();
+      
+      // 1) Seed vendor, product, and inventory with onHand=0
+      const { vendorId } = await seedVendor(api);
+      const prod = await createProduct({ name: "PartialFulfillTest", preferredVendorId: vendorId });
+      if (!prod.ok) return { test: "smoke:backorders:partial-fulfill", result: "FAIL", step: "createProduct", prod };
+      const productId = prod.body?.id;
+      
+      const item = await createInventoryForProduct(productId, "PartialFulfillItem");
+      if (!item.ok) return { test: "smoke:backorders:partial-fulfill", result: "FAIL", step: "createInventory", item };
+      const itemId = item.body?.id;
+      
+      // Ensure onHand=0
+      const onhandPre = await onhand(itemId);
+      const currentOnHand = onhandPre.body?.items?.[0]?.onHand ?? 0;
+      if (currentOnHand !== 0) {
+        await post(`/objects/inventoryMovement`, { itemId, type: "adjust", qty: -currentOnHand });
+      }
+      
+      // 2) Create customer and sales order with qty=10
+      const { customerId } = await seedCustomer(api);
+      const so = await post(`/objects/salesOrder`, {
+        type: "salesOrder", 
+        status: "draft", 
+        partyId: customerId, 
+        lines: [{ itemId, qty: 10, uom: "ea" }]
+      });
+      if (!so.ok) return { test: "smoke:backorders:partial-fulfill", result: "FAIL", step: "createSO", so };
+      const soId = so.body?.id;
+      
+      // 3) Commit SO non-strict → creates backorder with qty=10
+      await post(`/sales/so/${encodeURIComponent(soId)}:submit`, {}, { "Idempotency-Key": idem() });
+      const commit = await post(`/sales/so/${encodeURIComponent(soId)}:commit`, {}, { "Idempotency-Key": idem() });
+      if (!commit.ok) return { test: "smoke:backorders:partial-fulfill", result: "FAIL", step: "commit", commit };
+      
+      // 4) Wait for backorder with status="open"
+      const boSearch = await waitForBackorders({ soId, itemId, status: "open" });
+      if (!boSearch.ok || !boSearch.items || boSearch.items.length === 0) {
+        return { test: "smoke:backorders:partial-fulfill", result: "FAIL", step: "backorder-not-found", boSearch };
+      }
+      const backorderId = boSearch.items[0].id;
+      const backorderQty = boSearch.items[0].qty;
+      
+      // 5) Suggest PO from backorder
+      const suggest = await post(`/purchasing/suggest-po`, { 
+        requests: [{ backorderRequestId: backorderId }] 
+      });
+      if (!suggest.ok) return { test: "smoke:backorders:partial-fulfill", result: "FAIL", step: "suggest-po", suggest };
+      
+      const draft = suggest.body?.draft ?? suggest.body?.drafts?.[0];
+      if (!draft) return { test: "smoke:backorders:partial-fulfill", result: "FAIL", step: "no-draft", suggest };
+      
+      // 6) Create PO from suggestion
+      const poCreate = await post(`/purchasing/po:create-from-suggestion`, { draft }, { "Idempotency-Key": idem() });
+      if (!poCreate.ok) return { test: "smoke:backorders:partial-fulfill", result: "FAIL", step: "po-create", poCreate };
+      const poId = poCreate.body?.id ?? poCreate.body?.ids?.[0];
+      
+      recordFromListResult([{ id: poId, type: "purchaseOrder", status: "draft", vendorId }], 
+        "purchaseOrder", `/purchasing/po:create-from-suggestion`);
+      
+      // 7) Submit and approve PO
+      await post(`/purchasing/po/${encodeURIComponent(poId)}:submit`, {}, { "Idempotency-Key": idem() });
+      const approve = await post(`/purchasing/po/${encodeURIComponent(poId)}:approve`, {}, { "Idempotency-Key": idem() });
+      if (!approve.ok) return { test: "smoke:backorders:partial-fulfill", result: "FAIL", step: "approve", approve };
+      
+      // 8) Receive ONLY qty=5 (partial receive)
+      const po = await get(`/objects/purchaseOrder/${encodeURIComponent(poId)}`);
+      const poLines = po.body?.lines ?? [];
+      if (poLines.length === 0) {
+        return { test: "smoke:backorders:partial-fulfill", result: "FAIL", step: "no-po-lines", po };
+      }
+      
+      const lineId = poLines[0].id ?? poLines[0].lineId;
+      const partialQty = 5; // Receive only half
+      
+      const receive = await post(`/purchasing/po/${encodeURIComponent(poId)}:receive`, 
+        { lines: [{ lineId, deltaQty: partialQty }] }, 
+        { "Idempotency-Key": idem() }
+      );
+      if (!receive.ok) return { test: "smoke:backorders:partial-fulfill", result: "FAIL", step: "receive", receive };
+      
+      // 9) Fetch backorder and verify partial fulfillment
+      // Allow a few retries for eventual consistency
+      let boAfter = null;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const fetchBo = await get(`/objects/backorderRequest/${encodeURIComponent(backorderId)}`);
+        if (fetchBo.ok && fetchBo.body) {
+          boAfter = fetchBo.body;
+          break;
+        }
+        if (attempt < 4) await sleep(300);
+      }
+      
+      if (!boAfter) {
+        return { test: "smoke:backorders:partial-fulfill", result: "FAIL", step: "backorder-fetch-after-receive" };
+      }
+      
+      // Assertions:
+      // - backorder should NOT be "fulfilled" (since only 5 of 10 received)
+      // - status should be "converted" (from suggest-po) or remain "open" if conversion happens later
+      // - fulfilledQty should be 5, remainingQty should be 5 (if tracked)
+      const statusAfter = boAfter.status;
+      const fulfilledQty = boAfter.fulfilledQty ?? 0;
+      const remainingQty = boAfter.remainingQty ?? (backorderQty - fulfilledQty);
+      
+      const statusOk = statusAfter !== "fulfilled"; // Should be "converted" or "open"
+      const fulfilledOk = fulfilledQty === partialQty;
+      const remainingOk = remainingQty === (backorderQty - partialQty);
+      
+      const pass = statusOk && fulfilledOk && remainingOk;
+      
+      return {
+        test: "smoke:backorders:partial-fulfill",
+        result: pass ? "PASS" : "FAIL",
+        steps: {
+          productId, itemId, soId, backorderId, poId,
+          backorderQty,
+          partialQty,
+          statusBefore: "open",
+          statusAfter,
+          fulfilledQty,
+          remainingQty,
+          checks: { statusOk, fulfilledOk, remainingOk },
+          boAfter
+        }
+      };
+    },
+
+    "smoke:suggest-po:moq": async () => {
+      await ensureBearer();
+      
+      // 1) Create vendor and product with minOrderQty=50
+      const { vendorId } = await seedVendor(api);
+      const moq = 50;
+      const prod = await createProduct({ 
+        name: "MOQTest", 
+        preferredVendorId: vendorId,
+        minOrderQty: moq
+      });
+      if (!prod.ok) return { test: "smoke:suggest-po:moq", result: "FAIL", step: "createProduct", prod };
+      const productId = prod.body?.id;
+      
+      const item = await createInventoryForProduct(productId, "MOQTestItem");
+      if (!item.ok) return { test: "smoke:suggest-po:moq", result: "FAIL", step: "createInventory", item };
+      const itemId = item.body?.id;
+      
+      // Ensure onHand=0
+      const onhandPre = await onhand(itemId);
+      const currentOnHand = onhandPre.body?.items?.[0]?.onHand ?? 0;
+      if (currentOnHand !== 0) {
+        await post(`/objects/inventoryMovement`, { itemId, type: "adjust", qty: -currentOnHand });
+      }
+      
+      // 2) Create customer and SO with qty=10 (below MOQ)
+      const { customerId } = await seedCustomer(api);
+      const requestedQty = 10; // Below MOQ
+      const so = await post(`/objects/salesOrder`, {
+        type: "salesOrder", 
+        status: "draft", 
+        partyId: customerId, 
+        lines: [{ itemId, qty: requestedQty, uom: "ea" }]
+      });
+      if (!so.ok) return { test: "smoke:suggest-po:moq", result: "FAIL", step: "createSO", so };
+      const soId = so.body?.id;
+      
+      // 3) Commit SO non-strict → creates backorder with qty=10
+      await post(`/sales/so/${encodeURIComponent(soId)}:submit`, {}, { "Idempotency-Key": idem() });
+      const commit = await post(`/sales/so/${encodeURIComponent(soId)}:commit`, {}, { "Idempotency-Key": idem() });
+      if (!commit.ok) return { test: "smoke:suggest-po:moq", result: "FAIL", step: "commit", commit };
+      
+      // 4) Wait for backorder
+      const boSearch = await waitForBackorders({ soId, itemId, status: "open" });
+      if (!boSearch.ok || !boSearch.items || boSearch.items.length === 0) {
+        return { test: "smoke:suggest-po:moq", result: "FAIL", step: "backorder-not-found", boSearch };
+      }
+      const backorderId = boSearch.items[0].id;
+      
+      // 5) Call suggest-po and verify MOQ bump
+      const suggest = await post(`/purchasing/suggest-po`, { 
+        requests: [{ backorderRequestId: backorderId }] 
+      });
+      if (!suggest.ok) return { test: "smoke:suggest-po:moq", result: "FAIL", step: "suggest-po", suggest };
+      
+      const draft = suggest.body?.draft ?? suggest.body?.drafts?.[0];
+      if (!draft) return { test: "smoke:suggest-po:moq", result: "FAIL", step: "no-draft", suggest };
+      
+      const draftLines = draft.lines ?? [];
+      if (draftLines.length === 0) {
+        return { test: "smoke:suggest-po:moq", result: "FAIL", step: "no-draft-lines", draft };
+      }
+      
+      const line = draftLines[0];
+      const draftQty = line.qty;
+      const adjustedFrom = line.adjustedFrom ?? line.originalQty;
+      const minOrderQtyApplied = line.minOrderQtyApplied;
+      
+      // Assertions:
+      // - line.qty should be bumped to MOQ (50)
+      // - adjustedFrom (if tracked) should show original qty (10)
+      // - minOrderQtyApplied (if tracked) should be 50
+      const qtyOk = draftQty === moq;
+      const adjustedFromOk = adjustedFrom === undefined || adjustedFrom === requestedQty;
+      const moqFieldOk = minOrderQtyApplied === undefined || minOrderQtyApplied === moq;
+      
+      const pass = qtyOk && adjustedFromOk && moqFieldOk;
+      
+      return {
+        test: "smoke:suggest-po:moq",
+        result: pass ? "PASS" : "FAIL",
+        steps: {
+          productId, itemId, soId, backorderId,
+          moq,
+          requestedQty,
+          draftQty,
+          adjustedFrom,
+          minOrderQtyApplied,
+          checks: { qtyOk, adjustedFromOk, moqFieldOk },
+          line
+        }
+      };
+    },
+
     "smoke:vendor-guard-enforced": async () => {
       await ensureBearer();
       const guardHeaders = { "X-Feature-Enforce-Vendor": "1" };

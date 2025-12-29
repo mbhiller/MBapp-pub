@@ -965,24 +965,31 @@ export default function PurchaseOrderDetailPage() {
                       {lineId} ({itemId})
                     </div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                      {line.backorderRequestIds!.map((boId) => (
-                        <Link
-                          key={boId}
-                          to={`/backorders?backorderRequestId=${encodeURIComponent(boId)}`}
-                          style={{
-                            display: "inline-block",
-                            padding: "4px 12px",
-                            background: "#1976d2",
-                            color: "#fff",
-                            borderRadius: 3,
-                            textDecoration: "none",
-                            fontSize: 12,
-                            fontWeight: 500,
-                          }}
-                        >
-                          {boId}
-                        </Link>
-                      ))}
+                      {line.backorderRequestIds!.map((boId) => {
+                        // Build link to backorders list with filters to help locate this backorder
+                        const params = new URLSearchParams({ status: "open" });
+                        if (po.vendorId) params.set("vendorId", po.vendorId);
+                        if (itemId && itemId !== "—") params.set("itemId", itemId);
+                        return (
+                          <Link
+                            key={boId}
+                            to={`/backorders?${params.toString()}`}
+                            title={`View backorder ${boId}`}
+                            style={{
+                              display: "inline-block",
+                              padding: "4px 12px",
+                              background: "#1976d2",
+                              color: "#fff",
+                              borderRadius: 3,
+                              textDecoration: "none",
+                              fontSize: 12,
+                              fontWeight: 500,
+                            }}
+                          >
+                            {boId}
+                          </Link>
+                        );
+                      })}
                     </div>
                   </div>
                 );
