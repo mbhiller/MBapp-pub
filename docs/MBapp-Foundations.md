@@ -450,7 +450,7 @@ export async function smoke_module_flow(API_BASE, authToken) {
 **How to verify:**
 - Run smoke flow `smoke:salesOrders:patch-lines` in [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) to validate qty update + new line add and that new lines receive server-assigned IDs.
 
-**Web gaps:** All screens  
+**Web status:** SalesOrder and PurchaseOrder edit pages use patch-lines via shared helper (E1/E2); broader module screens remain pending.
 **API complete:** ✅
 
 ---

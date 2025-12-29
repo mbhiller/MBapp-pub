@@ -11,6 +11,9 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 
 **CI Smoke Manifest:** The definitive list of tests run in CI is maintained in [ops/ci-smokes.json](../ops/ci-smokes.json). Additional flows exist in `ops/smoke/smoke.mjs` but are opt-in only.
 
+**New CI-covered flow:**
+- `smoke:purchaseOrders:patch-lines` — Mirrors Sales Orders patch-lines smoke; creates a draft PO, patches qty on existing line and adds a new line; asserts existing line ID persists and new line receives a server-assigned ID. Registered in CI manifest.
+
 - Default tenant: any tenant starting with **SmokeTenant** (e.g., SmokeTenant, SmokeTenant-qa). Override only by setting `MBAPP_SMOKE_ALLOW_NON_SMOKE_TENANT=1` (dangerous).
 - `SMOKE_RUN_ID` is emitted in the preflight log; set `SMOKE_RUN_ID` explicitly to tag runs or let the runner generate one.
   - The runner records a manifest per run in `ops/smoke/.manifests/<SMOKE_RUN_ID>.json` capturing created entities (type, id, route, meta).

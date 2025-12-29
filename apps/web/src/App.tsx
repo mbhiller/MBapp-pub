@@ -29,6 +29,7 @@ import EditPurchaseOrderPage from "./pages/EditPurchaseOrderPage";
 import LocationsListPage from "./pages/LocationsListPage";
 import LocationDetailPage from "./pages/LocationDetailPage";
 import InventoryMovementsPage from "./pages/InventoryMovementsPage";
+import DocsPage from "./pages/DocsPage";
 
 function HomePage() {
   return (
@@ -84,6 +85,7 @@ export default function App() {
           <Route path="/purchase-orders/:id/edit" element={<EditPurchaseOrderPage />} />
           <Route path="/locations" element={<LocationsListPage />} />
           <Route path="/locations/:id" element={<LocationDetailPage />} />
+          <Route path="/docs" element={<DocsPage />} />
         </Routes>
       </Layout>
     </ErrorBoundary>

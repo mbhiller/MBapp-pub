@@ -14,6 +14,7 @@
 - ✅ VendorPicker component with search + manual entry fallback
 - ✅ Inventory adjust modal with per-location breakdown
 - ✅ Close-the-loop smokes: multi-vendor PO creation + receive validation
+- ✅ PatchLines parity: SO and PO patch-lines endpoints exist (`/sales/so/{id}:patch-lines`, `/purchasing/po/{id}:patch-lines`) and both web edit pages use them via a shared diff helper.
 
 **CI Posture:**
 - 38/38 smoke tests passing in CI (Sprint XXV baseline)
