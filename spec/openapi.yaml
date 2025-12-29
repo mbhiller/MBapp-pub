@@ -1509,6 +1509,7 @@ paths:
   /purchasing/po/{id}:patch-lines:
     post:
       summary: Apply patch operations to purchase order lines (draft-only)
+      description: Patch lines for draft purchase orders only. Non-draft states reject with 409 (PO_NOT_EDITABLE). Server preserves existing line ids and assigns stable ids (e.g., L1, L2, ...) for new lines.
       operationId: patchPurchaseOrderLines
       parameters:
         - in: path
@@ -1895,7 +1896,8 @@ paths:
                 $ref: '#/components/schemas/Error'
   /sales/so/{id}:patch-lines:
     post:
-      summary: Apply patch operations to sales order lines (draft-only)
+      summary: Apply patch operations to sales order lines (draft/submitted/approved)
+      description: Patch lines while the sales order is editable (draft, submitted, or approved). Non-editable states reject with 409. Server preserves existing line ids and assigns stable ids (e.g., L1, L2, ...) for new lines.
       operationId: patchSalesOrderLines
       parameters:
         - in: path
@@ -4317,10 +4319,10 @@ components:
             - remove
         id:
           type: string
-          description: Server line id; preferred for matching existing lines
+          description: Server-assigned line id (stable). Preferred for matching existing lines. Server may assign ids like `L1`, `L2`, ... and they are preserved.
         cid:
           type: string
-          description: Client-side temporary key; best-effort for non-persisted lines
+          description: Client-side temporary key for new lines before persistence; best-effort match when `id` is absent.
         patch:
           type: object
           description: Partial line fields to merge when op=upsert

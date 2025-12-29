@@ -86,7 +86,7 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
 
     if (!allowedToPatch(so.status)) {
       logger.warn(logCtx, "so-patch-lines.guard", { status: so.status });
-      return conflictError(`Cannot patch lines from status=${so.status}`, undefined, requestId);
+      return conflictError("SO not editable in current status", { code: "SO_NOT_EDITABLE", status: so.status }, requestId);
     }
 
     const beforeLines: SOLine[] = Array.isArray(so.lines) ? (so.lines as SOLine[]) : [];

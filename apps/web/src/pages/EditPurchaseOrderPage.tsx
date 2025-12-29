@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { PurchaseOrderForm, type PurchaseOrderFormValue, type PurchaseOrderLineInput } from "../components/PurchaseOrderForm";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
-import { computePatchLinesDiff } from "../lib/patchLinesDiff";
+import { computePatchLinesDiff, PURCHASE_ORDER_PATCHABLE_LINE_FIELDS } from "../lib/patchLinesDiff";
 
 type PurchaseOrder = PurchaseOrderFormValue & { id: string; status?: string };
 
@@ -75,7 +75,7 @@ export default function EditPurchaseOrderPage() {
 
     // Compute patch ops using shared helper
     const current = Array.isArray(payload?.lines) ? payload.lines : [];
-    const ops = computePatchLinesDiff(originalLines, current, ["itemId", "qty", "uom"]);
+    const ops = computePatchLinesDiff(originalLines, current, PURCHASE_ORDER_PATCHABLE_LINE_FIELDS);
 
     if (ops.length === 0) {
       // No changes; avoid endpoint call

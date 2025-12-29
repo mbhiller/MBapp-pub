@@ -16,12 +16,15 @@ export type LineWithId = {
   [key: string]: any;
 };
 
+export const SALES_ORDER_PATCHABLE_LINE_FIELDS = ["itemId", "qty", "uom"] as const;
+export const PURCHASE_ORDER_PATCHABLE_LINE_FIELDS = ["itemId", "qty", "uom"] as const;
+
 /**
  * Compute patch-lines ops to transform originalLines into currentLines.
  * 
  * @param originalLines - Lines as they existed when edit started (must have stable ids)
  * @param currentLines - Lines from current form state (may have new lines without ids)
- * @param fields - Fields to track for changes (default: ["itemId", "qty", "uom"])
+ * @param fields - Fields to track for changes (default: SALES_ORDER_PATCHABLE_LINE_FIELDS)
  * @returns Array of patch operations (upsert/remove)
  * 
  * Rules:
@@ -34,7 +37,7 @@ export type LineWithId = {
 export function computePatchLinesDiff(
   originalLines: LineWithId[],
   currentLines: LineWithId[],
-  fields: string[] = ["itemId", "qty", "uom"]
+  fields: ReadonlyArray<string> = SALES_ORDER_PATCHABLE_LINE_FIELDS
 ): PatchLineOp[] {
   // Index original lines by id
   const origById = new Map<string, LineWithId>();
