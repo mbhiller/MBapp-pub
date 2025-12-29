@@ -43,6 +43,7 @@ export type RootStackParamList = {
 
   // Backorders
   BackordersList: { soId?: string; itemId?: string; status?: "open" | "ignored" | "converted"; preferredVendorId?: string } | undefined;
+  BackorderDetail: { id: string };
 
   // Routing and Delivery
   RoutePlanList: undefined;

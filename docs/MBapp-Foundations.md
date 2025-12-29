@@ -465,7 +465,9 @@ export async function smoke_module_flow(API_BASE, authToken) {
 
 **What triggers a BackorderRequest:**
 - SO commit with `strict: false` and insufficient inventory creates BackorderRequest for each shortage line (status: `open`).
-- BackorderRequest has fields: `{ id, soId, soLineId, itemId, qty, createdAt, status }`.
+- BackorderRequest has fields: `{ id, soId, soLineId, itemId, qty, createdAt, status, preferredVendorId, fulfilledQty?, remainingQty? }`.
+  - `fulfilledQty` and `remainingQty`: nullable, server-maintained during PO receive (not client-writable).
+  - **No reverse index:** PO lines store `backorderRequestIds[]`; backorders do NOT store PO IDs (navigate via PO detail).
 - Status lifecycle: `open` → (converted by suggest-po) → `converted` OR (user ignores) → `ignored` OR (PO partial receive) → `open/converted` OR (PO full receive) → `fulfilled`.
 
 **suggest-po MOQ behavior (Sprint I):**
@@ -483,10 +485,13 @@ export async function smoke_module_flow(API_BASE, authToken) {
 - Validation in smoke test: `smoke:backorders:partial-fulfill` creates backorder qty=10, receives qty=5, asserts status=`converted`, remainingQty=5, fulfilledQty=5.
 
 **Visibility (Web + Mobile):**
-- **Web PO detail:** Shows linked backorder IDs per line with filtered deep-link to backorders list (vendorId/itemId pre-filter).
-- **Web SO detail:** Fetches `/objects/backorderRequest/search?filter.soId={soId}` with all statuses (open/ignored/converted/fulfilled) and displays status breakdown badge with counts and total units.
+- **Web backorder detail:** `/backorders/:id` shows full context (SO link, item link, vendor link), fulfillment progress bar (when fulfilledQty present), and ignore action button.
+- **Mobile backorder detail:** `BackorderDetail` screen shows full context with navigate buttons, fulfillment progress, and ignore action with confirmation alert.
+- **Web PO detail:** Shows linked backorder IDs per line; chips now link directly to `/backorders/:id` detail page.
+- **Web SO detail:** Breakdown badges (open/converted/fulfilled/ignored) are clickable, linking to filtered backorders list by status.
 - **Mobile SO detail:** Fetches all backorder statuses via `apiClient.post('/objects/backorderRequest/search', { filter: { soId } })` with status param loop; displays BackorderHeaderBadge with optional breakdown (open/converted/fulfilled/ignored with unit counts).
-- **Mobile backorders list:** Supports bulk Ignore action via `/objects/backorderRequest/{id}:ignore` to mark backorders as ignored (status → `ignored`).
+- **Mobile backorders list:** Tap row → detail; long-press → multi-select for bulk ignore/convert actions.
+- **Web backorders list:** Row click → detail (stopPropagation on checkbox/actions to preserve multi-select).
 
 **API complete:** ✅  
 **Smoke coverage:** `smoke:backorders:partial-fulfill`, `smoke:suggest-po:moq`  

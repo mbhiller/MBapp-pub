@@ -1386,6 +1386,91 @@ const tests = {
       };
     },
 
+    "smoke:backorders:ignore": async () => {
+      await ensureBearer();
+      
+      // 1) Create vendor, product, and inventory with onHand=0
+      const { vendorId } = await seedVendor(api);
+      const prod = await createProduct({ name: "IgnoreTest", preferredVendorId: vendorId });
+      if (!prod.ok) return { test: "smoke:backorders:ignore", result: "FAIL", step: "createProduct", prod };
+      const productId = prod.body?.id;
+      
+      const item = await createInventoryForProduct(productId, "IgnoreTestItem");
+      if (!item.ok) return { test: "smoke:backorders:ignore", result: "FAIL", step: "createInventory", item };
+      const itemId = item.body?.id;
+      
+      // Ensure onHand=0
+      const onhandPre = await onhand(itemId);
+      const currentOnHand = onhandPre.body?.items?.[0]?.onHand ?? 0;
+      if (currentOnHand !== 0) {
+        await post(`/objects/inventoryMovement`, { itemId, type: "adjust", qty: -currentOnHand });
+      }
+      
+      // 2) Create customer and sales order with qty=10
+      const { customerId } = await seedCustomer(api);
+      const so = await post(`/objects/salesOrder`, {
+        type: "salesOrder", 
+        status: "draft", 
+        partyId: customerId, 
+        lines: [{ itemId, qty: 10, uom: "ea" }]
+      });
+      if (!so.ok) return { test: "smoke:backorders:ignore", result: "FAIL", step: "createSO", so };
+      const soId = so.body?.id;
+      
+      // 3) Commit SO non-strict → creates backorder with qty=10
+      await post(`/sales/so/${encodeURIComponent(soId)}:submit`, {}, { "Idempotency-Key": idem() });
+      const commit = await post(`/sales/so/${encodeURIComponent(soId)}:commit`, {}, { "Idempotency-Key": idem() });
+      if (!commit.ok) return { test: "smoke:backorders:ignore", result: "FAIL", step: "commit", commit };
+      
+      // 4) Wait for backorder to appear in open status
+      const boSearch = await waitForBackorders({ soId, itemId, status: "open" });
+      if (!boSearch.ok || !boSearch.items?.[0]?.id) {
+        return { test: "smoke:backorders:ignore", result: "FAIL", step: "backorder-not-found", boSearch };
+      }
+      const backorderId = boSearch.items[0].id;
+      
+      // 5) Call :ignore action
+      const ignoreResp = await post(`/objects/backorderRequest/${encodeURIComponent(backorderId)}:ignore`, {});
+      if (!ignoreResp.ok) return { test: "smoke:backorders:ignore", result: "FAIL", step: "ignore-action", ignoreResp };
+      
+      // 6) GET backorder by ID and verify status === "ignored"
+      const boDetail = await get(`/objects/backorderRequest/${encodeURIComponent(backorderId)}`);
+      if (!boDetail.ok) return { test: "smoke:backorders:ignore", result: "FAIL", step: "get-detail", boDetail };
+      const statusAfterIgnore = boDetail.body?.status;
+      const statusOk = statusAfterIgnore === "ignored";
+      
+      // 7) Search open backorders for same soId and verify ignored backorder is NOT in list
+      const openSearch = await post(`/objects/backorderRequest/search`, { soId, status: "open" });
+      const openItems = openSearch.body?.items ?? [];
+      const ignoredStillInOpen = openItems.some(b => b.id === backorderId);
+      const notInOpenOk = !ignoredStillInOpen;
+      
+      // 8) Search ignored backorders and verify it IS present
+      const ignoredSearch = await post(`/objects/backorderRequest/search`, { soId, status: "ignored" });
+      const ignoredItems = ignoredSearch.body?.items ?? [];
+      const foundInIgnored = ignoredItems.some(b => b.id === backorderId);
+      const inIgnoredOk = foundInIgnored;
+      
+      const pass = statusOk && notInOpenOk && inIgnoredOk;
+      
+      return {
+        test: "smoke:backorders:ignore",
+        result: pass ? "PASS" : "FAIL",
+        steps: {
+          productId, itemId, soId, backorderId,
+          statusAfterIgnore,
+          openBackordersCount: openItems.length,
+          ignoredBackordersCount: ignoredItems.length,
+          checks: {
+            statusOk,
+            notInOpenOk,
+            inIgnoredOk,
+            ignoredStillInOpen
+          }
+        }
+      };
+    },
+
     "smoke:vendor-guard-enforced": async () => {
       await ensureBearer();
       const guardHeaders = { "X-Feature-Enforce-Vendor": "1" };

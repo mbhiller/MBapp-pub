@@ -268,7 +268,8 @@ export default function BackordersListScreen() {
         keyExtractor={(r) => r.id}
         renderItem={({ item }) => (
           <Pressable
-            onPress={() => toggle(item.id)}
+            onPress={() => nav.navigate("BackorderDetail", { id: item.id })}
+            onLongPress={() => toggle(item.id)}
             style={{
               padding: 10,
               borderWidth: 1,

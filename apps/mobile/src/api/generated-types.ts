@@ -2168,6 +2168,10 @@ export interface components {
             soLineId: string;
             itemId: string;
             qty: number;
+            /** @description Server-maintained qty fulfilled via PO receive */
+            fulfilledQty?: number | null;
+            /** @description Server-maintained remaining qty to fulfill */
+            remainingQty?: number | null;
             /** Format: date-time */
             createdAt: string;
             /**
