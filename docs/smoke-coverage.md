@@ -1,7 +1,7 @@
-# Smoke Test Coverage (Sprint IV)
+# Smoke Test Coverage (Sprint O, 2025-12-29)
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Status/Working](MBapp-Status.md) · [Foundations](MBapp-Foundations.md) · [Cadence](MBapp-Cadence.md)  
-**Last Updated:** 2025-12-28
+**Last Updated:** 2025-12-29
 
 ---
 
@@ -16,6 +16,12 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 - `smoke:purchaseOrders:patch-lines` — Mirrors SO flow for PO; validates identical id assignment behavior, no id reuse, and stable L{n} sequence.
 - `smoke:so:patch-lines:cid` — Adds SO line via `cid`, asserts server assigns `L{n}` id, then patches the same line by `id` and verifies qty update.
 - `smoke:po:patch-lines:cid` — Adds PO line via `cid`, asserts server assigns `L{n}` id, then patches the same line by `id` and verifies qty update (draft-only guard enforced by endpoint).
+
+**CI-covered Line Identity Canonical flows (Sprint O, 2025-12-29 — E1 through E5):**
+- `smoke:line-identity:id-canonical` — Validates that all SO/PO line responses contain canonical `id` field and that action endpoints accept `id` (not `lineId`) in request payloads. Creates PO with 2 lines, receives them using `id` field; creates SO, reserves it using `id` field. Asserts all response lines have `id` and no `lineId` in responses. **Also validates:**
+  - API normalizes legacy `lineId` input to `id` and logs structured events
+  - Existing action smokes (close-the-loop, partial-receive, backorders-partial-fulfill, outbound-reserve-fulfill-release) all updated to use `id` in payloads
+  - Web and mobile clients send canonical `id` in all action payloads (E4, E5)
 
 **Guarantee:** Both smokes validate that removed line IDs are **reserved and never reused** by the server, ensuring stable line identity across edits.
 

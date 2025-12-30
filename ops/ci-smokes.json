@@ -30,7 +30,8 @@
   "smoke:webish:purchaseOrders:list-detail-join",
   "smoke:po:create-from-suggestion:line-ids",
   "smoke:so:patch-lines:cid",
-  "smoke:po:patch-lines:cid"
+  "smoke:po:patch-lines:cid",
+  "smoke:line-identity:id-canonical"
   ]
 
 }

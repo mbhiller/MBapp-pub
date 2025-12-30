@@ -212,9 +212,9 @@ export default function PurchaseOrderDetailPage() {
       const lines = po.lines
         .map((ln) => ({
           itemId: ln.itemId ?? ln.productId,
-          lineId: ln.id ?? ln.lineId,
+          id: ln.id ?? ln.lineId,
         }))
-        .filter((l) => l.itemId && l.lineId) as Array<{ itemId: string; lineId: string }>;
+        .filter((l) => l.itemId && l.id) as Array<{ itemId: string; id: string }>;
 
       if (lines.length === 0) {
         setActivity([]);
@@ -228,10 +228,10 @@ export default function PurchaseOrderDetailPage() {
         const results = await Promise.all(
           lines.map(async (l) => {
             const page = await listInventoryMovements(
-              { itemId: l.itemId, refId: po.id, poLineId: l.lineId, limit: 50, sort: "desc" },
+              { itemId: l.itemId, refId: po.id, poLineId: l.id, limit: 50, sort: "desc" },
               { token: token || undefined, tenantId }
             );
-            return (page.items ?? []).map((m) => ({ ...m, lineId: m.poLineId ?? l.lineId }));
+            return (page.items ?? []).map((m) => ({ ...m, lineId: m.poLineId ?? l.id }));
           })
         );
         const merged = results.flat();
@@ -329,7 +329,7 @@ export default function PurchaseOrderDetailPage() {
         }
 
         return {
-          lineId: payloadLineId,
+          id: payloadLineId,
           deltaQty: qty,
           ...(lot ? { lot } : {}),
           ...(locationId ? { locationId } : {}),
@@ -444,7 +444,7 @@ export default function PurchaseOrderDetailPage() {
         }
 
         return {
-          lineId: getPoLineId(line),
+          id: getPoLineId(line),
           deltaQty: remaining,
           ...(lot ? { lot } : {}),
           ...(locationId ? { locationId } : {}),

@@ -77,7 +77,7 @@ export async function closePO(id: string) {
 
 /** ===== Receiving ===== */
 
-export type ReceiveLine = { lineId: string; deltaQty: number };
+export type ReceiveLine = { id: string; deltaQty: number };
 export async function receivePO(id: string, lines: ReceiveLine[]) {
   return apiClient.post<PurchaseOrder>(`/purchaseOrders/${id}/receive`, { lines });
 }

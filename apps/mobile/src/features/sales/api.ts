@@ -1,8 +1,8 @@
 import { apiClient } from "../../api/client";
 
-export type ReserveLine = { lineId: string; deltaQty: number };
-export type ReleaseLine = { lineId: string; deltaQty: number; reason?: string };
-export type FulfillLine = { lineId: string; deltaQty: number; locationId?: string; lot?: string };
+export type ReserveLine = { id: string; deltaQty: number };
+export type ReleaseLine = { id: string; deltaQty: number; reason?: string };
+export type FulfillLine = { id: string; deltaQty: number; locationId?: string; lot?: string };
 export type CommitOptions = { strict?: boolean };
 
 function unwrap<T = any>(res: any): T {

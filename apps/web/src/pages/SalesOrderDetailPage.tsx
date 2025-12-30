@@ -306,8 +306,8 @@ export default function SalesOrderDetailPage() {
     () =>
       (order?.lines ?? [])
         .map((ln) => {
-          const payload: { lineId: string; deltaQty: number; locationId?: string; lot?: string } = {
-            lineId: ln.id,
+          const payload: { id: string; deltaQty: number; locationId?: string; lot?: string } = {
+            id: ln.id,
             deltaQty: Math.max(0, Number(lineQtys[ln.id] ?? 0)),
           };
           // Use explicit user input first, fallback to prefill from reserve
@@ -502,7 +502,7 @@ export default function SalesOrderDetailPage() {
       // Group by item to reduce API calls
       const itemsSet = new Set<string>();
       for (const p of withLoc) {
-        const itemId = soLinesMap.get(p.lineId)?.itemId;
+        const itemId = soLinesMap.get(p.id)?.itemId;
         if (itemId) itemsSet.add(itemId);
       }
       const byItemAvailability = new Map<string, InventoryOnHandByLocationItem[]>();
@@ -515,7 +515,7 @@ export default function SalesOrderDetailPage() {
         }
       }
       for (const p of withLoc) {
-        const line = soLinesMap.get(p.lineId);
+        const line = soLinesMap.get(p.id);
         const itemId = line?.itemId;
         if (!itemId) continue;
         const items = byItemAvailability.get(itemId) ?? [];
@@ -523,7 +523,7 @@ export default function SalesOrderDetailPage() {
         const entry = items.find((it) => (it.locationId ?? null) === targetLoc);
         const available = entry?.available ?? 0;
         if (p.deltaQty > available) {
-          precheckShortages.push({ itemId, requested: p.deltaQty, available, lineId: p.lineId });
+          precheckShortages.push({ itemId, requested: p.deltaQty, available, lineId: p.id });
         }
       }
     }
@@ -531,8 +531,8 @@ export default function SalesOrderDetailPage() {
     // Aggregate precheck for non-location lines
     if (withoutLoc.length > 0) {
       const itemQtyMap = new Map<string, number>();
-      for (const { lineId, deltaQty } of withoutLoc) {
-        const line = soLinesMap.get(lineId);
+      for (const { id, deltaQty } of withoutLoc) {
+        const line = soLinesMap.get(id);
         const itemId = line?.itemId;
         if (!itemId || deltaQty <= 0) continue;
         itemQtyMap.set(itemId, (itemQtyMap.get(itemId) ?? 0) + deltaQty);

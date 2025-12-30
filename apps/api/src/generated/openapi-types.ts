@@ -977,7 +977,13 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
-                        lineId: string;
+                        /** @description Canonical line id (preferred). Server-assigned `L{n}` pattern. */
+                        id: string;
+                        /**
+                         * @deprecated
+                         * @description Alias for id (compatibility; will be removed after transition).
+                         */
+                        lineId?: string | null;
                         qty: number;
                         lot?: string | null;
                         location?: string | null;
@@ -1407,7 +1413,13 @@ export interface paths {
                 content: {
                     "application/json": {
                         lines?: {
-                            lineId: string;
+                            /** @description Canonical line id (preferred). Server-assigned `L{n}` pattern. */
+                            id: string;
+                            /**
+                             * @deprecated
+                             * @description Alias for id (compatibility; will be removed after transition).
+                             */
+                            lineId?: string | null;
                             /** @description Quantity shipped/picked */
                             deltaQty: number;
                             locationId?: string;
@@ -1566,7 +1578,13 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
-                        lineId: string;
+                        /** @description Canonical line id (preferred). Server-assigned `L{n}` pattern. */
+                        id: string;
+                        /**
+                         * @deprecated
+                         * @description Alias for id (compatibility; will be removed after transition).
+                         */
+                        lineId?: string | null;
                         qty: number;
                         lot?: string | null;
                         location?: string | null;
@@ -2320,7 +2338,13 @@ export interface components {
             /** Format: date-time */
             ts: string | null;
             lines: {
-                lineId: string;
+                /** @description Canonical line id (preferred). Server-assigned `L{n}` pattern. */
+                id: string;
+                /**
+                 * @deprecated
+                 * @description Alias for `id` (compatibility; will be removed after transition).
+                 */
+                lineId?: string | null;
                 itemId?: string | null;
                 deltaQty: number;
                 lot?: string | null;
@@ -2330,7 +2354,13 @@ export interface components {
             attachments?: string[];
         };
         GoodsReceiptLine: {
-            lineId: string;
+            /** @description Canonical line id (preferred). Server-assigned `L{n}` pattern. */
+            id: string;
+            /**
+             * @deprecated
+             * @description Alias for `id` (compatibility; will be removed after transition).
+             */
+            lineId?: string | null;
             deltaQty: number;
             locationId?: string | null;
             lot?: string | null;
@@ -2695,7 +2725,13 @@ export interface components {
             /** @deprecated */
             idempotencyKey?: string;
             lines: {
-                lineId: string;
+                /** @description Canonical line id (preferred). Server-assigned `L{n}` pattern. */
+                id: string;
+                /**
+                 * @deprecated
+                 * @description Alias for id (compatibility; will be removed after transition).
+                 */
+                lineId?: string | null;
                 deltaQty: number;
                 locationId?: string;
                 lot?: string;
@@ -2837,7 +2873,13 @@ export interface components {
             notes?: string | null;
         };
         SalesFulfillmentLine: {
-            lineId: string;
+            /** @description Canonical line id (preferred). Server-assigned `L{n}` pattern. */
+            id: string;
+            /**
+             * @deprecated
+             * @description Alias for id (compatibility; will be removed after transition).
+             */
+            lineId?: string | null;
             deltaQty: number;
             locationId?: string | null;
             lot?: string | null;
@@ -2962,7 +3004,13 @@ export interface components {
         };
         SalesOrderReserveRequest: {
             lines: {
-                lineId: string;
+                /** @description Canonical line id (preferred). Server-assigned `L{n}` pattern. */
+                id: string;
+                /**
+                 * @deprecated
+                 * @description Alias for id (compatibility; will be removed after transition).
+                 */
+                lineId?: string | null;
                 deltaQty: number;
                 /** @description Optional: when provided, reservation is applied to the specific location; if omitted, behavior is aggregate/unassigned (legacy). */
                 locationId?: string | null;
@@ -2972,7 +3020,13 @@ export interface components {
         };
         SalesOrderReleaseRequest: {
             lines: {
-                lineId: string;
+                /** @description Canonical line id (preferred). Server-assigned `L{n}` pattern. */
+                id: string;
+                /**
+                 * @deprecated
+                 * @description Alias for id (compatibility; will be removed after transition).
+                 */
+                lineId?: string | null;
                 deltaQty: number;
                 reason?: string;
                 /** @description Optional: when provided, release is applied to the specific location; if omitted, behavior is aggregate/unassigned (legacy). */

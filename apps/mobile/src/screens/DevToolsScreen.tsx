@@ -238,7 +238,7 @@ export default function DevToolsScreen({ navigation }: any) {
       await apiClient.post(`/purchasing/po/${encodeURIComponent(poId)}:approve`, {}, { "Idempotency-Key": idem });
       await apiClient.post(
         `/purchasing/po/${encodeURIComponent(poId)}:receive`,
-        { lines: [{ lineId: createdLineId, deltaQty: lineQty }] },
+        { lines: [{ id: createdLineId, deltaQty: lineQty }] },
         { "Idempotency-Key": idem }
       );
 

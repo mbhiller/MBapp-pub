@@ -619,7 +619,7 @@ const tests = {
       if (!poSave.ok) return { test: "close-the-loop", result: "FAIL", step: "po-save", poSave };
       const poId = poSave.body?.id;
       // 6) Receive PO: POST /purchasing/po/{id}:receive with lines deltaQty
-      const lines = (poSave.body?.lines ?? []).map(ln => ({ lineId: ln.id ?? ln.lineId, deltaQty: (ln.qty - (ln.receivedQty ?? 0)) })).filter(l => l.deltaQty > 0);
+      const lines = (poSave.body?.lines ?? []).map(ln => ({ id: ln.id ?? ln.lineId, deltaQty: (ln.qty - (ln.receivedQty ?? 0)) })).filter(l => l.deltaQty > 0);
       const idk = idem();
       const receive = await post(`/purchasing/po/${encodeURIComponent(poId)}:receive`, { lines }, { "Idempotency-Key": idk });
       if (!receive.ok) return { test: "close-the-loop", result: "FAIL", step: "po-receive", receive };
@@ -904,7 +904,7 @@ const tests = {
         const po = await get(`/objects/purchaseOrder/${encodeURIComponent(poId)}`);
         const lines = (po.body?.lines ?? [])
           .map(ln => ({ 
-            lineId: ln.id ?? ln.lineId, 
+            id: ln.id ?? ln.lineId, 
             deltaQty: Math.max(0, (ln.qty ?? 0) - (ln.receivedQty ?? 0)) 
           }))
           .filter(l => l.deltaQty > 0);
@@ -1080,7 +1080,7 @@ const tests = {
 
       const receive1 = await post(
         `/purchasing/po/${encodeURIComponent(poId)}:receive`,
-        { lines: [{ lineId, deltaQty: 2 }] },
+        { lines: [{ id: lineId, deltaQty: 2 }] },
         { "Idempotency-Key": idem() }
       );
       if (!receive1.ok) return { test: "close-the-loop-partial-receive", result: "FAIL", step: "receive-partial", receive1 };
@@ -1102,7 +1102,7 @@ const tests = {
       const remaining = Math.max(0, (lineAfter1.qty ?? ordered) - (lineAfter1.receivedQty ?? 2));
       const receive2 = await post(
         `/purchasing/po/${encodeURIComponent(poId)}:receive`,
-        { lines: [{ lineId, deltaQty: remaining }] },
+        { lines: [{ id: lineId, deltaQty: remaining }] },
         { "Idempotency-Key": idem() }
       );
       if (!receive2.ok) return { test: "close-the-loop-partial-receive", result: "FAIL", step: "receive-final", receive2 };
@@ -1240,7 +1240,7 @@ const tests = {
       const partialQty = 5; // Receive only half
       
       const receive = await post(`/purchasing/po/${encodeURIComponent(poId)}:receive`, 
-        { lines: [{ lineId, deltaQty: partialQty }] }, 
+        { lines: [{ id: lineId, deltaQty: partialQty }] }, 
         { "Idempotency-Key": idem() }
       );
       if (!receive.ok) return { test: "smoke:backorders:partial-fulfill", result: "FAIL", step: "receive", receive };
@@ -3457,7 +3457,7 @@ const tests = {
 
     // 3) Reserve qty 3 from location
     const reserve = await post(`/sales/so/${encodeURIComponent(soId)}:reserve`, {
-      lines: [{ lineId: soLineId, deltaQty: 3, locationId: locId, lot: "LOT-OBC" }]
+      lines: [{ id: soLineId, deltaQty: 3, locationId: locId, lot: "LOT-OBC" }]
     }, { "Idempotency-Key": idem() });
     if (!reserve.ok) return { test: "outbound:reserve-fulfill-release-cycle", result: "FAIL", step: "reserve", reserve };
 
@@ -3473,7 +3473,7 @@ const tests = {
 
     // 4) Fulfill qty 2 (partial)
     const fulfill = await post(`/sales/so/${encodeURIComponent(soId)}:fulfill`, {
-      lines: [{ lineId: soLineId, deltaQty: 2, locationId: locId, lot: "LOT-OBC" }]
+      lines: [{ id: soLineId, deltaQty: 2, locationId: locId, lot: "LOT-OBC" }]
     }, { "Idempotency-Key": idem() });
     if (!fulfill.ok) return { test: "outbound:reserve-fulfill-release-cycle", result: "FAIL", step: "fulfill", fulfill };
     if (fulfill.body?.status !== "partially_fulfilled") {
@@ -7135,6 +7135,188 @@ const tests = {
         patch2_ok: patch2.ok,
         qtyUpdated
       }
+    };
+  },
+
+  "smoke:line-identity:id-canonical": async () => {
+    // Smoke to validate: (1) all SO/PO line responses have `id` field, (2) action endpoints accept `id` in request
+    const tests = [];
+    // Get party IDs for SO and vendor for PO
+    const { partyId } = await seedParties(api);
+    
+    // Create a product
+    const prod = await post(`/objects/product`, {
+      type: "product",
+      name: `line-id-test-product-${SMOKE_RUN_ID}`,
+      sku: `LID-P-${SMOKE_RUN_ID}`,
+      unitPrice: 50
+    });
+    if (!prod.ok) return { test: "line-identity:id-canonical", result: "FAIL", step: "create-product", prod };
+    const productId = prod.body?.id;
+    tests.push({ step: "create-product", ok: prod.ok });
+
+    // Create inventory
+    const item = await post(`/objects/inventoryItem`, {
+      type: "inventoryItem",
+      name: `line-id-test-item-${SMOKE_RUN_ID}`,
+      sku: `LID-I-${SMOKE_RUN_ID}`,
+      qty: 20,
+      uom: "unit"
+    });
+    if (!item.ok) return { test: "line-identity:id-canonical", result: "FAIL", step: "create-inventory", item };
+    const itemId = item.body?.id;
+    tests.push({ step: "create-inventory", ok: item.ok, itemId });
+
+    // Create a vendor
+    const vendor = await post(`/objects/party`, {
+      type: "party",
+      name: `line-id-vendor-${SMOKE_RUN_ID}`,
+      roles: ["vendor"]
+    });
+    if (!vendor.ok) return { test: "line-identity:id-canonical", result: "FAIL", step: "create-vendor", vendor };
+    const vendorId = vendor.body?.id;
+    tests.push({ step: "create-vendor", ok: vendor.ok, vendorId });
+
+    // Test 1: Create PO and verify all lines have `id`
+    const poDraft = {
+      type: "purchaseOrder",
+      status: "draft",
+      vendorId,
+      lines: [
+        { itemId, qty: 5, uom: "unit" },
+        { itemId, qty: 3, uom: "unit" }
+      ]
+    };
+    const poCreate = await post(`/objects/purchaseOrder`, poDraft);
+    if (!poCreate.ok) return { test: "line-identity:id-canonical", result: "FAIL", step: "po-create", poCreate };
+    const poId = poCreate.body?.id;
+    
+    // Verify all PO lines have `id`
+    const poLines = poCreate.body?.lines ?? [];
+    for (let i = 0; i < poLines.length; i++) {
+      if (!poLines[i].id) {
+        return {
+          test: "line-identity:id-canonical",
+          result: "FAIL",
+          step: "po-lines-missing-id",
+          lineIndex: i,
+          line: poLines[i]
+        };
+      }
+    }
+    tests.push({ step: "po-create-all-lines-have-id", ok: true, lineCount: poLines.length });
+
+    // Submit and approve PO
+    const poSubmit = await post(`/purchasing/po/${encodeURIComponent(poId)}:submit`, {}, { "Idempotency-Key": idem() });
+    if (!poSubmit.ok) return { test: "line-identity:id-canonical", result: "FAIL", step: "po-submit", poSubmit };
+    
+    const poApprove = await post(`/purchasing/po/${encodeURIComponent(poId)}:approve`, {}, { "Idempotency-Key": idem() });
+    if (!poApprove.ok) return { test: "line-identity:id-canonical", result: "FAIL", step: "po-approve", poApprove };
+    tests.push({ step: "po-submit-approve", ok: true });
+
+    // Fetch PO and use line `id` (not lineId) for receive request
+    const poGet = await get(`/objects/purchaseOrder/${encodeURIComponent(poId)}`);
+    if (!poGet.ok) return { test: "line-identity:id-canonical", result: "FAIL", step: "po-get", poGet };
+    
+    const receivableLines = (poGet.body?.lines ?? [])
+      .map(ln => ({ id: ln.id, deltaQty: (ln.qty - (ln.receivedQty ?? 0)) }))
+      .filter(l => l.deltaQty > 0);
+    
+    // Test 2: Execute PO receive using `id` (canonical field)
+    const poReceive = await post(
+      `/purchasing/po/${encodeURIComponent(poId)}:receive`,
+      { lines: receivableLines },
+      { "Idempotency-Key": idem() }
+    );
+    if (!poReceive.ok) return { test: "line-identity:id-canonical", result: "FAIL", step: "po-receive-with-id", poReceive };
+    
+    // Verify received PO response has all lines with `id`
+    const receivedLines = poReceive.body?.lines ?? [];
+    for (let i = 0; i < receivedLines.length; i++) {
+      if (!receivedLines[i].id) {
+        return {
+          test: "line-identity:id-canonical",
+          result: "FAIL",
+          step: "po-receive-response-missing-id",
+          lineIndex: i,
+          line: receivedLines[i]
+        };
+      }
+    }
+    tests.push({ step: "po-receive-all-lines-have-id", ok: true });
+
+    // Test 3: Create SO and verify all lines have `id`
+    const soDraft = {
+        partyId,
+      type: "salesOrder",
+      status: "draft",
+      lines: [
+        { itemId, qty: 3, uom: "unit" }
+      ]
+    };
+    const soCreate = await post(`/objects/salesOrder`, soDraft);
+    if (!soCreate.ok) return { test: "line-identity:id-canonical", result: "FAIL", step: "so-create", soCreate };
+    const soId = soCreate.body?.id;
+    
+    const soLines = soCreate.body?.lines ?? [];
+    for (let i = 0; i < soLines.length; i++) {
+      if (!soLines[i].id) {
+        return {
+          test: "line-identity:id-canonical",
+          result: "FAIL",
+          step: "so-lines-missing-id",
+          lineIndex: i,
+          line: soLines[i]
+        };
+      }
+    }
+    tests.push({ step: "so-create-all-lines-have-id", ok: true, lineCount: soLines.length });
+
+    // Submit, approve, commit SO
+    const soSubmit = await post(`/sales/so/${encodeURIComponent(soId)}:submit`, {}, { "Idempotency-Key": idem() });
+    if (!soSubmit.ok) return { test: "line-identity:id-canonical", result: "FAIL", step: "so-submit", soSubmit };
+    const soCommit = await post(`/sales/so/${encodeURIComponent(soId)}:commit`, {}, { "Idempotency-Key": idem() });
+    if (!soCommit.ok) return { test: "line-identity:id-canonical", result: "FAIL", step: "so-commit", soCommit };
+
+    tests.push({ step: "so-submit-commit", ok: true });
+    // Fetch SO and use line `id` for reserve request
+    const soGet = await get(`/objects/salesOrder/${encodeURIComponent(soId)}`);
+    if (!soGet.ok) return { test: "line-identity:id-canonical", result: "FAIL", step: "so-get", soGet };
+    
+    const reserveLines = (soGet.body?.lines ?? [])
+      .map(ln => ({ id: ln.id, deltaQty: ln.qty ?? 0 }))
+      .filter(l => l.deltaQty > 0);
+
+    // Test 4: Execute SO reserve using `id` (canonical field)
+    const soReserve = await post(
+      `/sales/so/${encodeURIComponent(soId)}:reserve`,
+      { lines: reserveLines },
+      { "Idempotency-Key": idem() }
+    );
+    if (!soReserve.ok) return { test: "line-identity:id-canonical", result: "FAIL", step: "so-reserve-with-id", soReserve };
+    
+    // Verify reserved SO response has all lines with `id`
+    const reservedSoLines = soReserve.body?.lines ?? [];
+    for (let i = 0; i < reservedSoLines.length; i++) {
+      if (!reservedSoLines[i].id) {
+        return {
+          test: "line-identity:id-canonical",
+          result: "FAIL",
+          step: "so-reserve-response-missing-id",
+          lineIndex: i,
+          line: reservedSoLines[i]
+        };
+      }
+    }
+    tests.push({ step: "so-reserve-all-lines-have-id", ok: true });
+
+    // All tests passed
+    return {
+      test: "line-identity:id-canonical",
+      result: "PASS",
+      summary: "All SO/PO lines have canonical 'id' field; action endpoints accept id-based payloads",
+      tests,
+      artifacts: { poId, soId, itemId, vendorId }
     };
   }
 };

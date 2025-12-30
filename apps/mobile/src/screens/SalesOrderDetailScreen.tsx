@@ -154,12 +154,12 @@ export default function SalesOrderDetailScreen() {
       const reserveDelta = Math.max(0, remainingToShip - reserved);
       const lineId = String(line?.id ?? line?.lineId ?? "");
       return { 
-        lineId, 
+        id: lineId, 
         deltaQty: reserveDelta,
         ...(defaultLocationId ? { locationId: defaultLocationId } : {}),
         ...(defaultLot ? { lot: defaultLot } : {})
       };
-    }).filter((l) => l.lineId && l.deltaQty > 0);
+    }).filter((l) => l.id && l.deltaQty > 0);
     return { lines: mapped };
   };
 
@@ -168,12 +168,12 @@ export default function SalesOrderDetailScreen() {
       const reserved = Number(line?.qtyReserved ?? 0);
       const lineId = String(line?.id ?? line?.lineId ?? "");
       return { 
-        lineId, 
+        id: lineId, 
         deltaQty: reserved,
         ...(defaultLocationId ? { locationId: defaultLocationId } : {}),
         ...(defaultLot ? { lot: defaultLot } : {})
       };
-    }).filter((l) => l.lineId && l.deltaQty > 0);
+    }).filter((l) => l.id && l.deltaQty > 0);
     return { lines: mapped };
   };
 
@@ -190,12 +190,12 @@ export default function SalesOrderDetailScreen() {
       
       const lineId = String(line?.id ?? line?.lineId ?? "");
       return { 
-        lineId, 
+        id: lineId, 
         deltaQty,
         ...(defaultLocationId ? { locationId: defaultLocationId } : {}),
         ...(defaultLot ? { lot: defaultLot } : {})
       };
-    }).filter((l) => l.lineId && l.deltaQty > 0);
+    }).filter((l) => l.id && l.deltaQty > 0);
     return { lines: mapped };
   };
 
@@ -292,7 +292,7 @@ export default function SalesOrderDetailScreen() {
 
     try {
       const linesToFulfill = Array.from(pendingFulfills.entries()).map(([lineId, deltaQty]) => ({
-        lineId,
+        id: lineId,
         deltaQty,
         ...(defaultLocationId ? { locationId: defaultLocationId } : {}),
         ...(defaultLot ? { lot: defaultLot } : {}),

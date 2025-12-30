@@ -10,7 +10,7 @@ import { resolveTenantId } from "../common/tenant";
 import { badRequest, conflictError, internalError, notFound } from "../common/responses";
 import { logger } from "../common/logger";
 
-type LineReq = { lineId: string; deltaQty: number; locationId?: string; lot?: string };
+type LineReq = { id?: string; lineId?: string; deltaQty: number; locationId?: string; lot?: string };
 type SOLine = { id: string; itemId: string; qty: number; uom?: string; qtyCommitted?: number };
 type SalesOrder = {
   pk: string; sk: string; id: string; type: "salesOrder";
@@ -71,17 +71,31 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
       return conflictError(`Cannot reserve from status=${so.status}`, undefined, requestId);
     }
 
+    // Normalize request lines: canonicalize to use 'id' as the key
     const soLines = new Map<string, SOLine>((so.lines ?? []).map(l => [l.id, l]));
-    for (const l of reqLines) {
-      if (!l?.lineId || typeof l.deltaQty !== "number" || l.deltaQty <= 0) {
-        return badRequest("Each line requires { lineId, deltaQty>0 }", undefined, requestId);
+    const normalizedLines: Array<{ lineKey: string; deltaQty: number; locationId?: string; lot?: string }> = [];
+    const lineIdUsage: boolean[] = [];
+    for (let i = 0; i < reqLines.length; i++) {
+      const l = reqLines[i];
+      const lineKey = l.id ?? l.lineId;
+      if (!lineKey || typeof l.deltaQty !== "number" || l.deltaQty <= 0) {
+        return badRequest("Each line requires { id or lineId, deltaQty>0 }", undefined, requestId);
       }
-      if (!soLines.has(l.lineId)) return notFound(`Unknown lineId ${l.lineId}`, requestId);
+      if (!soLines.has(lineKey)) return notFound(`Unknown line id=${lineKey}`, requestId);
+      normalizedLines.push({ lineKey, deltaQty: l.deltaQty, locationId: l.locationId, lot: l.lot });
+      // Track if legacy lineId was used instead of id
+      lineIdUsage[i] = !l.id && !!l.lineId;
+    }
+
+    // Log if any requests used legacy lineId
+    const legacyCount = lineIdUsage.filter(Boolean).length;
+    if (legacyCount > 0) {
+      logger.info(logCtx, "so-reserve.legacy_lineId", { legacyLineIdCount: legacyCount, totalLines: normalizedLines.length });
     }
 
     // Availability checks: handle lines with locationId specifically, others via aggregate batch
-    const locReqLines = reqLines.filter(l => !!l.locationId);
-    const nonLocReqLines = reqLines.filter(l => !l.locationId);
+    const locReqLines = normalizedLines.filter(l => !!l.locationId);
+    const nonLocReqLines = normalizedLines.filter(l => !l.locationId);
 
     // Cache per-item location counters to avoid repeated queries
     const locCountersCache = new Map<string, Map<string | null, { onHand: number; reserved: number; available: number }>>();
@@ -101,11 +115,12 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     const shortages: Array<{ itemId: string; requested: number; available: number; locationId?: string }> = [];
 
     // Location-specific checks
-    const locItems = [...new Set(locReqLines.map(r => soLines.get(r.lineId)!.itemId))];
+    const locItems = [...new Set(locReqLines.map(r => soLines.get(r.lineKey)!.itemId))];
     for (const itemId of locItems) {
       const countersMap = await loadLocCounters(itemId);
-      for (const r of locReqLines.filter(rr => soLines.get(rr.lineId)!.itemId === itemId)) {
+      for (const r of locReqLines.filter(rr => soLines.get(rr.lineKey)!.itemId === itemId)) {
         const locId = r.locationId ?? null;
+
         const availableAtLoc = countersMap.get(locId)?.available ?? 0;
         const reqQty = Number(r.deltaQty);
         if (reqQty > availableAtLoc) {
@@ -116,7 +131,7 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
 
     // Aggregate checks for non-location lines
     if (nonLocReqLines.length > 0) {
-      const itemIds = [...new Set(nonLocReqLines.map(r => soLines.get(r.lineId)!.itemId))];
+      const itemIds = [...new Set(nonLocReqLines.map(r => soLines.get(r.lineKey)!.itemId))];
       const batchEvt: APIGatewayProxyEventV2 = {
         ...event,
         body: JSON.stringify({ itemIds }),
@@ -130,7 +145,7 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
 
       const wantByItem = new Map<string, number>();
       for (const r of nonLocReqLines) {
-        const it = soLines.get(r.lineId)!.itemId;
+        const it = soLines.get(r.lineKey)!.itemId;
         wantByItem.set(it, (wantByItem.get(it) ?? 0) + Number(r.deltaQty));
       }
       for (const [itemId, reqQty] of wantByItem) {
@@ -146,8 +161,8 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
 
     // Create inventory movement rows for each line request using shared dual-write helper
     const now = new Date().toISOString();
-    for (const r of reqLines) {
-      const line = soLines.get(r.lineId)!;
+    for (const r of normalizedLines) {
+      const line = soLines.get(r.lineKey)!;
       try {
         await createMovement({
           tenantId,
@@ -162,7 +177,7 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
       } catch (err) {
         // Log error but don't fail the entire reserve (best-effort semantics)
         logger.warn(logCtx, "so-reserve: movement write error", { 
-          lineId: r.lineId, 
+          lineId: r.lineKey, 
           itemId: line.itemId, 
           error: String(err) 
         });
