@@ -48,6 +48,11 @@
 
 **Epic Summary:** Harden `/workspaces` list so q/entityType filtering works across pages and cursor aliasing remains reliable.
 
+- **Behavior:** Mixed-source listing (true `type="workspace"` + legacy `type="view"`) now dedupes IDs before counting toward `limit`, ensuring duplicates never consume page capacity. Cursor encoding remains stable when deduping across sources.
+- **Verification:** `npm run smoke:list` ✅; `node ops/smoke/smoke.mjs smoke:workspaces:mixed-dedupe` ✅ exercises multi-page pagination with enforced duplicates; `smoke:workspaces:get-fallback` verifies legacy fallback reads. No new typecheck runs for this change set.
+- **Follow-ups:** Keep both smokes in CI manifest once migration hardens; monitor for pagination regressions as dual-write toggles.
+- **Tooling:** Backfill script `ops/tools/backfill-workspaces.mjs` added to upsert true workspaces from legacy workspace-like views only (filters candidates to those with `views[]`, skips existing workspaces). No dedicated endpoint added beyond existing workspace CRUD.
+
 
 ### Workspace Storage Transition — 🟨 In Progress (Sprint Q, 2025-12-30)
 

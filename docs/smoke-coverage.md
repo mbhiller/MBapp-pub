@@ -1,7 +1,7 @@
-# Smoke Test Coverage (Sprint O, 2025-12-29)
+# Smoke Test Coverage (Sprint O, 2025-12-30)
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Status/Working](MBapp-Status.md) · [Foundations](MBapp-Foundations.md) · [Cadence](MBapp-Cadence.md)  
-**Last Updated:** 2025-12-29
+**Last Updated:** 2025-12-30
 
 ---
 
@@ -30,6 +30,8 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 - `smoke:workspaces:list` — Creates 2 temp views with unique smokeTag names and different entityTypes, validates filtering by `q=<tag>` and `entityType=<type>`. **Pollution-resistant:** uses unique run timestamp in names and filters by created view IDs, not generic patterns.
 - `smoke:views:apply-to-po-list` (Sprint Q) — Creates 2 POs with different statuses (draft, submitted), creates View with `status="draft"` filter, queries `/purchasing/purchase-orders?viewId={id}`, asserts draft PO present and submitted PO absent. Validates that applying a view with filters constrains list results as expected.
 - `smoke:views:validate-filters` (Sprint Q) — Validates server-side filter validation: rejects views with (1) missing field, (2) invalid operator (badOp), (3) "in" operator with non-array value, (4) object value for eq operator. Accepts valid filters (eq/in/ge with proper types). Returns 400 bad_request with clear error messages for invalid filters.
+- `smoke:workspaces:mixed-dedupe` (Sprint Q) — Forces mixed-source pagination across true workspaces and legacy view-backed workspaces, asserting duplicates are deduped before counting toward `limit`, multi-page cursors stay stable, and IDs remain unique across pages.
+- `smoke:workspaces:get-fallback` (Sprint Q) — Verifies legacy view-backed workspaces still resolve via workspace GET when no dedicated workspace record exists (ensures migration fallback safety).
 
 **Note (2025-12-30):** No new smokes needed; `smoke:views:crud` revalidated after `/views` added server-side `entityType` filtering, and `smoke:workspaces:list` still passes with q + entityType filters across pages after pagination hardening.
 **Note (2025-12-30):** During the workspace storage migration (primary `type="workspace"` with legacy `type="view"` fallback/dual-write), `smoke:workspaces:list` continues to validate list semantics across both sources; keep it as the guardrail for pagination + filter compatibility.

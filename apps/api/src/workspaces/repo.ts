@@ -127,26 +127,31 @@ export async function listWorkspaces({
         return true;
       });
 
+      let uniquesAdded = 0;
       for (const raw of filtered) {
         const projected = projectWorkspace(raw);
         const id = projected.id;
         if (!id) continue;
-        if (seen.has(id)) continue;
+        if (seen.has(id)) continue; // duplicates do not consume limit
         seen.add(id);
         collected.push(applyFields(projected, fields));
+        uniquesAdded += 1;
         if (collected.length >= limit) break;
       }
 
       const pageNext = (page as any).next ?? (page as any).nextCursor ?? (page as any).pageInfo?.nextCursor;
+
       if (collected.length >= limit) {
         outgoing = pageNext ? { src: source, cursor: pageNext } : undefined;
         break;
       }
 
+      // If no more pages in this source, stop and move to next source (if any)
       if (!pageNext || pageNext === pageCursor) {
         break;
       }
 
+      // Continue paging current source to find more uniques
       pageCursor = pageNext;
     }
 
