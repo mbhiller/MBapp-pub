@@ -79,5 +79,19 @@ export function useViewsApi() {
     return getJSON<View>(url, "PATCH", payload);
   }, []);
 
-  return { list, get, create, patch };
+    const del = useCallback(async (id: string) => {
+      const token = await getAuthToken();
+      const url = `${API}/views/${encodeURIComponent(id)}`;
+      const r = await fetch(url, {
+        method: "DELETE",
+        headers: {
+          "content-type": "application/json",
+          "x-tenant-id": TENANT,
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    }, []);
+
+    return { list, get, create, patch, del };
 }
