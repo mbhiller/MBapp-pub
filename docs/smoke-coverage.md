@@ -32,6 +32,7 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 - `smoke:views:validate-filters` (Sprint Q) — Validates server-side filter validation: rejects views with (1) missing field, (2) invalid operator (badOp), (3) "in" operator with non-array value, (4) object value for eq operator. Accepts valid filters (eq/in/ge with proper types). Returns 400 bad_request with clear error messages for invalid filters.
 
 **Note (2025-12-30):** No new smokes needed; `smoke:views:crud` revalidated after `/views` added server-side `entityType` filtering, and `smoke:workspaces:list` still passes with q + entityType filters across pages after pagination hardening.
+**Note (2025-12-30):** During the workspace storage migration (primary `type="workspace"` with legacy `type="view"` fallback/dual-write), `smoke:workspaces:list` continues to validate list semantics across both sources; keep it as the guardrail for pagination + filter compatibility.
 
 **Reliability Hardening (Sprint V/U):**
 - `smoke:views:apply-to-po-list` now wraps cleanup in try/finally and retries DELETE up to 5× to ensure created temp view is removed, improving CI hygiene and reducing flake.

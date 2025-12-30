@@ -48,9 +48,15 @@
 
 **Epic Summary:** Harden `/workspaces` list so q/entityType filtering works across pages and cursor aliasing remains reliable.
 
-- **E1 (Pagination):** `/workspaces` now pages with the same cursor contract as `/views` (`next` cursor from `listObjects`), removes `fields` projection from repo calls to avoid cursor loss, and applies in-memory filters (q on name/description, entityType/ownerId/shared) across accumulated pages.
-- **E2 (Projection):** Items are projected as `type="workspace"` with `views` defaulting to `[]`; optional `fields` query is applied only after collection so pagination cursors remain intact.
-- **E3 (Verification):** `smoke:workspaces:list` passes with q + entityType filters and pagination retries after the fix (cursor observed when additional pages exist).
+
+### Workspace Storage Transition — 🟨 In Progress (Sprint Q, 2025-12-30)
+
+**Epic Summary:** Introduce true workspace storage (`type="workspace"`) with backward-compatible reads and optional legacy dual-write flag to `type="view"` during migration.
+
+- **E1 (Repo Layer):** New workspace repo wraps objects repo to read workspace-first, fall back to legacy view records, dedupe by id, and optionally dual-write shadows for compatibility.
+- **E2 (Handlers):** Workspace CRUD handlers now use the repo, write primary `type="workspace"` records, and honor `MBAPP_WORKSPACES_DUALWRITE_LEGACY=true` to keep legacy shadows aligned; list endpoint uses workspace-first listing with legacy fallback.
+- **Back-compat:** Reads prefer `type="workspace"` but still serve legacy view-backed workspaces; delete removes both when dual-write is on.
+- **Verification:** `npm run smoke:list` (pass) and `npm run spec:types:mobile` (pass). Full `npm run typecheck` not re-run for this change set (unchanged expectations).
 
 ### Views/Workspaces Contract Alignment — ✅ Complete (Sprint Q, 2025-12-30)
 

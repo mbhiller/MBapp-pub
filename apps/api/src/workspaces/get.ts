@@ -1,7 +1,7 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { ok, notFound, error } from "../common/responses";
-import { getObjectById } from "../objects/repo";
 import { getAuth, requirePerm } from "../auth/middleware";
+import { getWorkspaceById } from "./repo";
 
 /**
  * GET /workspaces/:id — retrieves a single saved View.
@@ -15,17 +15,10 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const id = event.pathParameters?.id;
     if (!id) return notFound();
 
-    const result = await getObjectById({
-      tenantId: auth.tenantId,
-      type: "view",
-      id,
-    });
-    
+    const result = await getWorkspaceById({ tenantId: auth.tenantId, id });
     if (!result) return notFound();
 
-    const views = Array.isArray((result as any)?.views) ? (result as any).views : [];
-    const projected = { ...result, type: "workspace", views };
-    return ok(projected);
+    return ok(result);
   } catch (e: any) {
     return error(e);
   }

@@ -1,7 +1,9 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { ok, bad, error } from "../common/responses";
-import { createObject } from "../objects/repo";
 import { getAuth, requirePerm } from "../auth/middleware";
+import { writeWorkspace } from "./repo";
+
+const DUALWRITE_LEGACY = process.env.MBAPP_WORKSPACES_DUALWRITE_LEGACY === "true";
 
 /**
  * POST /workspaces — creates a saved View.
@@ -34,22 +36,13 @@ export async function handle(event: APIGatewayProxyEventV2) {
 
     const views = Array.isArray(body.views) ? body.views : [];
 
-    // Ensure type is set to 'view' for storage
-    const viewBody = {
-      ...body,
-      type: "view",
-      views,
-    };
-
-    const result = await createObject({
+    const result = await writeWorkspace({
       tenantId: auth.tenantId,
-      type: "view",
-      body: viewBody,
+      workspace: { ...body, views },
+      dualWriteLegacy: DUALWRITE_LEGACY,
     });
 
-    // Project response as workspace
-    const projected = { ...result, type: "workspace", views };
-    return ok(projected, 201);
+    return ok(result, 201);
   } catch (e: any) {
     return error(e);
   }
