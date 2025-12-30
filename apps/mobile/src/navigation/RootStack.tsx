@@ -50,6 +50,7 @@ import DevToolsScreen from "../screens/DevToolsScreen";
 // Purchasing
 import PurchaseOrdersListScreen from "../screens/PurchaseOrdersListScreen";
 import PurchaseOrderDetailScreen from "../screens/PurchaseOrderDetailScreen";
+import EditPurchaseOrderScreen from "../screens/EditPurchaseOrderScreen";
 
 // Sales
 import SalesOrdersListScreen from   "../screens/SalesOrdersListScreen";
@@ -131,6 +132,7 @@ export default function RootStack() {
     {/* Purchase Orders */}
     <Stack.Screen name="PurchaseOrdersList" component={PurchaseOrdersListScreen} options={{ title: "Purchasing" }} />
     <Stack.Screen name="PurchaseOrderDetail" component={PurchaseOrderDetailScreen} options={{ title: "Purchase Order" }} />
+    <Stack.Screen name="EditPurchaseOrder" component={EditPurchaseOrderScreen} options={{ title: "Edit Purchase Order" }} />
     
     {/* Routing and Delivery */}
     <Stack.Screen name="RoutePlanList" component={RoutePlanListScreen} />

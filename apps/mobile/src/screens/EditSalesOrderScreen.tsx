@@ -1,25 +1,17 @@
 // apps/mobile/src/screens/EditSalesOrderScreen.tsx
 import * as React from "react";
-import { View, Text, TextInput, Pressable, ScrollView, ActivityIndicator, Alert } from "react-native";
+import { View, Text, Pressable, ActivityIndicator } from "react-native";
 import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
 import { useToast } from "../features/_shared/Toast";
 import { apiClient } from "../api/client";
 import { computePatchLinesDiff } from "../lib/patchLinesDiff"; // added in E3
 import type { RootStackParamList } from "../navigation/types";
-
-// Minimal line shape for editing
-type Line = {
-  id?: string;
-  cid?: string;
-  itemId?: string;
-  qty?: number;
-  uom?: string;
-};
+import { LineEditor, EditableLine } from "../components/LineEditor";
 
 type SalesOrder = {
   id: string;
   status?: string;
-  lines?: Line[];
+  lines?: EditableLine[];
 };
 
 const PATCH_FIELDS = ["itemId", "qty", "uom"] as const;
@@ -30,14 +22,12 @@ export default function EditSalesOrderScreen() {
   const nav = useNavigation<any>();
   const toast = useToast();
   const { soId } = route.params;
-  const cidCounter = React.useRef(1);
-
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [status, setStatus] = React.useState<string>("");
-  const [originalLines, setOriginalLines] = React.useState<Line[]>([]);
-  const [currentLines, setCurrentLines] = React.useState<Line[]>([]);
+  const [originalLines, setOriginalLines] = React.useState<EditableLine[]>([]);
+  const [currentLines, setCurrentLines] = React.useState<EditableLine[]>([]);
 
   // Load sales order
   React.useEffect(() => {
@@ -50,7 +40,7 @@ export default function EditSalesOrderScreen() {
         const res = await apiClient.get<SalesOrder>(`/objects/salesOrder/${encodeURIComponent(soId)}`);
         const body = (res as any)?.body ?? res;
         const lines = Array.isArray(body?.lines) ? body.lines : [];
-        const normalized: Line[] = lines.map((ln: any) => ({
+        const normalized: EditableLine[] = lines.map((ln: any) => ({
           id: ln?.id ? String(ln.id).trim() : undefined,
           cid: ln?.cid ? String(ln.cid).trim() : undefined,
           itemId: ln?.itemId ? String(ln.itemId).trim() : "",
@@ -58,13 +48,6 @@ export default function EditSalesOrderScreen() {
           uom: ln?.uom ? String(ln.uom).trim() || "ea" : "ea",
         }));
         if (!mounted) return;
-        const maxTmp = normalized.reduce((max, ln) => {
-          const rawCid = ln.cid || (ln.id && String(ln.id).startsWith("tmp-") ? String(ln.id) : "");
-          if (!rawCid || !rawCid.startsWith("tmp-")) return max;
-          const n = Number(rawCid.replace("tmp-", ""));
-          return Number.isFinite(n) ? Math.max(max, n) : max;
-        }, 0);
-        cidCounter.current = Math.max(cidCounter.current, maxTmp + 1);
         setStatus(String(body?.status ?? ""));
         setOriginalLines(normalized);
         setCurrentLines(normalized);
@@ -81,38 +64,6 @@ export default function EditSalesOrderScreen() {
   }, [soId]);
 
   const canEdit = ALLOWED_STATUSES.has((status || "").toLowerCase());
-
-  const handleChange = (key: keyof Line, value: string | number, idx: number) => {
-    setCurrentLines((prev) => {
-      const next = [...prev];
-      const line = { ...next[idx] };
-      if (key === "qty") {
-        const n = Number(value);
-        line.qty = Number.isFinite(n) ? n : 0;
-      } else if (key === "itemId" || key === "uom") {
-        line[key] = typeof value === "string" ? value : String(value ?? "");
-      }
-      next[idx] = line;
-      return next;
-    });
-  };
-
-  const handleRemove = (idx: number) => {
-    setCurrentLines((prev) => prev.filter((_, i) => i !== idx));
-  };
-
-  const nextCid = React.useCallback(() => {
-    const value = cidCounter.current;
-    cidCounter.current += 1;
-    return `tmp-${value}`;
-  }, []);
-
-  const handleAddLine = () => {
-    setCurrentLines((prev) => [
-      ...prev,
-      { cid: nextCid(), itemId: "", qty: 1, uom: "ea" },
-    ]);
-  };
 
   const save = async () => {
     if (!soId || saving) return;
@@ -151,7 +102,11 @@ export default function EditSalesOrderScreen() {
       // Ensure state reflects trimmed values for any subsequent edits
       setCurrentLines(normalizedLines);
 
-      const ops = computePatchLinesDiff(originalLines, normalizedLines, PATCH_FIELDS as any);
+      const ops = computePatchLinesDiff({
+        originalLines,
+        editedLines: normalizedLines,
+        patchableFields: PATCH_FIELDS as any,
+      });
       if (!ops || ops.length === 0) {
         nav.goBack();
         return;
@@ -198,74 +153,7 @@ export default function EditSalesOrderScreen() {
         )}
       </View>
 
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: 12 }}>
-        {currentLines.map((line, idx) => {
-          const key = line.id || line.cid || String(idx);
-          return (
-            <View key={key} style={{ padding: 10, borderWidth: 1, borderColor: "#ddd", borderRadius: 8, gap: 8 }}>
-              <Text style={{ fontWeight: "600" }}>Line {line.id || line.cid}</Text>
-              <View style={{ gap: 6 }}>
-                <Text>Item</Text>
-                <TextInput
-                  editable={canEdit}
-                  value={line.itemId ?? ""}
-                  onChangeText={(v) => handleChange("itemId", v, idx)}
-                  placeholder="Item ID"
-                  style={{ borderWidth: 1, borderColor: "#ccc", borderRadius: 6, padding: 8 }}
-                />
-              </View>
-              <View style={{ gap: 6 }}>
-                <Text>Qty</Text>
-                <TextInput
-                  editable={canEdit}
-                  keyboardType="numeric"
-                  value={String(line.qty ?? 0)}
-                  onChangeText={(v) => handleChange("qty", v, idx)}
-                  style={{ borderWidth: 1, borderColor: "#ccc", borderRadius: 6, padding: 8 }}
-                />
-              </View>
-              <View style={{ gap: 6 }}>
-                <Text>UOM</Text>
-                <TextInput
-                  editable={canEdit}
-                  value={line.uom ?? "ea"}
-                  onChangeText={(v) => handleChange("uom", v || "ea", idx)}
-                  style={{ borderWidth: 1, borderColor: "#ccc", borderRadius: 6, padding: 8 }}
-                />
-              </View>
-              <Pressable
-                disabled={!canEdit}
-                onPress={() => handleRemove(idx)}
-                style={{
-                  padding: 10,
-                  borderRadius: 6,
-                  borderWidth: 1,
-                  borderColor: "#d32f2f",
-                  backgroundColor: canEdit ? "#ffebee" : "#f5f5f5",
-                  alignItems: "center",
-                }}
-              >
-                <Text style={{ color: "#d32f2f", fontWeight: "700" }}>Remove</Text>
-              </Pressable>
-            </View>
-          );
-        })}
-
-        <Pressable
-          disabled={!canEdit}
-          onPress={handleAddLine}
-          style={{
-            padding: 12,
-            borderRadius: 8,
-            borderWidth: 1,
-            borderColor: "#1976d2",
-            backgroundColor: canEdit ? "#e3f2fd" : "#f5f5f5",
-            alignItems: "center",
-          }}
-        >
-          <Text style={{ color: "#1976d2", fontWeight: "700" }}>+ Add Line</Text>
-        </Pressable>
-      </ScrollView>
+      <LineEditor lines={currentLines} onChange={setCurrentLines} canEdit={canEdit} />
 
       <View style={{ flexDirection: "row", gap: 12, marginTop: 12 }}>
         <Pressable

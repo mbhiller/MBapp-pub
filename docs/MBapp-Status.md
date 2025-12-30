@@ -50,11 +50,14 @@
   - ✅ Files: [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) (lines 6672-6876), [ops/ci-smokes.json](../ops/ci-smokes.json)
 - **CI Posture:** 30/30 smoke tests passing (added 2 new regression tests)
 - **Remaining Work:**
-  - ⬜ Mobile: Implement edit screens (EditSalesOrderScreen, EditPurchaseOrderScreen) using same pattern
-  - ⬜ Mobile: Port `computePatchLinesDiff` to mobile (apps/mobile/src/lib/patchLinesDiff.ts)
+  - ⬜ Mobile: Implement RN line editor UX (LineArrayEditor equivalent)
   - ⬜ Web: Audit other endpoints that create/update lines without `ensureLineIds()`
-  - ⬜ Mobile: Add `LineArrayEditor` equivalent for React Native
+- **Mobile Parity:** Shared `computePatchLinesDiff` helper now lives in apps/mobile/src/lib/patchLinesDiff.ts (SO/PO), matching web semantics.
+- **Mobile PO Edit:** `EditPurchaseOrderScreen` supports draft-only line edits using patch-lines (id/cid diff, add/remove/edit, no-op toast, 409 guard) and refreshes detail on return; PO detail links to edit when draft; uses dedicated patch-lines API client helper.
+- **Mobile Line Editor:** Shared React Native `LineEditor` component now powers both SO and PO edit screens (itemId/qty/uom, cid tmp-* generation, add/remove/edit UI reuse).
+- **CI Regression:** Added `smoke:po:patch-lines:cid` to validate cid→id assignment for PO patch-lines; CI suite remains green.
 - **Pattern Documentation:** See [MBapp-Foundations.md § 2.5 Shared Line Editor Contract](MBapp-Foundations.md#25-shared-line-editor-contract)
+- **Telemetry:** Mobile PO edit emits `screen_viewed` (screen=`PurchaseOrderEdit`, includes `poId` + status) and `po_edit_submit` (`result=attempt|success|error`, `opCount`, `upsertCount`, `removeCount`, `httpStatus?`, `errorCode?`); Sentry tags include `screen`, `route`, `objectType`, `objectId`, `poStatus` when present.
 
 **Recent Deliveries (Sprint I, 2025-12-28):**
 - ✅ **Backend MOQ loading fix:** suggest-po applies minOrderQty after vendor determined (from override, backorder, or product).
