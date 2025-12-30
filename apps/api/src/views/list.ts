@@ -10,10 +10,13 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const qsp = event.queryStringParameters || {};
     const { limit, cursor } = parsePagination(qsp, 25);
     const q = qsp.q ?? undefined;
+    const entityType = qsp.entityType ? String(qsp.entityType).trim() : undefined;
     const fields = qsp.fields ? String(qsp.fields).split(",").map(s => s.trim()).filter(Boolean) : undefined;
 
     requirePerm(auth, "view:read");
-    const page = await listObjects({ tenantId: auth.tenantId, type: "view", q, next: cursor, limit, fields });
+    const filters = entityType ? { entityType } : undefined;
+
+    const page = await listObjects({ tenantId: auth.tenantId, type: "view", q, next: cursor, limit, fields, filters });
     return ok(buildListPage(page.items, page.next));
   } catch (e: any) {
     return internalError(e);

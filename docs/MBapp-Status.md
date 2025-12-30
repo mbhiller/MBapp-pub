@@ -52,6 +52,14 @@
 - **E2 (Projection):** Items are projected as `type="workspace"` with `views` defaulting to `[]`; optional `fields` query is applied only after collection so pagination cursors remain intact.
 - **E3 (Verification):** `smoke:workspaces:list` passes with q + entityType filters and pagination retries after the fix (cursor observed when additional pages exist).
 
+### Views/Workspaces Contract Alignment — ✅ Complete (Sprint Q, 2025-12-30)
+
+**Epic Summary:** Align list contracts and schemas with actual client/API behavior so views honor entityType and workspace spec matches list usage.
+
+- **E1 (API):** `/views` list now applies `entityType` filtering before pagination via repo filters, preserving q/cursor shape ([apps/api/src/views/list.ts](../apps/api/src/views/list.ts)).
+- **E2 (Spec):** `/workspaces` list documents q/entityType/next alongside ownerId/shared/limit/cursor, and Workspace schema now includes optional entityType matching View enum ([spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml)).
+- **Verification:** `npm run typecheck` (fails only on pre-existing infra/terraform JS TS8008 warnings, unchanged); `npm run spec:bundle`, `npm run spec:types:api`, `npm run spec:types:mobile` pass; smokes `smoke:views:crud` and `smoke:views:apply-to-po-list` pass.
+
 ### Mobile PO Edit Parity — ✅ Complete (Sprint U, 2025-12-30)
 
 **Epic Summary:** Bring mobile PO line editing to parity with SO: shared diff helper, cid/id rules, draft-only guard, and immediate detail refresh on return.

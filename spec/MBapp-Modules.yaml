@@ -2106,6 +2106,21 @@ components:
             minLength: 1
             maxLength: 200
             description: Workspace name
+          entityType:
+            type: string
+            description: Optional module/object key this workspace targets (aligns to View.entityType)
+            enum:
+            - purchaseOrder
+            - salesOrder
+            - inventoryItem
+            - party
+            - account
+            - event
+            - employee
+            - organization
+            - product
+            - class
+            - division
           description:
             type: string
             description: Optional description
@@ -3045,8 +3060,10 @@ paths:
         schema:
           type: boolean
         description: Filter by shared status
+      - $ref: '#/components/parameters/Q'
+      - $ref: '#/components/parameters/EntityType'
       - $ref: '#/components/parameters/Limit'
-      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Next'
       responses:
         '200':
           $ref: '#/components/responses/ListPage'
