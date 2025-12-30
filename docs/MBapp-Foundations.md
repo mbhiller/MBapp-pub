@@ -620,10 +620,10 @@ export async function smoke_module_flow(API_BASE, authToken) {
 
 | Endpoint | Method | Status | Mobile | Web | MVP Need |
 |----------|--------|--------|--------|-----|----------|
-| `/views` | GET | ✅ | ❌ | ✅ | **Required for saved filters** |
-| `/views` | POST | ✅ | ❌ | ✅ | **Required** |
-| `/views/{id}` | GET | ✅ | ❌ | ✅ | **Required** |
-| `/views/{id}` | PATCH | ✅ | ❌ | ✅ | **Required** (Sprint Q: used for Update View) |
+| `/views` | GET | ✅ | ✅ (v1: PO/SO) | ✅ | **Required for saved filters** |
+| `/views` | POST | ✅ | ✅ (v1: PO/SO) | ✅ | **Required** |
+| `/views/{id}` | GET | ✅ | ✅ (v1: PO/SO) | ✅ | **Required** |
+| `/views/{id}` | PATCH | ✅ | ✅ (v1: PO/SO) | ✅ | **Required** (Sprint Q: used for Update View; Sprint R mobile) |
 | `/views/{id}` | DELETE | ✅ | ❌ | ✅ | Optional |
 | `/workspaces` | GET | ✅ (aliases views) | 🟨 (hub list only) | 🟨 (list/detail) | Optional (nice-to-have) |
 | `/workspaces` | POST | ✅ (aliases views) | 🟨 (hub list only) | 🟨 (list/detail) | Optional |
@@ -642,7 +642,19 @@ export async function smoke_module_flow(API_BASE, authToken) {
 - ✅ **Columns stored but not rendered:** View `columns` array is persisted in API/DB but currently not used by web table rendering (UI ignores columns field; tables show default column set). Sort field is stored; whether applied depends on list page implementation.
 - ✅ **Smoke coverage:** `smoke:views:apply-to-po-list` validates filter application constrains list results; `smoke:views:validate-filters` validates server-side filter rejection.
 
-**Mobile gaps:** Views UI absent; Workspaces hub lists items but cannot apply/open views.  
+**Sprint R Mobile Save View v1 (2025-12-30):**
+- ✅ **Mobile API support:** `useViewsApi()` hook extended with `create(payload)` and `patch(id, payload)` methods; auth token wired to AsyncStorage
+- ✅ **PO/SO list UI:** SaveViewModal component added for save/update workflows; integrated into PurchaseOrdersListScreen and SalesOrdersListScreen with primary "Save"/"Update" button affordance
+- ✅ **State mapping:** Bidirectional (applyView ↔ buildViewFromState) with round-trip guarantee; mapViewToMobileState applies filters, buildViewFromState reverses mapping for save
+- ✅ **Supported fields (v1):**
+  - **PO:** q (contains), status (eq), vendorId (eq), sort (createdAt/updatedAt only)
+  - **SO:** q (contains), status (eq), sort (createdAt/updatedAt only)
+  - **Sort:** Limited to `createdAt` or `updatedAt` fields with `asc`/`desc` direction (other fields dropped)
+  - **Shared flag:** Defaults to false (if omitted from payload); not exposed in UI for v1
+- ✅ **Implementation pattern:** Inverse mapper normalizes state → View.filters by dropping empty values, validating operators, and entity-specific field mappings
+- ✅ **Limitations:** Inventory/Parties/Products list save not yet implemented; workspaces hub UI absent; columns array not applied to mobile lists
+
+**Mobile gaps (post-v1):** Inventory/Parties/Products list save; workspaces hub apply/open views.  
 **Web gaps:** Workspaces create/edit missing; view apply/save present for SO/PO/Inventory/Parties/Products, other modules pending.  
 **API complete:** ✅ (v1 aliasing behavior as above)
 

@@ -44,6 +44,24 @@
 - **Status:** ✅ **Complete (Sprint Q, 2025-12-30)** — All E1–E4 tasks complete; apps/api typecheck passes; smoke:views:crud, smoke:workspaces:list, smoke:views:validate-filters all pass; web typecheck clean.
 - **Next:** Mobile views UI (deferred); server-side field-existence validation (deferred); workspace-view aliasing clarification (future).
 
+### Mobile Save View v1 — ✅ Complete (Sprint R, 2025-12-30)
+
+**Epic Summary:** Mobile save/update views for PO/SO list screens with bidirectional state mapping and auth-wired API client.
+
+- **E1 (API — Mobile Client):** [apps/mobile/src/features/views/hooks.ts](../apps/mobile/src/features/views/hooks.ts) extended with `create(payload: CreateViewPayload)` and `patch(id: string, payload: PatchViewPayload)` methods. Auth token wired to AsyncStorage (`mbapp.dev.token`) matching DevAuthBootstrap pattern. Enhanced `getJSON()` to accept `method` parameter (GET/POST/PATCH) and optional `body` for mutations. Payload types include `name` (required), `entityType` (required), `filters`, `sort`, `description`, `shared` (all optional).
+- **E2 (Inverse Mapper):** [apps/mobile/src/features/views/buildViewFromState.ts](../apps/mobile/src/features/views/buildViewFromState.ts) (new file) implements `buildViewFromState(entityType: string, state: MobileState)` inverse mapper. Entity-specific mappings: PO (q/status/vendorId), SO (q/status), Inventory (q/productId), Party (q/role), Product (q). Normalizes state by dropping empty values, validating operator types, ensuring value types match operators. Sort validation: only `createdAt`/`updatedAt` fields allowed, `asc`/`desc` direction required. Round-trip guarantee: `mapViewToMobileState(entityType, view)` → apply → `buildViewFromState(entityType, applied)` yields symmetric result for mapped fields.
+- **E3 (UI — SaveViewModal):** [apps/mobile/src/features/views/SaveViewModal.tsx](../apps/mobile/src/features/views/SaveViewModal.tsx) (new file) reusable modal component with `name` (required TextInput), `description` (optional multi-line), `shared` toggle (omitted for v1, defaults false). Behavior: Detects update vs. create via `appliedView?.id`, shows "Save View" header (create) or "Update <Name>" header (update). Uses `buildViewFromState(entityType, currentState)` to derive filters from current state. API: POST `/views` for create, PATCH `/views/{id}` for update. Error handling: Toast with first 50 chars of error message. Loading state disables inputs + spinner.
+- **E4 (UI — PurchaseOrdersListScreen):** [apps/mobile/src/screens/PurchaseOrdersListScreen.tsx](../apps/mobile/src/screens/PurchaseOrdersListScreen.tsx) integrated SaveViewModal with `saveModalOpen` state, `handleViewSaved(view)` callback, refactored button layout (primary "+ New PO" + secondary "Save"/"Update"), and SaveViewModal component at end. Passes `currentState: { q, filter: filters.filter, sort: filters.sort }` to modal.
+- **E5 (UI — SalesOrdersListScreen):** [apps/mobile/src/screens/SalesOrdersListScreen.tsx](../apps/mobile/src/screens/SalesOrdersListScreen.tsx) integrated SaveViewModal with same pattern as PO (saveModalOpen state, handleViewSaved callback, button layout refactor, modal integration). Entity type: `"salesOrder"` (simpler filters: status + q, no vendorId).
+- **Status:** ✅ **Complete (Sprint R, 2025-12-30)** — All E1–E5 tasks complete; mobile API types + auth wiring tested; inverse mapper with round-trip guarantee ✅; SaveViewModal component ✅; PO/SO screen integration ✅; apps/mobile typecheck passes; smoke:views:apply-to-po-list ✅ validates view-derived filter application.
+- **Supported fields (v1):**
+  - **PO:** q (contains), status (eq), vendorId (eq)
+  - **SO:** q (contains), status (eq)
+  - **Sort:** Limited to createdAt/updatedAt with asc/desc (other fields dropped during normalization)
+  - **Shared:** Defaults to false if omitted (not exposed in UI for v1)
+  - **Columns:** Parsed but not applied to list rendering (future feature)
+- **Next:** Inventory/Parties/Products list save; workspaces hub apply/open views; additional entity types (e.g., backorders, registrations).
+
 ### Backorder → PO → Receive Loop Polish — ✅ Complete (Sprint I + Sprint J)
 - **MOQ Bump Fix:** suggest-po now applies minOrderQty regardless of vendor source (override/backorder derivation).
 - **Runtime Tracking:** BackorderRequest schema includes `fulfilledQty` and `remainingQty` (nullable, server-maintained during PO receive).

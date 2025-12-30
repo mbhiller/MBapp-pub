@@ -8,6 +8,15 @@ export type AppliedState = {
   sort?: { by?: string; dir?: "asc" | "desc" };
 };
 
+/**
+ * ROUND-TRIP MAPPING GUARANTEE:
+ * buildViewFromState(entityType, mapViewToMobileState(entityType, view).applied)
+ * should produce filters/sort that, when re-applied via mapViewToMobileState,
+ * yield the same AppliedState (for fields supported by mapViewToMobileState).
+ *
+ * See: apps/mobile/src/features/views/buildViewFromState.ts (inverse mapper)
+ */
+
 function logUnsupported(entityType: string, unsupported: Array<{ field: string; reason: string }>) {
   if (__DEV__ && unsupported.length > 0) {
     console.warn(
