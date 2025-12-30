@@ -290,14 +290,23 @@ export default function SalesOrderDetailScreen() {
       return;
     }
 
-    try {
-      const linesToFulfill = Array.from(pendingFulfills.entries()).map(([lineId, deltaQty]) => ({
-        id: lineId,
-        deltaQty,
-        ...(defaultLocationId ? { locationId: defaultLocationId } : {}),
-        ...(defaultLot ? { lot: defaultLot } : {}),
-      }));
+    const linesToFulfill = Array.from(pendingFulfills.entries()).map(([lineId, deltaQty]) => ({
+      id: lineId,
+      deltaQty,
+      ...(defaultLocationId ? { locationId: defaultLocationId } : {}),
+      ...(defaultLot ? { lot: defaultLot } : {}),
+    }));
 
+    // Track attempt for scan-to-fulfill
+    track("so_fulfill_clicked", {
+      objectType: "salesOrder",
+      objectId: id,
+      lineCount: linesToFulfill.length,
+      scanMode: true,
+      result: "attempt",
+    });
+
+    try {
       // Capture a stable idempotency key for this submit attempt
       const idempotencyKey = makeScanIdempotencyKey(id, linesToFulfill.length);
 
@@ -306,11 +315,47 @@ export default function SalesOrderDetailScreen() {
       setPendingFulfills(new Map());
       setScanHistory([]);
       setScanMode(false);
+      
+      // Track success for scan-to-fulfill
+      track("so_fulfill_clicked", {
+        objectType: "salesOrder",
+        objectId: id,
+        lineCount: linesToFulfill.length,
+        scanMode: true,
+        result: "success",
+      });
+
       await refetch();
       await fetchBackorderBreakdown();
       await refetchAvailability();
     } catch (err: any) {
       console.error(err);
+      const errorCode = err?.code ?? err?.status ?? "UNKNOWN_ERROR";
+      
+      // Track failure for scan-to-fulfill
+      track("so_fulfill_clicked", {
+        objectType: "salesOrder",
+        objectId: id,
+        lineCount: linesToFulfill.length,
+        scanMode: true,
+        result: "fail",
+        errorCode,
+      });
+
+      // Capture exception in Sentry (dynamic require)
+      try {
+        const Sentry = require("@sentry/react-native");
+        Sentry.captureException(err, {
+          tags: {
+            objectType: "salesOrder",
+            objectId: id,
+            action: "fulfill",
+          },
+        });
+      } catch {
+        // Sentry not available
+      }
+
       toast(err?.message || "Submit failed", "error");
     }
   };
@@ -318,14 +363,31 @@ export default function SalesOrderDetailScreen() {
   async function run(label: string, fn: () => Promise<any>) {
     if (!id) return;
 
-    // Track attempt for commit actions
+    // Track attempt for commit/reserve/fulfill actions
     const isCommit = label === "Commit" || label === "Commit (strict)";
+    const isReserve = label === "Reserve";
+    const isFulfill = label === "Fulfill";
     const strict = label === "Commit (strict)";
+    
     if (isCommit) {
       track("SO_Commit_Clicked", {
         objectType: "salesOrder",
         objectId: id,
         strict,
+        result: "attempt",
+      });
+    } else if (isReserve) {
+      track("so_reserve_clicked", {
+        objectType: "salesOrder",
+        objectId: id,
+        lineCount: reservePayload()?.lines?.length ?? 0,
+        result: "attempt",
+      });
+    } else if (isFulfill) {
+      track("so_fulfill_clicked", {
+        objectType: "salesOrder",
+        objectId: id,
+        lineCount: fulfillPayload()?.lines?.length ?? 0,
         result: "attempt",
       });
     }
@@ -342,12 +404,26 @@ export default function SalesOrderDetailScreen() {
         toast(`${label} ok`, "success");
       }
 
-      // Track success for commit actions
+      // Track success for commit/reserve/fulfill actions
       if (isCommit) {
         track("SO_Commit_Clicked", {
           objectType: "salesOrder",
           objectId: id,
           strict,
+          result: "success",
+        });
+      } else if (isReserve) {
+        track("so_reserve_clicked", {
+          objectType: "salesOrder",
+          objectId: id,
+          lineCount: reservePayload()?.lines?.length ?? 0,
+          result: "success",
+        });
+      } else if (isFulfill) {
+        track("so_fulfill_clicked", {
+          objectType: "salesOrder",
+          objectId: id,
+          lineCount: fulfillPayload()?.lines?.length ?? 0,
           result: "success",
         });
       }
@@ -358,7 +434,7 @@ export default function SalesOrderDetailScreen() {
     } catch (e: any) {
       console.error(e);
 
-      // Track failure for commit actions
+      // Track failure for commit/reserve/fulfill actions
       if (isCommit) {
         const errorCode = e?.code ?? e?.status ?? "UNKNOWN_ERROR";
         track("SO_Commit_Clicked", {
@@ -377,6 +453,52 @@ export default function SalesOrderDetailScreen() {
               objectType: "salesOrder",
               objectId: id,
               action: "commit",
+            },
+          });
+        } catch {
+          // Sentry not available
+        }
+      } else if (isReserve) {
+        const errorCode = e?.code ?? e?.status ?? "UNKNOWN_ERROR";
+        track("so_reserve_clicked", {
+          objectType: "salesOrder",
+          objectId: id,
+          lineCount: reservePayload()?.lines?.length ?? 0,
+          result: "fail",
+          errorCode,
+        });
+
+        // Capture exception in Sentry (dynamic require)
+        try {
+          const Sentry = require("@sentry/react-native");
+          Sentry.captureException(e, {
+            tags: {
+              objectType: "salesOrder",
+              objectId: id,
+              action: "reserve",
+            },
+          });
+        } catch {
+          // Sentry not available
+        }
+      } else if (isFulfill) {
+        const errorCode = e?.code ?? e?.status ?? "UNKNOWN_ERROR";
+        track("so_fulfill_clicked", {
+          objectType: "salesOrder",
+          objectId: id,
+          lineCount: fulfillPayload()?.lines?.length ?? 0,
+          result: "fail",
+          errorCode,
+        });
+
+        // Capture exception in Sentry (dynamic require)
+        try {
+          const Sentry = require("@sentry/react-native");
+          Sentry.captureException(e, {
+            tags: {
+              objectType: "salesOrder",
+              objectId: id,
+              action: "fulfill",
             },
           });
         } catch {

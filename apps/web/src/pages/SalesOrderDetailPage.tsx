@@ -350,6 +350,30 @@ export default function SalesOrderDetailPage() {
             shortagesCount,
           });
         }
+
+        // Track success for reserve action
+        if (action === "reserve") {
+          const lines = body?.lines as Array<{ deltaQty: number }> | undefined;
+          const totalQty = lines?.reduce((sum, ln) => sum + Number(ln.deltaQty ?? 0), 0) ?? 0;
+          track("so_reserve_clicked", {
+            objectType: "salesOrder",
+            objectId: id,
+            lineCount: lines?.length ?? 0,
+            result: "success",
+          });
+        }
+
+        // Track success for fulfill action
+        if (action === "fulfill") {
+          const lines = body?.lines as Array<{ deltaQty: number }> | undefined;
+          const totalQty = lines?.reduce((sum, ln) => sum + Number(ln.deltaQty ?? 0), 0) ?? 0;
+          track("so_fulfill_clicked", {
+            objectType: "salesOrder",
+            objectId: id,
+            lineCount: lines?.length ?? 0,
+            result: "success",
+          });
+        }
       } catch (err) {
         const e = err as any;
         const details = e?.details || {};
@@ -407,6 +431,48 @@ export default function SalesOrderDetailPage() {
               objectType: "salesOrder",
               objectId: id,
               action: "commit",
+            },
+          });
+        }
+
+        // Track failures for reserve action
+        if (action === "reserve") {
+          const errorCode = e?.code ?? e?.details?.code ?? e?.status ?? "UNKNOWN_ERROR";
+          const lines = body?.lines as Array<{ deltaQty: number }> | undefined;
+          track("so_reserve_clicked", {
+            objectType: "salesOrder",
+            objectId: id,
+            lineCount: lines?.length ?? 0,
+            result: "fail",
+            errorCode,
+          });
+          Sentry.captureException(err, {
+            tags: {
+              tenantId: tenantId ?? "unknown",
+              objectType: "salesOrder",
+              objectId: id,
+              action: "reserve",
+            },
+          });
+        }
+
+        // Track failures for fulfill action
+        if (action === "fulfill") {
+          const errorCode = e?.code ?? e?.details?.code ?? e?.status ?? "UNKNOWN_ERROR";
+          const lines = body?.lines as Array<{ deltaQty: number }> | undefined;
+          track("so_fulfill_clicked", {
+            objectType: "salesOrder",
+            objectId: id,
+            lineCount: lines?.length ?? 0,
+            result: "fail",
+            errorCode,
+          });
+          Sentry.captureException(err, {
+            tags: {
+              tenantId: tenantId ?? "unknown",
+              objectType: "salesOrder",
+              objectId: id,
+              action: "fulfill",
             },
           });
         }
@@ -486,6 +552,16 @@ export default function SalesOrderDetailPage() {
     if (payload.length === 0) {
       setActionError("Add a quantity for at least one line before reserving");
       return;
+    }
+
+    // Track attempt
+    if (id) {
+      track("so_reserve_clicked", {
+        objectType: "salesOrder",
+        objectId: id,
+        lineCount: payload.length,
+        result: "attempt",
+      });
     }
 
     setShortageInfo(null);
@@ -580,6 +656,17 @@ export default function SalesOrderDetailPage() {
       setActionError("Add a quantity for at least one line before fulfilling");
       return;
     }
+
+    // Track attempt
+    if (id) {
+      track("so_fulfill_clicked", {
+        objectType: "salesOrder",
+        objectId: id,
+        lineCount: payload.length,
+        result: "attempt",
+      });
+    }
+
     await performAction("fulfill", { lines: payload });
   };
 

@@ -888,7 +888,7 @@ MBapp serves **three primary UX disciplines** with distinct interaction patterns
 **Product Analytics:**
 - **Tool:** PostHog (self-hosted or cloud)
 - **Scope:** User behavior tracking, feature adoption, funnel analysis
-- **Events:** Domain events (backorder_ignored, po_received) + UX events (screen_viewed, button_clicked)
+- **Events:** Domain events (backorder_ignored, po_received, SalesOrderReserved, SalesOrderFulfilled) + UX events (screen_viewed, button_clicked, so_reserve_clicked, so_fulfill_clicked)
 - **Session replay:** Enabled for web (opt-in for mobile)
 
 **Error Tracking:**
@@ -930,6 +930,15 @@ MBapp serves **three primary UX disciplines** with distinct interaction patterns
 - **Domain event (API):**
   - `BackorderIgnored` emitted from backend with `{ objectType, objectId, soId, itemId, statusBefore, statusAfter, durationMs }`
 - **PII rule:** IDs only in properties; no names/emails.
+
+**Sprint P Telemetry Additions: SO Reserve/Fulfill**
+- **Domain events (API):**
+  - `SalesOrderReserved`: Emitted after inventory movements persist (success) or on error (INVALID_STATUS | INSUFFICIENT_AVAILABILITY). Payload: `{ objectType, objectId, lineCount, totalQtyReserved, statusBefore, statusAfter, result, errorCode? }`
+  - `SalesOrderFulfilled`: Emitted after movements + line updates + status computed (success) or on error (INVALID_STATUS | OVER_FULFILLMENT). Payload: `{ objectType, objectId, lineCount, totalQtyFulfilled, statusBefore, statusAfter, result, errorCode? }`
+- **UX events (Web + Mobile):**
+  - `so_reserve_clicked`: Tracks reserve button clicks (attempt/success/fail). Payload: `{ objectType, objectId, lineCount, result, errorCode? }`
+  - `so_fulfill_clicked`: Tracks fulfill button clicks (attempt/success/fail) and scan-to-fulfill path (scanMode=true). Payload: `{ objectType, objectId, lineCount, result, errorCode?, scanMode? }`
+- **Pattern:** IDs + aggregated counts only; no lines array. Sentry integration adds tags (objectType, objectId, action) on failures.
 
 ---
 
@@ -1020,6 +1029,46 @@ type TelemetryEvent = {
     strict: false,
     shortagesCount: 2,
     movementsEmitted: 5,
+    result: "success"
+  },
+  platform: "api",
+  environment: "prod"
+}
+
+// Sales Order reserved (Sprint P)
+{
+  eventName: "SalesOrderReserved",
+  timestamp: "2025-12-29T14:22:00.000Z",
+  sessionId: "sess_def456",
+  tenantId: "DemoTenant",
+  actorId: "user_xyz",
+  objectType: "salesOrder",
+  objectId: "so_78901",
+  properties: {
+    lineCount: 2,
+    totalQtyReserved: 50,
+    statusBefore: "submitted",
+    statusAfter: "submitted",
+    result: "success"
+  },
+  platform: "api",
+  environment: "prod"
+}
+
+// Sales Order fulfilled (Sprint P)
+{
+  eventName: "SalesOrderFulfilled",
+  timestamp: "2025-12-29T14:30:00.000Z",
+  sessionId: "sess_def456",
+  tenantId: "DemoTenant",
+  actorId: "user_xyz",
+  objectType: "salesOrder",
+  objectId: "so_78901",
+  properties: {
+    lineCount: 2,
+    totalQtyFulfilled: 50,
+    statusBefore: "committed",
+    statusAfter: "fulfilled",
     result: "success"
   },
   platform: "api",
@@ -1137,6 +1186,44 @@ type TelemetryEvent = {
     strict: false,
     result: "success",  // or "attempt", "fail"
     shortagesCount: 0
+  },
+  platform: "web",
+  environment: "prod"
+}
+
+// Sales Order reserve clicked (Sprint P — web)
+{
+  eventName: "so_reserve_clicked",
+  timestamp: "2025-12-29T14:22:00.000Z",
+  sessionId: "sess_def456",
+  tenantId: "DemoTenant",
+  actorId: "user_xyz",
+  screen: "/sales-orders/so_78901",
+  properties: {
+    objectType: "salesOrder",
+    objectId: "so_78901",
+    lineCount: 2,
+    result: "success",  // or "attempt", "fail"
+    errorCode?: "INSUFFICIENT_AVAILABILITY"  // on fail
+  },
+  platform: "web",
+  environment: "prod"
+}
+
+// Sales Order fulfill clicked (Sprint P — web)
+{
+  eventName: "so_fulfill_clicked",
+  timestamp: "2025-12-29T14:23:00.000Z",
+  sessionId: "sess_def456",
+  tenantId: "DemoTenant",
+  actorId: "user_xyz",
+  screen: "/sales-orders/so_78901",
+  properties: {
+    objectType: "salesOrder",
+    objectId: "so_78901",
+    lineCount: 2,
+    result: "success",  // or "attempt", "fail"
+    errorCode?: "OVER_FULFILLMENT"  // on fail
   },
   platform: "web",
   environment: "prod"
