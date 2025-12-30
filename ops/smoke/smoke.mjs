@@ -3788,6 +3788,150 @@ const tests = {
     };
   },
 
+  /**
+   * Regression: PO patch-lines CID flow (parity with SO)
+   * - Add new line via cid -> server assigns stable L{n}
+   * - Subsequent patch uses id and succeeds
+   */
+  "smoke:po:patch-lines:cid": async () => {
+    await ensureBearer();
+
+    const { vendorId } = await seedVendor(api);
+
+    const prod = await createProduct({ name: "PoCidTest" });
+    if (!prod.ok) return { test: "po:patch-lines:cid", result: "FAIL", reason: "product-create-failed", prod };
+
+    const inv = await createInventoryForProduct(prod.body.id, "PoCidTestItem");
+    if (!inv.ok) return { test: "po:patch-lines:cid", result: "FAIL", reason: "inventory-create-failed", inv };
+
+    const itemId = inv.body?.id;
+
+    // 1) Create draft PO with no lines
+    const create = await post(
+      `/objects/purchaseOrder`,
+      {
+        type: "purchaseOrder",
+        status: "draft",
+        vendorId,
+        lines: [],
+      },
+      { "Idempotency-Key": idem() }
+    );
+
+    if (!create.ok || !create.body?.id) {
+      return { test: "po:patch-lines:cid", result: "FAIL", reason: "po-create-failed", create };
+    }
+
+    const poId = create.body.id;
+
+    // 2) Patch-lines with cid for new line
+    const clientId = `tmp-${Math.random().toString(36).slice(2, 11)}`;
+    const patch1 = await post(
+      `/purchasing/po/${encodeURIComponent(poId)}:patch-lines`,
+      {
+        ops: [
+          {
+            op: "upsert",
+            cid: clientId,
+            patch: { itemId, qty: 2, uom: "ea" },
+          },
+        ],
+      },
+      { "Idempotency-Key": idem() }
+    );
+
+    if (!patch1.ok) {
+      return { test: "po:patch-lines:cid", result: "FAIL", reason: "patch1-failed", patch1 };
+    }
+
+    // 3) Fetch PO and verify server-assigned id matches ^L\d+$
+    const fetch1 = await get(`/objects/purchaseOrder/${encodeURIComponent(poId)}`);
+    if (!fetch1.ok || !fetch1.body) {
+      return { test: "po:patch-lines:cid", result: "FAIL", reason: "po-fetch1-failed", fetch1 };
+    }
+
+    const lines1 = Array.isArray(fetch1.body.lines) ? fetch1.body.lines : [];
+    if (lines1.length === 0) {
+      return { test: "po:patch-lines:cid", result: "FAIL", reason: "no-lines-after-patch1", fetch1: fetch1.body };
+    }
+
+    const newLine = lines1.find((ln) => ln.itemId === itemId);
+    if (!newLine || !newLine.id) {
+      return {
+        test: "po:patch-lines:cid",
+        result: "FAIL",
+        reason: "new-line-not-found-or-no-id",
+        lines1: lines1.map((ln) => ({ id: ln.id, itemId: ln.itemId })),
+      };
+    }
+
+    const serverId = String(newLine.id).trim();
+    const lineIdPattern = /^L\d+$/;
+    const serverIdValid = lineIdPattern.test(serverId);
+
+    if (!serverIdValid) {
+      return {
+        test: "po:patch-lines:cid",
+        result: "FAIL",
+        reason: "server-id-invalid-pattern",
+        serverId,
+        expectedPattern: "L{n}",
+      };
+    }
+
+    // 4) Subsequent patch updates line via id
+    const patch2 = await post(
+      `/purchasing/po/${encodeURIComponent(poId)}:patch-lines`,
+      {
+        ops: [
+          {
+            op: "upsert",
+            id: serverId,
+            patch: { qty: 5 },
+          },
+        ],
+      },
+      { "Idempotency-Key": idem() }
+    );
+
+    if (!patch2.ok) {
+      return { test: "po:patch-lines:cid", result: "FAIL", reason: "patch2-failed", patch2 };
+    }
+
+    // 5) Fetch again and assert qty updated
+    const fetch2 = await get(`/objects/purchaseOrder/${encodeURIComponent(poId)}`);
+    if (!fetch2.ok || !fetch2.body) {
+      return { test: "po:patch-lines:cid", result: "FAIL", reason: "po-fetch2-failed", fetch2 };
+    }
+
+    const lines2 = Array.isArray(fetch2.body.lines) ? fetch2.body.lines : [];
+    const updatedLine = lines2.find((ln) => ln.id === serverId);
+
+    if (!updatedLine) {
+      return { test: "po:patch-lines:cid", result: "FAIL", reason: "updated-line-not-found", serverId, lines2 };
+    }
+
+    const qtyUpdated = updatedLine.qty === 5;
+
+    const pass = serverIdValid && qtyUpdated;
+
+    return {
+      test: "po:patch-lines:cid",
+      result: pass ? "PASS" : "FAIL",
+      poId,
+      clientId,
+      serverId,
+      serverIdValid,
+      qtyUpdated,
+      assertions: {
+        patch1_ok: patch1.ok,
+        serverIdMatchesPattern: serverIdValid,
+        patch2_ok: patch2.ok,
+        qtyUpdated,
+      },
+    };
+  },
+
   "smoke:salesOrders:commit-strict-shortage": async () => {
     await ensureBearer();
 

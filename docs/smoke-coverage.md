@@ -14,6 +14,8 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 **CI-covered patch-lines flows (Sprint G):**
 - `smoke:salesOrders:patch-lines` — Creates SO draft with 2 lines (L1, L2), updates L1 qty, removes L2, adds new line; asserts new line receives L3 (not reused L2), `idReused: false`, and all IDs stable.
 - `smoke:purchaseOrders:patch-lines` — Mirrors SO flow for PO; validates identical id assignment behavior, no id reuse, and stable L{n} sequence.
+- `smoke:so:patch-lines:cid` — Adds SO line via `cid`, asserts server assigns `L{n}` id, then patches the same line by `id` and verifies qty update.
+- `smoke:po:patch-lines:cid` — Adds PO line via `cid`, asserts server assigns `L{n}` id, then patches the same line by `id` and verifies qty update (draft-only guard enforced by endpoint).
 
 **Guarantee:** Both smokes validate that removed line IDs are **reserved and never reused** by the server, ensuring stable line identity across edits.
 

@@ -1,6 +1,7 @@
 // apps/mobile/src/api/client.ts
 // Canonical objects client used by all features.
 // Adds: auto refresh on 401 in dev, dual header casings, Accept header.
+import type { PatchLinesOp } from "../lib/patchLinesDiff";
 
 let API_BASE = (
   process.env.MBAPP_API_BASE ??
@@ -115,16 +116,22 @@ async function request<T>(path: string, method: HttpMethod = "GET", body?: any, 
     }
 
     let detail = "";
+    let parsed: any = null;
     try {
-      const data = await res.json();
-      const code = data?.code ? ` ${data.code}` : "";
-      const msg  = typeof data?.message === "string" ? data.message : JSON.stringify(data);
+      parsed = await res.json();
+      const code = parsed?.code ? ` ${parsed.code}` : "";
+      const msg  = typeof parsed?.message === "string" ? parsed.message : JSON.stringify(parsed);
       detail = `${code} — ${msg}`;
     } catch {
       const text = await res.text().catch(() => "");
       detail = text;
     }
-    throw new Error(`HTTP ${res.status} ${res.statusText} for ${path}${detail ? ` — ${detail}` : ""}`);
+    const err: any = new Error(`HTTP ${res.status} ${res.statusText} for ${path}${detail ? ` — ${detail}` : ""}`);
+    err.status = res.status;
+    err.statusText = res.statusText;
+    err.code = parsed?.code;
+    err.body = parsed;
+    throw err;
   }
 
   if (res.status === 204) return undefined as unknown as T;
@@ -178,6 +185,14 @@ export async function deleteObject(
   opts: RequestOpts = {}
 ): Promise<{ id: string; type: string; deleted: boolean }> {
   return request(`/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}`, "DELETE", undefined, opts);
+}
+
+export async function patchSalesOrderLines(id: string, ops: PatchLinesOp[], opts: RequestOpts = {}) {
+  return request(`/sales/so/${encodeURIComponent(id)}:patch-lines`, "POST", { ops }, opts);
+}
+
+export async function patchPurchaseOrderLines(id: string, ops: PatchLinesOp[], opts: RequestOpts = {}) {
+  return request(`/purchasing/po/${encodeURIComponent(id)}:patch-lines`, "POST", { ops }, opts);
 }
 
 // Low-level pass-through

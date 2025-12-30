@@ -170,7 +170,7 @@ Web Edit Page:
 - ✅ Web: LineArrayEditor auto-generates `cid` for new lines, preserves `id` for existing
 - ✅ Smoke tests: `smoke:po:create-from-suggestion:line-ids` validates `L{n}` pattern
 - ✅ Smoke tests: `smoke:so:patch-lines:cid` validates cid → server id flow
-- ⬜ Mobile: Edit screens not yet implemented (action flows only: receive, fulfill, commit)
+- ✅ Mobile: Shared `computePatchLinesDiff` helper matches web semantics (apps/mobile/src/lib/patchLinesDiff.ts); shared RN `LineEditor` component used by SO/PO edit screens with cid tmp-* generation; broader RN line editor UX roll-out ongoing
 
 **Files:**
 - Spec: [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) — PatchLinesOp schema defines `id` + `cid` fields
@@ -862,6 +862,7 @@ MBapp serves **three primary UX disciplines** with distinct interaction patterns
 - **Helper:** `apps/mobile/src/lib/telemetry.ts` exports `track(eventName, properties)` with envelope (`ts`, `source="mobile"`, `screen`, `tenantId`, optional `actorId`)
 - **Env vars:** `EXPO_PUBLIC_POSTHOG_API_KEY`, `EXPO_PUBLIC_POSTHOG_HOST` (defaults to app.posthog.com)
 - **Sentry:** Init if `EXPO_PUBLIC_SENTRY_DSN` present; tags `source="mobile"` and `tenantId` from DevAuthBootstrap (no unsafe actorId decoding)
+- **Mobile PO edit instrumentation:** `screen_viewed` (screen `PurchaseOrderEdit`, includes `poId` + status) and `po_edit_submit` (`result=attempt|success|error`, `opCount`, `upsertCount`, `removeCount`, `httpStatus?`, `errorCode?`) fire from [apps/mobile/src/screens/EditPurchaseOrderScreen.tsx](../apps/mobile/src/screens/EditPurchaseOrderScreen.tsx); Sentry tags include `screen`, `route`, `objectType`, `objectId`, `poStatus` when present.
 - **Safe no-op:** Missing keys → telemetry helpers are no-ops (no crashes)
 
 **Instrumented Workflow (Example): Backorder Ignore (Web + Mobile)**

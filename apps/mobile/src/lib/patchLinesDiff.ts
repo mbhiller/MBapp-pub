@@ -18,6 +18,7 @@ export type LineWithId = {
 };
 
 export const SALES_ORDER_PATCHABLE_LINE_FIELDS = ["itemId", "qty", "uom"] as const;
+export const PURCHASE_ORDER_PATCHABLE_LINE_FIELDS = ["itemId", "qty", "uom"] as const;
 
 // Detect client-only temp ids
 function isClientOnlyId(id: string | undefined): boolean {
@@ -37,14 +38,31 @@ function getLineKey(ln: LineWithId): string {
 }
 
 /**
- * Compute patch-lines ops to transform originalLines into currentLines.
- * Mirrors web implementation semantics.
+ * Compute patch-lines ops to transform originalLines into editedLines.
+ * Mirrors web semantics: existing lines patch by `id`, new lines by `cid`,
+ * removes by `id` (or `cid` for unsaved client-only rows), and skips no-op patches.
+ *
+ * Example (conceptual):
+ * - before: [{ id: "L1", itemId: "A", qty: 2, uom: "ea" }]
+ * - after:  [{ id: "L1", itemId: "A", qty: 3, uom: "ea" }, { cid: "tmp-1", itemId: "B", qty: 1, uom: "ea" }]
+ * - ops: [ { op: "upsert", id: "L1", patch: { qty: 3 } }, { op: "upsert", cid: "tmp-1", patch: { itemId: "B", qty: 1, uom: "ea" } } ]
+ *
+ * Remove cases:
+ * - before: [{ id: "L2", itemId: "C", qty: 1, uom: "ea" }]
+ *   after:  []
+ *   ops:   [ { op: "remove", id: "L2" } ]
+ * - before: [{ cid: "tmp-9", itemId: "X", qty: 1, uom: "ea" }]
+ *   after:  []
+ *   ops:   [ { op: "remove", cid: "tmp-9" } ]
  */
-export function computePatchLinesDiff(
-  originalLines: LineWithId[],
-  currentLines: LineWithId[],
-  fields: ReadonlyArray<string> = SALES_ORDER_PATCHABLE_LINE_FIELDS
-): PatchLinesOp[] {
+export function computePatchLinesDiff(args: {
+  originalLines: LineWithId[];
+  editedLines: LineWithId[];
+  patchableFields?: ReadonlyArray<string>;
+  makeCid?: () => string; // optional helper to assign cid for new lines lacking one
+}): PatchLinesOp[] {
+  const { originalLines, editedLines, patchableFields = SALES_ORDER_PATCHABLE_LINE_FIELDS, makeCid } = args;
+
   const origByKey = new Map<string, LineWithId>();
   for (const ln of originalLines || []) {
     const k = getLineKey(ln);
@@ -52,7 +70,7 @@ export function computePatchLinesDiff(
   }
 
   const currByKey = new Map<string, LineWithId>();
-  for (const ln of currentLines || []) {
+  for (const ln of editedLines || []) {
     const k = getLineKey(ln);
     if (k) currByKey.set(k, ln);
   }
@@ -73,21 +91,25 @@ export function computePatchLinesDiff(
   }
 
   // Upserts
-  for (const ln of currentLines || []) {
+  for (const ln of editedLines || []) {
     const key = getLineKey(ln);
     const inOriginal = key && origByKey.has(key);
     const base = inOriginal ? origByKey.get(key)! : undefined;
 
+    // For new lines with no id/cid, optionally assign a cid via makeCid (without mutating caller state)
+    const lineId = String(ln.id || "").trim();
+    const lineCid = String(ln.cid || "").trim() || (!inOriginal && !lineId && makeCid ? makeCid() : "");
+
     const patch: Record<string, any> = {};
     if (inOriginal && base) {
-      for (const field of fields) {
+      for (const field of patchableFields) {
         const before = (base as any)[field];
         const after = (ln as any)[field];
         const changed = String(before ?? "") !== String(after ?? "");
         if (changed) patch[field] = after;
       }
     } else {
-      for (const field of fields) {
+      for (const field of patchableFields) {
         const val = (ln as any)[field];
         if (val !== undefined && val !== null) patch[field] = val;
       }
@@ -96,21 +118,20 @@ export function computePatchLinesDiff(
     if (Object.keys(patch).length === 0) continue;
 
     const op: PatchLinesOp = { op: "upsert", patch };
-    const id = String(ln.id || "").trim();
-    const cid = String(ln.cid || "").trim();
 
     if (inOriginal) {
-      if (id && !isClientOnlyId(id)) {
-        op.id = id;
-      } else if (cid || (id && isClientOnlyId(id))) {
-        op.cid = cid || id;
+      if (lineId && !isClientOnlyId(lineId)) {
+        op.id = lineId;
+      } else if (lineCid || (lineId && isClientOnlyId(lineId))) {
+        op.cid = lineCid || lineId;
       }
     } else {
-      if (cid) {
-        op.cid = cid;
-      } else if (id && isClientOnlyId(id)) {
-        op.cid = id;
+      if (lineCid) {
+        op.cid = lineCid;
+      } else if (lineId && isClientOnlyId(lineId)) {
+        op.cid = lineId;
       }
+      // no id/cid and no makeCid => still omit to avoid inventing server ids
     }
 
     ops.push(op);

@@ -53,6 +53,15 @@ export default function PurchaseOrderDetailScreen() {
   const [pendingReceives, setPendingReceives] = React.useState<Map<string, number>>(new Map());
   const [scanHistory, setScanHistory] = React.useState<Array<{ lineId: string; itemId: string; delta: number }>>([])
 
+  // Refresh after edit (EditPurchaseOrder sets didEdit param)
+  React.useEffect(() => {
+    const didEdit = (route.params as any)?.didEdit;
+    if (didEdit && typeof refetch === "function") {
+      refetch();
+      navigation.setParams?.({ ...(route.params as any), didEdit: undefined });
+    }
+  }, [route.params, refetch, navigation]);
+
   if (isLoading) return <ActivityIndicator />;
 
   // Deterministic idempotency key per (poId, lineId, qty, lot, location)
@@ -250,6 +259,7 @@ export default function PurchaseOrderDetailScreen() {
   const vendorGuardActive = !po?.vendorId || !vendorHasRole;
 
   // Status-aware gating
+  const canEditLines = String(po?.status || "").toLowerCase() === "draft";
   const canSubmit = po?.status === "draft" && !vendorGuardActive;
   const canApprove = po?.status === "submitted" && !vendorGuardActive;
   const canCancel = (po?.status === "draft" || po?.status === "submitted") && po?.status !== "cancelled" && po?.status !== "canceled" && po?.status !== "closed";
@@ -270,7 +280,20 @@ export default function PurchaseOrderDetailScreen() {
           <Text style={{ fontSize: 18, fontWeight: "700" }}>{po?.id}</Text>
         </Pressable>
       </View>
-      <Text>Status: {po?.status}</Text>
+      <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 4 }}>
+        <Text>Status: {po?.status}</Text>
+        {canEditLines && po?.id ? (
+          <Pressable
+            onPress={() => {
+              track("po_detail_edit_clicked", { objectType: "purchaseOrder", objectId: po.id });
+              navigation.navigate("EditPurchaseOrder", { id: po.id });
+            }}
+            style={{ marginLeft: 8, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: "#1976d2", borderRadius: 6, backgroundColor: "#e3f2fd" }}
+          >
+            <Text style={{ color: "#1976d2", fontWeight: "700" }}>Edit</Text>
+          </Pressable>
+        ) : null}
+      </View>
 
       {/* Vendor identity row */}
       <View style={{ marginTop: 8, marginBottom: 4, flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
