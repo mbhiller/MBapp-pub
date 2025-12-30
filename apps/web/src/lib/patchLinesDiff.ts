@@ -10,6 +10,7 @@ export type PatchLineOp = {
 
 export type LineWithId = {
   id?: string;
+  cid?: string;  // Client-only temporary id (e.g., tmp-*)
   itemId?: string;
   qty?: number;
   uom?: string;
@@ -19,54 +20,83 @@ export type LineWithId = {
 export const SALES_ORDER_PATCHABLE_LINE_FIELDS = ["itemId", "qty", "uom"] as const;
 export const PURCHASE_ORDER_PATCHABLE_LINE_FIELDS = ["itemId", "qty", "uom"] as const;
 
+// Detect client-only temporary IDs (tmp-* prefix)
+function isClientOnlyId(id: string | undefined): boolean {
+  if (!id) return false;
+  const trimmed = String(id).trim();
+  return trimmed.startsWith("tmp-");
+}
+
+// Get stable key for line (prefer server id, fallback to cid)
+function getLineKey(ln: LineWithId): string {
+  const id = String(ln.id || "").trim();
+  const cid = String(ln.cid || "").trim();
+  
+  // Server id takes precedence (unless it's client-only)
+  if (id && !isClientOnlyId(id)) return id;
+  
+  // Client-only id or cid
+  if (cid) return cid;
+  if (id) return id;
+  
+  return "";
+}
+
 /**
  * Compute patch-lines ops to transform originalLines into currentLines.
  * 
  * @param originalLines - Lines as they existed when edit started (must have stable ids)
- * @param currentLines - Lines from current form state (may have new lines without ids)
+ * @param currentLines - Lines from current form state (may have new lines with cid)
  * @param fields - Fields to track for changes (default: SALES_ORDER_PATCHABLE_LINE_FIELDS)
  * @returns Array of patch operations (upsert/remove)
  * 
  * Rules:
- * - Removes: emit { op: "remove", id } for any original id missing from current
- * - Updates: emit { op: "upsert", id, patch } with only changed fields
- * - Adds: emit { op: "upsert", patch } (no id; server assigns)
+ * - Removes: emit { op: "remove", id } for server lines, { op: "remove", cid } for client-only
+ * - Updates: emit { op: "upsert", id, patch } with only changed fields (server lines only)
+ * - Adds: emit { op: "upsert", cid, patch } for client lines (server assigns stable id)
  * - No-op updates are skipped (empty patch)
- * - Client-only fields (_key, etc.) are never included in ops
+ * - Client-only IDs (tmp-*) are sent as cid, never as id
  */
 export function computePatchLinesDiff(
   originalLines: LineWithId[],
   currentLines: LineWithId[],
   fields: ReadonlyArray<string> = SALES_ORDER_PATCHABLE_LINE_FIELDS
 ): PatchLineOp[] {
-  // Index original lines by id
-  const origById = new Map<string, LineWithId>();
+  // Index original lines by stable key (id or cid)
+  const origByKey = new Map<string, LineWithId>();
   for (const ln of originalLines || []) {
-    const k = String(ln.id || "").trim();
-    if (k) origById.set(k, ln);
+    const k = getLineKey(ln);
+    if (k) origByKey.set(k, ln);
   }
 
-  // Index current lines by id
-  const currById = new Map<string, LineWithId>();
+  // Index current lines by stable key
+  const currByKey = new Map<string, LineWithId>();
   for (const ln of currentLines || []) {
-    const k = String(ln.id || "").trim();
-    if (k) currById.set(k, ln);
+    const k = getLineKey(ln);
+    if (k) currByKey.set(k, ln);
   }
 
   const ops: PatchLineOp[] = [];
 
-  // 1) Removes: any original id missing from current
-  for (const [oid] of origById.entries()) {
-    if (!currById.has(oid)) {
-      ops.push({ op: "remove", id: oid });
+  // 1) Removes: any original key missing from current
+  for (const [okey, oline] of origByKey.entries()) {
+    if (!currByKey.has(okey)) {
+      const oid = String(oline.id || "").trim();
+      const ocid = String(oline.cid || "").trim();
+      
+      if (oid && !isClientOnlyId(oid)) {
+        ops.push({ op: "remove", id: oid });
+      } else if (ocid || (oid && isClientOnlyId(oid))) {
+        ops.push({ op: "remove", cid: ocid || oid });
+      }
     }
   }
 
   // 2) Upserts: for each current line
   for (const ln of currentLines || []) {
-    const idTrim = String(ln.id || "").trim();
-    const inOriginal = idTrim && origById.has(idTrim);
-    const base = inOriginal ? origById.get(idTrim)! : undefined;
+    const key = getLineKey(ln);
+    const inOriginal = key && origByKey.has(key);
+    const base = inOriginal ? origByKey.get(key)! : undefined;
 
     // Build patch: changed fields only for updates, required fields for new lines
     const patch: Record<string, any> = {};
@@ -83,7 +113,7 @@ export function computePatchLinesDiff(
         }
       }
     } else {
-      // New line: include required fields (server will assign id)
+      // New line: include required fields (server will assign stable id)
       for (const field of fields) {
         const value = (ln as any)[field];
         if (value !== undefined && value !== null) {
@@ -97,10 +127,26 @@ export function computePatchLinesDiff(
 
     // Build operation
     const op: PatchLineOp = { op: "upsert", patch };
+    
+    const id = String(ln.id || "").trim();
+    const cid = String(ln.cid || "").trim();
+    
     if (inOriginal) {
-      op.id = idTrim; // update existing by id
+      // Update existing: use server id if present and not client-only
+      if (id && !isClientOnlyId(id)) {
+        op.id = id;
+      } else if (cid || (id && isClientOnlyId(id))) {
+        op.cid = cid || id;
+      }
+    } else {
+      // New line: send cid so server can track client intent across retries
+      if (cid) {
+        op.cid = cid;
+      } else if (id && isClientOnlyId(id)) {
+        op.cid = id;
+      }
+      // else: no id/cid (server assigns stable id)
     }
-    // else: new line, no id (server assigns)
     
     ops.push(op);
   }

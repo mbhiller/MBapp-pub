@@ -6669,6 +6669,329 @@ const tests = {
         }
       })
     };
+  },
+
+  /**
+   * E4: Regression test for po-create-from-suggestion line ID normalization (Sprint M E1)
+   * Ensures all created PO lines have stable L{n} IDs (not ln_* or other ad-hoc patterns)
+   */
+  "smoke:po:create-from-suggestion:line-ids": async () => {
+    await ensureBearer();
+    
+    // Step 1: Seed vendor to ensure vendor resolution
+    const { vendorId } = await seedVendor(api);
+    if (!vendorId) {
+      return { test: "po:create-from-suggestion:line-ids", result: "FAIL", reason: "vendor-seed-failed" };
+    }
+    
+    // Step 2: Create product with preferredVendorId and inventory item
+    const prod = await createProduct({ name: "PoLineIdTest", preferredVendorId: vendorId });
+    if (!prod.ok) return { test: "po:create-from-suggestion:line-ids", result: "FAIL", reason: "product-create-failed", prod };
+    
+    const inv = await createInventoryForProduct(prod.body.id, "PoLineIdTestItem");
+    if (!inv.ok) return { test: "po:create-from-suggestion:line-ids", result: "FAIL", reason: "inventory-create-failed", inv };
+    
+    const itemId = inv.body?.id;
+    
+    // Step 3: Create customer for SO
+    const { customerId } = await seedCustomer(api);
+    if (!customerId) {
+      return { test: "po:create-from-suggestion:line-ids", result: "FAIL", reason: "customer-seed-failed" };
+    }
+    
+    // Step 4: Create SO with shortage to trigger backorder
+    const soCreate = await post(`/objects/salesOrder`, {
+      type: "salesOrder",
+      status: "draft",
+      customerId,
+      lines: [{ id: "L1", itemId, qty: 5, uom: "ea" }]
+    });
+    
+    if (!soCreate.ok || !soCreate.body?.id) {
+      return { test: "po:create-from-suggestion:line-ids", result: "FAIL", reason: "so-create-failed", soCreate };
+    }
+    
+    const soId = soCreate.body.id;
+    
+    // Step 5: Submit SO (required before commit)
+    const submit = await post(
+      `/sales/so/${encodeURIComponent(soId)}:submit`,
+      {},
+      { "Idempotency-Key": idem() }
+    );
+    
+    if (!submit.ok) {
+      return { test: "po:create-from-suggestion:line-ids", result: "FAIL", reason: "so-submit-failed", submit };
+    }
+    
+    // Step 6: Verify SO status after submit
+    const soAfterSubmit = await get(`/objects/salesOrder/${encodeURIComponent(soId)}`);
+    if (!soAfterSubmit.ok || soAfterSubmit.body?.status !== "submitted") {
+      return {
+        test: "po:create-from-suggestion:line-ids",
+        result: "FAIL",
+        reason: "so-status-not-submitted",
+        expectedStatus: "submitted",
+        actualStatus: soAfterSubmit.body?.status,
+        soAfterSubmit
+      };
+    }
+    
+    // Step 7: Commit SO (non-strict) to create backorder request
+    const commit = await post(
+      `/sales/so/${encodeURIComponent(soId)}:commit`,
+      { strict: false },
+      { "Idempotency-Key": idem() }
+    );
+    
+    if (!commit.ok) {
+      return { test: "po:create-from-suggestion:line-ids", result: "FAIL", reason: "so-commit-failed", commit };
+    }
+    
+    // Step 8: Wait for backorder request to be created
+    const boWait = await waitForBackorders({ soId, itemId, status: "open", preferredVendorId: vendorId }, { timeoutMs: 5000 });
+    if (!boWait.ok || !boWait.items || boWait.items.length === 0) {
+      return { test: "po:create-from-suggestion:line-ids", result: "FAIL", reason: "backorder-not-created", boWait };
+    }
+    
+    const bo = boWait.items[0];
+    const boId = bo?.id;
+    
+    if (!boId) {
+      return { test: "po:create-from-suggestion:line-ids", result: "FAIL", reason: "backorder-missing-id", bo };
+    }
+    
+    // Step 9: Suggest PO from backorder
+    const sugg = await post(
+      `/purchasing/suggest-po`,
+      { requests: [{ backorderRequestId: boId }] },
+      { "Idempotency-Key": idem() }
+    );
+    
+    if (!sugg.ok) {
+      return { test: "po:create-from-suggestion:line-ids", result: "FAIL", reason: "suggest-po-failed", sugg };
+    }
+    
+    const drafts = Array.isArray(sugg.body?.drafts) ? sugg.body.drafts : (sugg.body?.draft ? [sugg.body.draft] : []);
+    const skipped = Array.isArray(sugg.body?.skipped) ? sugg.body.skipped : [];
+    
+    if (drafts.length === 0) {
+      // Debug: include skipped reasons and vendor resolution details
+      const boData = await get(`/objects/backorderRequest/${encodeURIComponent(boId)}`);
+      const invData = await get(`/objects/inventory/${encodeURIComponent(itemId)}`);
+      const prodData = invData.ok && invData.body?.productId 
+        ? await get(`/objects/product/${encodeURIComponent(invData.body.productId)}`)
+        : { ok: false };
+      
+      return {
+        test: "po:create-from-suggestion:line-ids",
+        result: "FAIL",
+        reason: "no-drafts-from-suggest-po",
+        debug: {
+          skippedReasons: skipped.map(s => ({ backorderRequestId: s.backorderRequestId, reason: s.reason })),
+          backorder: { id: boData.body?.id, preferredVendorId: boData.body?.preferredVendorId, itemId: boData.body?.itemId },
+          inventory: { id: invData.body?.id, productId: invData.body?.productId },
+          product: { id: prodData.body?.id, preferredVendorId: prodData.body?.preferredVendorId },
+          vendorIdUsed: vendorId
+        }
+      };
+    }
+    
+    const draft = drafts[0];
+    if (!draft.vendorId) {
+      return { test: "po:create-from-suggestion:line-ids", result: "FAIL", reason: "draft-missing-vendor", draft };
+    }
+    
+    // Step 10: Create PO from suggestion
+    const create = await post(
+      `/purchasing/po:create-from-suggestion`,
+      { draft },
+      { "Idempotency-Key": idem() }
+    );
+    
+    if (!create.ok || !create.body?.id) {
+      return { test: "po:create-from-suggestion:line-ids", result: "FAIL", reason: "create-from-suggestion-failed", create };
+    }
+    
+    const poId = create.body.id;
+    
+    // Step 11: Fetch persisted PO and validate line IDs
+    const fetchPo = await get(`/objects/purchaseOrder/${encodeURIComponent(poId)}`);
+    
+    if (!fetchPo.ok || !fetchPo.body) {
+      return { test: "po:create-from-suggestion:line-ids", result: "FAIL", reason: "po-fetch-failed", fetchPo };
+    }
+    
+    const lines = Array.isArray(fetchPo.body.lines) ? fetchPo.body.lines : [];
+    if (lines.length === 0) {
+      return { test: "po:create-from-suggestion:line-ids", result: "FAIL", reason: "no-lines-in-po", fetchPo: fetchPo.body };
+    }
+    
+    // Step 12: Assert every line ID matches ^L\d+$ pattern (e.g., L1, L2, L3, ...)
+    const lineIdPattern = /^L\d+$/;
+    const invalidLines = lines.filter(ln => {
+      const id = String(ln.id || ln.lineId || "").trim();
+      return !lineIdPattern.test(id);
+    });
+    
+    const allLineIdsValid = invalidLines.length === 0;
+    const lineIds = lines.map(ln => String(ln.id || ln.lineId || "").trim());
+    
+    const pass = allLineIdsValid && lines.length > 0;
+    
+    return {
+      test: "po:create-from-suggestion:line-ids",
+      result: pass ? "PASS" : "FAIL",
+      poId,
+      lineCount: lines.length,
+      lineIds,
+      allLineIdsValid,
+      ...(pass ? {} : { invalidLines: invalidLines.map(ln => ({ id: ln.id, lineId: ln.lineId })) })
+    };
+  },
+
+  /**
+   * E4: Regression test for web CID support in patch-lines (Sprint M E2)
+   * Ensures new lines sent with cid field get stable server IDs, and subsequent updates use id field
+   */
+  "smoke:so:patch-lines:cid": async () => {
+    await ensureBearer();
+    
+    const { customerId } = await seedCustomer(api);
+    
+    // Step 1: Create SO draft with 0 lines (or 1 existing line)
+    const create = await post(`/objects/salesOrder`, {
+      type: "salesOrder",
+      status: "draft",
+      customerId,
+      lines: [] // Start with empty lines
+    });
+    
+    if (!create.ok || !create.body?.id) {
+      return { test: "so:patch-lines:cid", result: "FAIL", reason: "so-create-failed", create };
+    }
+    
+    const soId = create.body.id;
+    
+    // Step 2: Create product and inventory for new line
+    const prod = await createProduct({ name: "SoCidTest" });
+    if (!prod.ok) return { test: "so:patch-lines:cid", result: "FAIL", reason: "product-create-failed", prod };
+    
+    const inv = await createInventoryForProduct(prod.body.id, "SoCidTestItem");
+    if (!inv.ok) return { test: "so:patch-lines:cid", result: "FAIL", reason: "inventory-create-failed", inv };
+    
+    const itemId = inv.body?.id;
+    
+    // Step 3: Patch-lines with upsert using cid for new line
+    const clientId = `tmp-${Math.random().toString(36).slice(2, 11)}`; // Generate tmp-* CID
+    
+    const patch1 = await post(
+      `/sales/so/${encodeURIComponent(soId)}:patch-lines`,
+      {
+        ops: [
+          {
+            op: "upsert",
+            cid: clientId, // Use cid field for new line
+            patch: { itemId, qty: 3, uom: "ea" }
+          }
+        ]
+      },
+      { "Idempotency-Key": idem() }
+    );
+    
+    if (!patch1.ok) {
+      return { test: "so:patch-lines:cid", result: "FAIL", reason: "patch1-failed", patch1 };
+    }
+    
+    // Step 4: Fetch SO and verify line has server-assigned L{n} ID
+    const fetchSo1 = await get(`/objects/salesOrder/${encodeURIComponent(soId)}`);
+    
+    if (!fetchSo1.ok || !fetchSo1.body) {
+      return { test: "so:patch-lines:cid", result: "FAIL", reason: "so-fetch1-failed", fetchSo1 };
+    }
+    
+    const lines1 = Array.isArray(fetchSo1.body.lines) ? fetchSo1.body.lines : [];
+    if (lines1.length === 0) {
+      return { test: "so:patch-lines:cid", result: "FAIL", reason: "no-lines-after-patch1", fetchSo1: fetchSo1.body };
+    }
+    
+    // Find the line we just added (should have itemId match)
+    const newLine = lines1.find(ln => ln.itemId === itemId);
+    if (!newLine || !newLine.id) {
+      return {
+        test: "so:patch-lines:cid",
+        result: "FAIL",
+        reason: "new-line-not-found-or-no-id",
+        lines1: lines1.map(ln => ({ id: ln.id, itemId: ln.itemId }))
+      };
+    }
+    
+    const serverId = String(newLine.id).trim();
+    const lineIdPattern = /^L\d+$/;
+    const serverIdValid = lineIdPattern.test(serverId);
+    
+    if (!serverIdValid) {
+      return {
+        test: "so:patch-lines:cid",
+        result: "FAIL",
+        reason: "server-id-invalid-pattern",
+        serverId,
+        expectedPattern: "L{n}"
+      };
+    }
+    
+    // Step 5: Subsequent patch updates that same line via id field (not cid)
+    const patch2 = await post(
+      `/sales/so/${encodeURIComponent(soId)}:patch-lines`,
+      {
+        ops: [
+          {
+            op: "upsert",
+            id: serverId, // Use server id field for update
+            patch: { qty: 5 } // Update qty
+          }
+        ]
+      },
+      { "Idempotency-Key": idem() }
+    );
+    
+    if (!patch2.ok) {
+      return { test: "so:patch-lines:cid", result: "FAIL", reason: "patch2-failed", patch2 };
+    }
+    
+    // Step 6: Fetch SO again and verify qty updated
+    const fetchSo2 = await get(`/objects/salesOrder/${encodeURIComponent(soId)}`);
+    
+    if (!fetchSo2.ok || !fetchSo2.body) {
+      return { test: "so:patch-lines:cid", result: "FAIL", reason: "so-fetch2-failed", fetchSo2 };
+    }
+    
+    const lines2 = Array.isArray(fetchSo2.body.lines) ? fetchSo2.body.lines : [];
+    const updatedLine = lines2.find(ln => ln.id === serverId);
+    
+    if (!updatedLine) {
+      return { test: "so:patch-lines:cid", result: "FAIL", reason: "updated-line-not-found", serverId, lines2 };
+    }
+    
+    const qtyUpdated = updatedLine.qty === 5;
+    
+    const pass = serverIdValid && qtyUpdated && updatedLine.id === serverId;
+    
+    return {
+      test: "so:patch-lines:cid",
+      result: pass ? "PASS" : "FAIL",
+      soId,
+      clientId,
+      serverId,
+      serverIdValid,
+      qtyUpdated,
+      assertions: {
+        patch1_ok: patch1.ok,
+        serverIdMatchesPattern: serverIdValid,
+        patch2_ok: patch2.ok,
+        qtyUpdated
+      }
+    };
   }
 };
 

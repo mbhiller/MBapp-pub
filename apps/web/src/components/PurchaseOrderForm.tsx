@@ -1,8 +1,22 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { LineArrayEditor, type LineInput } from "./LineArrayEditor";
 
+/**
+ * Purchase Order Line Input Type
+ * 
+ * Key Separation Pattern (DO NOT VIOLATE):
+ * - id: Server-assigned stable id (L1, L2, ...) - present ONLY for persisted lines
+ * - cid: Client temporary id (tmp-*) - present ONLY for new lines not yet saved
+ * - _key: UI-only React key (managed by LineArrayEditor, never sent to API)
+ * 
+ * NEVER:
+ * - Generate fallback IDs (e.g., L${idx}) for lines without server id
+ * - Send tmp-* values as `id` field (always use `cid`)
+ * - Send full line arrays as PUT payload (use computePatchLinesDiff instead)
+ */
 export type PurchaseOrderLineInput = {
-  id: string;
+  id?: string;    // Server-assigned id (present for existing lines)
+  cid?: string;   // Client-only temporary id (for new lines before server assigns stable id)
   itemId: string;
   qty: number;
   uom?: string;
@@ -25,8 +39,8 @@ export function PurchaseOrderForm({ initialValue, submitLabel = "Save", onSubmit
   const [notes, setNotes] = useState(initialValue?.notes ?? "");
   const [lines, setLines] = useState<LineInput[]>(() => {
     if (initialValue?.lines && initialValue.lines.length > 0) {
-      return initialValue.lines.map((ln, idx) => ({
-        id: ln.id || `L${idx + 1}`,
+      return initialValue.lines.map((ln) => ({
+        id: ln.id,  // Keep id if present (no fallback)
         itemId: ln.itemId || "",
         qty: ln.qty ?? 1,
         uom: ln.uom || "ea",
@@ -43,8 +57,8 @@ export function PurchaseOrderForm({ initialValue, submitLabel = "Save", onSubmit
       setNotes(initialValue.notes ?? "");
       if (initialValue.lines && initialValue.lines.length > 0) {
         setLines(
-          initialValue.lines.map((ln, idx) => ({
-            id: ln.id || `L${idx + 1}`,
+          initialValue.lines.map((ln) => ({
+            id: ln.id,  // Keep id if present (no fallback)
             itemId: ln.itemId || "",
             qty: ln.qty ?? 1,
             uom: ln.uom || "ea",
@@ -62,17 +76,25 @@ export function PurchaseOrderForm({ initialValue, submitLabel = "Save", onSubmit
       const trimmedVendor = vendorId.trim();
       if (!trimmedVendor) throw new Error("vendorId is required");
 
+      // CRITICAL: Preserve id/cid exactly as provided by LineArrayEditor
+      // Do NOT generate synthetic IDs - let computePatchLinesDiff handle identity
       const cleanedLines: PurchaseOrderLineInput[] = lines
-        .map((ln, idx) => ({
-          id: (ln.id || `L${idx + 1}`).trim(),
-          itemId: ln.itemId.trim(),
-          qty: Number(ln.qty ?? 0),
-          uom: (ln.uom || "ea").trim() || "ea",
-        }))
+        .map((ln) => {
+          const line: PurchaseOrderLineInput = {
+            itemId: ln.itemId.trim(),
+            qty: Number(ln.qty ?? 0),
+            uom: (ln.uom || "ea").trim() || "ea",
+          };
+          // Preserve id or cid (don't generate fallbacks)
+          if (ln.id) line.id = String(ln.id).trim();
+          if ((ln as any).cid) line.cid = String((ln as any).cid).trim();
+          return line;
+        })
         .filter((ln) => ln.itemId && ln.qty > 0);
 
       if (cleanedLines.length === 0) throw new Error("At least one line with itemId and qty>0 is required");
 
+      // Pass to parent (Edit page will use computePatchLinesDiff, Create page will send as-is)
       await onSubmit({
         vendorId: trimmedVendor,
         notes: notes.trim() || undefined,

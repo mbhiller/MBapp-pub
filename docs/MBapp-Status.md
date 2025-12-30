@@ -27,6 +27,35 @@
 - **CI coverage:** Both `smoke:salesOrders:patch-lines` and `smoke:purchaseOrders:patch-lines` validate id stability and no-reuse guarantee.
 - **Next:** Broader web modules to adopt the shared line editor; mobile edit UIs can later align on the same contract.
 
+### Shared Line Editors v1 (SO/PO) — ✅ Implemented (Sprint M, 2025-12-29)
+- **Goal:** ONE shared line editing model that works identically for SO + PO, web + mobile, with consistent ID handling.
+- **API Normalization (E1):**
+  - `po-create-from-suggestion` now uses `ensureLineIds()` helper → generates stable `L{n}` IDs (no more ad-hoc `ln_*` patterns)
+  - Dev-mode logging warns if non-`L{n}` IDs detected (legacy/external data)
+  - ✅ File: [apps/api/src/purchasing/po-create-from-suggestion.ts](../apps/api/src/purchasing/po-create-from-suggestion.ts)
+- **Web CID Support (E2):**
+  - `computePatchLinesDiff()` now sends `cid` field for client-only lines (e.g., `tmp-xyz`), `id` for server lines
+  - Edit pages preserve server IDs exactly (removed `makeLineId()` fallback generation)
+  - Forms no longer generate synthetic `L${idx}` IDs (preserve `id`/`cid` only)
+  - `LineArrayEditor` auto-generates `tmp-{uuid}` CIDs for new lines
+  - ✅ Files: patchLinesDiff.ts, EditSalesOrderPage.tsx, EditPurchaseOrderPage.tsx, SalesOrderForm.tsx, PurchaseOrderForm.tsx, LineArrayEditor.tsx (6 files)
+- **Pattern Lock (E3):**
+  - `LineArrayEditor.ensureKeys()` auto-generates CID for lines without server ID (edge case protection)
+  - JSDoc pattern documentation added to SO/PO form types (3 critical rules: NEVER fallback IDs, NEVER tmp-* as id, NEVER PUT full arrays)
+  - Inline comments at form submission points reinforce pattern
+  - ✅ Files: LineArrayEditor.tsx, SalesOrderForm.tsx, PurchaseOrderForm.tsx, EditSalesOrderPage.tsx, EditPurchaseOrderPage.tsx (5 files)
+- **Regression Tests (E4):**
+  - `smoke:po:create-from-suggestion:line-ids`: Creates backorder → suggest-po → create-from-suggestion → asserts all line IDs match `^L\d+$`
+  - `smoke:so:patch-lines:cid`: Creates SO draft → patch-lines with `cid` → verifies server assigns stable `L{n}` → subsequent patch uses `id`
+  - ✅ Files: [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) (lines 6672-6876), [ops/ci-smokes.json](../ops/ci-smokes.json)
+- **CI Posture:** 30/30 smoke tests passing (added 2 new regression tests)
+- **Remaining Work:**
+  - ⬜ Mobile: Implement edit screens (EditSalesOrderScreen, EditPurchaseOrderScreen) using same pattern
+  - ⬜ Mobile: Port `computePatchLinesDiff` to mobile (apps/mobile/src/lib/patchLinesDiff.ts)
+  - ⬜ Web: Audit other endpoints that create/update lines without `ensureLineIds()`
+  - ⬜ Mobile: Add `LineArrayEditor` equivalent for React Native
+- **Pattern Documentation:** See [MBapp-Foundations.md § 2.5 Shared Line Editor Contract](MBapp-Foundations.md#25-shared-line-editor-contract)
+
 **Recent Deliveries (Sprint I, 2025-12-28):**
 - ✅ **Backend MOQ loading fix:** suggest-po applies minOrderQty after vendor determined (from override, backorder, or product).
 - ✅ **Two new smoke tests:** smoke:backorders:partial-fulfill (partial receive → partial backorder fulfillment) and smoke:suggest-po:moq (MOQ bump verification).
@@ -36,8 +65,8 @@
 - ✅ **Mobile backorders Ignore action:** Bulk Ignore workflow integrated (pre-existing, confirmed working).
 
 **CI Posture:**
-- 28/28 smoke tests passing in CI (Sprint I added smoke:backorders:partial-fulfill, smoke:suggest-po:moq; Sprint J added smoke:backorders:ignore)
-- Latest additions: smoke:backorders:ignore (Sprint J)
+- 30/30 smoke tests passing in CI (Sprint I added smoke:backorders:partial-fulfill, smoke:suggest-po:moq; Sprint J added smoke:backorders:ignore; Sprint M added smoke:po:create-from-suggestion:line-ids, smoke:so:patch-lines:cid)
+- Latest additions: smoke:po:create-from-suggestion:line-ids, smoke:so:patch-lines:cid (Sprint M)
 - All tests documented in [smoke-coverage.md](smoke-coverage.md)
 
 **What's Next:**

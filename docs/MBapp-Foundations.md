@@ -121,6 +121,65 @@ See [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) for full OpenAPI defin
 
 **Reference IDs:** Cross-module references use consistent naming: `vendorId`, `productId`, `customerId`, `locationId`, `poId`, `soId`
 
+### 2.5 Shared Line Editor Contract
+
+**Purpose:** Ensure consistent line item identity and patch-lines behavior across SO/PO, web/mobile, create/edit flows.
+
+**ID Fields:**
+- `id` (string): Server-assigned persistent identity — MUST be stable `L{n}` pattern (e.g., `L1`, `L2`, `L3`, ...)
+  - Present ONLY for lines already persisted by server
+  - Never send client-generated temporary IDs (e.g., `tmp-*`) in the `id` field
+- `cid` (string): Client-only temporary identity — MUST use `tmp-{uuid}` pattern
+  - Present ONLY for new lines not yet saved to server
+  - Used by patch-lines ops to identify which line to create
+  - Never persisted; server replaces with stable `id` upon creation
+- `_key` (string): UI-only React key — managed by LineArrayEditor component
+  - Never sent to API
+  - Ensures stable rendering during edits
+
+**Patch-Lines Flow:**
+```
+Web Edit Page:
+  1. Load server lines (have id: L1, L2, ...)
+  2. User edits in LineArrayEditor (new lines get cid: tmp-*, existing keep id)
+  3. Form submission → computePatchLinesDiff(serverLines, editedLines)
+  4. Diff helper generates ops:
+     - Remove: { op: "remove", id: "L1" }  (for server lines)
+     - Remove: { op: "remove", cid: "tmp-xyz" }  (for client lines)
+     - Upsert: { op: "upsert", id: "L1", patch: {...} }  (update existing)
+     - Upsert: { op: "upsert", cid: "tmp-xyz", patch: {...} }  (create new)
+  5. API receives ops → applyPatchLines() processes
+  6. Server calls ensureLineIds() → assigns stable L{n} IDs to new lines
+  7. Persist with guaranteed stable IDs
+```
+
+**Critical Rules (DO NOT VIOLATE):**
+- ❌ NEVER generate fallback IDs (e.g., `L${idx}`) for lines without server id
+- ❌ NEVER send `tmp-*` values in the `id` field (always use `cid`)
+- ❌ NEVER send full line arrays as PUT payload (always use `computePatchLinesDiff` + PATCH ops)
+- ✅ ALWAYS preserve server `id` exactly as provided
+- ✅ ALWAYS use `cid` for client-only lines (generate via `tmp-${uuid}`)
+- ✅ ALWAYS let server assign stable IDs via `ensureLineIds()`
+
+**Implementation Status (Sprint M):**
+- ✅ API: `ensureLineIds()` helper ensures stable `L{n}` IDs (apps/api/src/shared/ensureLineIds.ts)
+- ✅ API: `po-create-from-suggestion` uses `ensureLineIds()` (no more ad-hoc `ln_*` IDs)
+- ✅ Web: `computePatchLinesDiff()` sends `cid` for new lines, `id` for updates (apps/web/src/lib/patchLinesDiff.ts)
+- ✅ Web: Edit pages preserve server IDs, no fallback generation (EditSalesOrderPage, EditPurchaseOrderPage)
+- ✅ Web: Forms have JSDoc pattern documentation to prevent regressions (SalesOrderForm, PurchaseOrderForm)
+- ✅ Web: LineArrayEditor auto-generates `cid` for new lines, preserves `id` for existing
+- ✅ Smoke tests: `smoke:po:create-from-suggestion:line-ids` validates `L{n}` pattern
+- ✅ Smoke tests: `smoke:so:patch-lines:cid` validates cid → server id flow
+- ⬜ Mobile: Edit screens not yet implemented (action flows only: receive, fulfill, commit)
+
+**Files:**
+- Spec: [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) — PatchLinesOp schema defines `id` + `cid` fields
+- API: [apps/api/src/shared/ensureLineIds.ts](../apps/api/src/shared/ensureLineIds.ts) — ID normalization
+- API: [apps/api/src/shared/applyPatchLines.ts](../apps/api/src/shared/applyPatchLines.ts) — Patch ops processor
+- Web: [apps/web/src/lib/patchLinesDiff.ts](../apps/web/src/lib/patchLinesDiff.ts) — Diff + ops generator
+- Web: [apps/web/src/components/LineArrayEditor.tsx](../apps/web/src/components/LineArrayEditor.tsx) — Shared editor component
+- Smokes: [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) — Regression tests (lines 6672-6876)
+
 ---
 
 ## 3. Mobile UI Patterns (apps/mobile/src/screens)
