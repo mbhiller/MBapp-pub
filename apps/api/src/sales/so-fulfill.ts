@@ -8,7 +8,7 @@ import { badRequest, conflictError, internalError, notFound } from "../common/re
 import { logger } from "../common/logger";
 
 type LineReq = { id?: string; lineId?: string; deltaQty: number; locationId?: string; lot?: string };
-type SOLine = { id: string; itemId: string; qty: number; uom?: string };
+type SOLine = { id: string; itemId: string; qty: number; uom?: string; fulfilledQty?: number };
 type SalesOrder = {
   pk: string; sk: string; id: string; type: "salesOrder";
   status: "draft"|"submitted"|"approved"|"committed"|"partially_fulfilled"|"fulfilled"|"cancelled"|"closed";
@@ -116,7 +116,7 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
       logger.info(logCtx, "so-fulfill.legacy_lineId", { legacyLineIdCount: legacyCount, totalLines: normalizedLines.length });
     }
 
-    // Prevent over-fulfillment
+    // Prevent over-fulfillment & update SO lines in-memory
     const shipped = await fulfilledSoFar(tenantId, so.id);
     const now = new Date().toISOString();
 
@@ -157,13 +157,21 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     }
     logger.info(logCtx, "so-fulfill.movements", { count: mvCount });
 
-    // Decide new status: if all lines fully shipped → fulfilled, else partially_fulfilled
-    const shippedNow = await fulfilledSoFar(tenantId, so.id);
+    // Update SO lines in-memory with new fulfilledQty (do NOT rely on querying movements)
+    // This avoids eventual consistency issues where the movement GSI query may miss newly-written data
+    for (const r of normalizedLines) {
+      const line = linesById.get(r.lineKey)!;
+      const prevFulfilled = line.fulfilledQty ?? 0;
+      const newFulfilled = prevFulfilled + Number(r.deltaQty);
+      line.fulfilledQty = newFulfilled;
+    }
+
+    // Decide new status based on updated in-memory state: if all lines fully fulfilled → fulfilled
     let allFull = true;
     for (const ln of so.lines ?? []) {
       const qtyOrdered = Number(ln.qty ?? 0);
-      const got = shippedNow[ln.id] ?? 0;
-      if (got < qtyOrdered) { allFull = false; break; }
+      const fulfilledQty = Number(ln.fulfilledQty ?? 0);
+      if (fulfilledQty < qtyOrdered) { allFull = false; break; }
     }
     const nextStatus = allFull ? "fulfilled" : "partially_fulfilled";
 
