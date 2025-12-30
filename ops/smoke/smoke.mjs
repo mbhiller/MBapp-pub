@@ -3297,17 +3297,54 @@ const tests = {
     }, { "Idempotency-Key": idem() });
     if (!putaway.ok) return { test: "sales:fulfill-without-reserve", result: "FAIL", step: "putaway", putaway };
 
+    // 2.5) Wait for inventory to be readable in location (eventual consistency)
+    // Poll /inventory/{id}/onhand:by-location until we see qty 5 at the target location (up to 3.75s)
+    const maxRetries = 15;
+    const retryDelayMs = 250;
+    let onhandReady = false;
+    let onhandSnapshot = null;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      onhandSnapshot = await get(`/inventory/${encodeURIComponent(itemId)}/onhand:by-location`);
+      if (onhandSnapshot.ok) {
+        const locItem = (onhandSnapshot.body?.items ?? []).find(item => item.locationId === locId);
+        if (locItem && locItem.onHand >= 5) {
+          onhandReady = true;
+          break;
+        }
+      }
+      if (attempt < maxRetries - 1) {
+        await sleep(retryDelayMs);
+      }
+    }
+    if (!onhandReady) {
+      return {
+        test: "sales:fulfill-without-reserve",
+        result: "FAIL",
+        step: "waitForInventoryVisible",
+        reason: "inventory not visible in location after putaway",
+        itemId,
+        locId,
+        onhandSnapshot: snippet(onhandSnapshot?.body, 800)
+      };
+    }
+
     // 3) Create SO with qty 3, submit and commit (non-strict)
     const { partyId } = await seedParties(api);
     const so = await post(`/objects/salesOrder`, {
       type: "salesOrder",
       status: "draft",
       partyId,
-      lines: [{ id: "FNR1", itemId, uom: "ea", qty: 3 }]
+      lines: [{ itemId, uom: "ea", qty: 3 }]
     }, { "Idempotency-Key": idem() });
     if (!so.ok) return { test: "sales:fulfill-without-reserve", result: "FAIL", step: "createSO", so };
     const soId = so.body?.id;
-    const soLineId = "FNR1";
+    
+    // Get the actual server-assigned line ID
+    const soLines = so.body?.lines ?? [];
+    const soLineId = soLines[0]?.id ?? soLines[0]?.lineId;
+    if (!soLineId) {
+      return { test: "sales:fulfill-without-reserve", result: "FAIL", step: "getSoLineId", reason: "no line ID in SO response", soLines };
+    }
     recordCreated({ type: 'salesOrder', id: soId, route: '/objects/salesOrder', meta: { partyId } });
 
     const submit = await post(`/sales/so/${encodeURIComponent(soId)}:submit`, {}, { "Idempotency-Key": idem() });
@@ -3321,15 +3358,65 @@ const tests = {
 
     // 4) Fulfill directly WITHOUT reserve call
     const fulfill = await post(`/sales/so/${encodeURIComponent(soId)}:fulfill`, {
-      lines: [{ lineId: soLineId, deltaQty: 3, locationId: locId, lot: "LOT-FNR" }]
+      lines: [{ id: soLineId, deltaQty: 3, locationId: locId, lot: "LOT-FNR" }]
     }, { "Idempotency-Key": idem() });
     if (!fulfill.ok) return { test: "sales:fulfill-without-reserve", result: "FAIL", step: "fulfill", fulfill };
 
-    // 5) Assert SO status is fulfilled
-    const soAfterFulfill = fulfill.body;
-    if (soAfterFulfill?.status !== "fulfilled") {
-      return { test: "sales:fulfill-without-reserve", result: "FAIL", step: "checkFulfillStatus", status: soAfterFulfill?.status, expected: "fulfilled" };
+    // 5) Assert SO status is fulfilled and line is fully fulfilled (short retry for eventual consistency, ~2s total)
+    // The fulfill endpoint updates SO status and fulfilledQty in-memory, so we just need a brief
+    // retry to allow for eventual consistency in the read of the updated SO document.
+    const fulfillStatusMaxRetries = 8;
+    const fulfillStatusRetryDelayMs = 250;
+    let finalSoStatus = null;
+    let soAfterFulfillRetry = null;
+    let fulfillStatusReady = false;
+    const requestedFulfillQty = 3; // matching the fulfill request above
+    
+    for (let attempt = 0; attempt < fulfillStatusMaxRetries; attempt++) {
+      const soFetch = await get(`/objects/salesOrder/${encodeURIComponent(soId)}`);
+      soAfterFulfillRetry = soFetch.body;
+      finalSoStatus = soAfterFulfillRetry?.status;
+      
+      // Check both status and line fulfillment
+      if (finalSoStatus === "fulfilled") {
+        const soLine = soAfterFulfillRetry?.lines?.[0];
+        const fulfilledQty = Number(soLine?.fulfilledQty ?? 0);
+        if (fulfilledQty >= requestedFulfillQty) {
+          fulfillStatusReady = true;
+          break;
+        }
+      }
+      
+      if (attempt < fulfillStatusMaxRetries - 1) {
+        await sleep(fulfillStatusRetryDelayMs);
+      }
     }
+    
+    if (!fulfillStatusReady) {
+      // Build detailed debug snapshot on failure
+      const soLine = soAfterFulfillRetry?.lines?.[0];
+      const orderedQty = Number(soLine?.qty ?? 0);
+      const fulfilledQty = Number(soLine?.fulfilledQty ?? 0);
+      
+      // Also get onhand snapshot for diagnosis
+      const onhandDebug = await get(`/inventory/${encodeURIComponent(itemId)}/onhand:by-location`);
+      const locOnhand = (onhandDebug.body?.items ?? []).find(item => item.locationId === locId);
+      
+      return {
+        test: "sales:fulfill-without-reserve",
+        result: "FAIL",
+        step: "checkFulfillStatus",
+        currentStatus: finalSoStatus,
+        expectedStatus: "fulfilled",
+        lineOrderedQty: orderedQty,
+        lineFulfilledQty: fulfilledQty,
+        expectedFulfilledQty: requestedFulfillQty,
+        locationOnhand: locOnhand ? { onHand: locOnhand.onHand, reserved: locOnhand.reserved } : null,
+        attempts: fulfillStatusMaxRetries
+      };
+    }
+
+    const soAfterFulfill = soAfterFulfillRetry;
 
     // 6) Query movements for this SO to assert fulfill action exists
     // Use top-level filters: soId and action (not nested under "filters")
