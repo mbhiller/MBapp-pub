@@ -4,10 +4,11 @@ import { View, Text, Pressable, ActivityIndicator } from "react-native";
 import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
 import { useToast } from "../features/_shared/Toast";
 import { apiClient, patchPurchaseOrderLines } from "../api/client";
-import { computePatchLinesDiff, PURCHASE_ORDER_PATCHABLE_LINE_FIELDS } from "../lib/patchLinesDiff";
+import { computePatchLinesDiff, PATCHABLE_LINE_FIELDS } from "../lib/patchLinesDiff";
 import type { RootStackParamList } from "../navigation/types";
 import { track, trackScreenView } from "../lib/telemetry";
 import { LineEditor, EditableLine } from "../components/LineEditor";
+import { buildEditableLines, normalizeEditableLines } from "../lib/buildEditableLines";
 
 export type PurchaseOrder = {
   id: string;
@@ -17,14 +18,15 @@ export type PurchaseOrder = {
 
 type RouteProps = RouteProp<RootStackParamList, "EditPurchaseOrder">;
 
-const PATCH_FIELDS = PURCHASE_ORDER_PATCHABLE_LINE_FIELDS;
+const PATCH_FIELDS = PATCHABLE_LINE_FIELDS;
 
 export default function EditPurchaseOrderScreen() {
   const route = useRoute<RouteProps>();
   const nav = useNavigation<any>();
   const toast = useToast();
   const routeParams = route.params as any;
-  const poId: string | undefined = routeParams?.id ?? routeParams?.poId; // allow legacy poId param
+  const poId: string | undefined = routeParams?.purchaseOrderId ?? routeParams?.id ?? routeParams?.poId; // allow purchaseOrderId or legacy id/poId
+  const isMounted = React.useRef(true);
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -33,29 +35,29 @@ export default function EditPurchaseOrderScreen() {
   const [currentLines, setCurrentLines] = React.useState<EditableLine[]>([]);
   const [trackedOpen, setTrackedOpen] = React.useState(false);
 
-  // Load purchase order
   React.useEffect(() => {
-    let mounted = true;
-    (async () => {
-      if (!poId) return;
-      setLoading(true);
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
+
+  const loadPo = React.useCallback(
+    async (opts?: { silent?: boolean }) => {
+      if (!poId || !isMounted.current) return null;
+      const silent = opts?.silent === true;
+      if (!silent) setLoading(true);
       setError(null);
       try {
         const res = await apiClient.get<PurchaseOrder>(`/objects/purchaseOrder/${encodeURIComponent(poId)}`);
         const body = (res as any)?.body ?? res;
-        const lines = Array.isArray(body?.lines) ? body.lines : [];
-        const normalized: EditableLine[] = lines.map((ln: any) => ({
-          id: ln?.id ? String(ln.id).trim() : undefined,
-          cid: ln?.cid ? String(ln.cid).trim() : undefined,
-          itemId: ln?.itemId ? String(ln.itemId).trim() : "",
-          qty: Number(ln?.qty ?? 0) || 0,
-          uom: ln?.uom ? String(ln.uom).trim() || "ea" : "ea",
-        }));
-        if (!mounted) return;
         const normalizedStatus = String(body?.status ?? "");
+        const normalizedLines = buildEditableLines(Array.isArray(body?.lines) ? body?.lines : []);
+
+        if (!isMounted.current) return null;
+
         setStatus(normalizedStatus);
-        setOriginalLines(normalized);
-        setCurrentLines(normalized);
+        setOriginalLines(normalizedLines);
+        setCurrentLines(normalizedLines);
 
         if (poId && !trackedOpen) {
           const statusLower = normalizedStatus.toLowerCase();
@@ -76,32 +78,47 @@ export default function EditPurchaseOrderScreen() {
           }
           setTrackedOpen(true);
         }
+
+        return { status: normalizedStatus, lines: normalizedLines };
       } catch (err: any) {
-        if (!mounted) return;
-        setError(err?.message || "Failed to load PO");
+        if (!isMounted.current) return null;
+        if (!silent) setError(err?.message || "Failed to load PO");
+        throw err;
       } finally {
-        if (mounted) setLoading(false);
+        if (!silent && isMounted.current) setLoading(false);
       }
-    })();
-    return () => { mounted = false; };
-  }, [poId, trackedOpen]);
+    },
+    [buildEditableLines, poId, trackedOpen]
+  );
+
+  // Load purchase order
+  React.useEffect(() => {
+    loadPo().catch(() => {});
+  }, [loadPo]);
 
   const canEdit = String(status || "").toLowerCase() === "draft";
 
   const save = async () => {
     if (!poId || saving) return;
+
+    const statusLower = String(status || "").toLowerCase();
+    const baseClick = {
+      objectId: poId,
+      objectType: "purchaseOrder",
+      status: statusLower || undefined,
+      lineCount: currentLines.length,
+    };
+
+    track("po_edit_lines_clicked", { ...baseClick, result: "attempt" });
+
     if (!canEdit) {
-      toast("PO not editable (draft only)", "warning");
+      track("po_edit_lines_submitted", { ...baseClick, result: "fail", errorCode: "PO_NOT_EDITABLE" });
+      toast("PO is not editable unless Draft", "warning");
       return;
     }
 
     try {
-      const normalizedLines = currentLines.map((ln) => ({
-        ...ln,
-        itemId: (ln.itemId ?? "").trim(),
-        uom: (ln.uom ?? "").trim(),
-        qty: Number(ln.qty ?? 0) || 0,
-      }));
+      const normalizedLines = normalizeEditableLines(currentLines);
 
       for (let i = 0; i < normalizedLines.length; i++) {
         const line = normalizedLines[i];
@@ -129,44 +146,39 @@ export default function EditPurchaseOrderScreen() {
         patchableFields: PATCH_FIELDS,
       });
 
-      const upsertCount = ops.filter((op) => op.op === "upsert").length;
-      const removeCount = ops.filter((op) => op.op === "remove").length;
-      const statusLower = String(status || "").toLowerCase();
-      const baseTelemetry = {
-        objectType: "purchaseOrder",
-        objectId: poId,
-        status: statusLower || undefined,
-        opCount: ops.length,
-        upsertCount,
-        removeCount,
-      };
-
       if (!ops || ops.length === 0) {
-        track("po_edit_submit", { ...baseTelemetry, result: "no_op" });
         toast("No changes", "info");
-        nav.goBack();
         return;
       }
 
-      track("po_edit_submit", { ...baseTelemetry, result: "attempt" });
+      const submissionTelemetry = {
+        objectId: poId,
+        objectType: "purchaseOrder",
+        status: statusLower || undefined,
+        lineCount: ops.length,
+      };
+
+      track("po_edit_lines_submitted", { ...submissionTelemetry, result: "attempt" });
 
       await patchPurchaseOrderLines(poId, ops);
 
-      track("po_edit_submit", { ...baseTelemetry, result: "success" });
+      track("po_edit_lines_submitted", { ...submissionTelemetry, result: "success" });
 
-      // Hint detail screen to refresh
+      // Refresh PO then return with didEdit flag
+      await loadPo({ silent: true }).catch(() => {});
       nav.navigate({ name: "PurchaseOrderDetail", params: { id: poId, didEdit: true }, merge: true } as any);
       nav.goBack();
     } catch (err: any) {
-      const code = err?.code || err?.body?.code || err?.status;
+      const code = err?.body?.code || err?.code || err?.status;
       const httpStatus = err?.status || err?.body?.status || err?.response?.status;
-      const msg = err?.message || err?.body?.message || "Save failed";
-      track("po_edit_submit", {
-        objectType: "purchaseOrder",
+      const message = code === "PO_NOT_EDITABLE" || httpStatus === 409 ? "PO is not editable unless Draft" : (code || err?.message || "Save failed");
+
+      track("po_edit_lines_submitted", {
         objectId: poId,
-        status: String(status || "").toLowerCase() || undefined,
-        result: "error",
-        httpStatus: httpStatus || "unknown",
+        objectType: "purchaseOrder",
+        status: statusLower || undefined,
+        lineCount: Array.isArray(err?.ops) ? err.ops.length : currentLines.length,
+        result: "fail",
         errorCode: code || "unknown",
       });
 
@@ -189,12 +201,9 @@ export default function EditPurchaseOrderScreen() {
       } catch {
         // Sentry not available
       }
-      if (code === "PO_NOT_EDITABLE" || code === 409) {
-        toast("Purchase order cannot be edited in current status", "warning");
-        nav.navigate({ name: "PurchaseOrderDetail", params: { id: poId }, merge: true } as any);
-      } else {
-        toast(msg, "error");
-      }
+
+      toast(message, code === "PO_NOT_EDITABLE" || httpStatus === 409 ? "warning" : "error");
+
       if (__DEV__) {
         console.warn("EditPurchaseOrder save error", err);
       }

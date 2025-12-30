@@ -36,7 +36,7 @@ export type RootStackParamList = {
   // Purchasing
   PurchaseOrdersList: { viewId?: string } | undefined;
   PurchaseOrderDetail: DetailParams;
-  EditPurchaseOrder: { id: string };
+  EditPurchaseOrder: { id?: string; purchaseOrderId?: string; poId?: string };
 
   // Sales
   SalesOrdersList: { viewId?: string } | undefined;

@@ -4,7 +4,8 @@ import { View, Text, Pressable, ActivityIndicator } from "react-native";
 import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
 import { useToast } from "../features/_shared/Toast";
 import { apiClient } from "../api/client";
-import { computePatchLinesDiff } from "../lib/patchLinesDiff"; // added in E3
+import { computePatchLinesDiff, PATCHABLE_LINE_FIELDS } from "../lib/patchLinesDiff"; // added in E3
+import { buildEditableLines, normalizeEditableLines } from "../lib/buildEditableLines";
 import type { RootStackParamList } from "../navigation/types";
 import { LineEditor, EditableLine } from "../components/LineEditor";
 
@@ -14,7 +15,6 @@ type SalesOrder = {
   lines?: EditableLine[];
 };
 
-const PATCH_FIELDS = ["itemId", "qty", "uom"] as const;
 const ALLOWED_STATUSES = new Set(["draft", "submitted", "approved"]);
 
 export default function EditSalesOrderScreen() {
@@ -39,14 +39,7 @@ export default function EditSalesOrderScreen() {
       try {
         const res = await apiClient.get<SalesOrder>(`/objects/salesOrder/${encodeURIComponent(soId)}`);
         const body = (res as any)?.body ?? res;
-        const lines = Array.isArray(body?.lines) ? body.lines : [];
-        const normalized: EditableLine[] = lines.map((ln: any) => ({
-          id: ln?.id ? String(ln.id).trim() : undefined,
-          cid: ln?.cid ? String(ln.cid).trim() : undefined,
-          itemId: ln?.itemId ? String(ln.itemId).trim() : "",
-          qty: Number(ln?.qty ?? 0) || 0,
-          uom: ln?.uom ? String(ln.uom).trim() || "ea" : "ea",
-        }));
+        const normalized = buildEditableLines(Array.isArray(body?.lines) ? body.lines : []);
         if (!mounted) return;
         setStatus(String(body?.status ?? ""));
         setOriginalLines(normalized);
@@ -73,12 +66,7 @@ export default function EditSalesOrderScreen() {
     }
 
     try {
-      const normalizedLines = currentLines.map((ln) => ({
-        ...ln,
-        itemId: (ln.itemId ?? "").trim(),
-        uom: (ln.uom ?? "").trim(),
-        qty: Number(ln.qty ?? 0) || 0,
-      }));
+      const normalizedLines = normalizeEditableLines(currentLines);
 
       for (let i = 0; i < normalizedLines.length; i++) {
         const line = normalizedLines[i];
@@ -105,7 +93,7 @@ export default function EditSalesOrderScreen() {
       const ops = computePatchLinesDiff({
         originalLines,
         editedLines: normalizedLines,
-        patchableFields: PATCH_FIELDS as any,
+        patchableFields: PATCHABLE_LINE_FIELDS as any,
       });
       if (!ops || ops.length === 0) {
         nav.goBack();

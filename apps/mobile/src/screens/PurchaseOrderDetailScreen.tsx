@@ -57,10 +57,13 @@ export default function PurchaseOrderDetailScreen() {
   React.useEffect(() => {
     const didEdit = (route.params as any)?.didEdit;
     if (didEdit && typeof refetch === "function") {
-      refetch();
-      navigation.setParams?.({ ...(route.params as any), didEdit: undefined });
+      (async () => {
+        await refetch();
+        toast("PO updated", "success");
+        navigation.setParams?.({ ...(route.params as any), didEdit: undefined });
+      })();
     }
-  }, [route.params, refetch, navigation]);
+  }, [route.params, refetch, navigation, toast]);
 
   if (isLoading) return <ActivityIndicator />;
 
@@ -286,7 +289,7 @@ export default function PurchaseOrderDetailScreen() {
           <Pressable
             onPress={() => {
               track("po_detail_edit_clicked", { objectType: "purchaseOrder", objectId: po.id });
-              navigation.navigate("EditPurchaseOrder", { id: po.id });
+              navigation.navigate("EditPurchaseOrder", { purchaseOrderId: po.id, id: po.id });
             }}
             style={{ marginLeft: 8, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: "#1976d2", borderRadius: 6, backgroundColor: "#e3f2fd" }}
           >
