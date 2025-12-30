@@ -5601,6 +5601,7 @@ const tests = {
 
     // Sprint H: Test /workspaces filters (q, entityType) with unique smokeTag to avoid pollution
     const runTimestamp = Date.now();
+    const uniqueToken = `ws-smoke-${runTimestamp}-${Math.random().toString(36).slice(2, 8)}`;
     const featureHeaders = { "X-Feature-Views-Enabled": "true" };
     const listHdr = { ...baseHeaders(), ...featureHeaders };
 
@@ -5609,7 +5610,7 @@ const tests = {
       method: "POST",
       headers: listHdr,
       body: JSON.stringify({
-        name: smokeTag(`WS-Test-A-${runTimestamp}`),
+        name: smokeTag(`${uniqueToken}-A`),
         entityType: "purchaseOrder",
         filters: [{ field: "status", op: "eq", value: "submitted" }],
         columns: ["id", "vendorId", "total"]
@@ -5626,7 +5627,7 @@ const tests = {
       method: "POST",
       headers: listHdr,
       body: JSON.stringify({
-        name: smokeTag(`WS-Sample-B-${runTimestamp}`),
+        name: smokeTag(`${uniqueToken}-B`),
         entityType: "salesOrder",
         filters: [{ field: "status", op: "eq", value: "committed" }],
         columns: ["id", "customerId", "total"]
@@ -5644,32 +5645,96 @@ const tests = {
     const viewIdB = bodyB.id;
     recordCreated({ type: 'view', id: viewIdB, route: '/views', meta: { name: bodyB?.name, entityType: bodyB?.entityType } });
 
-    // 2) GET /workspaces?q=<unique tag> -> assert both created views are in results
-    const uniqueTag = `WS-Test-A-${runTimestamp}`.substring(0, 15); // Use first part of tag for search
-    const listQ = await fetch(`${API}/workspaces?q=${encodeURIComponent(uniqueTag)}&limit=50`, { headers: listHdr });
-    const qBody = await listQ.json().catch(() => ({}));
-    const qItems = Array.isArray(qBody?.items) ? qBody.items : [];
-    const foundA = qItems.some(item => item.id === viewIdA);
-
-    if (!foundA) {
-      // Cleanup before failing
+    const cleanup = async () => {
       await fetch(`${API}/views/${encodeURIComponent(viewIdA)}`, { method: "DELETE", headers: listHdr });
       await fetch(`${API}/views/${encodeURIComponent(viewIdB)}`, { method: "DELETE", headers: listHdr });
-      return { test:"workspaces:list", result:"FAIL", reason:"q-filter-missing-created-view", qItems: qItems.slice(0, 5) };
+    };
+
+    // 2) GET /workspaces?q=<unique tag> -> assert both created views are in results
+    let qItems = [];
+    let foundA = false;
+    let attempts = 0;
+    const entityType = "purchaseOrder";
+    while (attempts < 25 && !foundA) {
+      attempts++;
+      const qUrl = `${API}/workspaces?q=${encodeURIComponent(uniqueToken)}&entityType=${encodeURIComponent(entityType)}&limit=200&shared=false`;
+      const listQ = await fetch(qUrl, { headers: listHdr });
+      const qBody = await listQ.json().catch(() => ({}));
+      qItems = Array.isArray(qBody?.items) ? qBody.items : [];
+      foundA = qItems.some(item => item.id === viewIdA);
+      if (foundA) break;
+      await sleep(500);
     }
 
-    // 3) GET /workspaces?entityType=purchaseOrder -> assert viewA is in results and all items have entityType=purchaseOrder
-    const listEntity = await fetch(`${API}/workspaces?entityType=purchaseOrder&limit=50`, { headers: listHdr });
-    const entityBody = await listEntity.json().catch(() => ({}));
-    const entityItems = Array.isArray(entityBody?.items) ? entityBody.items : [];
-    const foundAinEntity = entityItems.some(item => item.id === viewIdA);
-    const allPO = entityItems.length > 0 && entityItems.every(item => item.entityType === "purchaseOrder");
+    if (!foundA) {
+      const diagResp = await fetch(`${API}/workspaces?entityType=${encodeURIComponent(entityType)}&limit=50`, { headers: listHdr });
+      const diagBody = await diagResp.json().catch(() => ({}));
+      const unfiltered = Array.isArray(diagBody?.items) ? diagBody.items : [];
+      await cleanup();
+      throw new Error(JSON.stringify({
+        test: "workspaces:list",
+        result: "FAIL",
+        reason: "q-filter-missing-created-view",
+        expectedId: viewIdA,
+        q: uniqueToken,
+        entityType,
+        attemptCount: attempts,
+        qItemsCount: qItems.length,
+        qItemsSample: qItems.slice(0, 5).map(i => ({ id: i?.id, name: i?.name })),
+        unfilteredCount: unfiltered.length,
+        unfilteredSample: unfiltered.slice(0, 5).map(i => ({ id: i?.id, name: i?.name })),
+      }));
+    }
 
-    if (!foundAinEntity || !allPO) {
-      // Cleanup before failing
-      await fetch(`${API}/views/${encodeURIComponent(viewIdA)}`, { method: "DELETE", headers: listHdr });
-      await fetch(`${API}/views/${encodeURIComponent(viewIdB)}`, { method: "DELETE", headers: listHdr });
-      return { test:"workspaces:list", result:"FAIL", reason: !foundAinEntity ? "entityType-filter-missing-view" : "entityType-filter-mismatch", entityItems: entityItems.slice(0, 5) };
+    // 3) GET /workspaces?entityType=purchaseOrder with pagination + retry until created view is found
+    let foundAinEntity = false;
+    let allPO = false;
+    let attemptsEntity = 0;
+    let pagesScanned = 0;
+    let totalItemsSeen = 0;
+    let lastPageSample = [];
+
+    while (attemptsEntity < 25 && !foundAinEntity) {
+      attemptsEntity++;
+      let nextCursor = null;
+      let pagesThisAttempt = 0;
+      while (pagesThisAttempt < 10 && !foundAinEntity) {
+        const url = `${API}/workspaces?entityType=purchaseOrder&limit=100${nextCursor ? `&next=${encodeURIComponent(nextCursor)}` : ""}&shared=false`;
+        const listEntity = await fetch(url, { headers: listHdr });
+        const entityBody = await listEntity.json().catch(() => ({}));
+        const entityItems = Array.isArray(entityBody?.items) ? entityBody.items : [];
+        pagesThisAttempt++;
+        pagesScanned++;
+        totalItemsSeen += entityItems.length;
+        lastPageSample = entityItems.slice(0, 5).map(i => ({ id: i?.id, name: i?.name }));
+
+        foundAinEntity = entityItems.some(item => item.id === viewIdA);
+        allPO = entityItems.length === 0 ? false : entityItems.every(item => item.entityType === "purchaseOrder");
+
+        nextCursor = entityBody?.next ?? entityBody?.nextToken ?? entityBody?.pageInfo?.next ?? entityBody?.pageInfo?.nextCursor ?? null;
+        if (!nextCursor || foundAinEntity) break;
+      }
+      if (foundAinEntity && !allPO) {
+        await cleanup();
+        return { test:"workspaces:list", result:"FAIL", reason:"entityType-filter-mismatch", entityItems: lastPageSample };
+      }
+      if (foundAinEntity) break;
+      await sleep(500);
+    }
+
+    if (!foundAinEntity) {
+      await cleanup();
+      throw new Error(JSON.stringify({
+        test: "workspaces:list",
+        result: "FAIL",
+        reason: "entityType-filter-missing-view",
+        expectedId: viewIdA,
+        entityType: "purchaseOrder",
+        attempts: attemptsEntity,
+        pagesScanned,
+        totalItemsSeen,
+        lastPageSample,
+      }));
     }
 
     // 4) Cleanup: delete both temp views
@@ -5683,12 +5748,13 @@ const tests = {
     });
 
     const pass = createA.ok && createB.ok && foundA && foundAinEntity && allPO && delA.ok && delB.ok;
+    const byEntityCount = totalItemsSeen;
     return {
       test: "workspaces:list",
       result: pass ? "PASS" : "FAIL",
       counts: {
         q: qItems.length,
-        byEntity: entityItems.length
+        byEntity: byEntityCount
       }
     };
   },

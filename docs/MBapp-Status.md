@@ -44,6 +44,16 @@
 - **Status:** ✅ **Complete (Sprint Q, 2025-12-30)** — All E1–E4 tasks complete; apps/api typecheck passes; smoke:views:crud, smoke:workspaces:list, smoke:views:validate-filters all pass; web typecheck clean.
 - **Next:** Mobile views UI (deferred); server-side field-existence validation (deferred); workspace-view aliasing clarification (future).
 
+### Mobile PO Edit Parity — ✅ Complete (Sprint U, 2025-12-30)
+
+**Epic Summary:** Bring mobile PO line editing to parity with SO: shared diff helper, cid/id rules, draft-only guard, and immediate detail refresh on return.
+
+- **E1 (Entrypoint):** PurchaseOrderDetailScreen shows Edit button only for draft POs and now returns to detail with auto-refetch + “PO updated” toast when edits save.
+- **E2 (Parity Polish):** EditPurchaseOrderScreen aligned to the SO edit model: shared PATCHABLE fields (`itemId`,`qty`,`uom`), tmp-* cid handling, shared normalization helper, no-op diff toast, and draft-only 409 guard (`PO_NOT_EDITABLE`).
+- **E3 (Telemetry):** Added `po_edit_lines_clicked` and `po_edit_lines_submitted` lifecycle events (attempt/success/fail, includes errorCode and lineCount) matching SO patterns.
+- **Status:** ✅ Typecheck clean; uses shared LineEditor component and shared patchLinesDiff helper; detail refreshes without pull-to-refresh.
+- **E4 (Refresh/Guardrails):** Edit CTA remains draft-only; post-edit refresh is focus-safe via `didEdit` flag + on-focus refetch, with single “PO updated” toast.
+
 ### Mobile Save View v1 — ✅ Complete (Sprint R, 2025-12-30)
 
 **Epic Summary:** Mobile save/update views for PO/SO list screens with bidirectional state mapping and auth-wired API client.

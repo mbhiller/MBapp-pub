@@ -17,8 +17,9 @@ export type LineWithId = {
   [key: string]: any;
 };
 
-export const SALES_ORDER_PATCHABLE_LINE_FIELDS = ["itemId", "qty", "uom"] as const;
-export const PURCHASE_ORDER_PATCHABLE_LINE_FIELDS = ["itemId", "qty", "uom"] as const;
+export const PATCHABLE_LINE_FIELDS = ["itemId", "qty", "uom"] as const;
+export const SALES_ORDER_PATCHABLE_LINE_FIELDS = PATCHABLE_LINE_FIELDS;
+export const PURCHASE_ORDER_PATCHABLE_LINE_FIELDS = PATCHABLE_LINE_FIELDS;
 
 // Detect client-only temp ids
 function isClientOnlyId(id: string | undefined): boolean {
@@ -61,7 +62,7 @@ export function computePatchLinesDiff(args: {
   patchableFields?: ReadonlyArray<string>;
   makeCid?: () => string; // optional helper to assign cid for new lines lacking one
 }): PatchLinesOp[] {
-  const { originalLines, editedLines, patchableFields = SALES_ORDER_PATCHABLE_LINE_FIELDS, makeCid } = args;
+  const { originalLines, editedLines, patchableFields = PATCHABLE_LINE_FIELDS, makeCid } = args;
 
   const origByKey = new Map<string, LineWithId>();
   for (const ln of originalLines || []) {

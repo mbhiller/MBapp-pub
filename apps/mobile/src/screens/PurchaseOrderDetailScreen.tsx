@@ -52,15 +52,37 @@ export default function PurchaseOrderDetailScreen() {
   const [scanInput, setScanInput] = React.useState("");
   const [pendingReceives, setPendingReceives] = React.useState<Map<string, number>>(new Map());
   const [scanHistory, setScanHistory] = React.useState<Array<{ lineId: string; itemId: string; delta: number }>>([])
+  const lastRefetchAt = React.useRef<number>(0);
 
-  // Refresh after edit (EditPurchaseOrder sets didEdit param)
-  React.useEffect(() => {
-    const didEdit = (route.params as any)?.didEdit;
-    if (didEdit && typeof refetch === "function") {
-      refetch();
-      navigation.setParams?.({ ...(route.params as any), didEdit: undefined });
-    }
-  }, [route.params, refetch, navigation]);
+  // Refresh on focus after edit or when data missing, throttled to avoid repeat fetches
+  useFocusEffect(
+    React.useCallback(() => {
+      let active = true;
+
+      const maybeRefetch = async () => {
+        const didEdit = (route.params as any)?.didEdit;
+        const now = Date.now();
+        if (now - lastRefetchAt.current < 2000) return;
+        if (!didEdit && po) return;
+
+        lastRefetchAt.current = now;
+        if (typeof refetch === "function") {
+          await refetch();
+        }
+
+        if (didEdit && active) {
+          toast("PO updated", "success");
+          navigation.setParams?.({ ...(route.params as any), didEdit: undefined });
+        }
+      };
+
+      maybeRefetch();
+
+      return () => {
+        active = false;
+      };
+    }, [navigation, refetch, route.params, po, toast])
+  );
 
   if (isLoading) return <ActivityIndicator />;
 
@@ -286,7 +308,7 @@ export default function PurchaseOrderDetailScreen() {
           <Pressable
             onPress={() => {
               track("po_detail_edit_clicked", { objectType: "purchaseOrder", objectId: po.id });
-              navigation.navigate("EditPurchaseOrder", { id: po.id });
+              navigation.navigate("EditPurchaseOrder", { purchaseOrderId: po.id, id: po.id });
             }}
             style={{ marginLeft: 8, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: "#1976d2", borderRadius: 6, backgroundColor: "#e3f2fd" }}
           >

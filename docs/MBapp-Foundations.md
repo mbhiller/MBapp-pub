@@ -142,7 +142,7 @@ See [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) for full OpenAPI defin
   - Never sent to API
   - Ensures stable rendering during edits
 
-**Patch-Lines Flow:**
+**Patch-Lines Flow (Web + Mobile):**
 ```
 Web Edit Page:
   1. Load server lines (have id: L1, L2, ...)
@@ -167,7 +167,7 @@ Web Edit Page:
 - ✅ ALWAYS let server assign stable IDs via `ensureLineIds()`
 - ✅ Canonical line identity is `id`; `lineId` is a deprecated compatibility alias during transition (accept on input only).
 
-**Implementation Status (Sprint M):**
+**Implementation Status (Sprint M → Sprint U):**
 - ✅ API: `ensureLineIds()` helper ensures stable `L{n}` IDs (apps/api/src/shared/ensureLineIds.ts)
 - ✅ API: `po-create-from-suggestion` uses `ensureLineIds()` (no more ad-hoc `ln_*` IDs)
 - ✅ API: Action handlers (po-receive, so-reserve, so-release, so-fulfill) accept both `id` (canonical) and `lineId` (deprecated) on input, normalize internally to `id`, log legacy usage, always emit `id` in responses (Sprint E2)
@@ -177,7 +177,7 @@ Web Edit Page:
 - ✅ Web: LineArrayEditor auto-generates `cid` for new lines, preserves `id` for existing
 - ✅ Smoke tests: `smoke:po:create-from-suggestion:line-ids` validates `L{n}` pattern
 - ✅ Smoke tests: `smoke:so:patch-lines:cid` validates cid → server id flow
-- ✅ Mobile: Shared `computePatchLinesDiff` helper matches web semantics (apps/mobile/src/lib/patchLinesDiff.ts); shared RN `LineEditor` component used by SO/PO edit screens with cid tmp-* generation; broader RN line editor UX roll-out ongoing
+- ✅ Mobile: Shared `computePatchLinesDiff` helper matches web semantics (apps/mobile/src/lib/patchLinesDiff.ts); shared RN `LineEditor` component used by SO/PO edit screens with cid tmp-* generation; broader RN line editor UX roll-out ongoing; PO/SO edit screens now share normalization helpers + PATCHABLE fields constant (itemId/qty/uom) and respect tmp-* cid rules (Sprint U)
 
 **Files:**
 - Spec: [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) — PatchLinesOp schema defines `id` + `cid` fields
@@ -186,6 +186,10 @@ Web Edit Page:
 - Web: [apps/web/src/lib/patchLinesDiff.ts](../apps/web/src/lib/patchLinesDiff.ts) — Diff + ops generator
 - Web: [apps/web/src/components/LineArrayEditor.tsx](../apps/web/src/components/LineArrayEditor.tsx) — Shared editor component
 - Smokes: [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) — Regression tests (lines 6672-6876)
+
+**Status Guards (mobile PO vs SO patch-lines):**
+- Sales Orders: patch-lines allowed in `draft|submitted|approved` (UI allows edit in those statuses; 409 `SO_NOT_EDITABLE` otherwise)
+- Purchase Orders: patch-lines **draft-only**; UI gates the Edit CTA to draft and surfaces 409 `PO_NOT_EDITABLE` as “PO is not editable unless Draft.”
 
 ### 2.6 Line Identity Contract (Canonical `id` vs. Deprecated `lineId`)
 
