@@ -14,18 +14,31 @@ export async function handle(event: APIGatewayProxyEventV2) {
 
     const body = JSON.parse(event.body || "{}");
 
-    // Validate required fields per spec (match views/create.ts)
-    if (!body.name || typeof body.name !== "string" || body.name.length < 1 || body.name.length > 120) {
-      return bad({ message: "name is required and must be 1-120 characters" });
-    }
-    if (!body.entityType || typeof body.entityType !== "string") {
-      return bad({ message: "entityType is required" });
+    // Validate name (workspace spec: 1–200 chars)
+    if (!body.name || typeof body.name !== "string" || body.name.length < 1 || body.name.length > 200) {
+      return bad({ message: "name is required and must be 1-200 characters" });
     }
 
-    // Ensure type is set to 'view'
+    // views must be string[] if provided; default []
+    if (typeof body.views !== "undefined" && !Array.isArray(body.views)) {
+      return bad({ message: "views must be an array of strings" });
+    }
+    if (Array.isArray(body.views) && body.views.some((v: any) => typeof v !== "string")) {
+      return bad({ message: "views must be an array of strings" });
+    }
+
+    // entityType is optional for back-compat; if provided ensure string
+    if (typeof body.entityType !== "undefined" && typeof body.entityType !== "string") {
+      return bad({ message: "entityType must be a string if provided" });
+    }
+
+    const views = Array.isArray(body.views) ? body.views : [];
+
+    // Ensure type is set to 'view' for storage
     const viewBody = {
       ...body,
       type: "view",
+      views,
     };
 
     const result = await createObject({
@@ -34,7 +47,9 @@ export async function handle(event: APIGatewayProxyEventV2) {
       body: viewBody,
     });
 
-    return ok(result, 201);
+    // Project response as workspace
+    const projected = { ...result, type: "workspace", views };
+    return ok(projected, 201);
   } catch (e: any) {
     return error(e);
   }

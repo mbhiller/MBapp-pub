@@ -22,7 +22,10 @@ export async function handle(event: APIGatewayProxyEventV2) {
     });
     
     if (!result) return notFound();
-    return ok(result);
+
+    const views = Array.isArray((result as any)?.views) ? (result as any).views : [];
+    const projected = { ...result, type: "workspace", views };
+    return ok(projected);
   } catch (e: any) {
     return error(e);
   }

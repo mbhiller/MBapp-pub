@@ -20,6 +20,7 @@ export type WorkspaceListParams = {
   entityType?: string;
   limit?: number;
   next?: string;
+  cursor?: string;
 };
 
 export type CreateWorkspacePayload = {
@@ -44,7 +45,8 @@ function toQuery(params?: WorkspaceListParams): Record<string, string> {
   if (params.q !== undefined) result.q = params.q;
   if (params.entityType !== undefined) result.entityType = params.entityType;
   if (params.limit !== undefined) result.limit = String(params.limit);
-  if (params.next !== undefined) result.next = params.next;
+  if (params.cursor !== undefined) result.cursor = params.cursor;
+  if (params.next !== undefined) result.next = params.next; // legacy alias
   return result;
 }
 
@@ -111,7 +113,18 @@ export const workspacesApi = {
     payload: PatchWorkspacePayload,
     opts?: { idempotencyKey?: string }
   ): Promise<WorkspaceItem> => {
-    return workspacesApi.put(id, payload, opts);
+    const headers = { "Idempotency-Key": opts?.idempotencyKey ?? newIdempotencyKey("ws") };
+    return apiClient.patch<WorkspaceItem>(
+      `/workspaces/${encodeURIComponent(id)}`,
+      payload,
+      headers
+    ).then(normalizeWorkspace)
+    .catch((err: any) => {
+      if (err?.status === 405) {
+        return workspacesApi.put(id, payload, opts);
+      }
+      throw err;
+    });
   },
   del: (
     id: string,

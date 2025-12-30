@@ -47,7 +47,14 @@ export function useViewsApi() {
   }, []);
 
   const patch = useCallback(async (id: string, payload: PatchViewPayload) => {
-    return apiClient.patch<View>(`/views/${encodeURIComponent(id)}`, payload);
+    try {
+      return await apiClient.patch<View>(`/views/${encodeURIComponent(id)}`, payload);
+    } catch (err: any) {
+      if (err?.status === 405) {
+        return apiClient.put<View>(`/views/${encodeURIComponent(id)}`, payload);
+      }
+      throw err;
+    }
   }, []);
 
   const del = useCallback(async (id: string) => {
