@@ -121,6 +121,18 @@ export default function SalesOrderDetailScreen() {
 
   const { availabilityMap, isLoading: isAvailabilityLoading, refetch: refetchAvailability } = useSalesOrderAvailability(itemIds);
 
+  // Refresh after edit (EditSalesOrder sets didEdit param)
+  React.useEffect(() => {
+    const didEdit = (route.params as any)?.didEdit;
+    if (didEdit && typeof refetch === "function") {
+      refetch();
+      fetchBackorderBreakdown();
+      refetchAvailability();
+      // Clear the flag to avoid repeat fetches
+      nav.setParams?.({ ...(route.params as any), didEdit: undefined });
+    }
+  }, [route.params, refetch, fetchBackorderBreakdown, refetchAvailability, nav]);
+
   // Build line -> backordered map if needed
   const boMap: Record<string, number> = React.useMemo(() => {
     const m: Record<string, number> = {};
@@ -445,6 +457,8 @@ export default function SalesOrderDetailScreen() {
   const isCancelled = ["canceled", "cancelled"].includes(so?.status);
   const isClosed = so?.status === "closed";
 
+  const canEditLines = ["draft", "submitted", "approved"].includes(String(so?.status || "").toLowerCase());
+
   const canSubmit = so?.status === "draft";
   const canCommit = ["submitted"].includes(so?.status);
   const canReserve = ["submitted", "committed", "partially_fulfilled"].includes(so?.status);
@@ -470,7 +484,17 @@ export default function SalesOrderDetailScreen() {
           <Text style={{ fontSize: 18, fontWeight: "700" }}>{so?.id}</Text>
         </Pressable>
       </View>
-      <Text>Status: {so?.status}</Text>
+      <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 4 }}>
+        <Text>Status: {so?.status}</Text>
+        {canEditLines && so?.id ? (
+          <Pressable
+            onPress={() => nav.navigate("EditSalesOrder", { soId: so.id })}
+            style={{ marginLeft: 8, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: "#1976d2", borderRadius: 6, backgroundColor: "#e3f2fd" }}
+          >
+            <Text style={{ color: "#1976d2", fontWeight: "700" }}>Edit</Text>
+          </Pressable>
+        ) : null}
+      </View>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
         {backorders.length > 0 || backorderBreakdown.total > 0 ? (
           <Pressable onPress={() => so?.id ? nav.navigate("BackordersList", { soId: so.id }) : nav.navigate("BackordersList")}>
