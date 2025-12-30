@@ -89,21 +89,37 @@ export default function WorkspaceHubScreen({ navigation }: { navigation: Navigat
           ))}
         </ScrollView>
 
-        <Pressable
-          onPress={() => navigation.navigate("ViewsManage", entityType ? { initialEntityType: entityType } : undefined)}
-          style={{
-            marginTop: 4,
-            alignSelf: "flex-start",
-            paddingHorizontal: 12,
-            paddingVertical: 8,
-            borderRadius: 8,
-            borderWidth: 1,
-            borderColor: t.colors.primary,
-            backgroundColor: t.colors.card,
-          }}
-        >
-          <Text style={{ color: t.colors.primary, fontWeight: "700" }}>Manage Views</Text>
-        </Pressable>
+        <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
+          <Pressable
+            onPress={() => navigation.navigate("ViewsManage", entityType ? { initialEntityType: entityType } : undefined)}
+            style={{
+              alignSelf: "flex-start",
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              borderRadius: 8,
+              borderWidth: 1,
+              borderColor: t.colors.primary,
+              backgroundColor: t.colors.card,
+            }}
+          >
+            <Text style={{ color: t.colors.primary, fontWeight: "700" }}>Manage Views</Text>
+          </Pressable>
+
+          <Pressable
+            onPress={() => navigation.navigate("WorkspacesManage", entityType ? { initialEntityType: entityType } : undefined)}
+            style={{
+              alignSelf: "flex-start",
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              borderRadius: 8,
+              borderWidth: 1,
+              borderColor: t.colors.primary,
+              backgroundColor: t.colors.card,
+            }}
+          >
+            <Text style={{ color: t.colors.primary, fontWeight: "700" }}>Manage Workspaces</Text>
+          </Pressable>
+        </View>
       </View>
 
       {/* Workspace List */}

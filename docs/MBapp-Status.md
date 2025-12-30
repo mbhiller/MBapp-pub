@@ -1,7 +1,7 @@
 # MBapp Status / Working
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Foundations](MBapp-Foundations.md) · [Cadence](MBapp-Cadence.md) · [Verification](smoke-coverage.md)  
-**Last Updated:** 2025-12-29  
+**Last Updated:** 2025-12-30  
 **Workflow & DoD:** See [MBapp-Cadence.md](MBapp-Cadence.md) for canonical workflow, Definition of Done, and testing rules.
 
 ---
@@ -71,6 +71,16 @@
 - **E3 (API client):** useViewsApi now exposes `del(id)` (DELETE /views/{id}) alongside existing list/get/create/patch; uses same tenant/auth headers.
 - **Safety:** Delete action prompts confirm dialog with view name; rename requires non-empty name; pagination explicit via load-more button to avoid surprise fetches.
 - **Status:** ✅ Typecheck clean; uses existing toast/theme patterns; no new smokes required (views:crud already covers delete).
+
+### Mobile Workspaces v1 — ✅ Complete (Sprint T, 2025-12-30)
+
+**Epic Summary:** Mobile workspace management with view memberships and open-to-list navigation; workspaces remain an alias of views on the backend.
+
+- **E1 (API Client):** Mobile workspaces client gained create/patch/delete with idempotency headers; update uses PUT to satisfy backend validation (name/entityType required). `views` field supported for memberships.
+- **E2 (Manage Screen):** [apps/mobile/src/screens/WorkspacesManageScreen.tsx](../apps/mobile/src/screens/WorkspacesManageScreen.tsx) lists/searches workspaces (chips: All/PO/SO), shows view counts, supports create (name/entityType/shared, views=[]), rename, delete with toasts, pagination.
+- **E3 (Detail Screen):** [apps/mobile/src/screens/WorkspaceDetailScreen.tsx](../apps/mobile/src/screens/WorkspaceDetailScreen.tsx) shows workspace info, resolves member view names, edits memberships via checklist filtered by entityType (PATCH via PUT with required fields), and opens member views into entity list routes using `viewId`.
+- **E4 (Navigation Entry):** WorkspaceHub now links to WorkspacesManage alongside Manage Views; new routes registered for manage/detail.
+- **Caveat:** Backend enforces name length ≤120 chars while spec allows 200; workspaces are stored as type="view" aliases with `views: string[]` memberships. Backend update is PUT-only today (PATCH not wired).
 
 ### Backorder → PO → Receive Loop Polish — ✅ Complete (Sprint I + Sprint J)
 - **MOQ Bump Fix:** suggest-po now applies minOrderQty regardless of vendor source (override/backorder derivation).
