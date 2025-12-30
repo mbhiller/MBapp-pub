@@ -8,7 +8,7 @@ import { listMovementsByItem, createMovement } from "../inventory/movements";
 import { deriveCountersByLocation } from "../inventory/counters";
 import { resolveTenantId } from "../common/tenant";
 import { badRequest, conflictError, internalError, notFound } from "../common/responses";
-import { logger } from "../common/logger";
+import { logger, emitDomainEvent } from "../common/logger";
 
 type LineReq = { id?: string; lineId?: string; deltaQty: number; locationId?: string; lot?: string };
 type SOLine = { id: string; itemId: string; qty: number; uom?: string; qtyCommitted?: number };
@@ -68,6 +68,17 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     // ✅ Allow reserve from submitted OR committed (matches smoke)
     if (!["submitted", "committed"].includes(so.status)) {
       logger.warn(logCtx, "so-reserve.guard", { reason: "bad_status", status: so.status });
+      // Emit failure event
+      emitDomainEvent(logCtx, "SalesOrderReserved", {
+        objectType: "salesOrder",
+        objectId: so.id,
+        lineCount: reqLines.length,
+        totalQtyReserved: 0,
+        statusBefore: so.status,
+        statusAfter: so.status,
+        result: "fail",
+        errorCode: "INVALID_STATUS",
+      });
       return conflictError(`Cannot reserve from status=${so.status}`, undefined, requestId);
     }
 
@@ -156,6 +167,18 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
 
     if (shortages.length) {
       logger.warn(logCtx, "so-reserve.shortage", { shortages });
+      // Emit failure event
+      const totalQtyRequested = normalizedLines.reduce((sum, r) => sum + Number(r.deltaQty), 0);
+      emitDomainEvent(logCtx, "SalesOrderReserved", {
+        objectType: "salesOrder",
+        objectId: so.id,
+        lineCount: normalizedLines.length,
+        totalQtyReserved: 0,
+        statusBefore: so.status,
+        statusAfter: so.status,
+        result: "fail",
+        errorCode: "INSUFFICIENT_AVAILABILITY",
+      });
       return conflictError("Insufficient availability to reserve", { shortages }, requestId);
     }
 
@@ -183,6 +206,18 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
         });
       }
     }
+
+    // Emit domain event for successful reserve
+    const totalQtyReserved = normalizedLines.reduce((sum, r) => sum + Number(r.deltaQty), 0);
+    emitDomainEvent(logCtx, "SalesOrderReserved", {
+      objectType: "salesOrder",
+      objectId: so.id,
+      lineCount: normalizedLines.length,
+      totalQtyReserved,
+      statusBefore: so.status,
+      statusAfter: so.status,
+      result: "success",
+    });
 
     return json(200, so);
   } catch (err: any) {

@@ -21,6 +21,18 @@
 - **Guarantee:** Full stack aligned on canonical `id`; all clients send `id`; API accepts both `id`/`lineId` on input (Sprint O only); responses always include `id` (never `lineId`).
 - **Next:** Sprint P removes `lineId` from API input schemas; post-P cleanup verifies telemetry shows ~0% legacy usage before final removal.
 
+### Telemetry Accretion on Core Workflows — 🟨 In Progress (Sprint P, started 2025-12-29)
+
+**Epic Summary:** Add consistent domain event emission to SO and PO core workflows (reserve, release, fulfill, receive) with standardized envelope fields (tenantId, actorId, objectType/objectId, statusBefore/After, result, errorCode on failure).
+
+- **E1 (API — so-reserve.ts):** [apps/api/src/sales/so-reserve.ts](../apps/api/src/sales/so-reserve.ts) now emits `SalesOrderReserved` domain event after movements persist (success path: lineCount, totalQtyReserved, statusBefore/After, result="success") and on error paths (result="fail", errorCode: "INVALID_STATUS" | "INSUFFICIENT_AVAILABILITY"). Payload contains IDs + counts only; no lines array.
+- **E2 (API — so-fulfill.ts):** [apps/api/src/sales/so-fulfill.ts](../apps/api/src/sales/so-fulfill.ts) now emits `SalesOrderFulfilled` domain event after movements persist + SO lines updated + status computed (success path: lineCount, totalQtyFulfilled, statusBefore/After, result="success") and on error paths (result="fail", errorCode: "INVALID_STATUS" | "OVER_FULFILLMENT").
+- **E3 (Web UX — SalesOrderDetailPage):** [apps/web/src/pages/SalesOrderDetailPage.tsx](../apps/web/src/pages/SalesOrderDetailPage.tsx) emits `so_reserve_clicked` and `so_fulfill_clicked` events via track() helper (snake_case names per convention); tracks attempt/success/fail lifecycle with result field and errorCode on failures. Payload: objectType, objectId, lineCount, result, errorCode. Integrated with Sentry error context tags.
+- **E4 (Mobile UX — SalesOrderDetailScreen):** [apps/mobile/src/screens/SalesOrderDetailScreen.tsx](../apps/mobile/src/screens/SalesOrderDetailScreen.tsx) emits `so_reserve_clicked` and `so_fulfill_clicked` events via track() helper in two paths: (1) `run()` wrapper for reserve/fulfill button actions (attempt/success/fail tracking with lineCount + errorCode); (2) `submitPendingFulfills()` for scan-to-fulfill path (attempt/success/fail with scanMode: true flag). Integrated with Sentry error context tags matching web pattern (tags: objectType, objectId, action).
+- **E5 (Docs — Foundations + Status):** MBapp-Foundations.md updated with Sprint P telemetry summary (domain events: SalesOrderReserved, SalesOrderFulfilled; UX events: so_reserve_clicked, so_fulfill_clicked; pattern: IDs + counts only, no lines array, Sentry integration). Event examples already present in § 8.3. MBapp-Status.md updated with E4 completion note.
+- **Status:** ✅ **Complete (Sprint P, 2025-12-29)** — All E1–E5 tasks complete; typecheck + smoke tests pass; documentation synchronized.
+- **Next:** Sprint Q readiness for so-release domain event (E6) and po-receive domain event (E7) if planned.
+
 ### Backorder → PO → Receive Loop Polish — ✅ Complete (Sprint I + Sprint J)
 - **MOQ Bump Fix:** suggest-po now applies minOrderQty regardless of vendor source (override/backorder derivation).
 - **Runtime Tracking:** BackorderRequest schema includes `fulfilledQty` and `remainingQty` (nullable, server-maintained during PO receive).

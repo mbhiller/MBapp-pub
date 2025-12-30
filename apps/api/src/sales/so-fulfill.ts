@@ -5,7 +5,7 @@ import { GetCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import { createMovement } from "../inventory/movements";
 import { resolveTenantId } from "../common/tenant";
 import { badRequest, conflictError, internalError, notFound } from "../common/responses";
-import { logger } from "../common/logger";
+import { logger, emitDomainEvent } from "../common/logger";
 
 type LineReq = { id?: string; lineId?: string; deltaQty: number; locationId?: string; lot?: string };
 type SOLine = { id: string; itemId: string; qty: number; uom?: string; fulfilledQty?: number };
@@ -91,6 +91,17 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     // Guard status: allow fulfill from committed or partially_fulfilled
     if (!["committed", "partially_fulfilled"].includes(so.status)) {
       logger.warn(logCtx, "so-fulfill.guard", { reason: "bad_status", status: so.status });
+      // Emit failure event
+      emitDomainEvent(logCtx, "SalesOrderFulfilled", {
+        objectType: "salesOrder",
+        objectId: so.id,
+        lineCount: reqLines.length,
+        totalQtyFulfilled: 0,
+        statusBefore: so.status,
+        statusAfter: so.status,
+        result: "fail",
+        errorCode: "INVALID_STATUS",
+      });
       return conflictError(`Cannot fulfill from status=${so.status}`, undefined, requestId);
     }
 
@@ -126,6 +137,18 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
       const willBe = already + Number(r.deltaQty);
       if (willBe > Number(line.qty ?? 0)) {
         logger.warn(logCtx, "so-fulfill.guard", { lineId: r.lineKey, qtyOrdered: line.qty, already, attempt: r.deltaQty });
+        // Emit failure event
+        const totalQtyAttempted = normalizedLines.reduce((sum, req) => sum + Number(req.deltaQty), 0);
+        emitDomainEvent(logCtx, "SalesOrderFulfilled", {
+          objectType: "salesOrder",
+          objectId: so.id,
+          lineCount: normalizedLines.length,
+          totalQtyFulfilled: 0,
+          statusBefore: so.status,
+          statusAfter: so.status,
+          result: "fail",
+          errorCode: "OVER_FULFILLMENT",
+        });
         return conflictError("Over-fulfillment blocked", { lineId: r.lineKey, ordered: line.qty, fulfilledSoFar: already, attempt: r.deltaQty }, requestId);
       }
     }
@@ -178,6 +201,18 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     const updated: SalesOrder = { ...so, status: nextStatus, updatedAt: now };
     await ddb.send(new PutCommand({ TableName: tableObjects, Item: updated }));
     logger.info(logCtx, "so-fulfill.saved", { soId: so.id, status: nextStatus });
+
+    // Emit domain event for successful fulfill
+    const totalQtyFulfilled = normalizedLines.reduce((sum, r) => sum + Number(r.deltaQty), 0);
+    emitDomainEvent(logCtx, "SalesOrderFulfilled", {
+      objectType: "salesOrder",
+      objectId: so.id,
+      lineCount: normalizedLines.length,
+      totalQtyFulfilled,
+      statusBefore: so.status,
+      statusAfter: nextStatus,
+      result: "success",
+    });
 
     return json(200, updated);
   } catch (err: any) {
