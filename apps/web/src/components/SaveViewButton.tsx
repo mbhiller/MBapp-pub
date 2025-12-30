@@ -12,6 +12,8 @@ type Props = {
   filters: ViewFilter[];
   sort?: SortConfig;
   buttonLabel?: string;
+  activeViewId?: string; // If set, enable "Update View" mode
+  activeViewName?: string; // Current name of the active view (for display)
   onSaved?: (view: ViewConfig) => void;
 };
 
@@ -22,9 +24,10 @@ function normalizeFilters(filters: ViewFilter[]): ViewFilter[] {
     .filter((f) => !(typeof f.value === "string" ? f.value.trim() === "" : f.value === undefined || f.value === null));
 }
 
-export function SaveViewButton({ entityType, filters, sort, buttonLabel, onSaved }: Props) {
+export function SaveViewButton({ entityType, filters, sort, buttonLabel, activeViewId, activeViewName, onSaved }: Props) {
   const { token, tenantId } = useAuth();
   const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"update" | "save">(activeViewId ? "update" : "save");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [shared, setShared] = useState(false);
@@ -33,7 +36,7 @@ export function SaveViewButton({ entityType, filters, sort, buttonLabel, onSaved
   const [error, setError] = useState<string | null>(null);
 
   const handleSave = async () => {
-    if (!name.trim()) {
+    if (mode === "save" && !name.trim()) {
       setError("View name is required");
       return;
     }
@@ -44,7 +47,7 @@ export function SaveViewButton({ entityType, filters, sort, buttonLabel, onSaved
 
     try {
       const payload: Partial<ViewConfig> & { entityType: string } = {
-        name: name.trim(),
+        name: name.trim() || undefined, // For update mode, undefined name means no change
         entityType,
         filters: normalizeFilters(filters),
         sort: sort && sort.field ? sort : undefined,
@@ -52,25 +55,31 @@ export function SaveViewButton({ entityType, filters, sort, buttonLabel, onSaved
         shared: shared || undefined,
       };
 
-      const created = await apiFetch<ViewConfig>('/views', {
-        method: 'POST',
+      // If in update mode, use PATCH; otherwise POST
+      const isUpdate = mode === "update" && activeViewId;
+      const method = isUpdate ? "PATCH" : "POST";
+      const endpoint = isUpdate ? `/views/${activeViewId}` : "/views";
+
+      const result = await apiFetch<ViewConfig>(endpoint, {
+        method,
         body: payload,
         token: token || undefined,
         tenantId,
       });
 
-      if (created?.id) {
-        setMessage(`Saved view "${created.name || created.id}"`);
+      if (result?.id) {
+        const action = isUpdate ? "Updated" : "Saved";
+        setMessage(`${action} view "${result.name || result.id}"`);
         setOpen(false);
         setName("");
         setDescription("");
         setShared(false);
-        onSaved?.(created);
+        onSaved?.(result);
       } else {
-        setError('Failed to save view');
+        setError(`Failed to ${isUpdate ? "update" : "save"} view`);
       }
     } catch (err: any) {
-      setError(err?.message || 'Failed to save view');
+      setError(err?.message || `Failed to ${mode === "update" ? "update" : "save"} view`);
     } finally {
       setLoading(false);
     }
@@ -89,9 +98,16 @@ export function SaveViewButton({ entityType, filters, sort, buttonLabel, onSaved
         </div>
       )}
 
-      <button onClick={() => setOpen(true)} disabled={loading} style={{ padding: "6px 10px" }}>
-        {loading ? "Saving..." : buttonLabel || "Save as View"}
-      </button>
+      <div style={{ display: "flex", gap: 6 }}>
+        <button onClick={() => { setMode(activeViewId ? "update" : "save"); setOpen(true); }} disabled={loading} style={{ padding: "6px 10px" }}>
+          {loading ? (activeViewId ? "Updating..." : "Saving...") : (buttonLabel || (activeViewId ? "Update View" : "Save as View"))}
+        </button>
+        {activeViewId && (
+          <button onClick={() => { setMode("save"); setOpen(true); }} disabled={loading} style={{ padding: "6px 10px", background: "#f5f5f5", border: "1px solid #ccc" }}>
+            Save as New
+          </button>
+        )}
+      </div>
 
       {open && (
         <div
@@ -104,14 +120,16 @@ export function SaveViewButton({ entityType, filters, sort, buttonLabel, onSaved
             gap: 8,
           }}
         >
-          <div style={{ fontSize: 13, fontWeight: 600 }}>Save current filters as a View</div>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>
+            {mode === "update" ? `Update "${activeViewName || activeViewId}"` : "Save current filters as a View"}
+          </div>
           <label style={{ display: "grid", gap: 4 }}>
-            <span style={{ fontSize: 12 }}>Name (required)</span>
+            <span style={{ fontSize: 12 }}>Name {mode === "update" ? "(leave empty to keep unchanged)" : "(required)"}</span>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="View name"
+              placeholder={mode === "update" ? activeViewName || "View name" : "View name"}
               style={{ padding: 6, border: "1px solid #ccc", borderRadius: 3 }}
             />
           </label>
@@ -142,10 +160,10 @@ export function SaveViewButton({ entityType, filters, sort, buttonLabel, onSaved
             </button>
             <button
               onClick={handleSave}
-              disabled={loading}
+              disabled={loading || (mode === "save" && !name.trim())}
               style={{ background: "#007bff", color: "#fff", padding: "6px 12px", border: "none", borderRadius: 3 }}
             >
-              {loading ? "Saving..." : "Save View"}
+              {loading ? (mode === "update" ? "Updating..." : "Saving...") : (mode === "update" ? "Update View" : "Save View")}
             </button>
           </div>
         </div>

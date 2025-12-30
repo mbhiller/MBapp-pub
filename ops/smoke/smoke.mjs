@@ -5500,6 +5500,102 @@ const tests = {
     };
   },
 
+  "smoke:views:validate-filters": async ()=>{
+    await ensureBearer();
+
+    const entityType = "purchaseOrder";
+    const uniqueName = smokeTag(`FilterValidationTest-${Date.now()}`);
+
+    // Test 1: Invalid filter - missing field
+    const test1 = await post(`/views`, {
+      name: uniqueName,
+      entityType,
+      filters: [{ op: "eq", value: "draft" }] // Missing field
+    });
+    if (test1.ok) {
+      return {
+        test: "views:validate-filters",
+        result: "FAIL",
+        reason: "should-reject-missing-field",
+        test1
+      };
+    }
+
+    // Test 2: Invalid filter - bad operator
+    const test2 = await post(`/views`, {
+      name: uniqueName,
+      entityType,
+      filters: [{ field: "status", op: "badOp", value: "draft" }] // Bad op
+    });
+    if (test2.ok) {
+      return {
+        test: "views:validate-filters",
+        result: "FAIL",
+        reason: "should-reject-bad-op",
+        test2
+      };
+    }
+
+    // Test 3: Invalid filter - "in" operator with non-array value
+    const test3 = await post(`/views`, {
+      name: uniqueName,
+      entityType,
+      filters: [{ field: "status", op: "in", value: "draft" }] // "in" requires array
+    });
+    if (test3.ok) {
+      return {
+        test: "views:validate-filters",
+        result: "FAIL",
+        reason: "should-reject-in-with-non-array",
+        test3
+      };
+    }
+
+    // Test 4: Invalid filter - value is an object (not allowed)
+    const test4 = await post(`/views`, {
+      name: uniqueName,
+      entityType,
+      filters: [{ field: "status", op: "eq", value: { nested: "object" } }] // No objects
+    });
+    if (test4.ok) {
+      return {
+        test: "views:validate-filters",
+        result: "FAIL",
+        reason: "should-reject-object-value",
+        test4
+      };
+    }
+
+    // Test 5: Valid filters - should pass
+    const validName = smokeTag(`FilterValidationTest-Valid-${Date.now()}`);
+    const test5 = await post(`/views`, {
+      name: validName,
+      entityType,
+      filters: [
+        { field: "status", op: "eq", value: "draft" },
+        { field: "vendorId", op: "in", value: ["v1", "v2"] },
+        { field: "createdAt", op: "ge", value: "2025-01-01T00:00:00Z" }
+      ]
+    });
+    if (!test5.ok || !test5.body?.id) {
+      return {
+        test: "views:validate-filters",
+        result: "FAIL",
+        reason: "valid-filters-should-pass",
+        test5
+      };
+    }
+
+    return {
+      test: "views:validate-filters",
+      result: "PASS",
+      artifacts: {
+        invalidTests: { missingField: !test1.ok, badOp: !test2.ok, inWithNonArray: !test3.ok, objectValue: !test4.ok },
+        validTest: test5.ok
+      }
+    };
+  },
+
   "smoke:workspaces:list": async ()=>{
     await ensureBearer();
 
@@ -5593,6 +5689,271 @@ const tests = {
       counts: {
         q: qItems.length,
         byEntity: entityItems.length
+      }
+    };
+  },
+
+  "smoke:views:apply-to-po-list": async () => {
+    await ensureBearer();
+
+    const featureHeaders = { "X-Feature-Views-Enabled": "true" };
+    const runTimestamp = Date.now();
+
+    // 1) Create vendor + product + inventory
+    const { vendorId } = await seedVendor(api);
+    const prod = await createProduct({ name: `ViewApplyTest-${runTimestamp}`, preferredVendorId: vendorId });
+    if (!prod.ok) return { test: "views:apply-to-po-list", result: "FAIL", step: "createProduct", prod };
+    const prodId = prod.body?.id;
+    recordCreated({ type: 'product', id: prodId, route: '/objects/product', meta: { name: prod.body?.name } });
+
+    const item = await createInventoryForProduct(prodId, `ViewApplyItem-${runTimestamp}`);
+    if (!item.ok) return { test: "views:apply-to-po-list", result: "FAIL", step: "createInventory", item };
+    const itemId = item.body?.id;
+    recordCreated({ type: 'inventory', id: itemId, route: '/objects/inventory', meta: { name: item.body?.name, productId: prodId } });
+
+    // 2) Create two POs with different statuses: one draft, one submitted
+    const po1Create = await post(
+      `/objects/purchaseOrder`,
+      {
+        type: "purchaseOrder",
+        status: "draft",
+        vendorId,
+        lines: [{ itemId, qty: 1, uom: "ea" }]
+      },
+      { "Idempotency-Key": idem() }
+    );
+    if (!po1Create.ok) return { test: "views:apply-to-po-list", result: "FAIL", step: "createPO1", po1Create };
+    const po1Id = po1Create.body?.id;
+    recordCreated({ type: 'purchaseOrder', id: po1Id, route: '/objects/purchaseOrder', meta: { vendorId, status: "draft" } });
+
+    const po2Create = await post(
+      `/objects/purchaseOrder`,
+      {
+        type: "purchaseOrder",
+        status: "draft",
+        vendorId,
+        lines: [{ itemId, qty: 1, uom: "ea" }]
+      },
+      { "Idempotency-Key": idem() }
+    );
+    if (!po2Create.ok) return { test: "views:apply-to-po-list", result: "FAIL", step: "createPO2", po2Create };
+    const po2Id = po2Create.body?.id;
+    recordCreated({ type: 'purchaseOrder', id: po2Id, route: '/objects/purchaseOrder', meta: { vendorId, status: "draft" } });
+
+    // Submit PO2 so we have two different statuses
+    const po2Submit = await post(
+      `/purchasing/po/${encodeURIComponent(po2Id)}:submit`,
+      {},
+      { "Idempotency-Key": idem() }
+    );
+    if (!po2Submit.ok) return { test: "views:apply-to-po-list", result: "FAIL", step: "submitPO2", po2Submit };
+
+    // 3) Create a View with filter: status="draft"
+    const viewCreateHeaders = { ...baseHeaders(), ...featureHeaders };
+    const viewCreate = await fetch(`${API}/views`, {
+      method: "POST",
+      headers: viewCreateHeaders,
+      body: JSON.stringify({
+        name: smokeTag(`ViewApplyPOFilter-${runTimestamp}`),
+        entityType: "purchaseOrder",
+        filters: [{ field: "status", op: "eq", value: "draft" }],
+        columns: ["id", "vendorId", "status"],
+        description: "smoke:views:apply-to-po-list filter test"
+      })
+    });
+    const viewBody = await viewCreate.json().catch(() => ({}));
+    if (!viewCreate.ok || !viewBody?.id) {
+      return { test: "views:apply-to-po-list", result: "FAIL", step: "createView", status: viewCreate.status, body: snippet(viewBody, 400) };
+    }
+    const viewId = viewBody.id;
+    recordCreated({ type: 'view', id: viewId, route: '/views', meta: { name: viewBody?.name, entityType: "purchaseOrder" } });
+
+    // 4) Fetch the view back to get its filters
+    const viewGetHeaders = { ...baseHeaders(), ...featureHeaders };
+    const viewGet = await fetch(`${API}/views/${encodeURIComponent(viewId)}`, {
+      method: "GET",
+      headers: viewGetHeaders
+    });
+    const viewGetBody = await viewGet.json().catch(() => ({}));
+    if (!viewGet.ok || !viewGetBody?.id) {
+      return { test: "views:apply-to-po-list", result: "FAIL", step: "getView", status: viewGet.status, body: snippet(viewGetBody, 400) };
+    }
+
+    // 5) Convert view.filters into query params
+    // For this smoke, support only "eq" operator; fail fast if view contains anything else
+    const viewFilters = viewGetBody.filters || [];
+    const derivedQueryParams = { "filter.vendorId": vendorId, limit: 200 };
+    
+    for (const filter of viewFilters) {
+      if (filter.op !== "eq") {
+        return {
+          test: "views:apply-to-po-list",
+          result: "FAIL",
+          step: "deriveFilters",
+          reason: "unsupported-filter-operator",
+          filter,
+          message: "smoke:views:apply-to-po-list only supports 'eq' operator"
+        };
+      }
+      derivedQueryParams[`filter.${filter.field}`] = filter.value;
+    }
+
+    // 6) Query PO list WITHOUT filter applied (should see both PO1 and PO2)
+    // Use retry loop for eventual consistency (proven pattern from other PO smokes)
+    // Filter by vendorId to narrow scope and ensure our POs are in first page
+    const maxAttempts = 25;
+    const delayMs = 500;
+    let po1Found = false;
+    let po2Found = false;
+    let lastUnfilteredList = null;
+    let unfilteredItems = [];
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      if (attempt > 0) await sleep(delayMs);
+
+      // Use proven /objects/purchaseOrder endpoint with vendor filter (filter.vendorId syntax)
+      const listUnfiltered = await get(`/objects/purchaseOrder`, { "filter.vendorId": vendorId, limit: 200 });
+      lastUnfilteredList = listUnfiltered;
+
+      if (listUnfiltered.ok && Array.isArray(listUnfiltered.body?.items)) {
+        const items = listUnfiltered.body.items;
+        unfilteredItems = items; // Save for final report
+        po1Found = items.some(po => po.id === po1Id);
+        po2Found = items.some(po => po.id === po2Id);
+        
+        // Stop early if both found
+        if (po1Found && po2Found) break;
+      }
+    }
+
+    const po1InUnfiltered = po1Found;
+    const po2InUnfiltered = po2Found;
+
+    if (!po1Found || !po2Found) {
+      const items = lastUnfilteredList?.body?.items ?? [];
+      return {
+        test: "views:apply-to-po-list",
+        result: "FAIL",
+        step: "verifyBothPOsInUnfilteredList",
+        debug: {
+          po1Id,
+          po2Id,
+          po1Found,
+          po2Found,
+          endpoint: "/objects/purchaseOrder",
+          query: { "filter.vendorId": vendorId, limit: 200 },
+          attempts: maxAttempts,
+          unfilteredCount: items.length,
+          firstFiveIds: items.slice(0, 5).map(po => po.id)
+        }
+      };
+    }
+
+    // 7) Query PO list WITH view filters applied (derived from view definition)
+    // Use retry loop to handle eventual consistency
+    let po1InFiltered = false;
+    let po2InFiltered = false;
+    let filteredItems = [];
+    let lastFilteredList = null;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      if (attempt > 0) await sleep(delayMs);
+
+      const listFiltered = await get(`/objects/purchaseOrder`, derivedQueryParams);
+      lastFilteredList = listFiltered;
+
+      if (listFiltered.ok && Array.isArray(listFiltered.body?.items)) {
+        const items = listFiltered.body.items;
+        filteredItems = items;
+        po1InFiltered = items.some(po => po.id === po1Id);
+        po2InFiltered = items.some(po => po.id === po2Id);
+
+        // Stop early if we have po1 and NOT po2 (expected state)
+        if (po1InFiltered && !po2InFiltered) break;
+      }
+    }
+
+    if (!lastFilteredList?.ok) {
+      return {
+        test: "views:apply-to-po-list",
+        result: "FAIL",
+        step: "listFiltered",
+        reason: "filter-query-failed",
+        status: lastFilteredList?.status,
+        derivedQueryParams
+      };
+    }
+
+    if (filteredItems.length === 0) {
+      return {
+        test: "views:apply-to-po-list",
+        result: "FAIL",
+        step: "listFiltered",
+        reason: "filter-returned-empty",
+        derivedQueryParams
+      };
+    }
+
+    // 8) Assert: PO1 (draft) is in filtered results
+    if (!po1InFiltered) {
+      return {
+        test: "views:apply-to-po-list",
+        result: "FAIL",
+        step: "assertPO1InFiltered",
+        reason: "draft-PO-not-in-filtered-results",
+        po1Id,
+        filteredCount: filteredItems.length,
+        filteredIds: filteredItems.map(po => ({ id: po.id, status: po.status })),
+        derivedQueryParams
+      };
+    }
+
+    // 9) Assert: PO2 (submitted) is NOT in filtered results
+    if (po2InFiltered) {
+      return {
+        test: "views:apply-to-po-list",
+        result: "FAIL",
+        step: "assertPO2NotInFiltered",
+        reason: "submitted-PO-should-not-be-in-filtered-results",
+        po2Id,
+        filteredCount: filteredItems.length,
+        filteredIds: filteredItems.map(po => ({ id: po.id, status: po.status })),
+        derivedQueryParams
+      };
+    }
+
+    // 10) Assert: all items in filtered results have status="draft"
+    const allDraft = filteredItems.every(po => po.status === "draft");
+    if (!allDraft) {
+      const nonDraft = filteredItems.filter(po => po.status !== "draft");
+      return {
+        test: "views:apply-to-po-list",
+        result: "FAIL",
+        step: "assertAllDraftStatus",
+        reason: "filtered-list-contains-non-draft-items",
+        nonDraftCount: nonDraft.length,
+        nonDraftItems: nonDraft.map(po => ({ id: po.id, status: po.status })),
+        derivedQueryParams
+      };
+    }
+
+    const pass = po1InFiltered && !po2InFiltered && allDraft;
+    return {
+      test: "views:apply-to-po-list",
+      result: pass ? "PASS" : "FAIL",
+      message: "Applied view filters via derived list query params",
+      steps: {
+        product: { prodId },
+        inventory: { itemId },
+        po1: { id: po1Id, status: "draft", inUnfiltered: po1InUnfiltered, inFiltered: po1InFiltered },
+        po2: { id: po2Id, status: "submitted", inUnfiltered: po2InUnfiltered, inFiltered: po2InFiltered },
+        view: { id: viewId, entityType: "purchaseOrder", filters: viewFilters },
+        derivedQueryParams,
+        results: {
+          unfilteredCount: unfilteredItems.length,
+          filteredCount: filteredItems.length,
+          allFilteredAreDraft: allDraft
+        }
       }
     };
   },

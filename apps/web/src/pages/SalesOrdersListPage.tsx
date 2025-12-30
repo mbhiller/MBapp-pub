@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
 import { ViewSelector } from "../components/ViewSelector";
+import { SaveViewButton } from "../components/SaveViewButton";
 import { mapViewToSOFilters } from "../lib/viewFilterMappers";
 import type { ViewConfig } from "../hooks/useViewFilters";
 
@@ -36,6 +37,7 @@ export default function SalesOrdersListPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [appliedView, setAppliedView] = useState<ViewConfig | null>(null);
+  const [activeViewId, setActiveViewId] = useState<string | null>(null);
 
   const queryParams = useMemo(() => {
     const q: Record<string, string | number | boolean | undefined> = {
@@ -111,6 +113,7 @@ export default function SalesOrdersListPage() {
 
     // Handle ?viewId=<id>: fetch and apply the view
     if (urlViewId) {
+      setActiveViewId(urlViewId);
       (async () => {
         try {
           const view = await apiFetch<ViewConfig>(`/views/${urlViewId}`, {
@@ -135,6 +138,8 @@ export default function SalesOrdersListPage() {
           // Silently fail if view not found; user can select from ViewSelector
         }
       })();
+    } else {
+      setActiveViewId(null);
     }
   }, [searchParams, token, tenantId]);
 
@@ -170,6 +175,15 @@ export default function SalesOrdersListPage() {
           <option value="closed">closed</option>
         </select>
         <button onClick={onSearch} disabled={loading}>{loading ? "Searching..." : "Search"}</button>
+        <SaveViewButton
+          entityType="salesOrder"
+          filters={[
+            filter.q ? { field: "q", op: "contains", value: filter.q } : null,
+            filter.status && filter.status !== "all" ? { field: "status", op: "eq", value: filter.status } : null,
+          ].filter(Boolean) as Array<{ field: string; op: string; value: any }>}
+          activeViewId={activeViewId || undefined}
+          activeViewName={appliedView?.name}
+        />
       </div>
 
       {error ? <div style={{ padding: 12, background: "#fee", color: "#b00020", borderRadius: 4 }}>{error}</div> : null}

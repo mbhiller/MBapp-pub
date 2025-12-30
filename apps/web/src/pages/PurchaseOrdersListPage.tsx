@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
 import { ViewSelector } from "../components/ViewSelector";
+import { SaveViewButton } from "../components/SaveViewButton";
 import { mapViewToPOFilters } from "../lib/viewFilterMappers";
 import type { ViewConfig } from "../hooks/useViewFilters";
 
@@ -40,6 +41,7 @@ export default function PurchaseOrdersListPage() {
   const [vendorMode, setVendorMode] = useState<boolean>(false);
   const [vendorIdLocked, setVendorIdLocked] = useState<boolean>(false);
   const [appliedView, setAppliedView] = useState<ViewConfig | null>(null);
+  const [activeViewId, setActiveViewId] = useState<string | null>(null);
 
   const fetchPage = useCallback(
     async (cursor?: string) => {
@@ -85,6 +87,7 @@ export default function PurchaseOrdersListPage() {
 
     // Handle ?viewId=<id>: fetch and apply the view
     if (urlViewId) {
+      setActiveViewId(urlViewId);
       (async () => {
         try {
           const view = await apiFetch<ViewConfig>(`/views/${urlViewId}`, {
@@ -105,6 +108,8 @@ export default function PurchaseOrdersListPage() {
           // Silently fail if view not found; user can select from ViewSelector
         }
       })();
+    } else {
+      setActiveViewId(null);
     }
   }, [searchParams, token, tenantId]);
 
@@ -224,6 +229,15 @@ export default function PurchaseOrdersListPage() {
         >
           Clear filters
         </button>
+        <SaveViewButton
+          entityType="purchaseOrder"
+          filters={[
+            statusFilter ? { field: "status", op: "eq", value: statusFilter } : null,
+            vendorFilter ? { field: "vendorId", op: "eq", value: vendorFilter } : null,
+          ].filter(Boolean) as Array<{ field: string; op: string; value: any }>}
+          activeViewId={activeViewId || undefined}
+          activeViewName={appliedView?.name}
+        />
       </div>
 
       {vendorMode && (

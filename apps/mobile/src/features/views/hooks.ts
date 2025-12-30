@@ -30,23 +30,22 @@ type ListResult<T> = { items: T[]; next?: string | null };
 
 export function useViewsApi() {
   const list = useCallback(
-    async (opts?: { moduleKey?: string; ownerId?: string; shared?: boolean; isDefault?: boolean; limit?: number; next?: string }) => {
+    async (opts?: { entityType?: string; q?: string; limit?: number; nextToken?: string }) => {
       const qs = new URLSearchParams();
-      if (opts?.moduleKey) qs.set("moduleKey", String(opts.moduleKey));
-      if (opts?.ownerId) qs.set("ownerId", String(opts.ownerId));
-      if (opts?.shared !== undefined) qs.set("shared", String(opts.shared));
-      if (opts?.isDefault !== undefined) qs.set("isDefault", String(opts.isDefault));
+      if (opts?.entityType) qs.set("entityType", String(opts.entityType));
+      if (opts?.q) qs.set("q", String(opts.q));
       if (opts?.limit) qs.set("limit", String(opts.limit));
-      if (opts?.next) qs.set("next", String(opts.next));
-      // Your API routes are object-templated:
-      const url = `${API}/objects/view/list?${qs.toString()}`;
+      if (opts?.nextToken) qs.set("nextToken", String(opts.nextToken));
+      // Spec-compliant endpoint (Sprint Q alignment):
+      const url = `${API}/views?${qs.toString()}`;
       return getJSON<ListResult<View>>(url);
     },
     []
   );
 
   const get = useCallback(async (id: string) => {
-    const url = `${API}/objects/view/${encodeURIComponent(id)}`;
+    // Spec-compliant endpoint (Sprint Q alignment):
+    const url = `${API}/views/${encodeURIComponent(id)}`;
     return getJSON<View>(url);
   }, []);
 

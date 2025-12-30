@@ -616,14 +616,14 @@ export async function smoke_module_flow(API_BASE, authToken) {
 
 ---
 
-### 4.7 Views & Workspaces (Sprint III)
+### 4.7 Views & Workspaces (Sprint III + Sprint Q Hardening)
 
 | Endpoint | Method | Status | Mobile | Web | MVP Need |
 |----------|--------|--------|--------|-----|----------|
 | `/views` | GET | ✅ | ❌ | ✅ | **Required for saved filters** |
 | `/views` | POST | ✅ | ❌ | ✅ | **Required** |
 | `/views/{id}` | GET | ✅ | ❌ | ✅ | **Required** |
-| `/views/{id}` | PUT | ✅ | ❌ | ✅ | **Required** |
+| `/views/{id}` | PATCH | ✅ | ❌ | ✅ | **Required** (Sprint Q: used for Update View) |
 | `/views/{id}` | DELETE | ✅ | ❌ | ✅ | Optional |
 | `/workspaces` | GET | ✅ (aliases views) | 🟨 (hub list only) | 🟨 (list/detail) | Optional (nice-to-have) |
 | `/workspaces` | POST | ✅ (aliases views) | 🟨 (hub list only) | 🟨 (list/detail) | Optional |
@@ -635,6 +635,12 @@ export async function smoke_module_flow(API_BASE, authToken) {
 - **Feature flags:** `FEATURE_VIEWS_ENABLED` / `X-Feature-Views-Enabled` are historical/client gating. Handlers use RBAC; no server-side flag guard today.
 
 - **List pages:** Sales Orders, Purchase Orders, Inventory, Parties, and Products can apply `?viewId` and save current filters as a View (optional shared flag) directly from the list UI.
+
+**Sprint Q Hardening (2025-12-30):**
+- ✅ **Server-side filter validation:** `/views` POST and PATCH endpoints validate filter shape (field: non-empty string, op: enum, value: type-appropriate). Returns 400 with clear message for invalid filters. No deep field-existence validation (deferred).
+- ✅ **Web "Update View" affordance:** When a view is applied via `?viewId`, SaveViewButton shows "Update View" (primary) + "Save as New" (secondary) options. Uses PATCH `/views/{id}` to persist changes without creating duplicates (reduces view sprawl).
+- ✅ **Columns stored but not rendered:** View `columns` array is persisted in API/DB but currently not used by web table rendering (UI ignores columns field; tables show default column set). Sort field is stored; whether applied depends on list page implementation.
+- ✅ **Smoke coverage:** `smoke:views:apply-to-po-list` validates filter application constrains list results; `smoke:views:validate-filters` validates server-side filter rejection.
 
 **Mobile gaps:** Views UI absent; Workspaces hub lists items but cannot apply/open views.  
 **Web gaps:** Workspaces create/edit missing; view apply/save present for SO/PO/Inventory/Parties/Products, other modules pending.  
