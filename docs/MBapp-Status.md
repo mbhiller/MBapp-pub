@@ -90,6 +90,7 @@
 - **E2 (Manage Screen):** [apps/mobile/src/screens/WorkspacesManageScreen.tsx](../apps/mobile/src/screens/WorkspacesManageScreen.tsx) lists/searches workspaces (chips: All/PO/SO), shows view counts, supports create (name/entityType/shared, views=[]), rename, delete with toasts, pagination.
 - **E3 (Detail Screen):** [apps/mobile/src/screens/WorkspaceDetailScreen.tsx](../apps/mobile/src/screens/WorkspaceDetailScreen.tsx) shows workspace info, resolves member view names, edits memberships via checklist filtered by entityType (PATCH via PUT with required fields), and opens member views into entity list routes using `viewId`.
 - **E4 (Navigation Entry):** WorkspaceHub now links to WorkspacesManage alongside Manage Views; new routes registered for manage/detail.
+- **E5 (Membership edit):** Mobile now supports editing workspace `views[]` membership (manage screen + dedicated membership editor). Backend stores workspaces as `type="view"`; updates require `entityType` and enforce `name` ≤ 120 chars.
 - **Caveat:** Backend enforces name length ≤120 chars while spec allows 200; workspaces are stored as type="view" aliases with `views: string[]` memberships. Backend update is PUT-only today (PATCH not wired).
 
 ### Backorder → PO → Receive Loop Polish — ✅ Complete (Sprint I + Sprint J)

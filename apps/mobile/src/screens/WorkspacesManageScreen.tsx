@@ -10,11 +10,12 @@ import {
   Modal,
   Switch,
 } from "react-native";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import { useTheme } from "../providers/ThemeProvider";
 import { useToast } from "../features/_shared/Toast";
 import { useWorkspacesApi } from "../features/workspaces/hooks";
 import type { WorkspaceItem, CreateWorkspacePayload } from "../features/workspaces/api";
+import { buildWorkspacePutPayload } from "../features/workspaces/api";
 import type { RootStackParamList } from "../navigation/types";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 
@@ -28,7 +29,7 @@ export default function WorkspacesManageScreen({ route }: any) {
   const t = useTheme();
   const toast = useToast();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { list, create, patch, del } = useWorkspacesApi();
+  const { list, create, patch, put, del } = useWorkspacesApi();
 
   const initialEntityType = route?.params?.initialEntityType as string | undefined;
   const [entityType, setEntityType] = React.useState<string | undefined>(initialEntityType);
@@ -81,6 +82,15 @@ export default function WorkspacesManageScreen({ route }: any) {
     fetchPage(undefined, false);
   }, [entityType, q, fetchPage]);
 
+  useFocusEffect(
+    React.useCallback(() => {
+      if (route?.params?.didEdit) {
+        fetchPage(undefined, false);
+        navigation.setParams?.({ ...(route.params || {}), didEdit: undefined });
+      }
+    }, [fetchPage, navigation, route?.params])
+  );
+
   const onLoadMore = React.useCallback(() => {
     if (!nextCursor) return;
     fetchPage(nextCursor, true);
@@ -104,9 +114,14 @@ export default function WorkspacesManageScreen({ route }: any) {
       toast("Name is required", "warning");
       return;
     }
+    if (trimmed.length > 120) {
+      toast("Name must be 120 characters or fewer", "warning");
+      return;
+    }
     setRenaming(true);
     try {
-      await patch(renameTarget.id, { name: trimmed, entityType: renameTarget.entityType });
+      const payload = buildWorkspacePutPayload(renameTarget, { name: trimmed });
+      await (put ?? patch)(renameTarget.id, payload);
       toast("✓ Renamed workspace", "success");
       closeRename();
       fetchPage(undefined, false);
@@ -158,6 +173,10 @@ export default function WorkspacesManageScreen({ route }: any) {
     const trimmed = createPayload.name.trim();
     if (!trimmed) {
       toast("Name is required", "warning");
+      return;
+    }
+    if (trimmed.length > 120) {
+      toast("Name must be 120 characters or fewer", "warning");
       return;
     }
     if (!createPayload.entityType) {
@@ -243,6 +262,20 @@ export default function WorkspacesManageScreen({ route }: any) {
           Views: {viewCount}
         </Text>
         <View style={{ flexDirection: "row", gap: 8 }}>
+          <Pressable
+            onPress={() => navigation.navigate("WorkspaceEditMembership", { workspaceId: workspace.id })}
+            style={{
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              borderRadius: 8,
+              borderWidth: 1,
+              borderColor: t.colors.primary,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Text style={{ color: t.colors.primary, fontWeight: "700" }}>Edit views</Text>
+          </Pressable>
           <Pressable
             onPress={() => openRename(workspace)}
             style={{

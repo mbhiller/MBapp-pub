@@ -6,6 +6,8 @@ export type WorkspaceItem = {
   id: string;
   name: string;
   entityType: string;
+  description?: string;
+  shared?: boolean;
   filters?: any[];
   columns?: string[];
   views?: string[];
@@ -46,21 +48,53 @@ function toQuery(params?: WorkspaceListParams): Record<string, string> {
   return result;
 }
 
+export function normalizeWorkspace(obj: any): WorkspaceItem {
+  return {
+    id: obj?.id,
+    name: obj?.name,
+    entityType: obj?.entityType,
+    description: obj?.description,
+    shared: obj?.shared,
+    filters: obj?.filters,
+    columns: obj?.columns,
+    views: Array.isArray(obj?.views) ? obj.views : [],
+    createdAt: obj?.createdAt,
+    updatedAt: obj?.updatedAt,
+  } as WorkspaceItem;
+}
+
+export function buildWorkspacePutPayload(existing: any, updates: Partial<WorkspaceItem> & { name?: string; entityType?: string }) {
+  const base = normalizeWorkspace(existing || {});
+  const merged = { ...base, ...updates };
+  return {
+    name: merged.name,
+    entityType: merged.entityType,
+    description: merged.description,
+    shared: merged.shared,
+    views: Array.isArray(merged.views) ? merged.views : [],
+    filters: merged.filters,
+    columns: merged.columns,
+  };
+}
+
 export const workspacesApi = {
   list: (params?: WorkspaceListParams): Promise<ListPage<WorkspaceItem>> => {
-    return apiClient.get<ListPage<WorkspaceItem>>("/workspaces", toQuery(params));
+    return apiClient.get<ListPage<WorkspaceItem>>("/workspaces", toQuery(params)).then((res) => ({
+      ...res,
+      items: Array.isArray(res?.items) ? res.items.map(normalizeWorkspace) : [],
+    }));
   },
   get: (id: string): Promise<WorkspaceItem> => {
-    return apiClient.get<WorkspaceItem>(`/workspaces/${encodeURIComponent(id)}`);
+    return apiClient.get<WorkspaceItem>(`/workspaces/${encodeURIComponent(id)}`).then(normalizeWorkspace);
   },
   create: (
     payload: CreateWorkspacePayload,
     opts?: { idempotencyKey?: string }
   ): Promise<WorkspaceItem> => {
     const headers = { "Idempotency-Key": opts?.idempotencyKey ?? newIdempotencyKey("ws") };
-    return apiClient.post<WorkspaceItem>("/workspaces", payload, headers);
+    return apiClient.post<WorkspaceItem>("/workspaces", payload, headers).then(normalizeWorkspace);
   },
-  patch: (
+  put: (
     id: string,
     payload: PatchWorkspacePayload,
     opts?: { idempotencyKey?: string }
@@ -70,7 +104,14 @@ export const workspacesApi = {
       `/workspaces/${encodeURIComponent(id)}`,
       payload,
       headers
-    );
+    ).then(normalizeWorkspace);
+  },
+  patch: (
+    id: string,
+    payload: PatchWorkspacePayload,
+    opts?: { idempotencyKey?: string }
+  ): Promise<WorkspaceItem> => {
+    return workspacesApi.put(id, payload, opts);
   },
   del: (
     id: string,
