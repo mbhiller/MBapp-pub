@@ -576,11 +576,17 @@ components:
             items:
               type: object
               required:
-              - lineId
+              - id
               - deltaQty
               properties:
+                id:
+                  type: string
+                  description: Canonical line id (preferred). Server-assigned `L{n}` pattern.
                 lineId:
                   type: string
+                  nullable: true
+                  deprecated: true
+                  description: Alias for `id` (compatibility; will be removed after transition).
                 itemId:
                   type: string
                   nullable: true
@@ -602,11 +608,17 @@ components:
     GoodsReceiptLine:
       type: object
       required:
-      - lineId
+      - id
       - deltaQty
       properties:
+        id:
+          type: string
+          description: Canonical line id (preferred). Server-assigned `L{n}` pattern.
         lineId:
           type: string
+          nullable: true
+          deprecated: true
+          description: Alias for `id` (compatibility; will be removed after transition).
         deltaQty:
           type: number
         locationId:
@@ -1340,9 +1352,10 @@ components:
           minItems: 1
           items:
             type: object
-            required: [lineId, deltaQty]
+            required: [id, deltaQty]
             properties:
-              lineId:     { type: string }
+              id:         { type: string, description: "Canonical line id (preferred). Server-assigned `L{n}` pattern." }
+              lineId:     { type: string, nullable: true, deprecated: true, description: "Alias for id (compatibility; will be removed after transition)." }
               deltaQty:   { type: number, minimum: 1 }
               locationId: { type: string }
               lot:        { type: string }
@@ -1602,9 +1615,10 @@ components:
             nullable: true
     SalesFulfillmentLine:
       type: object
-      required: [lineId, deltaQty]
+      required: [id, deltaQty]
       properties:
-        lineId:     { type: string }
+        id:         { type: string, description: "Canonical line id (preferred). Server-assigned `L{n}` pattern." }
+        lineId:     { type: string, nullable: true, deprecated: true, description: "Alias for id (compatibility; will be removed after transition)." }
         deltaQty:   { type: number, minimum: 1 }
         locationId: { type: string, nullable: true }
         lot:        { type: string, nullable: true }
@@ -1807,9 +1821,10 @@ components:
           minItems: 1
           items:
             type: object
-            required: [lineId, deltaQty]
+            required: [id, deltaQty]
             properties:
-              lineId:   { type: string }
+              id:       { type: string, description: "Canonical line id (preferred). Server-assigned `L{n}` pattern." }
+              lineId:   { type: string, nullable: true, deprecated: true, description: "Alias for id (compatibility; will be removed after transition)." }
               deltaQty: { type: number, minimum: 1 }
               locationId: { type: string, nullable: true, description: "Optional: when provided, reservation is applied to the specific location; if omitted, behavior is aggregate/unassigned (legacy)." }
               lot:        { type: string, nullable: true, description: "Optional: lot identifier to associate with the reservation when applicable." }
@@ -1823,9 +1838,10 @@ components:
           minItems: 1
           items:
             type: object
-            required: [lineId, deltaQty]
+            required: [id, deltaQty]
             properties:
-              lineId:   { type: string }
+              id:       { type: string, description: "Canonical line id (preferred). Server-assigned `L{n}` pattern." }
+              lineId:   { type: string, nullable: true, deprecated: true, description: "Alias for id (compatibility; will be removed after transition)." }
               deltaQty: { type: number, minimum: 1 }
               reason:   { type: string }
               locationId: { type: string, nullable: true, description: "Optional: when provided, release is applied to the specific location; if omitted, behavior is aggregate/unassigned (legacy)." }
@@ -4056,11 +4072,12 @@ paths:
           application/json:
             schema:
               type: object
-              required: [lineId, qty]
+              required: [id, qty]
               properties:
-                lineId:  { type: string }
-                qty:     { type: number, minimum: 1 }
-                lot:     { type: string, nullable: true }
+                id:       { type: string, description: "Canonical line id (preferred). Server-assigned `L{n}` pattern." }
+                lineId:   { type: string, nullable: true, deprecated: true, description: "Alias for id (compatibility; will be removed after transition)." }
+                qty:      { type: number, minimum: 1 }
+                lot:      { type: string, nullable: true }
                 location: { type: string, nullable: true }
       responses:
         '200':
@@ -4307,9 +4324,10 @@ paths:
                   minItems: 1
                   items:
                     type: object
-                    required: [lineId, deltaQty]
+                    required: [id, deltaQty]
                     properties:
-                      lineId:     { type: string }
+                      id:         { type: string, description: "Canonical line id (preferred). Server-assigned `L{n}` pattern." }
+                      lineId:     { type: string, nullable: true, deprecated: true, description: "Alias for id (compatibility; will be removed after transition)." }
                       deltaQty:   { type: number, minimum: 1, description: Quantity shipped/picked }
                       locationId: { type: string }
                       lot:        { type: string }
@@ -4372,9 +4390,10 @@ paths:
           application/json:
             schema:
               type: object
-              required: [lineId, qty]
+              required: [id, qty]
               properties:
-                lineId: { type: string }
+                id:   { type: string, description: "Canonical line id (preferred). Server-assigned `L{n}` pattern." }
+                lineId: { type: string, nullable: true, deprecated: true, description: "Alias for id (compatibility; will be removed after transition)." }
                 qty:    { type: number }
                 lot:    { type: string, nullable: true }
                 location: { type: string, nullable: true }

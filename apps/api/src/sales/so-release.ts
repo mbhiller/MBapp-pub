@@ -5,7 +5,7 @@ import { createMovement } from "../inventory/movements";
 import { resolveTenantId } from "../common/tenant";
 import { logger } from "../common/logger";
 
-type LineReq = { lineId: string; deltaQty: number; reason?: string; locationId?: string; lot?: string };
+type LineReq = { id?: string; lineId?: string; deltaQty: number; reason?: string; locationId?: string; lot?: string };
 type SOLine = { id: string; itemId: string; qty: number; uom?: string };
 type SalesOrder = {
   pk: string; sk: string; id: string; type: "salesOrder";
@@ -57,19 +57,31 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     }
 
     const soLines = new Map<string, SOLine>((so.lines ?? []).map(l => [l.id, l]));
-    for (const l of reqLines) {
-      if (!l?.lineId || typeof l.deltaQty !== "number" || l.deltaQty < 0) {
-        return json(400, { message: "Each line requires { lineId, deltaQty>=0 }" });
+    const normalizedLines: Array<{ lineKey: string; deltaQty: number; reason?: string; locationId?: string; lot?: string }> = [];
+    const lineIdUsage: boolean[] = [];
+    for (let i = 0; i < reqLines.length; i++) {
+      const l = reqLines[i];
+      const lineKey = l.id ?? l.lineId;
+      if (!lineKey || typeof l.deltaQty !== "number" || l.deltaQty < 0) {
+        return json(400, { message: "Each line requires { id or lineId, deltaQty>=0 }" });
       }
-      if (!soLines.has(l.lineId)) {
-        return json(404, { message: `Unknown lineId ${l.lineId}` });
+      if (!soLines.has(lineKey)) {
+        return json(404, { message: `Unknown line id=${lineKey}` });
       }
+      normalizedLines.push({ lineKey, deltaQty: l.deltaQty, reason: l.reason, locationId: l.locationId, lot: l.lot });
+      lineIdUsage[i] = !l.id && !!l.lineId;
+    }
+
+    // Log if any requests used legacy lineId
+    const legacyCount = lineIdUsage.filter(Boolean).length;
+    if (legacyCount > 0) {
+      logger.info({ tenantId }, "so-release.legacy_lineId", { legacyLineIdCount: legacyCount, totalLines: normalizedLines.length });
     }
 
     // Emit inventory movements with action 'release' using shared dual-write helper
     const now = new Date().toISOString();
-    for (const r of reqLines) {
-      const line = soLines.get(r.lineId)!;
+    for (const r of normalizedLines) {
+      const line = soLines.get(r.lineKey)!;
       try {
         await createMovement({
           tenantId,
@@ -85,7 +97,7 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
       } catch (err) {
         // Log error but don't fail the entire release (best-effort semantics)
         logger.warn({ tenantId }, "so-release: movement write error", { 
-          lineId: r.lineId, 
+          lineId: r.lineKey, 
           itemId: line.itemId, 
           error: String(err) 
         });

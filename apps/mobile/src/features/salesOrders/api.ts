@@ -61,7 +61,7 @@ export type UpdateSalesOrderPatch = Partial<Omit<SalesOrder, "lines">> & {
 };
 
 /** Action payloads */
-export type LineDelta = { lineId: string; deltaQty: number };
+export type LineDelta = { id: string; deltaQty: number };
 export type CommitOptions = { strict?: boolean };
 
 /** ===== CRUD via Objects API =====

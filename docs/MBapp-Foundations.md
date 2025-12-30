@@ -160,10 +160,12 @@ Web Edit Page:
 - ✅ ALWAYS preserve server `id` exactly as provided
 - ✅ ALWAYS use `cid` for client-only lines (generate via `tmp-${uuid}`)
 - ✅ ALWAYS let server assign stable IDs via `ensureLineIds()`
+- ✅ Canonical line identity is `id`; `lineId` is a deprecated compatibility alias during transition (accept on input only).
 
 **Implementation Status (Sprint M):**
 - ✅ API: `ensureLineIds()` helper ensures stable `L{n}` IDs (apps/api/src/shared/ensureLineIds.ts)
 - ✅ API: `po-create-from-suggestion` uses `ensureLineIds()` (no more ad-hoc `ln_*` IDs)
+- ✅ API: Action handlers (po-receive, so-reserve, so-release, so-fulfill) accept both `id` (canonical) and `lineId` (deprecated) on input, normalize internally to `id`, log legacy usage, always emit `id` in responses (Sprint E2)
 - ✅ Web: `computePatchLinesDiff()` sends `cid` for new lines, `id` for updates (apps/web/src/lib/patchLinesDiff.ts)
 - ✅ Web: Edit pages preserve server IDs, no fallback generation (EditSalesOrderPage, EditPurchaseOrderPage)
 - ✅ Web: Forms have JSDoc pattern documentation to prevent regressions (SalesOrderForm, PurchaseOrderForm)
@@ -180,9 +182,65 @@ Web Edit Page:
 - Web: [apps/web/src/components/LineArrayEditor.tsx](../apps/web/src/components/LineArrayEditor.tsx) — Shared editor component
 - Smokes: [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) — Regression tests (lines 6672-6876)
 
+### 2.6 Line Identity Contract (Canonical `id` vs. Deprecated `lineId`)
+
+**Context:** Through Sprint M, the codebase used `lineId` to reference line items. Starting in Sprint O (E1-E5), the canonical identifier is now `id` (matching patch-lines semantics). This section documents the transition plan and guarantees.
+
+**Canonical Rule:**
+- **`id`** (string): Canonical line identity, always used in responses and client payloads
+  - Assigned by server as stable `L{n}` pattern (e.g., `L1`, `L2`, `L3`)
+  - Persisted and immutable once created
+  - Must be sent by clients in all action requests (receive/reserve/release/fulfill)
+
+**Deprecated Alias:**
+- **`lineId`** (string): Legacy field, accepted on input during 1-sprint compatibility window (Sprint O)
+  - Will be removed from API input schemas in Sprint P
+  - **Never** included in API responses (responses always use `id` only)
+  - Clients must migrate to use `id` within this sprint
+
+**Affected Endpoints:**
+- `POST /purchasing/po/{id}:receive` — Expects `{ lines: [{ id, deltaQty, ... }] }` (was `lineId`)
+- `POST /sales/so/{id}:reserve` — Expects `{ lines: [{ id, deltaQty, ... }] }` (was `lineId`)
+- `POST /sales/so/{id}:release` — Expects `{ lines: [{ id, deltaQty, reason? }] }` (was `lineId`)
+- `POST /sales/so/{id}:fulfill` — Expects `{ lines: [{ id, deltaQty, ... }] }` (was `lineId`)
+- All `{object}:patch-lines` endpoints — Already require `id` (or `cid` for new lines); never used `lineId`
+
+**Transition Timeline:**
+| Phase | When | Behavior |
+|-------|------|----------|
+| **Input Compat** | Sprint O (now) | API accepts both `id` and `lineId` on input; normalizes to `id`; logs legacy usage metrics |
+| **Removal** | Sprint P | `lineId` removed from input schemas; clients must use `id` |
+| **Cleanup** | Post-Sprint P | Telemetry queries show legacy usage rate; remove if ~0% |
+
+**Implementation (Sprint O E1–E5):**
+- ✅ **E1 (Spec):** spec/MBapp-Modules.yaml updated to canonicalize `id` in action payloads
+- ✅ **E2 (API):** Action handlers normalize `lineId` → `id` on input; emit structured logs (`so-reserve.legacy_lineId`, `po-receive.legacy_lineId`, etc.); always respond with `id`
+- ✅ **E3 (Smoke):** New test `smoke:line-identity:id-canonical` validates all action endpoints accept/emit `id`; existing action smokes updated to use `id` payloads
+- ✅ **E4 (Web):** Web app payloads updated to send `id` (all action handlers)
+- ✅ **E5 (Mobile):** Mobile app payloads updated to send `id` (all action handlers, type definitions)
+- ✅ **E6 (Docs):** This section + Status/smoke-coverage updated
+
+**Selection/Reading Helpers (Read-Side Fallback):**
+During transition, helpers like `getPoLineId()` (web) and `pickBestMatchingLineId()` (mobile) retain fallback logic:
+```typescript
+// Web example
+const lineId = String(line?.id ?? line?.lineId ?? "");  // prefer id, fallback lineId
+
+// Mobile example  
+getLineId: (line: any) => String(line?.id ?? line?.lineId ?? ""),  // prefer id, fallback lineId
+```
+This allows responses from legacy systems or test fixtures to still work. **Client payloads, however, always send `id`.**
+
+**Files Modified (E1-E5):**
+- Spec: [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml)
+- API: [apps/api/src/purchasing/so-reserve.ts](../apps/api/src/purchasing/so-reserve.ts), [so-release.ts](../apps/api/src/sales/so-release.ts), [so-fulfill.ts](../apps/api/src/sales/so-fulfill.ts), [po-receive.ts](../apps/api/src/purchasing/po-receive.ts)
+- Web: [apps/web/src/pages/PurchaseOrderDetailPage.tsx](../apps/web/src/pages/PurchaseOrderDetailPage.tsx), [SalesOrderDetailPage.tsx](../apps/web/src/pages/SalesOrderDetailPage.tsx)
+- Mobile: [apps/mobile/src/screens/PurchaseOrderDetailScreen.tsx](../apps/mobile/src/screens/PurchaseOrderDetailScreen.tsx), [SalesOrderDetailScreen.tsx](../apps/mobile/src/screens/SalesOrderDetailScreen.tsx), [DevToolsScreen.tsx](../apps/mobile/src/screens/DevToolsScreen.tsx)
+- Mobile Types: [apps/mobile/src/features/purchaseOrders/api.ts](../apps/mobile/src/features/purchaseOrders/api.ts), [salesOrders/api.ts](../apps/mobile/src/features/salesOrders/api.ts), [sales/api.ts](../apps/mobile/src/features/sales/api.ts), [purchasing/poActions.ts](../apps/mobile/src/features/purchasing/poActions.ts)
+
 ---
 
-## 3. Mobile UI Patterns (apps/mobile/src/screens)
+
 
 | Module | List Screen | Detail Screen | Create/Edit | Search/Filter | Status |
 |--------|------------|---------------|-------------|---------------|--------|

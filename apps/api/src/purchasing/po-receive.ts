@@ -48,16 +48,17 @@ async function markAppliedKey(tenantId: string, poId: string, idk?: string | nul
 }
 
 /** Simple canonical signature of request lines so same payload is idempotent even with a different key */
-type LineReq = { lineId: string; deltaQty: number; lot?: string; locationId?: string };
+type LineReq = { id?: string; lineId?: string; deltaQty: number; lot?: string; locationId?: string };
 function canonicalizeLines(lines: LineReq[]) {
   const norm = lines.map(l => ({
-    lineId: String(l.lineId),
+    id: l.id ?? undefined,
+    lineId: l.lineId ?? undefined,
     deltaQty: Number(l.deltaQty ?? 0),
     lot: l.lot ?? undefined,
     locationId: (l as any).location ?? l.locationId ?? undefined,
   }));
   norm.sort((a, b) =>
-    a.lineId.localeCompare(b.lineId) ||
+    String(a.id ?? a.lineId).localeCompare(String(b.id ?? b.lineId)) ||
     a.deltaQty - b.deltaQty ||
     String(a.lot ?? "").localeCompare(String(b.lot ?? "")) ||
     String(a.locationId ?? "").localeCompare(String(b.locationId ?? ""))
@@ -130,15 +131,20 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
 
     const idk = (event.headers?.["Idempotency-Key"] || event.headers?.["idempotency-key"] || null) as string | null;
 
-    const body = parse<{ lines: Array<{ lineId: string, deltaQty?: number, receivedQty?: number, lot?: string, locationId?: string }> }>(event);
+    const body = parse<{ lines: Array<{ id?: string; lineId?: string; deltaQty?: number; receivedQty?: number; lot?: string; locationId?: string }> }>(event);
     let reqLines: LineReq[] = [];
+    const lineIdUsage: boolean[] = [];
     if (Array.isArray(body?.lines)) {
-      for (const l of body.lines) {
+      for (let i = 0; i < body.lines.length; i++) {
+        const l = body.lines[i];
+        const lineKey = l.id ?? l.lineId;
+        if (!lineKey) continue;
         // Support receivedQty for backward compatibility
         if (typeof l.receivedQty === "number") {
           const current = Number(l.deltaQty ?? 0);
           // We'll need to load prior received for this line
           reqLines.push({
+            id: l.id,
             lineId: l.lineId,
             deltaQty: typeof l.deltaQty === "number" ? l.deltaQty : l.receivedQty - (current || 0),
             lot: l.lot,
@@ -146,12 +152,14 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
           });
         } else {
           reqLines.push({
+            id: l.id,
             lineId: l.lineId,
             deltaQty: Number(l.deltaQty ?? 0),
             lot: l.lot,
             locationId: l.locationId
           });
         }
+        lineIdUsage[reqLines.length - 1] = !l.id && !!l.lineId;
       }
     }
     if (reqLines.length === 0) {
@@ -210,25 +218,42 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
 
     const linesById = new Map<string, any>((po.lines ?? []).map((ln: any) => [String(ln.id ?? ln.lineId), ln]));
     
+    // Log if any requests used legacy lineId
+    const legacyCount = lineIdUsage.filter(Boolean).length;
+    if (legacyCount > 0) {
+      logger.info(logCtx, "po-receive.legacy_lineId", { legacyLineIdCount: legacyCount, totalLines: reqLines.length });
+    }
+
+    // Normalize lines to use canonical lineKey and validate
+    const normalizedLines: Array<{ lineKey: string; deltaQty: number; lot?: string; locationId?: string }> = [];
+    for (const r of reqLines) {
+      const lineKey = r.id ?? r.lineId;
+      if (!lineKey || !linesById.has(lineKey)) {
+        logger.warn(logCtx, "po.receive: unknown line", { ...logExtra, lineId: lineKey });
+        return badRequest(`Unknown line id=${lineKey}`, { code: "UNKNOWN_LINE", lineId: lineKey }, requestId);
+      }
+      normalizedLines.push({ lineKey, deltaQty: r.deltaQty, lot: r.lot, locationId: r.locationId });
+    }
+
     // Over-receive guard (BEFORE payload signature check to catch invalid retries with different keys)
     const prior = await receivedSoFar(tenantId, po.id);
-    for (const r of reqLines) {
+    for (const r of normalizedLines) {
       const delta = Number(r.deltaQty ?? 0);
       if (delta <= 0) {
-        logger.warn(logCtx, "po.receive: non-positive delta", { ...logExtra, lineId: r.lineId, deltaQty: delta });
-        return badRequest(`deltaQty must be positive for line ${r.lineId}`, { lineId: r.lineId, deltaQty: delta }, requestId);
+        logger.warn(logCtx, "po.receive: non-positive delta", { ...logExtra, lineId: r.lineKey, deltaQty: delta });
+        return badRequest(`deltaQty must be positive for line ${r.lineKey}`, { lineId: r.lineKey, deltaQty: delta }, requestId);
       }
-      const ordered = Number(linesById.get(r.lineId)?.qty ?? 0);
-      const received = Number(prior[r.lineId] ?? 0);
+      const ordered = Number(linesById.get(r.lineKey)?.qty ?? 0);
+      const received = Number(prior[r.lineKey] ?? 0);
       const remaining = Math.max(0, ordered - received);
       const next = received + delta;
       if (next > ordered) {
-        logger.warn(logCtx, "po.receive: receive exceeds remaining", { ...logExtra, lineId: r.lineId, ordered, received, remaining, attemptedDelta: delta });
+        logger.warn(logCtx, "po.receive: receive exceeds remaining", { ...logExtra, lineId: r.lineKey, ordered, received, remaining, attemptedDelta: delta });
         return conflictError(
-          `Receive would exceed ordered quantity for line ${r.lineId}`,
+          `Receive would exceed ordered quantity for line ${r.lineKey}`,
           {
             code: "RECEIVE_EXCEEDS_REMAINING",
-            lineId: r.lineId,
+            lineId: r.lineKey,
             ordered,
             received,
             remaining,
@@ -250,13 +275,13 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     // Persist movements and update counters
     const now = new Date().toISOString();
     const totals: Record<string, number> = { ...(prior ?? {}) };
-    for (const r of reqLines) {
-      totals[r.lineId] = (totals[r.lineId] ?? 0) + Number(r.deltaQty ?? 0);
-      const line = linesById.get(r.lineId);
+    for (const r of normalizedLines) {
+      totals[r.lineKey] = (totals[r.lineKey] ?? 0) + Number(r.deltaQty ?? 0);
+      const line = linesById.get(r.lineKey);
       if (line) line.receivedQty = (Number(line.receivedQty ?? 0) + Number(r.deltaQty ?? 0));
       
       // Write movement via shared dual-write helper (canonical + timeline index)
-      const rawItemId = linesById.get(r.lineId)?.itemId;
+      const rawItemId = linesById.get(r.lineKey)?.itemId;
       try {
         await createMovement({
           tenantId,
@@ -264,14 +289,14 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
           action: "receive" as any,
           qty: Number(r.deltaQty ?? 0),
           refId: po.id,
-          poLineId: r.lineId,
+          poLineId: line?.id ?? r.lineKey,
           lot: r.lot ?? undefined,
           locationId: (r as any).location ?? r.locationId ?? undefined,
         });
       } catch (err) {
         // Log error but don't fail the entire receive (best-effort semantics)
         logger.warn(logCtx, "po.receive: movement write error", { 
-          lineId: r.lineId, 
+          lineId: r.lineKey, 
           itemId: rawItemId, 
           error: String(err) 
         });
@@ -279,8 +304,8 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     }
 
     // --- Backorder fulfillment ---
-    for (const r of reqLines) {
-      const line = linesById.get(r.lineId);
+    for (const r of normalizedLines) {
+      const line = linesById.get(r.lineKey);
       if (line?.backorderRequestIds && Array.isArray(line.backorderRequestIds)) {
         for (const backorderId of line.backorderRequestIds) {
           // Minimal logic: load backorder, decrement remainingQty, set status to fulfilled if 0

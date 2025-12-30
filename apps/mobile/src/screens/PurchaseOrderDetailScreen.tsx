@@ -167,7 +167,7 @@ export default function PurchaseOrderDetailScreen() {
     }
 
     const linesToReceive = Array.from(pendingReceives.entries()).map(([lineId, deltaQty]) => ({
-      lineId,
+      id: lineId,
       deltaQty,
       ...(defaultLot ? { lot: defaultLot } : {}),
       ...(defaultLocationId ? { locationId: defaultLocationId } : {}),
@@ -236,7 +236,7 @@ export default function PurchaseOrderDetailScreen() {
     try {
       await receiveLine(
         po.id,
-        { lineId: modal.lineId, deltaQty: n, lot: lot || undefined, locationId: locationId || undefined },
+        { id: modal.lineId, deltaQty: n, lot: lot || undefined, locationId: locationId || undefined },
         { idempotencyKey: makeIdk(po.id, modal.lineId, n, lot || undefined, locationId || undefined) }
       );
       setModal({ open: false });
@@ -425,7 +425,7 @@ export default function PurchaseOrderDetailScreen() {
                     const lotVal = (line?.lot ?? defaultLot ?? "").trim();
                     const locVal = (line?.locationId ?? defaultLocationId ?? "").trim();
                     return {
-                      lineId,
+                      id: lineId,
                       deltaQty: remaining,
                       ...(lotVal ? { lot: lotVal } : {}),
                       ...(locVal ? { locationId: locVal } : {}),

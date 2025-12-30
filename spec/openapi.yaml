@@ -1635,11 +1635,17 @@ paths:
             schema:
               type: object
               required:
-                - lineId
+                - id
                 - qty
               properties:
+                id:
+                  type: string
+                  description: Canonical line id (preferred). Server-assigned `L{n}` pattern.
                 lineId:
                   type: string
+                  nullable: true
+                  deprecated: true
+                  description: Alias for id (compatibility; will be removed after transition).
                 qty:
                   type: number
                   minimum: 1
@@ -1948,11 +1954,17 @@ paths:
                   items:
                     type: object
                     required:
-                      - lineId
+                      - id
                       - deltaQty
                     properties:
+                      id:
+                        type: string
+                        description: Canonical line id (preferred). Server-assigned `L{n}` pattern.
                       lineId:
                         type: string
+                        nullable: true
+                        deprecated: true
+                        description: Alias for id (compatibility; will be removed after transition).
                       deltaQty:
                         type: number
                         minimum: 1
@@ -2036,11 +2048,17 @@ paths:
             schema:
               type: object
               required:
-                - lineId
+                - id
                 - qty
               properties:
+                id:
+                  type: string
+                  description: Canonical line id (preferred). Server-assigned `L{n}` pattern.
                 lineId:
                   type: string
+                  nullable: true
+                  deprecated: true
+                  description: Alias for id (compatibility; will be removed after transition).
                 qty:
                   type: number
                 lot:
@@ -2978,11 +2996,17 @@ components:
               items:
                 type: object
                 required:
-                  - lineId
+                  - id
                   - deltaQty
                 properties:
+                  id:
+                    type: string
+                    description: Canonical line id (preferred). Server-assigned `L{n}` pattern.
                   lineId:
                     type: string
+                    nullable: true
+                    deprecated: true
+                    description: Alias for `id` (compatibility; will be removed after transition).
                   itemId:
                     type: string
                     nullable: true
@@ -3004,11 +3028,17 @@ components:
     GoodsReceiptLine:
       type: object
       required:
-        - lineId
+        - id
         - deltaQty
       properties:
+        id:
+          type: string
+          description: Canonical line id (preferred). Server-assigned `L{n}` pattern.
         lineId:
           type: string
+          nullable: true
+          deprecated: true
+          description: Alias for `id` (compatibility; will be removed after transition).
         deltaQty:
           type: number
         locationId:
@@ -3853,11 +3883,17 @@ components:
           items:
             type: object
             required:
-              - lineId
+              - id
               - deltaQty
             properties:
+              id:
+                type: string
+                description: Canonical line id (preferred). Server-assigned `L{n}` pattern.
               lineId:
                 type: string
+                nullable: true
+                deprecated: true
+                description: Alias for id (compatibility; will be removed after transition).
               deltaQty:
                 type: number
                 minimum: 1
@@ -4124,11 +4160,17 @@ components:
     SalesFulfillmentLine:
       type: object
       required:
-        - lineId
+        - id
         - deltaQty
       properties:
+        id:
+          type: string
+          description: Canonical line id (preferred). Server-assigned `L{n}` pattern.
         lineId:
           type: string
+          nullable: true
+          deprecated: true
+          description: Alias for id (compatibility; will be removed after transition).
         deltaQty:
           type: number
           minimum: 1
@@ -4432,11 +4474,17 @@ components:
           items:
             type: object
             required:
-              - lineId
+              - id
               - deltaQty
             properties:
+              id:
+                type: string
+                description: Canonical line id (preferred). Server-assigned `L{n}` pattern.
               lineId:
                 type: string
+                nullable: true
+                deprecated: true
+                description: Alias for id (compatibility; will be removed after transition).
               deltaQty:
                 type: number
                 minimum: 1
@@ -4459,11 +4507,17 @@ components:
           items:
             type: object
             required:
-              - lineId
+              - id
               - deltaQty
             properties:
+              id:
+                type: string
+                description: Canonical line id (preferred). Server-assigned `L{n}` pattern.
               lineId:
                 type: string
+                nullable: true
+                deprecated: true
+                description: Alias for id (compatibility; will be removed after transition).
               deltaQty:
                 type: number
                 minimum: 1

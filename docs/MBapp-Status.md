@@ -8,6 +8,19 @@
 
 ## Current State Summary
 
+### Line Identity Canonicalization (id vs. lineId) — ✅ Complete (Sprint O, 2025-12-29)
+
+**Epic Summary:** Systematic migration of line identity from deprecated `lineId` to canonical `id` across API, web, and mobile. Backward-compatible 1-sprint transition window with structured logging.
+
+- **E1 (Spec):** [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) updated to canonicalize `id` in action request/response schemas for `{po,so}:receive`, `{so}:reserve`, `{so}:release`, `{so}:fulfill` endpoints
+- **E2 (API Input Compat):** Action handlers (`po-receive`, `so-reserve`, `so-release`, `so-fulfill`) now accept both `id` (canonical) and `lineId` (deprecated) on input, normalize to `id` internally, log legacy usage via structured events (`po-receive.legacy_lineId`, `so-reserve.legacy_lineId`, etc.), and always emit `id` in responses. 1-sprint compatibility window allows clients to migrate safely.
+- **E3 (Smoke Regression):** New test `smoke:line-identity:id-canonical` validates all action endpoints accept `id` and emit `id` in responses; updated 5 existing action smokes (close-the-loop, close-the-loop-multi-vendor, partial-receive, backorders-partial-fulfill, outbound-reserve-fulfill-release) to use `id` in payloads instead of `lineId`.
+- **E4 (Web Client Migration):** PurchaseOrderDetailPage and SalesOrderDetailPage action handlers (receive, fulfill, receive-remaining, reserve, release) updated to send `id` instead of `lineId`. Read-side helpers retain fallback to `lineId`. Typecheck clean.
+- **E5 (Mobile Client Migration):** PurchaseOrderDetailScreen and SalesOrderDetailScreen action handlers updated; type definitions (ReceiveLine, LineDelta, ReserveLine, ReleaseLine, FulfillLine) refactored to use `id`; selection helpers retain read-side fallback. Typecheck clean.
+- **E6 (Documentation):** Foundations.md § 2.6 documents canonical contract, transition timeline, and all affected endpoints. smoke-coverage.md and Status.md updated. Sprint O marked complete.
+- **Guarantee:** Full stack aligned on canonical `id`; all clients send `id`; API accepts both `id`/`lineId` on input (Sprint O only); responses always include `id` (never `lineId`).
+- **Next:** Sprint P removes `lineId` from API input schemas; post-P cleanup verifies telemetry shows ~0% legacy usage before final removal.
+
 ### Backorder → PO → Receive Loop Polish — ✅ Complete (Sprint I + Sprint J)
 - **MOQ Bump Fix:** suggest-po now applies minOrderQty regardless of vendor source (override/backorder derivation).
 - **Runtime Tracking:** BackorderRequest schema includes `fulfilledQty` and `remainingQty` (nullable, server-maintained during PO receive).
@@ -57,6 +70,11 @@
 - **Mobile Line Editor:** Shared React Native `LineEditor` component now powers both SO and PO edit screens (itemId/qty/uom, cid tmp-* generation, add/remove/edit UI reuse).
 - **CI Regression:** Added `smoke:po:patch-lines:cid` to validate cid→id assignment for PO patch-lines; CI suite remains green.
 - **Pattern Documentation:** See [MBapp-Foundations.md § 2.5 Shared Line Editor Contract](MBapp-Foundations.md#25-shared-line-editor-contract)
+- **Spec Alignment:** Canonical line identity is `id`; `lineId` accepted only as deprecated alias during transition (patch-lines + receive/fulfill reserve/release schemas updated).
+- **API Input Compat (E2, 2025-12-29):** Action handlers (`po-receive`, `so-reserve`, `so-release`, `so-fulfill`) now accept both `id` (canonical) and `lineId` (deprecated) in request bodies, normalize internally to `id`, log `so-reserve.legacy_lineId` / `so-release.legacy_lineId` / `so-fulfill.legacy_lineId` / `po-receive.legacy_lineId` structured events when legacy usage detected, and always emit `id` in responses. Allows safe client migration without breaking existing API users (1-sprint compatibility window).
+- **Smoke Regression (E3, 2025-12-29):** New smoke `smoke:line-identity:id-canonical` validates all action endpoints accept `id` and emit `id`; updated 5 existing action smokes (close-the-loop, close-the-loop-multi-vendor, partial-receive, backorders-partial-fulfill, outbound-reserve-fulfill-release) to use `id` in payloads instead of deprecated `lineId`.
+- **Web Client Migration (E4, 2025-12-29):** Web app action payloads updated to use canonical `id` field: PurchaseOrderDetailPage (receive/receive-remaining handlers), SalesOrderDetailPage (fulfill handler). Read-side helpers (getPoLineId) retain fallback to `lineId` during transition. Typecheck clean; ready for E5 (mobile client updates).
+- **Mobile Client Migration (E5, 2025-12-29):** Mobile app action payloads updated to use canonical `id` field: PurchaseOrderDetailScreen (receive/scan-receive handlers), SalesOrderDetailScreen (reserve/release/fulfill handlers), DevToolsScreen (test payloads). Type definitions updated (ReceiveLine, LineDelta, ReserveLine, ReleaseLine, FulfillLine). Selection helpers (pickBestMatchingLineId) retain read-side fallback to `lineId`. Typecheck clean. All clients (web, mobile, API) now aligned on canonical id.
 - **Telemetry:** Mobile PO edit emits `screen_viewed` (screen=`PurchaseOrderEdit`, includes `poId` + status) and `po_edit_submit` (`result=attempt|success|error`, `opCount`, `upsertCount`, `removeCount`, `httpStatus?`, `errorCode?`); Sentry tags include `screen`, `route`, `objectType`, `objectId`, `poStatus` when present.
 
 **Recent Deliveries (Sprint I, 2025-12-28):**
@@ -68,8 +86,8 @@
 - ✅ **Mobile backorders Ignore action:** Bulk Ignore workflow integrated (pre-existing, confirmed working).
 
 **CI Posture:**
-- 30/30 smoke tests passing in CI (Sprint I added smoke:backorders:partial-fulfill, smoke:suggest-po:moq; Sprint J added smoke:backorders:ignore; Sprint M added smoke:po:create-from-suggestion:line-ids, smoke:so:patch-lines:cid)
-- Latest additions: smoke:po:create-from-suggestion:line-ids, smoke:so:patch-lines:cid (Sprint M)
+- 31/31 smoke tests passing in CI (Sprint I added smoke:backorders:partial-fulfill, smoke:suggest-po:moq; Sprint J added smoke:backorders:ignore; Sprint M added smoke:po:create-from-suggestion:line-ids, smoke:so:patch-lines:cid; Sprint E added smoke:line-identity:id-canonical; E4+E5 confirmed web+mobile payloads use canonical id)
+- Latest additions: smoke:line-identity:id-canonical (Sprint E, E3) — validates all action endpoints accept `id` (canonical) and emit `id` in responses; existing action smokes (receive/reserve/fulfill/release) updated to use `id` instead of `lineId`; web (E4) and mobile (E5) clients now send canonical `id` in all action payloads
 - All tests documented in [smoke-coverage.md](smoke-coverage.md)
 
 **What's Next:**

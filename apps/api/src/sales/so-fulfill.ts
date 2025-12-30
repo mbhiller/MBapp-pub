@@ -7,7 +7,7 @@ import { resolveTenantId } from "../common/tenant";
 import { badRequest, conflictError, internalError, notFound } from "../common/responses";
 import { logger } from "../common/logger";
 
-type LineReq = { lineId: string; deltaQty: number; locationId?: string; lot?: string };
+type LineReq = { id?: string; lineId?: string; deltaQty: number; locationId?: string; lot?: string };
 type SOLine = { id: string; itemId: string; qty: number; uom?: string };
 type SalesOrder = {
   pk: string; sk: string; id: string; type: "salesOrder";
@@ -95,33 +95,45 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     }
 
     const linesById = new Map<string, SOLine>((so.lines ?? []).map(l => [l.id, l]));
-    for (const l of reqLines) {
-      if (!l?.lineId || typeof l.deltaQty !== "number" || l.deltaQty <= 0) {
-        return badRequest("Each line requires { lineId, deltaQty>0 }", undefined, requestId);
+    const normalizedLines: Array<{ lineKey: string; deltaQty: number; locationId?: string; lot?: string }> = [];
+    const lineIdUsage: boolean[] = [];
+    for (let i = 0; i < reqLines.length; i++) {
+      const l = reqLines[i];
+      const lineKey = l.id ?? l.lineId;
+      if (!lineKey || typeof l.deltaQty !== "number" || l.deltaQty <= 0) {
+        return badRequest("Each line requires { id or lineId, deltaQty>0 }", undefined, requestId);
       }
-      if (!linesById.has(l.lineId)) {
-        return notFound(`Unknown lineId ${l.lineId}`, requestId);
+      if (!linesById.has(lineKey)) {
+        return notFound(`Unknown line id=${lineKey}`, requestId);
       }
+      normalizedLines.push({ lineKey, deltaQty: l.deltaQty, locationId: l.locationId, lot: l.lot });
+      lineIdUsage[i] = !l.id && !!l.lineId;
+    }
+
+    // Log if any requests used legacy lineId
+    const legacyCount = lineIdUsage.filter(Boolean).length;
+    if (legacyCount > 0) {
+      logger.info(logCtx, "so-fulfill.legacy_lineId", { legacyLineIdCount: legacyCount, totalLines: normalizedLines.length });
     }
 
     // Prevent over-fulfillment
     const shipped = await fulfilledSoFar(tenantId, so.id);
     const now = new Date().toISOString();
 
-    for (const r of reqLines) {
-      const line = linesById.get(r.lineId)!;
-      const already = shipped[r.lineId] ?? 0;
+    for (const r of normalizedLines) {
+      const line = linesById.get(r.lineKey)!;
+      const already = shipped[r.lineKey] ?? 0;
       const willBe = already + Number(r.deltaQty);
       if (willBe > Number(line.qty ?? 0)) {
-        logger.warn(logCtx, "so-fulfill.guard", { lineId: r.lineId, qtyOrdered: line.qty, already, attempt: r.deltaQty });
-        return conflictError("Over-fulfillment blocked", { lineId: r.lineId, ordered: line.qty, fulfilledSoFar: already, attempt: r.deltaQty }, requestId);
+        logger.warn(logCtx, "so-fulfill.guard", { lineId: r.lineKey, qtyOrdered: line.qty, already, attempt: r.deltaQty });
+        return conflictError("Over-fulfillment blocked", { lineId: r.lineKey, ordered: line.qty, fulfilledSoFar: already, attempt: r.deltaQty }, requestId);
       }
     }
 
     // Write inventoryMovement rows (action: fulfill) using shared dual-write helper
     let mvCount = 0;
-    for (const r of reqLines) {
-      const line = linesById.get(r.lineId)!;
+    for (const r of normalizedLines) {
+      const line = linesById.get(r.lineKey)!;
       try {
         await createMovement({
           tenantId,
@@ -137,7 +149,7 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
       } catch (err) {
         // Log error but don't fail the entire fulfill (best-effort semantics)
         logger.warn(logCtx, "so-fulfill: movement write error", { 
-          lineId: r.lineId, 
+          lineId: r.lineKey, 
           itemId: line.itemId, 
           error: String(err) 
         });
