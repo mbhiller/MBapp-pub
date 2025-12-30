@@ -5448,7 +5448,24 @@ const tests = {
       return { test:"views:crud", result:"FAIL", reason:"get-failed", get:get1 };
     }
 
-    // 4) PUT (update) view
+    // 4) PATCH view (update description) then verify
+    const patchedDescription = `patched-${timestamp}`;
+    const patchResp = await fetch(`${API}/views/${encodeURIComponent(viewId)}`, {
+      method: "PATCH",
+      headers: baseHeaders(),
+      body: JSON.stringify({ description: patchedDescription })
+    });
+    const patchBody = await patchResp.json().catch(() => ({}));
+    if (!patchResp.ok || patchBody?.description !== patchedDescription) {
+      return { test:"views:crud", result:"FAIL", reason:"patch-failed", status: patchResp.status, body: snippet(patchBody, 400) };
+    }
+
+    const getAfterPatch = await get(`/views/${encodeURIComponent(viewId)}`);
+    if (!getAfterPatch.ok || getAfterPatch.body?.description !== patchedDescription) {
+      return { test:"views:crud", result:"FAIL", reason:"patch-not-reflected", getAfterPatch };
+    }
+
+    // 5) PUT (update) view
     const baseUnique = `SmokeView-${Date.now()}`;
     const updatedName = smokeTag(`${baseUnique}-updated`);
     const update = await put(`/views/${encodeURIComponent(viewId)}`, {
@@ -5464,7 +5481,7 @@ const tests = {
       return { test:"views:crud", result:"FAIL", reason:"update-failed", update };
     }
 
-    // 5) DELETE view
+    // 6) DELETE view
     const del = await fetch(`${API}/views/${encodeURIComponent(viewId)}`, {
       method: "DELETE",
       headers: baseHeaders()
@@ -5473,7 +5490,7 @@ const tests = {
       return { test:"views:crud", result:"FAIL", reason:"delete-failed", delStatus:del.status };
     }
 
-    // 6) Verify deleted (should not be in list anymore)
+    // 7) Verify deleted (should not be in list anymore)
     // Use same filtered query pattern for consistency
     let stillThere = false;
     let deleteVerifyAttempts = 3;
@@ -5605,49 +5622,47 @@ const tests = {
     const featureHeaders = { "X-Feature-Views-Enabled": "true" };
     const listHdr = { ...baseHeaders(), ...featureHeaders };
 
-    // 1) Create two temp views with different entityTypes using unique smokeTag
-    const createA = await fetch(`${API}/views`, {
+    // 1) Create two temp workspaces (stored as views) with different entityTypes using unique smokeTag
+    const createA = await fetch(`${API}/workspaces`, {
       method: "POST",
       headers: listHdr,
       body: JSON.stringify({
         name: smokeTag(`${uniqueToken}-A`),
         entityType: "purchaseOrder",
-        filters: [{ field: "status", op: "eq", value: "submitted" }],
-        columns: ["id", "vendorId", "total"]
+        views: [],
       })
     });
     const bodyA = await createA.json().catch(() => ({}));
     if (!createA.ok || !bodyA?.id) {
-      return { test:"workspaces:list", result:"FAIL", reason:"create-view-a-failed" };
+      return { test:"workspaces:list", result:"FAIL", reason:"create-workspace-a-failed" };
     }
-    const viewIdA = bodyA.id;
-    recordCreated({ type: 'view', id: viewIdA, route: '/views', meta: { name: bodyA?.name, entityType: bodyA?.entityType } });
+    const workspaceIdA = bodyA.id;
+    recordCreated({ type: 'workspace', id: workspaceIdA, route: '/workspaces', meta: { name: bodyA?.name, entityType: bodyA?.entityType } });
 
-    const createB = await fetch(`${API}/views`, {
+    const createB = await fetch(`${API}/workspaces`, {
       method: "POST",
       headers: listHdr,
       body: JSON.stringify({
         name: smokeTag(`${uniqueToken}-B`),
         entityType: "salesOrder",
-        filters: [{ field: "status", op: "eq", value: "committed" }],
-        columns: ["id", "customerId", "total"]
+        views: [],
       })
     });
     const bodyB = await createB.json().catch(() => ({}));
     if (!createB.ok || !bodyB?.id) {
       // Cleanup A before failing
-      await fetch(`${API}/views/${encodeURIComponent(viewIdA)}`, {
+      await fetch(`${API}/workspaces/${encodeURIComponent(workspaceIdA)}` , {
         method: "DELETE",
         headers: listHdr
       });
-      return { test:"workspaces:list", result:"FAIL", reason:"create-view-b-failed" };
+      return { test:"workspaces:list", result:"FAIL", reason:"create-workspace-b-failed" };
     }
-    const viewIdB = bodyB.id;
-    recordCreated({ type: 'view', id: viewIdB, route: '/views', meta: { name: bodyB?.name, entityType: bodyB?.entityType } });
+    const workspaceIdB = bodyB.id;
+    recordCreated({ type: 'workspace', id: workspaceIdB, route: '/workspaces', meta: { name: bodyB?.name, entityType: bodyB?.entityType } });
 
     const cleanup = async () => {
-      await fetch(`${API}/views/${encodeURIComponent(viewIdA)}`, { method: "DELETE", headers: listHdr });
-      await fetch(`${API}/views/${encodeURIComponent(viewIdB)}`, { method: "DELETE", headers: listHdr });
+      await fetch(`${API}/workspaces/${encodeURIComponent(workspaceIdA)}`, { method: "DELETE", headers: listHdr });
+      await fetch(`${API}/workspaces/${encodeURIComponent(workspaceIdB)}`, { method: "DELETE", headers: listHdr });
     };
 
     const listWorkspacesUntil = async ({ q, entityType: et, wantIds }) => {
@@ -5698,7 +5713,7 @@ const tests = {
 
     // 2) GET /workspaces?q=<unique tag> -> assert both created views are in results
     const entityType = "purchaseOrder";
-    const qResult = await listWorkspacesUntil({ q: uniqueToken, entityType, wantIds: [viewIdA] });
+    const qResult = await listWorkspacesUntil({ q: uniqueToken, entityType, wantIds: [workspaceIdA] });
     if (!qResult.ok) {
       const diagResp = await fetch(`${API}/workspaces?entityType=${encodeURIComponent(entityType)}&limit=50`, { headers: listHdr });
       const diagBody = await diagResp.json().catch(() => ({}));
@@ -5708,7 +5723,7 @@ const tests = {
         test: "workspaces:list",
         result: "FAIL",
         reason: "q-filter-missing-created-view",
-        expectedIds: [viewIdA],
+        expectedIds: [workspaceIdA],
         q: uniqueToken,
         entityType,
         attempts: qResult.attempt,
@@ -5722,7 +5737,7 @@ const tests = {
     }
 
     // 3) GET /workspaces?entityType=purchaseOrder with pagination + retry until created view is found
-    const entityResult = await listWorkspacesUntil({ entityType: "purchaseOrder", wantIds: [viewIdA] });
+    const entityResult = await listWorkspacesUntil({ entityType: "purchaseOrder", wantIds: [workspaceIdA] });
     const allPO = (entityResult.items || []).every(item => item?.entityType === "purchaseOrder");
     if (!entityResult.ok || !allPO) {
       await cleanup();
@@ -5730,7 +5745,7 @@ const tests = {
         test: "workspaces:list",
         result: "FAIL",
         reason: entityResult.ok ? "entityType-filter-mismatch" : "entityType-filter-missing-view",
-        expectedIds: [viewIdA],
+        expectedIds: [workspaceIdA],
         entityType: "purchaseOrder",
         attempts: entityResult.attempt,
         pagesFetched: entityResult.pagesFetched,
@@ -5741,11 +5756,11 @@ const tests = {
     }
 
     // 4) Cleanup: delete both temp views
-    const delA = await fetch(`${API}/views/${encodeURIComponent(viewIdA)}`, {
+    const delA = await fetch(`${API}/workspaces/${encodeURIComponent(workspaceIdA)}`, {
       method: "DELETE",
       headers: listHdr
     });
-    const delB = await fetch(`${API}/views/${encodeURIComponent(viewIdB)}`, {
+    const delB = await fetch(`${API}/workspaces/${encodeURIComponent(workspaceIdB)}`, {
       method: "DELETE",
       headers: listHdr
     });

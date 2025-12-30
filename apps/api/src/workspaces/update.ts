@@ -17,17 +17,29 @@ export async function handle(event: APIGatewayProxyEventV2) {
 
     const body = JSON.parse(event.body || "{}");
 
-    // Validate required fields (match views/update.ts)
-    if (!body.name || typeof body.name !== "string" || body.name.length < 1 || body.name.length > 120) {
-      return bad({ message: "name is required and must be 1-120 characters" });
+    // Validate name (workspace spec: 1–200 chars)
+    if (!body.name || typeof body.name !== "string" || body.name.length < 1 || body.name.length > 200) {
+      return bad({ message: "name is required and must be 1-200 characters" });
     }
-    if (!body.entityType || typeof body.entityType !== "string") {
-      return bad({ message: "entityType is required" });
+
+    // views must be string[] if provided; default []
+    if (typeof body.views !== "undefined" && !Array.isArray(body.views)) {
+      return bad({ message: "views must be an array of strings" });
+    }
+    if (Array.isArray(body.views) && body.views.some((v: any) => typeof v !== "string")) {
+      return bad({ message: "views must be an array of strings" });
+    }
+    const views = Array.isArray(body.views) ? body.views : [];
+
+    // entityType is optional for back-compat; if provided ensure string
+    if (typeof body.entityType !== "undefined" && typeof body.entityType !== "string") {
+      return bad({ message: "entityType must be a string if provided" });
     }
 
     const viewBody = {
       ...body,
-      type: "view",
+      type: "view", // persist as view for back-compat
+      views,
     };
 
     const result = await replaceObject({
@@ -38,7 +50,9 @@ export async function handle(event: APIGatewayProxyEventV2) {
     });
 
     if (!result) return notFound();
-    return ok(result);
+
+    const projected = { ...result, type: "workspace", views };
+    return ok(projected);
   } catch (e: any) {
     return error(e);
   }

@@ -114,8 +114,8 @@ export default function WorkspacesManageScreen({ route }: any) {
       toast("Name is required", "warning");
       return;
     }
-    if (trimmed.length > 120) {
-      toast("Name must be 120 characters or fewer", "warning");
+    if (trimmed.length > 200) {
+      toast("Name must be 200 characters or fewer", "warning");
       return;
     }
     setRenaming(true);
@@ -175,8 +175,8 @@ export default function WorkspacesManageScreen({ route }: any) {
       toast("Name is required", "warning");
       return;
     }
-    if (trimmed.length > 120) {
-      toast("Name must be 120 characters or fewer", "warning");
+    if (trimmed.length > 200) {
+      toast("Name must be 200 characters or fewer", "warning");
       return;
     }
     if (!createPayload.entityType) {

@@ -55,17 +55,25 @@ export function SaveViewButton({ entityType, filters, sort, buttonLabel, activeV
         shared: shared || undefined,
       };
 
-      // If in update mode, use PATCH; otherwise POST
+      // If in update mode, use PATCH with PUT fallback on 405; otherwise POST
       const isUpdate = mode === "update" && activeViewId;
-      const method = isUpdate ? "PATCH" : "POST";
       const endpoint = isUpdate ? `/views/${activeViewId}` : "/views";
 
-      const result = await apiFetch<ViewConfig>(endpoint, {
-        method,
-        body: payload,
-        token: token || undefined,
-        tenantId,
-      });
+      const doSave = async () => {
+        if (!isUpdate) {
+          return apiFetch<ViewConfig>(endpoint, { method: "POST", body: payload, token: token || undefined, tenantId });
+        }
+        try {
+          return await apiFetch<ViewConfig>(endpoint, { method: "PATCH", body: payload, token: token || undefined, tenantId });
+        } catch (err: any) {
+          if (err?.status === 405) {
+            return apiFetch<ViewConfig>(endpoint, { method: "PUT", body: payload, token: token || undefined, tenantId });
+          }
+          throw err;
+        }
+      };
+
+      const result = await doSave();
 
       if (result?.id) {
         const action = isUpdate ? "Updated" : "Saved";

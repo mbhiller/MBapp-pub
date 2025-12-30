@@ -86,3 +86,14 @@ export function validateFilters(filters: unknown): string | undefined {
 
   return undefined; // All valid
 }
+
+/** Validate required top-level fields for a View payload (post-merge). */
+export function validateViewBodyFields(body: any): string | undefined {
+  if (!body?.name || typeof body.name !== "string" || body.name.length < 1 || body.name.length > 120) {
+    return "name is required and must be 1-120 characters";
+  }
+  if (!body?.entityType || typeof body.entityType !== "string") {
+    return "entityType is required";
+  }
+  return undefined;
+}

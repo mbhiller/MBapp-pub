@@ -44,6 +44,14 @@
 - **Status:** ✅ **Complete (Sprint Q, 2025-12-30)** — All E1–E4 tasks complete; apps/api typecheck passes; smoke:views:crud, smoke:workspaces:list, smoke:views:validate-filters all pass; web typecheck clean.
 - **Next:** Mobile views UI (deferred); server-side field-existence validation (deferred); workspace-view aliasing clarification (future).
 
+### Workspaces List Pagination Reliability — ✅ Complete (Sprint Q, 2025-12-30)
+
+**Epic Summary:** Harden `/workspaces` list so q/entityType filtering works across pages and cursor aliasing remains reliable.
+
+- **E1 (Pagination):** `/workspaces` now pages with the same cursor contract as `/views` (`next` cursor from `listObjects`), removes `fields` projection from repo calls to avoid cursor loss, and applies in-memory filters (q on name/description, entityType/ownerId/shared) across accumulated pages.
+- **E2 (Projection):** Items are projected as `type="workspace"` with `views` defaulting to `[]`; optional `fields` query is applied only after collection so pagination cursors remain intact.
+- **E3 (Verification):** `smoke:workspaces:list` passes with q + entityType filters and pagination retries after the fix (cursor observed when additional pages exist).
+
 ### Mobile PO Edit Parity — ✅ Complete (Sprint U, 2025-12-30)
 
 **Epic Summary:** Bring mobile PO line editing to parity with SO: shared diff helper, cid/id rules, draft-only guard, and immediate detail refresh on return.

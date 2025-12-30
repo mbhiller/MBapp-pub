@@ -1,6 +1,6 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { ok, notFound, bad, error } from "../common/responses";
-import { replaceObject } from "../objects/repo";
+import { getObjectById, replaceObject } from "../objects/repo";
 import { getAuth, requirePerm } from "../auth/middleware";
 import { validateFilters, validateViewBodyFields } from "./validate";
 
@@ -12,33 +12,30 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const id = event.pathParameters?.id;
     if (!id) return notFound();
 
+    // Fetch existing view to merge patch
+    const existing = await getObjectById({ tenantId: auth.tenantId, type: "view", id });
+    if (!existing) return notFound();
+
     const body = JSON.parse(event.body || "{}");
 
-    // Validate required fields
-    const fieldError = validateViewBodyFields(body);
+    // Shallow merge; arrays/objects in patch replace existing when provided
+    const merged = { ...existing, ...body, id: existing.id, type: "view" } as any;
+
+    // Validate required fields on merged payload
+    const fieldError = validateViewBodyFields(merged);
     if (fieldError) {
       return bad({ message: fieldError });
     }
 
-    // Validate filters if present
-    const filterError = validateFilters(body.filters);
+    // Validate filters if provided (merged value)
+    const filterError = validateFilters(merged.filters);
     if (filterError) {
       return bad({ message: filterError });
     }
 
-    const viewBody = {
-      ...body,
-      type: "view",
-    };
-
-    const result = await replaceObject({
-      tenantId: auth.tenantId,
-      type: "view",
-      id,
-      body: viewBody,
-    });
-
+    const result = await replaceObject({ tenantId: auth.tenantId, type: "view", id, body: merged });
     if (!result) return notFound();
+
     return ok(result);
   } catch (e: any) {
     return error(e);

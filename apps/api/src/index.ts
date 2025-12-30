@@ -10,6 +10,7 @@ import * as ViewsList   from "./views/list";
 import * as ViewsGet    from "./views/get";
 import * as ViewsCreate from "./views/create";
 import * as ViewsUpdate from "./views/update";
+import * as ViewsPatch  from "./views/patch";
 import * as ViewsDelete from "./views/delete";
 
 // Workspaces
@@ -17,6 +18,7 @@ import * as WsList   from "./workspaces/list";
 import * as WsGet    from "./workspaces/get";
 import * as WsCreate from "./workspaces/create";
 import * as WsUpdate from "./workspaces/update";
+import * as WsPatch  from "./workspaces/patch";
 import * as WsDelete from "./workspaces/delete";
 
 // Registrations
@@ -246,6 +248,7 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
         if (method === "GET" && id)     { requirePerm(auth, "view:read");  return ViewsGet.handle(withId(event, id)); }
         if (method === "POST" && !id)   { requirePerm(auth, "view:write"); return ViewsCreate.handle(event); }
         if (method === "PUT" && id)     { requirePerm(auth, "view:write"); return ViewsUpdate.handle(withId(event, id)); }
+        if (method === "PATCH" && id)   { requirePerm(auth, "view:write"); return ViewsPatch.handle(withId(event, id)); }
         if (method === "DELETE" && id)  { requirePerm(auth, "view:write"); return ViewsDelete.handle(withId(event, id)); }
         return methodNotAllowed();
       }
@@ -260,6 +263,7 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
         if (method === "GET" && id)     { requirePerm(auth, "workspace:read");  return WsGet.handle(withId(event, id)); }
         if (method === "POST" && !id)   { requirePerm(auth, "workspace:write"); return WsCreate.handle(event); }
         if (method === "PUT" && id)     { requirePerm(auth, "workspace:write"); return WsUpdate.handle(withId(event, id)); }
+        if (method === "PATCH" && id)   { requirePerm(auth, "workspace:write"); return WsPatch.handle(withId(event, id)); }
         if (method === "DELETE" && id)  { requirePerm(auth, "workspace:write"); return WsDelete.handle(withId(event, id)); }
         return methodNotAllowed();
       }
