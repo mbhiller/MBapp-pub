@@ -3150,6 +3150,11 @@ export interface components {
             type: "workspace";
             /** @description Workspace name */
             name: string;
+            /**
+             * @description Optional module/object key this workspace targets (aligns to View.entityType)
+             * @enum {string}
+             */
+            entityType?: "purchaseOrder" | "salesOrder" | "inventoryItem" | "party" | "account" | "event" | "employee" | "organization" | "product" | "class" | "division";
             /** @description Optional description */
             description?: string | null;
             /**
@@ -4041,10 +4046,13 @@ export interface operations {
                 ownerId?: string;
                 /** @description Filter by shared status */
                 shared?: boolean;
+                /** @description Optional substring search filter */
+                q?: components["parameters"]["Q"];
+                /** @description Filter by entity/object type */
+                entityType?: components["parameters"]["EntityType"];
                 /** @description Maximum number of items to return */
                 limit?: components["parameters"]["Limit"];
-                /** @description Opaque pagination cursor for next page */
-                next?: components["parameters"]["Cursor"];
+                next?: components["parameters"]["Next"];
             };
             header: {
                 "x-tenant-id": components["parameters"]["TenantHeader"];
