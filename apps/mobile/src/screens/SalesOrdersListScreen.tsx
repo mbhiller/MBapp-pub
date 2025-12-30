@@ -10,6 +10,7 @@ import { createParty, addPartyRole } from "../features/parties/api";
 import { upsertInventoryItem } from "../features/inventory/api";
 import { useViewsApi } from "../features/views/hooks";
 import { mapViewToMobileState, type SavedView } from "../features/views/applyView";
+import SaveViewModal from "../features/views/SaveViewModal";
 import type { RootStackParamList } from "../navigation/types";
 
 export default function SalesOrdersListScreen() {
@@ -23,6 +24,7 @@ export default function SalesOrdersListScreen() {
   const defaultSort = React.useMemo(() => ({ by: "updatedAt", dir: "desc" as const }), []);
   const [q, setQ] = React.useState("");
   const [appliedView, setAppliedView] = React.useState<SavedView | null>(null);
+  const [saveModalOpen, setSaveModalOpen] = React.useState(false);
   const [filters, setFilters] = React.useState<{ filter?: Record<string, any>; sort?: { by?: string; dir?: "asc" | "desc" } }>({
     filter: undefined,
     sort: defaultSort,
@@ -90,6 +92,10 @@ export default function SalesOrdersListScreen() {
     setFilters({ filter: undefined, sort: defaultSort });
     setQ("");
     reset?.();
+  };
+
+  const handleViewSaved = (view: SavedView) => {
+    setAppliedView(view);
   };
 
   const ensurePartyId = async (): Promise<string> => {
@@ -165,18 +171,36 @@ export default function SalesOrdersListScreen() {
         onChangeText={setQ}
         style={{ borderWidth: 1, borderColor: t.colors.border, borderRadius: 8, padding: 10, marginBottom: 12, backgroundColor: t.colors.card, color: t.colors.text }}
       />
-      <Pressable
-        onPress={createDraft}
-        style={{
-          backgroundColor: t.colors.primary,
-          padding: 12,
-          borderRadius: 8,
-          marginBottom: 12,
-          alignItems: "center",
-        }}
-      >
-        <Text style={{ color: "#fff", fontWeight: "700" }}>+ New Sales Order</Text>
-      </Pressable>
+      <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+        <Pressable
+          onPress={createDraft}
+          style={{
+            flex: 1,
+            backgroundColor: t.colors.primary,
+            padding: 12,
+            borderRadius: 8,
+            alignItems: "center",
+          }}
+        >
+          <Text style={{ color: "#fff", fontWeight: "700" }}>+ New SO</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setSaveModalOpen(true)}
+          style={{
+            paddingHorizontal: 14,
+            paddingVertical: 10,
+            borderRadius: 8,
+            borderWidth: 1,
+            borderColor: t.colors.primary,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Text style={{ color: t.colors.primary, fontWeight: "700" }}>
+            {appliedView ? "Update" : "Save"}
+          </Text>
+        </Pressable>
+      </View>
       {isLoading && !data ? <ActivityIndicator /> : (
         <FlatList
           ref={listRef}
@@ -200,6 +224,14 @@ export default function SalesOrdersListScreen() {
           )}
         />
       )}
+      <SaveViewModal
+        visible={saveModalOpen}
+        onClose={() => setSaveModalOpen(false)}
+        onSaved={handleViewSaved}
+        entityType="salesOrder"
+        currentState={{ q, filter: filters.filter, sort: filters.sort }}
+        appliedView={appliedView}
+      />
     </View>
   );
 }
