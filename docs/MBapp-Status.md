@@ -52,6 +52,7 @@
 - **E2 (Parity Polish):** EditPurchaseOrderScreen aligned to the SO edit model: shared PATCHABLE fields (`itemId`,`qty`,`uom`), tmp-* cid handling, shared normalization helper, no-op diff toast, and draft-only 409 guard (`PO_NOT_EDITABLE`).
 - **E3 (Telemetry):** Added `po_edit_lines_clicked` and `po_edit_lines_submitted` lifecycle events (attempt/success/fail, includes errorCode and lineCount) matching SO patterns.
 - **Status:** ✅ Typecheck clean; uses shared LineEditor component and shared patchLinesDiff helper; detail refreshes without pull-to-refresh.
+- **E4 (Refresh/Guardrails):** Edit CTA remains draft-only; post-edit refresh is focus-safe via `didEdit` flag + on-focus refetch, with single “PO updated” toast.
 
 ### Mobile Save View v1 — ✅ Complete (Sprint R, 2025-12-30)
 

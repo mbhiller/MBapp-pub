@@ -52,18 +52,37 @@ export default function PurchaseOrderDetailScreen() {
   const [scanInput, setScanInput] = React.useState("");
   const [pendingReceives, setPendingReceives] = React.useState<Map<string, number>>(new Map());
   const [scanHistory, setScanHistory] = React.useState<Array<{ lineId: string; itemId: string; delta: number }>>([])
+  const lastRefetchAt = React.useRef<number>(0);
 
-  // Refresh after edit (EditPurchaseOrder sets didEdit param)
-  React.useEffect(() => {
-    const didEdit = (route.params as any)?.didEdit;
-    if (didEdit && typeof refetch === "function") {
-      (async () => {
-        await refetch();
-        toast("PO updated", "success");
-        navigation.setParams?.({ ...(route.params as any), didEdit: undefined });
-      })();
-    }
-  }, [route.params, refetch, navigation, toast]);
+  // Refresh on focus after edit or when data missing, throttled to avoid repeat fetches
+  useFocusEffect(
+    React.useCallback(() => {
+      let active = true;
+
+      const maybeRefetch = async () => {
+        const didEdit = (route.params as any)?.didEdit;
+        const now = Date.now();
+        if (now - lastRefetchAt.current < 2000) return;
+        if (!didEdit && po) return;
+
+        lastRefetchAt.current = now;
+        if (typeof refetch === "function") {
+          await refetch();
+        }
+
+        if (didEdit && active) {
+          toast("PO updated", "success");
+          navigation.setParams?.({ ...(route.params as any), didEdit: undefined });
+        }
+      };
+
+      maybeRefetch();
+
+      return () => {
+        active = false;
+      };
+    }, [navigation, refetch, route.params, po, toast])
+  );
 
   if (isLoading) return <ActivityIndicator />;
 

@@ -124,14 +124,17 @@ export default function EditPurchaseOrderScreen() {
         const line = normalizedLines[i];
         const label = `Line ${i + 1}`;
         if (!line.itemId) {
+          track("po_edit_lines_submitted", { ...baseClick, result: "fail", errorCode: "VALIDATION" });
           toast(`${label}: Item is required`, "warning");
           return;
         }
         if (!line.uom) {
+          track("po_edit_lines_submitted", { ...baseClick, result: "fail", errorCode: "VALIDATION" });
           toast(`${label}: UOM is required`, "warning");
           return;
         }
         if (!(Number(line.qty) > 0)) {
+          track("po_edit_lines_submitted", { ...baseClick, result: "fail", errorCode: "VALIDATION" });
           toast(`${label}: Qty must be greater than 0`, "warning");
           return;
         }
@@ -171,7 +174,8 @@ export default function EditPurchaseOrderScreen() {
     } catch (err: any) {
       const code = err?.body?.code || err?.code || err?.status;
       const httpStatus = err?.status || err?.body?.status || err?.response?.status;
-      const message = code === "PO_NOT_EDITABLE" || httpStatus === 409 ? "PO is not editable unless Draft" : (code || err?.message || "Save failed");
+      const normalizedCode = code || (httpStatus === 409 ? "PO_NOT_EDITABLE" : "unknown");
+      const message = normalizedCode === "PO_NOT_EDITABLE" || httpStatus === 409 ? "PO is not editable unless Draft" : (normalizedCode || err?.message || "Save failed");
 
       track("po_edit_lines_submitted", {
         objectId: poId,
@@ -179,7 +183,7 @@ export default function EditPurchaseOrderScreen() {
         status: statusLower || undefined,
         lineCount: Array.isArray(err?.ops) ? err.ops.length : currentLines.length,
         result: "fail",
-        errorCode: code || "unknown",
+        errorCode: normalizedCode || "unknown",
       });
 
       try {
@@ -202,7 +206,7 @@ export default function EditPurchaseOrderScreen() {
         // Sentry not available
       }
 
-      toast(message, code === "PO_NOT_EDITABLE" || httpStatus === 409 ? "warning" : "error");
+      toast(message, normalizedCode === "PO_NOT_EDITABLE" || httpStatus === 409 ? "warning" : "error");
 
       if (__DEV__) {
         console.warn("EditPurchaseOrder save error", err);
