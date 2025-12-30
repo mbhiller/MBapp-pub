@@ -15,6 +15,7 @@ import WorkspaceHubScreen from "../screens/WorkspaceHubScreen";
 import ViewsManageScreen from "../screens/ViewsManageScreen";
 import WorkspacesManageScreen from "../screens/WorkspacesManageScreen";
 import WorkspaceDetailScreen from "../screens/WorkspaceDetailScreen";
+import WorkspaceEditMembershipScreen from "../screens/WorkspaceEditMembershipScreen";
 
 // Registrations (Sprint IV)
 import RegistrationsListScreen from "../screens/RegistrationsListScreen";
@@ -99,6 +100,7 @@ export default function RootStack() {
     <Stack.Screen name="ViewsManage" component={ViewsManageScreen} options={{ title: "Views" }} />
     <Stack.Screen name="WorkspacesManage" component={WorkspacesManageScreen} options={{ title: "Manage Workspaces" }} />
     <Stack.Screen name="WorkspaceDetail" component={WorkspaceDetailScreen} options={{ title: "Workspace" }} />
+    <Stack.Screen name="WorkspaceEditMembership" component={WorkspaceEditMembershipScreen} options={{ title: "Edit Workspace Views" }} />
     
     {/* Registrations (Sprint IV) */}
     <Stack.Screen name="RegistrationsList" component={RegistrationsListScreen} options={{ title: "Registrations" }} />

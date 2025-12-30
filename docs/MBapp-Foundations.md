@@ -114,6 +114,7 @@ See [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) for full OpenAPI defin
 - `/workspaces` is an alias over the same storage as `/views` (type="view"). The backend stores workspaces as objects with `type="view"` and honors the same CRUD semantics.
 - Workspace membership is tracked via `views: string[]` (list of view IDs). Mobile WorkspaceDetail uses this to open member views into entity list screens via `viewId`.
 - Known contract gap: the OpenAPI spec allows `name` up to 200 chars, but the current backend validation for workspaces (and views) enforces 1–120 chars; this should be aligned in a future sprint.
+- **Workspace v1 (alias reality):** Workspaces persist as `type="view"`; clients should treat a workspace as `{ id, name, entityType, views[] }` and MUST include `entityType` on updates. Spec divergence is known and queued for future normalization.
 
 **Status Lifecycles:**
 - Purchase Orders: `draft → submitted → approved → (partially-)received → fulfilled → closed` (also `cancelled`)
