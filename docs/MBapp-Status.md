@@ -33,6 +33,17 @@
 - **Status:** ✅ **Complete (Sprint P, 2025-12-29)** — All E1–E5 tasks complete; typecheck + smoke tests pass; documentation synchronized.
 - **Next:** Sprint Q readiness for so-release domain event (E6) and po-receive domain event (E7) if planned.
 
+### Views/Workspaces v1 Hardening — ✅ Complete (Sprint Q, 2025-12-30)
+
+**Epic Summary:** Server-side filter validation + web "Update View" affordance + smoke coverage to prevent view sprawl and invalid filter persistence.
+
+- **E1 (Smoke — apply-to-po-list):** [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) new test `smoke:views:apply-to-po-list` validates that applying a view with filters (e.g., status="draft") constrains list results. Creates 2 POs with different statuses, creates view with filter, queries list, asserts filter constrains results (draft PO present, submitted PO absent). Added to CI manifest.
+- **E2 (Web — Update View):** [apps/web/src/components/SaveViewButton.tsx](../apps/web/src/components/SaveViewButton.tsx), [apps/web/src/pages/PurchaseOrdersListPage.tsx](../apps/web/src/pages/PurchaseOrdersListPage.tsx), [apps/web/src/pages/SalesOrdersListPage.tsx](../apps/web/src/pages/SalesOrdersListPage.tsx) now detect `?viewId` URL parameter and show "Update View" (primary action) + "Save as New" (secondary button) when a view is applied. Uses PATCH `/views/{id}` endpoint to persist filter changes without creating duplicates. Name field optional in update mode (empty = no change). Prevents view sprawl by allowing operators to refine existing views.
+- **E3 (API — Filter Validation):** [apps/api/src/views/validate.ts](../apps/api/src/views/validate.ts) (new helper), [apps/api/src/views/create.ts](../apps/api/src/views/create.ts), [apps/api/src/views/update.ts](../apps/api/src/views/update.ts) now validate filter shape: field must be non-empty string, op must be one of 11 allowed operators (eq, ne, lt, le, gt, ge, in, nin, contains, startsWith, regex), value must be array for in/nin or primitive for others. Returns 400 bad_request with clear message (e.g., "Invalid view filter: op must be one of..."). No deep field-existence validation (too risky without canonical field registry). New smoke `smoke:views:validate-filters` validates rejection of invalid filters (missing field, bad op, in with non-array, object value) and acceptance of valid filters.
+- **E4 (Docs):** MBapp-Foundations.md § 4.7 updated with Sprint Q hardening notes (filter validation, Update View affordance, columns stored but not rendered, sort support status). MBapp-Status.md Sprint Q summary added. smoke-coverage.md documents new smoke tests.
+- **Status:** ✅ **Complete (Sprint Q, 2025-12-30)** — All E1–E4 tasks complete; apps/api typecheck passes; smoke:views:crud, smoke:workspaces:list, smoke:views:validate-filters all pass; web typecheck clean.
+- **Next:** Mobile views UI (deferred); server-side field-existence validation (deferred); workspace-view aliasing clarification (future).
+
 ### Backorder → PO → Receive Loop Polish — ✅ Complete (Sprint I + Sprint J)
 - **MOQ Bump Fix:** suggest-po now applies minOrderQty regardless of vendor source (override/backorder derivation).
 - **Runtime Tracking:** BackorderRequest schema includes `fulfilledQty` and `remainingQty` (nullable, server-maintained during PO receive).

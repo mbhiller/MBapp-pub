@@ -2,6 +2,7 @@ import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { ok, notFound, bad, error } from "../common/responses";
 import { replaceObject } from "../objects/repo";
 import { getAuth, requirePerm } from "../auth/middleware";
+import { validateFilters } from "./validate";
 
 export async function handle(event: APIGatewayProxyEventV2) {
   try {
@@ -19,6 +20,12 @@ export async function handle(event: APIGatewayProxyEventV2) {
     }
     if (!body.entityType || typeof body.entityType !== "string") {
       return bad({ message: "entityType is required" });
+    }
+
+    // Validate filters if present
+    const filterError = validateFilters(body.filters);
+    if (filterError) {
+      return bad({ message: filterError });
     }
 
     const viewBody = {

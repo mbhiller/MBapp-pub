@@ -25,9 +25,11 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 
 **Guarantee:** Both smokes validate that removed line IDs are **reserved and never reused** by the server, ensuring stable line identity across edits.
 
-**CI-covered Views/Workspaces flows (Sprint H):**
+**CI-covered Views/Workspaces flows (Sprint H + Sprint Q):**
 - `smoke:views:crud` — Creates view with unique timestamped name, validates CRUD operations (create, list with `q=<exact name>`, get, update, delete). Uses 5-attempt retry with 300ms delay for eventual consistency. **Deterministic:** filters by exact unique name instead of paginating through all views.
 - `smoke:workspaces:list` — Creates 2 temp views with unique smokeTag names and different entityTypes, validates filtering by `q=<tag>` and `entityType=<type>`. **Pollution-resistant:** uses unique run timestamp in names and filters by created view IDs, not generic patterns.
+- `smoke:views:apply-to-po-list` (Sprint Q) — Creates 2 POs with different statuses (draft, submitted), creates View with `status="draft"` filter, queries `/purchasing/purchase-orders?viewId={id}`, asserts draft PO present and submitted PO absent. Validates that applying a view with filters constrains list results as expected.
+- `smoke:views:validate-filters` (Sprint Q) — Validates server-side filter validation: rejects views with (1) missing field, (2) invalid operator (badOp), (3) "in" operator with non-array value, (4) object value for eq operator. Accepts valid filters (eq/in/ge with proper types). Returns 400 bad_request with clear error messages for invalid filters.
 
 - Default tenant: any tenant starting with **SmokeTenant** (e.g., SmokeTenant, SmokeTenant-qa). Override only by setting `MBAPP_SMOKE_ALLOW_NON_SMOKE_TENANT=1` (dangerous).
 - `SMOKE_RUN_ID` is emitted in the preflight log; set `SMOKE_RUN_ID` explicitly to tag runs or let the runner generate one.
