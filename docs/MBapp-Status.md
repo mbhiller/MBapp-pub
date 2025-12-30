@@ -62,6 +62,16 @@
   - **Columns:** Parsed but not applied to list rendering (future feature)
 - **Next:** Inventory/Parties/Products list save; workspaces hub apply/open views; additional entity types (e.g., backorders, registrations).
 
+### Mobile Views Management v1 — ✅ Complete (Sprint S, 2025-12-30)
+
+**Epic Summary:** Mobile ViewsManage screen to list/search/filter views and perform rename/delete with safety prompts.
+
+- **E1 (Screen):** [apps/mobile/src/screens/ViewsManageScreen.tsx](../apps/mobile/src/screens/ViewsManageScreen.tsx) lists views with entityType chips (All/PO/SO), q search, pagination (load-more), and row actions (Rename via PATCH name, Delete via DELETE). Empty state shows “No views match your filters.” Toast feedback on success/failure.
+- **E2 (Navigation):** [apps/mobile/src/navigation/types.ts](../apps/mobile/src/navigation/types.ts) + [RootStack.tsx](../apps/mobile/src/navigation/RootStack.tsx) register `ViewsManage` route (param: `initialEntityType?`). WorkspaceHub exposes a “Manage Views” button, passing current entityType filter when set.
+- **E3 (API client):** useViewsApi now exposes `del(id)` (DELETE /views/{id}) alongside existing list/get/create/patch; uses same tenant/auth headers.
+- **Safety:** Delete action prompts confirm dialog with view name; rename requires non-empty name; pagination explicit via load-more button to avoid surprise fetches.
+- **Status:** ✅ Typecheck clean; uses existing toast/theme patterns; no new smokes required (views:crud already covers delete).
+
 ### Backorder → PO → Receive Loop Polish — ✅ Complete (Sprint I + Sprint J)
 - **MOQ Bump Fix:** suggest-po now applies minOrderQty regardless of vendor source (override/backorder derivation).
 - **Runtime Tracking:** BackorderRequest schema includes `fulfilledQty` and `remainingQty` (nullable, server-maintained during PO receive).

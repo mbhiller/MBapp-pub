@@ -88,6 +88,22 @@ export default function WorkspaceHubScreen({ navigation }: { navigation: Navigat
             </Pressable>
           ))}
         </ScrollView>
+
+        <Pressable
+          onPress={() => navigation.navigate("ViewsManage", entityType ? { initialEntityType: entityType } : undefined)}
+          style={{
+            marginTop: 4,
+            alignSelf: "flex-start",
+            paddingHorizontal: 12,
+            paddingVertical: 8,
+            borderRadius: 8,
+            borderWidth: 1,
+            borderColor: t.colors.primary,
+            backgroundColor: t.colors.card,
+          }}
+        >
+          <Text style={{ color: t.colors.primary, fontWeight: "700" }}>Manage Views</Text>
+        </Pressable>
       </View>
 
       {/* Workspace List */}

@@ -53,6 +53,7 @@ export type RootStackParamList = {
 
   // Workspaces (Sprint III)
   WorkspaceHub: undefined;
+  ViewsManage: { initialEntityType?: string } | undefined;
   
   // Registrations (Sprint IV)
   RegistrationsList: undefined;

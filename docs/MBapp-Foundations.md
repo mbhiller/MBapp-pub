@@ -624,7 +624,7 @@ export async function smoke_module_flow(API_BASE, authToken) {
 | `/views` | POST | ✅ | ✅ (v1: PO/SO) | ✅ | **Required** |
 | `/views/{id}` | GET | ✅ | ✅ (v1: PO/SO) | ✅ | **Required** |
 | `/views/{id}` | PATCH | ✅ | ✅ (v1: PO/SO) | ✅ | **Required** (Sprint Q: used for Update View; Sprint R mobile) |
-| `/views/{id}` | DELETE | ✅ | ❌ | ✅ | Optional |
+| `/views/{id}` | DELETE | ✅ | ✅ (v1: manage) | ✅ | Optional |
 | `/workspaces` | GET | ✅ (aliases views) | 🟨 (hub list only) | 🟨 (list/detail) | Optional (nice-to-have) |
 | `/workspaces` | POST | ✅ (aliases views) | 🟨 (hub list only) | 🟨 (list/detail) | Optional |
 | `/workspaces/{id}` | GET | ✅ (aliases views) | 🟨 (hub list only) | 🟨 (list/detail) | Optional |
@@ -653,6 +653,12 @@ export async function smoke_module_flow(API_BASE, authToken) {
   - **Shared flag:** Defaults to false (if omitted from payload); not exposed in UI for v1
 - ✅ **Implementation pattern:** Inverse mapper normalizes state → View.filters by dropping empty values, validating operators, and entity-specific field mappings
 - ✅ **Limitations:** Inventory/Parties/Products list save not yet implemented; workspaces hub UI absent; columns array not applied to mobile lists
+
+**Sprint S Mobile Views Management (2025-12-30):**
+- ✅ **ViewsManageScreen:** Mobile screen to list/search/filter views (entityType chips + q) with pagination and rename/delete actions.
+- ✅ **Lifecycle coverage:** Save/Update from list screens (Sprint R) plus rename/delete from management screen (Sprint S); mobile now supports full view lifecycle.
+- ✅ **Safety:** Delete guarded by confirm dialog; rename requires non-empty name; pagination via load-more button.
+- ✅ **Entry point:** WorkspaceHub exposes “Manage Views” button (passes entityType filter when selected).
 
 **Mobile gaps (post-v1):** Inventory/Parties/Products list save; workspaces hub apply/open views.  
 **Web gaps:** Workspaces create/edit missing; view apply/save present for SO/PO/Inventory/Parties/Products, other modules pending.  

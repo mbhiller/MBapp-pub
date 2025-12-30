@@ -12,6 +12,7 @@ import ModuleHubScreen from "../screens/ModuleHubScreen";
 
 // Workspaces
 import WorkspaceHubScreen from "../screens/WorkspaceHubScreen";
+import ViewsManageScreen from "../screens/ViewsManageScreen";
 
 // Registrations (Sprint IV)
 import RegistrationsListScreen from "../screens/RegistrationsListScreen";
@@ -93,6 +94,7 @@ export default function RootStack() {
     
     {/* Workspaces (Sprint III) */}
     <Stack.Screen name="WorkspaceHub" component={WorkspaceHubScreen} options={{ title: "Workspaces" }} />
+    <Stack.Screen name="ViewsManage" component={ViewsManageScreen} options={{ title: "Views" }} />
     
     {/* Registrations (Sprint IV) */}
     <Stack.Screen name="RegistrationsList" component={RegistrationsListScreen} options={{ title: "Registrations" }} />
