@@ -1,7 +1,9 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { ok, notFound, bad, error } from "../common/responses";
-import { replaceObject } from "../objects/repo";
 import { getAuth, requirePerm } from "../auth/middleware";
+import { getWorkspaceById, writeWorkspace } from "./repo";
+
+const DUALWRITE_LEGACY = process.env.MBAPP_WORKSPACES_DUALWRITE_LEGACY === "true";
 
 /**
  * PUT /workspaces/:id — updates a saved View.
@@ -36,23 +38,24 @@ export async function handle(event: APIGatewayProxyEventV2) {
       return bad({ message: "entityType must be a string if provided" });
     }
 
-    const viewBody = {
+    const existing = await getWorkspaceById({ tenantId: auth.tenantId, id });
+    if (!existing) return notFound();
+
+    const merged = {
+      ...existing,
       ...body,
-      type: "view", // persist as view for back-compat
+      id,
+      type: "workspace",
       views,
     };
 
-    const result = await replaceObject({
+    const result = await writeWorkspace({
       tenantId: auth.tenantId,
-      type: "view",
-      id,
-      body: viewBody,
+      workspace: merged,
+      dualWriteLegacy: DUALWRITE_LEGACY,
     });
 
-    if (!result) return notFound();
-
-    const projected = { ...result, type: "workspace", views };
-    return ok(projected);
+    return ok(result);
   } catch (e: any) {
     return error(e);
   }

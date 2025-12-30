@@ -1,7 +1,9 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { ok, notFound, bad, error } from "../common/responses";
-import { getObjectById, replaceObject } from "../objects/repo";
 import { getAuth, requirePerm } from "../auth/middleware";
+import { getWorkspaceById, writeWorkspace } from "./repo";
+
+const DUALWRITE_LEGACY = process.env.MBAPP_WORKSPACES_DUALWRITE_LEGACY === "true";
 
 export async function handle(event: APIGatewayProxyEventV2) {
   try {
@@ -11,8 +13,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const id = event.pathParameters?.id;
     if (!id) return notFound();
 
-    // Fetch existing stored view backing this workspace
-    const existing = await getObjectById({ tenantId: auth.tenantId, type: "view", id });
+    const existing = await getWorkspaceById({ tenantId: auth.tenantId, id });
     if (!existing) return notFound();
 
     const body = JSON.parse(event.body || "{}");
@@ -36,8 +37,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
       return bad({ message: "entityType must be a string if provided" });
     }
 
-    // Shallow merge; ensure id preserved and storage type is 'view'
-    const merged: any = { ...existing, ...body, id: existing.id, type: "view" };
+    const merged: any = { ...existing, ...body, id: existing.id, type: "workspace" };
 
     // Normalize views default
     merged.views = Array.isArray(merged.views) ? merged.views : [];
@@ -47,12 +47,13 @@ export async function handle(event: APIGatewayProxyEventV2) {
       return bad({ message: "name is required and must be 1-200 characters" });
     }
 
-    const result = await replaceObject({ tenantId: auth.tenantId, type: "view", id, body: merged });
-    if (!result) return notFound();
+    const result = await writeWorkspace({
+      tenantId: auth.tenantId,
+      workspace: merged,
+      dualWriteLegacy: DUALWRITE_LEGACY,
+    });
 
-    // Project response as workspace
-    const projected = { ...result, type: "workspace", views: merged.views };
-    return ok(projected);
+    return ok(result);
   } catch (e: any) {
     return error(e);
   }
