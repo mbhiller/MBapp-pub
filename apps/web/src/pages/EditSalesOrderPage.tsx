@@ -38,19 +38,9 @@ export default function EditSalesOrderPage() {
         });
         if (!cancelled) {
           setOrder(res);
-          const makeLineId = () => {
-            try {
-              // Prefer crypto.randomUUID for stable unique ids
-              if (typeof crypto !== "undefined" && typeof (crypto as any).randomUUID === "function") {
-                return `tmp-${(crypto as any).randomUUID()}`;
-              }
-            } catch {}
-            // Fallback if randomUUID is unavailable
-            return `tmp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-          };
           const orig: SalesOrderLineInput[] = Array.isArray(res?.lines)
             ? res.lines.map((ln: any) => ({
-                id: String(ln.id || "").trim() || makeLineId(),
+                id: String(ln.id || "").trim(),  // Keep server id as-is (no tmp fallback)
                 itemId: String(ln.itemId || "").trim(),
                 qty: Number(ln.qty ?? 0),
                 uom: String(ln.uom || "ea").trim() || "ea",
@@ -73,7 +63,8 @@ export default function EditSalesOrderPage() {
   const handleSubmit = async (payload: SalesOrderFormValue) => {
     if (!id) throw new Error("Missing sales order id");
 
-    // Compute patch ops using shared helper
+    // CRITICAL: Use computePatchLinesDiff (NEVER send full line arrays to API)
+    // This helper correctly separates id (server) vs cid (client) in patch ops
     const current = Array.isArray(payload?.lines) ? payload.lines : [];
     const ops = computePatchLinesDiff(originalLines, current, SALES_ORDER_PATCHABLE_LINE_FIELDS);
 

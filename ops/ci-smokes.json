@@ -27,7 +27,9 @@
   "smoke:purchaseOrders:draft-create-edit-lines",
   "smoke:po:receive-with-location-counters",
   "smoke:po:receive-line-negative-qty",
-  "smoke:webish:purchaseOrders:list-detail-join"
+  "smoke:webish:purchaseOrders:list-detail-join",
+  "smoke:po:create-from-suggestion:line-ids",
+  "smoke:so:patch-lines:cid"
   ]
 
 }

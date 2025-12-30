@@ -3,10 +3,12 @@ import { useEffect, useState } from "react";
 /**
  * Line shape with optional client-side stable key.
  * _key is not persisted to API; generated/maintained client-side only.
+ * cid is sent to API for new lines (tmp-* prefix).
  */
 export type LineInput = {
   id?: string;           // server-assigned id (optional on create)
-  _key?: string;         // client-stable key (generated if missing, never sent to API)
+  cid?: string;          // client id sent to API for new lines (tmp-* prefix)
+  _key?: string;         // client-stable key for React rendering (generated if missing, never sent to API)
   itemId: string;
   qty: number;
   uom?: string;
@@ -26,7 +28,7 @@ export interface LineArrayEditorProps {
 }
 
 /**
- * Generate a stable client-side key for a line.
+ * Generate a stable client-side key for React rendering.
  * Uses crypto.getRandomValues if available, else Math.random fallback.
  */
 function generateKey(): string {
@@ -44,13 +46,34 @@ function generateKey(): string {
 }
 
 /**
- * Ensure every line has a _key. Mutates input.
+ * Generate a client-only ID (tmp-* prefix) for new lines.
+ * This is sent to API as `cid` so server can track client intent across retries.
+ */
+function generateCid(): string {
+  try {
+    if (typeof crypto !== "undefined" && typeof (crypto as any).randomUUID === "function") {
+      return `tmp-${(crypto as any).randomUUID()}`;
+    }
+  } catch {}
+  // Fallback if randomUUID is unavailable
+  return `tmp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Ensure every line has a _key for React rendering and cid for new lines.
+ * - _key: Always present (for React key prop)
+ * - cid: Added for lines without server id (tmp-* prefix for API tracking)
  */
 function ensureKeys(lines: LineInput[]): LineInput[] {
-  return lines.map(ln => ({
-    ...ln,
-    _key: ln._key ?? generateKey(),
-  }));
+  return lines.map(ln => {
+    const hasServerId = ln.id && String(ln.id).trim() && !String(ln.id).trim().startsWith("tmp-");
+    return {
+      ...ln,
+      _key: ln._key ?? generateKey(),
+      // Add cid for new lines (no server id yet)
+      cid: hasServerId ? ln.cid : (ln.cid ?? generateCid()),
+    };
+  });
 }
 
 /**
@@ -88,6 +111,7 @@ export function LineArrayEditor({
   const addLine = () => {
     const newLine: LineInput = {
       _key: generateKey(),
+      cid: generateCid(),  // Add tmp-* cid for new lines (sent to API)
       itemId: "",
       qty: 1,
       uom: fields.includes("uom") ? "ea" : undefined,

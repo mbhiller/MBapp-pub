@@ -3,6 +3,7 @@ import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda
 import { PutCommand } from "@aws-sdk/lib-dynamodb";
 import { ddb, tableObjects } from "../common/ddb";
 import { resolveTenantId } from "../common/tenant";
+import { ensureLineIds } from "../shared/ensureLineIds";
 
 const PK = process.env.MBAPP_TABLE_PK || "pk";
 const SK = process.env.MBAPP_TABLE_SK || "sk";
@@ -68,10 +69,23 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
 
     const id = newPoId(idemKey ? `${tenantId}#po-create-from-suggestion#${idemKey}` : undefined, i);
 
-    const lines = (draft.lines ?? []).map((ln: any, idx: number) => {
-      const lid = String(ln?.id ?? ln?.lineId ?? `ln_${idx.toString(36)}${Date.now().toString(36).slice(-4)}`);
-      return { ...ln, id: lid };
+    // Preserve existing line ids (id or lineId), normalize with ensureLineIds to get stable L{n} pattern
+    const rawLines = (draft.lines ?? []).map((ln: any) => {
+      // Keep existing id if present, else fallback to lineId if present
+      if (ln?.id && String(ln.id).trim()) return { ...ln, id: String(ln.id).trim() };
+      if (ln?.lineId && String(ln.lineId).trim()) return { ...ln, id: String(ln.lineId).trim() };
+      return { ...ln }; // no id yet; ensureLineIds will assign
     });
+
+    const lines = ensureLineIds<PurchaseOrderLine>(rawLines) as PurchaseOrderLine[];
+
+    // Dev log: detect any non-L{n} ids (indicates legacy/external data source)
+    if (process.env.NODE_ENV !== "production") {
+      const nonStandardIds = lines.filter(ln => ln.id && !ln.id.match(/^L\d+$/));
+      if (nonStandardIds.length > 0) {
+        console.warn(`[po-create-from-suggestion] Non-standard line ids detected:`, nonStandardIds.map(ln => ln.id));
+      }
+    }
 
     const po = {
       ...draft,
