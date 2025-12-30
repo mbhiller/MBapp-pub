@@ -31,6 +31,10 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 - `smoke:views:apply-to-po-list` (Sprint Q) — Creates 2 POs with different statuses (draft, submitted), creates View with `status="draft"` filter, queries `/purchasing/purchase-orders?viewId={id}`, asserts draft PO present and submitted PO absent. Validates that applying a view with filters constrains list results as expected.
 - `smoke:views:validate-filters` (Sprint Q) — Validates server-side filter validation: rejects views with (1) missing field, (2) invalid operator (badOp), (3) "in" operator with non-array value, (4) object value for eq operator. Accepts valid filters (eq/in/ge with proper types). Returns 400 bad_request with clear error messages for invalid filters.
 
+**Reliability Hardening (Sprint V/U):**
+- `smoke:views:apply-to-po-list` now wraps cleanup in try/finally and retries DELETE up to 5× to ensure created temp view is removed, improving CI hygiene and reducing flake.
+- `smoke:workspaces:list` now paginates through all pages (up to 10) with up to 25 retry attempts to handle eventual consistency and non-deterministic ordering, ensuring created workspace IDs are found before filtering assertions.
+
 - Default tenant: any tenant starting with **SmokeTenant** (e.g., SmokeTenant, SmokeTenant-qa). Override only by setting `MBAPP_SMOKE_ALLOW_NON_SMOKE_TENANT=1` (dangerous).
 - `SMOKE_RUN_ID` is emitted in the preflight log; set `SMOKE_RUN_ID` explicitly to tag runs or let the runner generate one.
   - The runner records a manifest per run in `ops/smoke/.manifests/<SMOKE_RUN_ID>.json` capturing created entities (type, id, route, meta).
