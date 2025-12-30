@@ -160,6 +160,8 @@
 **CI Posture:**
 - 31/31 smoke tests passing in CI (Sprint I added smoke:backorders:partial-fulfill, smoke:suggest-po:moq; Sprint J added smoke:backorders:ignore; Sprint M added smoke:po:create-from-suggestion:line-ids, smoke:so:patch-lines:cid; Sprint E added smoke:line-identity:id-canonical; E4+E5 confirmed web+mobile payloads use canonical id)
 - Latest additions: smoke:line-identity:id-canonical (Sprint E, E3) — validates all action endpoints accept `id` (canonical) and emit `id` in responses; existing action smokes (receive/reserve/fulfill/release) updated to use `id` instead of `lineId`; web (E4) and mobile (E5) clients now send canonical `id` in all action payloads
+- smoke:views:apply-to-po-list now deletes its temp view after assertions to reduce tenant clutter and avoid downstream flakiness.
+- smoke:workspaces:list now paginates with retries to find created items across pages and handle eventual consistency before asserting filters.
 - All tests documented in [smoke-coverage.md](smoke-coverage.md)
 
 **What's Next:**

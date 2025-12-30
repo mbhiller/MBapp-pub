@@ -5650,23 +5650,56 @@ const tests = {
       await fetch(`${API}/views/${encodeURIComponent(viewIdB)}`, { method: "DELETE", headers: listHdr });
     };
 
-    // 2) GET /workspaces?q=<unique tag> -> assert both created views are in results
-    let qItems = [];
-    let foundA = false;
-    let attempts = 0;
-    const entityType = "purchaseOrder";
-    while (attempts < 25 && !foundA) {
-      attempts++;
-      const qUrl = `${API}/workspaces?q=${encodeURIComponent(uniqueToken)}&entityType=${encodeURIComponent(entityType)}&limit=200&shared=false`;
-      const listQ = await fetch(qUrl, { headers: listHdr });
-      const qBody = await listQ.json().catch(() => ({}));
-      qItems = Array.isArray(qBody?.items) ? qBody.items : [];
-      foundA = qItems.some(item => item.id === viewIdA);
-      if (foundA) break;
-      await sleep(500);
-    }
+    const listWorkspacesUntil = async ({ q, entityType: et, wantIds }) => {
+      const maxAttempts = 25;
+      const delayMs = 500;
+      let lastSnapshot = null;
 
-    if (!foundA) {
+      const buildUrl = (cursor) => {
+        const params = new URLSearchParams();
+        params.set("limit", "200");
+        if (q) params.set("q", q);
+        if (et) params.set("entityType", et);
+        params.set("shared", "false");
+        if (cursor) params.set("next", cursor);
+        return `${API}/workspaces?${params.toString()}`;
+      };
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        let cursor = null;
+        let pages = 0;
+        let cursorsSeen = [];
+        let items = [];
+        let allFound = false;
+
+        while (pages < 10) {
+          const url = buildUrl(cursor);
+          const resp = await fetch(url, { headers: listHdr });
+          const body = await resp.json().catch(() => ({}));
+          const pageItems = Array.isArray(body?.items) ? body.items : [];
+          items = items.concat(pageItems);
+          const nextCursor = body?.next ?? body?.nextToken ?? body?.pageInfo?.next ?? body?.pageInfo?.nextCursor ?? null;
+          if (nextCursor) cursorsSeen.push(nextCursor);
+
+          allFound = wantIds.every(id => items.some(it => it?.id === id));
+          if (allFound || !nextCursor) break;
+
+          cursor = nextCursor;
+          pages++;
+        }
+
+        lastSnapshot = { attempt, items, pagesFetched: pages + 1, cursorsSeen, count: items.length };
+        if (allFound) return { ok: true, ...lastSnapshot };
+        await sleep(delayMs);
+      }
+
+      return { ok: false, ...(lastSnapshot || {}) };
+    };
+
+    // 2) GET /workspaces?q=<unique tag> -> assert both created views are in results
+    const entityType = "purchaseOrder";
+    const qResult = await listWorkspacesUntil({ q: uniqueToken, entityType, wantIds: [viewIdA] });
+    if (!qResult.ok) {
       const diagResp = await fetch(`${API}/workspaces?entityType=${encodeURIComponent(entityType)}&limit=50`, { headers: listHdr });
       const diagBody = await diagResp.json().catch(() => ({}));
       const unfiltered = Array.isArray(diagBody?.items) ? diagBody.items : [];
@@ -5675,65 +5708,35 @@ const tests = {
         test: "workspaces:list",
         result: "FAIL",
         reason: "q-filter-missing-created-view",
-        expectedId: viewIdA,
+        expectedIds: [viewIdA],
         q: uniqueToken,
         entityType,
-        attemptCount: attempts,
-        qItemsCount: qItems.length,
-        qItemsSample: qItems.slice(0, 5).map(i => ({ id: i?.id, name: i?.name })),
+        attempts: qResult.attempt,
+        pagesFetched: qResult.pagesFetched,
+        cursorsSeen: qResult.cursorsSeen,
+        collectedCount: qResult.count,
+        sample: (qResult.items || []).slice(0, 5).map(i => ({ id: i?.id, name: i?.name, entityType: i?.entityType })),
         unfilteredCount: unfiltered.length,
         unfilteredSample: unfiltered.slice(0, 5).map(i => ({ id: i?.id, name: i?.name })),
       }));
     }
 
     // 3) GET /workspaces?entityType=purchaseOrder with pagination + retry until created view is found
-    let foundAinEntity = false;
-    let allPO = false;
-    let attemptsEntity = 0;
-    let pagesScanned = 0;
-    let totalItemsSeen = 0;
-    let lastPageSample = [];
-
-    while (attemptsEntity < 25 && !foundAinEntity) {
-      attemptsEntity++;
-      let nextCursor = null;
-      let pagesThisAttempt = 0;
-      while (pagesThisAttempt < 10 && !foundAinEntity) {
-        const url = `${API}/workspaces?entityType=purchaseOrder&limit=100${nextCursor ? `&next=${encodeURIComponent(nextCursor)}` : ""}&shared=false`;
-        const listEntity = await fetch(url, { headers: listHdr });
-        const entityBody = await listEntity.json().catch(() => ({}));
-        const entityItems = Array.isArray(entityBody?.items) ? entityBody.items : [];
-        pagesThisAttempt++;
-        pagesScanned++;
-        totalItemsSeen += entityItems.length;
-        lastPageSample = entityItems.slice(0, 5).map(i => ({ id: i?.id, name: i?.name }));
-
-        foundAinEntity = entityItems.some(item => item.id === viewIdA);
-        allPO = entityItems.length === 0 ? false : entityItems.every(item => item.entityType === "purchaseOrder");
-
-        nextCursor = entityBody?.next ?? entityBody?.nextToken ?? entityBody?.pageInfo?.next ?? entityBody?.pageInfo?.nextCursor ?? null;
-        if (!nextCursor || foundAinEntity) break;
-      }
-      if (foundAinEntity && !allPO) {
-        await cleanup();
-        return { test:"workspaces:list", result:"FAIL", reason:"entityType-filter-mismatch", entityItems: lastPageSample };
-      }
-      if (foundAinEntity) break;
-      await sleep(500);
-    }
-
-    if (!foundAinEntity) {
+    const entityResult = await listWorkspacesUntil({ entityType: "purchaseOrder", wantIds: [viewIdA] });
+    const allPO = (entityResult.items || []).every(item => item?.entityType === "purchaseOrder");
+    if (!entityResult.ok || !allPO) {
       await cleanup();
       throw new Error(JSON.stringify({
         test: "workspaces:list",
         result: "FAIL",
-        reason: "entityType-filter-missing-view",
-        expectedId: viewIdA,
+        reason: entityResult.ok ? "entityType-filter-mismatch" : "entityType-filter-missing-view",
+        expectedIds: [viewIdA],
         entityType: "purchaseOrder",
-        attempts: attemptsEntity,
-        pagesScanned,
-        totalItemsSeen,
-        lastPageSample,
+        attempts: entityResult.attempt,
+        pagesFetched: entityResult.pagesFetched,
+        cursorsSeen: entityResult.cursorsSeen,
+        collectedCount: entityResult.count,
+        sample: (entityResult.items || []).slice(0, 5).map(i => ({ id: i?.id, name: i?.name, entityType: i?.entityType })),
       }));
     }
 
@@ -5747,13 +5750,13 @@ const tests = {
       headers: listHdr
     });
 
-    const pass = createA.ok && createB.ok && foundA && foundAinEntity && allPO && delA.ok && delB.ok;
-    const byEntityCount = totalItemsSeen;
+    const pass = createA.ok && createB.ok && qResult.ok && entityResult.ok && allPO && delA.ok && delB.ok;
+    const byEntityCount = entityResult.count;
     return {
       test: "workspaces:list",
       result: pass ? "PASS" : "FAIL",
       counts: {
-        q: qItems.length,
+        q: qResult.count,
         byEntity: byEntityCount
       }
     };
@@ -5764,6 +5767,10 @@ const tests = {
 
     const featureHeaders = { "X-Feature-Views-Enabled": "true" };
     const runTimestamp = Date.now();
+    let viewId = null;
+    let viewFilters = [];
+
+    try {
 
     // 1) Create vendor + product + inventory
     const { vendorId } = await seedVendor(api);
@@ -5831,7 +5838,7 @@ const tests = {
     if (!viewCreate.ok || !viewBody?.id) {
       return { test: "views:apply-to-po-list", result: "FAIL", step: "createView", status: viewCreate.status, body: snippet(viewBody, 400) };
     }
-    const viewId = viewBody.id;
+    viewId = viewBody.id;
     recordCreated({ type: 'view', id: viewId, route: '/views', meta: { name: viewBody?.name, entityType: "purchaseOrder" } });
 
     // 4) Fetch the view back to get its filters
@@ -5847,7 +5854,7 @@ const tests = {
 
     // 5) Convert view.filters into query params
     // For this smoke, support only "eq" operator; fail fast if view contains anything else
-    const viewFilters = viewGetBody.filters || [];
+    viewFilters = viewGetBody.filters || [];
     const derivedQueryParams = { "filter.vendorId": vendorId, limit: 200 };
     
     for (const filter of viewFilters) {
@@ -6022,6 +6029,34 @@ const tests = {
         }
       }
     };
+    } finally {
+      if (viewId) {
+        const deleteHeaders = { ...baseHeaders(), ...featureHeaders };
+        let deleted = false;
+        let lastError = null;
+        for (let attempt = 0; attempt < 5 && !deleted; attempt++) {
+          const delResp = await fetch(`${API}/views/${encodeURIComponent(viewId)}`, { method: "DELETE", headers: deleteHeaders });
+          if (delResp.ok || delResp.status === 404) {
+            deleted = true;
+            break;
+          }
+          lastError = {
+            status: delResp.status,
+            body: await delResp.json().catch(async () => await delResp.text().catch(() => null)),
+          };
+          await sleep(300);
+        }
+        if (!deleted) {
+          console.error(JSON.stringify({
+            test: "views:apply-to-po-list",
+            cleanup: "delete-view",
+            viewId,
+            smokeRunId: runTimestamp,
+            lastError,
+          }));
+        }
+      }
+    }
   },
 
   "smoke:events:enabled-noop": async ()=>{
