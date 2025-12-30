@@ -28,7 +28,7 @@ export function _debugConfig() {
   return { API_BASE, TENANT, hasBearer: Boolean(_bearerToken) };
 }
 
-type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
+type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 type RequestOpts = { idempotencyKey?: string; headers?: Record<string, string> };
 
 export type ListPage<T> = { items: T[]; next?: string; pageInfo?: { hasNext?: boolean; nextCursor?: string | null; pageSize?: number } };
@@ -203,5 +203,6 @@ export const apiClient = {
   request<T>(`${p}${qs(query)}`, "GET", undefined, { headers }),
   post: <T>(p: string, b: any, headers?: Record<string, string>) => request<T>(p, "POST", b, { headers }),
   put:  <T>(p: string, b: any, headers?: Record<string, string>) => request<T>(p, "PUT", b, { headers }),
+  patch: <T>(p: string, b: any, headers?: Record<string, string>) => request<T>(p, "PATCH", b, { headers }),
   del:  <T>(p: string, headers?: Record<string, string>) => request<T>(p, "DELETE", undefined, { headers }),
 };

@@ -1,5 +1,6 @@
 // apps/mobile/src/features/workspaces/api.ts
 import { apiClient, ListPage } from "../../api/client";
+import { newIdempotencyKey } from "../_shared/useIdempotencyKey";
 
 export type WorkspaceItem = {
   id: string;
@@ -7,6 +8,7 @@ export type WorkspaceItem = {
   entityType: string;
   filters?: any[];
   columns?: string[];
+  views?: string[];
   createdAt: string;
   updatedAt: string;
 };
@@ -17,6 +19,18 @@ export type WorkspaceListParams = {
   limit?: number;
   next?: string;
 };
+
+export type CreateWorkspacePayload = {
+  name: string;
+  entityType: string;
+  filters?: any[];
+  columns?: string[];
+  description?: string;
+  shared?: boolean;
+  views?: string[];
+};
+
+export type PatchWorkspacePayload = Partial<CreateWorkspacePayload>;
 
 /**
  * Convert WorkspaceListParams to Record<string,string> for query params.
@@ -38,5 +52,31 @@ export const workspacesApi = {
   },
   get: (id: string): Promise<WorkspaceItem> => {
     return apiClient.get<WorkspaceItem>(`/workspaces/${encodeURIComponent(id)}`);
+  },
+  create: (
+    payload: CreateWorkspacePayload,
+    opts?: { idempotencyKey?: string }
+  ): Promise<WorkspaceItem> => {
+    const headers = { "Idempotency-Key": opts?.idempotencyKey ?? newIdempotencyKey("ws") };
+    return apiClient.post<WorkspaceItem>("/workspaces", payload, headers);
+  },
+  patch: (
+    id: string,
+    payload: PatchWorkspacePayload,
+    opts?: { idempotencyKey?: string }
+  ): Promise<WorkspaceItem> => {
+    const headers = { "Idempotency-Key": opts?.idempotencyKey ?? newIdempotencyKey("ws") };
+    return apiClient.put<WorkspaceItem>(
+      `/workspaces/${encodeURIComponent(id)}`,
+      payload,
+      headers
+    );
+  },
+  del: (
+    id: string,
+    opts?: { idempotencyKey?: string }
+  ): Promise<{ id: string; deleted: boolean }> => {
+    const headers = { "Idempotency-Key": opts?.idempotencyKey ?? newIdempotencyKey("ws") };
+    return apiClient.del(`/workspaces/${encodeURIComponent(id)}`, headers);
   },
 };

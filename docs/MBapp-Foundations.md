@@ -1,7 +1,7 @@
 # MBapp Foundations Report
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Status/Working](MBapp-Status.md) · [Cadence](MBapp-Cadence.md) · [Verification](smoke-coverage.md)  
-**Last Updated:** 2025-12-29
+**Last Updated:** 2025-12-30
 
 ---
 
@@ -109,6 +109,11 @@ const TENANT = process.env.MBAPP_TENANT_ID ?? "DemoTenant";
 ### 2.4 Object Model Contracts
 
 See [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) for full OpenAPI definitions. Key patterns:
+
+**Workspaces / Views (alias model):**
+- `/workspaces` is an alias over the same storage as `/views` (type="view"). The backend stores workspaces as objects with `type="view"` and honors the same CRUD semantics.
+- Workspace membership is tracked via `views: string[]` (list of view IDs). Mobile WorkspaceDetail uses this to open member views into entity list screens via `viewId`.
+- Known contract gap: the OpenAPI spec allows `name` up to 200 chars, but the current backend validation for workspaces (and views) enforces 1–120 chars; this should be aligned in a future sprint.
 
 **Status Lifecycles:**
 - Purchase Orders: `draft → submitted → approved → (partially-)received → fulfilled → closed` (also `cancelled`)

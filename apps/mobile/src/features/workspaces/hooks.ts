@@ -1,4 +1,5 @@
 // apps/mobile/src/features/workspaces/hooks.ts
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { workspacesApi, WorkspaceListParams, WorkspaceItem } from "./api";
 
@@ -24,4 +25,8 @@ export function useWorkspaceItem(id: string | undefined) {
     queryFn: () => workspacesApi.get(id!),
     enabled: !!id,
   });
+}
+
+export function useWorkspacesApi() {
+  return useMemo(() => workspacesApi, []);
 }
