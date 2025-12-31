@@ -2,6 +2,7 @@
 import "react-native-gesture-handler";
 import * as React from "react";
 import { NavigationContainer, createNavigationContainerRef } from "@react-navigation/native";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import { setPostHogClient, setScreen } from "./lib/telemetry";
 import RootStack from "./navigation/RootStack"
 import { ThemeProvider } from "./providers/ThemeProvider";
@@ -45,12 +46,13 @@ export default function App() {
   const navRef = createNavigationContainerRef();
 
   return (
-    <ToastProvider>
-      <ThemeProvider>
-        <RolesProvider initialRoles={initialRoles}>
-          <QueryClientProvider client={queryClient}>
-            <DevAuthBootstrap>
-              <NavigationContainer
+    <SafeAreaProvider>
+      <ToastProvider>
+        <ThemeProvider>
+          <RolesProvider initialRoles={initialRoles}>
+            <QueryClientProvider client={queryClient}>
+              <DevAuthBootstrap>
+                <NavigationContainer
                 ref={navRef}
                 onReady={() => {
                   const route = navRef.getCurrentRoute();
@@ -63,10 +65,11 @@ export default function App() {
               >
                 <RootStack />
               </NavigationContainer>
-            </DevAuthBootstrap>
-          </QueryClientProvider>
-        </RolesProvider>
-      </ThemeProvider>
-    </ToastProvider>
+              </DevAuthBootstrap>
+            </QueryClientProvider>
+          </RolesProvider>
+        </ThemeProvider>
+      </ToastProvider>
+    </SafeAreaProvider>
   );
 }

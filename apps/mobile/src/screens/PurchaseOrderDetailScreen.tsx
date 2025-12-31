@@ -1,5 +1,6 @@
 import * as React from "react";
-import { View, Text, ActivityIndicator, FlatList, Pressable, Modal, TextInput, ScrollView, KeyboardAvoidingView, Platform, SafeAreaView } from "react-native";
+import { View, Text, ActivityIndicator, FlatList, Pressable, Modal, TextInput, ScrollView, KeyboardAvoidingView, Platform } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation, useRoute, useFocusEffect } from "@react-navigation/native";
 import { useObjects } from "../features/_shared/useObjects";
 import { FEATURE_PO_QUICK_RECEIVE } from "../features/_shared/flags";

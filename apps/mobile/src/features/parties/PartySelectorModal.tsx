@@ -1,6 +1,7 @@
 
 import React from "react";
-import { View, Text, Pressable, Keyboard, SafeAreaView } from "react-native";
+import { View, Text, Pressable, Keyboard } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useColors } from "../_shared/useColors";
 import PartyPicker from "./PartyPicker";
 import { Party } from "./api";
