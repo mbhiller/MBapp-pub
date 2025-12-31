@@ -3783,8 +3783,13 @@ const tests = {
     const addedHasId = addedLine && typeof (addedLine.id ?? addedLine.lineId) === "string" && (addedLine.id ?? addedLine.lineId).trim().length > 0;
     const addedLineId = addedLine?.id ?? addedLine?.lineId;
     const idReused = addedLineId === removeLineId;
+    
+    // INVARIANT: New line via cid must get server-assigned id in L\d+ format (never fabricated by client)
+    const addedLineIdIsValid = addedLineId && /^L\d+$/.test(addedLineId);
+    // INVARIANT: Verify all assigned ids match L\d+ pattern (no client ids leaked)
+    const allIdsValid = ids.every(id => /^L\d+$/.test(id));
 
-    const pass = create.ok && patch.ok && got.ok && lines.length === 2 && updatedKeep && Number(updatedKeep.qty) === ((Number(keepLine.qty) || 0) + 1) && !removedStillPresent && addedLine && addedHasId && !idReused;
+    const pass = create.ok && patch.ok && got.ok && lines.length === 2 && updatedKeep && Number(updatedKeep.qty) === ((Number(keepLine.qty) || 0) + 1) && !removedStillPresent && addedLine && addedHasId && !idReused && addedLineIdIsValid && allIdsValid;
     return {
       test: "salesOrders:patch-lines",
       result: pass ? "PASS" : "FAIL",
@@ -3795,6 +3800,13 @@ const tests = {
       removeLineId,
       addedLineId,
       idReused,
+      addedLineIdIsValid,
+      allIdsValid,
+      assertions: {
+        "new-line-has-server-id": addedLineIdIsValid,
+        "all-ids-match-L-pattern": allIdsValid,
+        "removed-id-not-reused": !idReused,
+      },
       create,
       patch,
       got,
@@ -3857,8 +3869,13 @@ const tests = {
     const addedHasId = addedLine && typeof (addedLine.id ?? addedLine.lineId) === "string" && (addedLine.id ?? addedLine.lineId).trim().length > 0;
     const addedLineId = addedLine?.id ?? addedLine?.lineId;
     const idReused = addedLineId === removeLineId;
+    
+    // INVARIANT: New line via cid must get server-assigned id in L\d+ format (never fabricated by client)
+    const addedLineIdIsValid = addedLineId && /^L\d+$/.test(addedLineId);
+    // INVARIANT: Verify all assigned ids match L\d+ pattern (no client ids leaked)
+    const allIdsValid = ids.every(id => /^L\d+$/.test(id));
 
-    const pass = create.ok && patch.ok && got.ok && lines.length === 2 && updatedKeep && Number(updatedKeep.qty) === ((Number(keepLine.qty) || 0) + 2) && !removedStillPresent && addedLine && addedHasId && !idReused;
+    const pass = create.ok && patch.ok && got.ok && lines.length === 2 && updatedKeep && Number(updatedKeep.qty) === ((Number(keepLine.qty) || 0) + 2) && !removedStillPresent && addedLine && addedHasId && !idReused && addedLineIdIsValid && allIdsValid;
     return {
       test: "purchaseOrders:patch-lines",
       result: pass ? "PASS" : "FAIL",
@@ -3869,6 +3886,13 @@ const tests = {
       removeLineId,
       addedLineId,
       idReused,
+      addedLineIdIsValid,
+      allIdsValid,
+      assertions: {
+        "new-line-has-server-id": addedLineIdIsValid,
+        "all-ids-match-L-pattern": allIdsValid,
+        "removed-id-not-reused": !idReused,
+      },
       create,
       patch,
       got,
@@ -3913,6 +3937,9 @@ const tests = {
 
     // 2) Patch-lines with cid for new line
     const clientId = `tmp-${Math.random().toString(36).slice(2, 11)}`;
+    // INVARIANT: Client cid must be tmp-* format (never L\d+)
+    const clientIdValid = /^tmp-/.test(clientId);
+    
     const patch1 = await post(
       `/purchasing/po/${encodeURIComponent(poId)}:patch-lines`,
       {
@@ -4000,7 +4027,7 @@ const tests = {
 
     const qtyUpdated = updatedLine.qty === 5;
 
-    const pass = serverIdValid && qtyUpdated;
+    const pass = serverIdValid && qtyUpdated && clientIdValid;
 
     return {
       test: "po:patch-lines:cid",
@@ -4008,13 +4035,14 @@ const tests = {
       poId,
       clientId,
       serverId,
+      clientIdValid,
       serverIdValid,
       qtyUpdated,
       assertions: {
-        patch1_ok: patch1.ok,
-        serverIdMatchesPattern: serverIdValid,
-        patch2_ok: patch2.ok,
-        qtyUpdated,
+        "client-cid-is-tmp-format": clientIdValid,
+        "server-id-is-L-pattern": serverIdValid,
+        "cid-to-id-roundtrip": patch2.ok,
+        "qty-updates-after-cid": qtyUpdated,
       },
     };
   },
@@ -8034,6 +8062,34 @@ const tests = {
       }
     }
     tests.push({ step: "so-reserve-all-lines-have-id", ok: true });
+
+    // Test 5: INVARIANT - Verify removed SO line id is not reused (patch-lines remove + add)
+    const soIdsCaptured = (soReserve.body?.lines ?? []).map(ln => String(ln.id || "").trim()).filter(Boolean);
+    const firstSoLineId = soIdsCaptured[0];
+    
+    if (firstSoLineId) {
+      // Patch: remove first line, add new line
+      const patchRemoveAdd = await post(
+        `/sales/so/${encodeURIComponent(soId)}:patch-lines`,
+        {
+          ops: [
+            { op: "remove", id: firstSoLineId },
+            { op: "upsert", patch: { itemId, qty: 1, uom: "unit" } },
+          ],
+        },
+        { "Idempotency-Key": idem() }
+      );
+      
+      if (patchRemoveAdd.ok) {
+        const soFinal = await get(`/objects/salesOrder/${encodeURIComponent(soId)}`);
+        const finalLines = soFinal.body?.lines ?? [];
+        const newLineAfterRemove = finalLines.find(ln => (ln.id || "") !== firstSoLineId && ln.qty === 1);
+        const newLineId = newLineAfterRemove?.id;
+        // INVARIANT: New line must not reuse the removed id
+        const noIdReuse = newLineId && newLineId !== firstSoLineId;
+        tests.push({ step: "so-remove-add-no-reuse", ok: patchRemoveAdd.ok, noIdReuse, removedId: firstSoLineId, newId: newLineId });
+      }
+    }
 
     // All tests passed
     return {

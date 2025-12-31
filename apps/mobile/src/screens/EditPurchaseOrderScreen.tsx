@@ -5,6 +5,7 @@ import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
 import { useToast } from "../features/_shared/Toast";
 import { apiClient, patchPurchaseOrderLines } from "../api/client";
 import { computePatchLinesDiff, PATCHABLE_LINE_FIELDS } from "../lib/patchLinesDiff";
+import { getPatchLinesErrorMessage, isPatchLinesStatusGuardError } from "../lib/patchLinesErrors";
 import type { RootStackParamList } from "../navigation/types";
 import { track, trackScreenView } from "../lib/telemetry";
 import { LineEditor, EditableLine } from "../components/LineEditor";
@@ -172,10 +173,13 @@ export default function EditPurchaseOrderScreen() {
       nav.navigate({ name: "PurchaseOrderDetail", params: { id: poId, didEdit: true }, merge: true } as any);
       nav.goBack();
     } catch (err: any) {
-      const code = err?.body?.code || err?.code || err?.status;
+      // Use shared error handler for consistent 409/status guard messages
+      const isGuard = isPatchLinesStatusGuardError(err);
+      const { message } = getPatchLinesErrorMessage(err, "PO");
+      
       const httpStatus = err?.status || err?.body?.status || err?.response?.status;
-      const normalizedCode = code || (httpStatus === 409 ? "PO_NOT_EDITABLE" : "unknown");
-      const message = normalizedCode === "PO_NOT_EDITABLE" || httpStatus === 409 ? "PO is not editable unless Draft" : (normalizedCode || err?.message || "Save failed");
+      const code = err?.body?.code || err?.code || httpStatus;
+      const normalizedCode = isGuard ? "PO_NOT_EDITABLE" : (code || "unknown");
 
       track("po_edit_lines_submitted", {
         objectId: poId,
@@ -183,7 +187,7 @@ export default function EditPurchaseOrderScreen() {
         status: statusLower || undefined,
         lineCount: Array.isArray(err?.ops) ? err.ops.length : currentLines.length,
         result: "fail",
-        errorCode: normalizedCode || "unknown",
+        errorCode: normalizedCode,
       });
 
       try {
@@ -206,7 +210,8 @@ export default function EditPurchaseOrderScreen() {
         // Sentry not available
       }
 
-      toast(message, normalizedCode === "PO_NOT_EDITABLE" || httpStatus === 409 ? "warning" : "error");
+      // Show message but KEEP local edits in UI (don't navigate away or wipe)
+      toast(message, isGuard ? "warning" : "error");
 
       if (__DEV__) {
         console.warn("EditPurchaseOrder save error", err);

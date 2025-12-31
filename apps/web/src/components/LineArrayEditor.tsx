@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
+import { generateCid, getOrGenerateLineKey, ensureLineCid } from "../lib/cidGeneration";
 
 /**
- * Line shape with optional client-side stable key.
- * _key is not persisted to API; generated/maintained client-side only.
- * cid is sent to API for new lines (tmp-* prefix).
+ * Line shape for SO/PO editing.
+ * id: server-assigned (optional on create; stable L{n} pattern when saved)
+ * cid: client-assigned for new lines only (tmp-* prefix; sent to API for idempotency)
+ * React key: derived from id (preferred) or cid (fallback); regenerated if missing.
  */
 export type LineInput = {
-  id?: string;           // server-assigned id (optional on create)
-  cid?: string;          // client id sent to API for new lines (tmp-* prefix)
-  _key?: string;         // client-stable key for React rendering (generated if missing, never sent to API)
+  id?: string;           // server-assigned stable id (L{n} pattern); stable across reloads
+  cid?: string;          // client-assigned temporary id (tmp-* prefix); sent to API for new lines
   itemId: string;
   qty: number;
   uom?: string;
@@ -17,7 +18,7 @@ export type LineInput = {
 export interface LineArrayEditorProps {
   /** Current lines array */
   lines: LineInput[];
-  /** Callback when lines change; receives lines WITH _key stripped */
+  /** Callback when lines change */
   onChange: (lines: LineInput[]) => void;
   /** Show/hide specific fields (default: all) */
   fields?: ("itemId" | "qty" | "uom")[];
@@ -28,64 +29,25 @@ export interface LineArrayEditorProps {
 }
 
 /**
- * Generate a stable client-side key for React rendering.
- * Uses crypto.getRandomValues if available, else Math.random fallback.
+ * Ensure every line has a cid (for new lines without server id).
+ * Uses shared cidGeneration utilities.
  */
-function generateKey(): string {
-  try {
-    if (typeof window !== "undefined" && window.crypto?.getRandomValues) {
-      const buf = new Uint8Array(8);
-      window.crypto.getRandomValues(buf);
-      return Array.from(buf)
-        .map(b => b.toString(16).padStart(2, "0"))
-        .join("");
-    }
-  } catch {}
-  // Fallback: use timestamp + random
-  return `_key_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+function ensureCids(lines: LineInput[]): LineInput[] {
+  return lines.map(ln => ensureLineCid(ln));
 }
 
 /**
- * Generate a client-only ID (tmp-* prefix) for new lines.
- * This is sent to API as `cid` so server can track client intent across retries.
+ * Get stable React key for a line: prefer server id, else cid.
+ * Generates cid if missing (never leaves lines without identity).
  */
-function generateCid(): string {
-  try {
-    if (typeof crypto !== "undefined" && typeof (crypto as any).randomUUID === "function") {
-      return `tmp-${(crypto as any).randomUUID()}`;
-    }
-  } catch {}
-  // Fallback if randomUUID is unavailable
-  return `tmp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-/**
- * Ensure every line has a _key for React rendering and cid for new lines.
- * - _key: Always present (for React key prop)
- * - cid: Added for lines without server id (tmp-* prefix for API tracking)
- */
-function ensureKeys(lines: LineInput[]): LineInput[] {
-  return lines.map(ln => {
-    const hasServerId = ln.id && String(ln.id).trim() && !String(ln.id).trim().startsWith("tmp-");
-    return {
-      ...ln,
-      _key: ln._key ?? generateKey(),
-      // Add cid for new lines (no server id yet)
-      cid: hasServerId ? ln.cid : (ln.cid ?? generateCid()),
-    };
-  });
-}
-
-/**
- * Strip _key from lines before returning to caller.
- */
-function stripKeys(lines: LineInput[]): LineInput[] {
-  return lines.map(({ _key, ...rest }) => rest);
+function getLineKey(ln: LineInput): string {
+  return getOrGenerateLineKey(ln);
 }
 
 /**
  * Shared line array editor for Sales Orders, Purchase Orders, etc.
- * Manages client-side stable keys for edit tracking; does NOT send _key to API.
+ * Manages stable id/cid for edit tracking; no _key overhead.
+ * Every line has a stable React key (id or cid).
  */
 export function LineArrayEditor({
   lines: propLines,
@@ -94,24 +56,23 @@ export function LineArrayEditor({
   disabled = false,
   itemIdLabel = "Item ID",
 }: LineArrayEditorProps) {
-  // Internal state with _key ensured
-  const [lines, setLines] = useState<LineInput[]>(() => ensureKeys(propLines));
+  // Ensure all lines have cid if missing
+  const [lines, setLines] = useState<LineInput[]>(() => ensureCids(propLines));
 
-  // Sync with prop changes
+  // Sync with prop changes; ensure cids
   useEffect(() => {
-    setLines(ensureKeys(propLines));
+    setLines(ensureCids(propLines));
   }, [propLines]);
 
-  // Update prop when lines change (strips _key before sending)
+  // Update prop when lines change
   const notifyChange = (updated: LineInput[]) => {
     setLines(updated);
-    onChange(stripKeys(updated));
+    onChange(updated);
   };
 
   const addLine = () => {
     const newLine: LineInput = {
-      _key: generateKey(),
-      cid: generateCid(),  // Add tmp-* cid for new lines (sent to API)
+      cid: generateCid(),
       itemId: "",
       qty: 1,
       uom: fields.includes("uom") ? "ea" : undefined,
@@ -119,14 +80,15 @@ export function LineArrayEditor({
     notifyChange([...lines, newLine]);
   };
 
-  const removeLine = (lineKey: string) => {
-    notifyChange(lines.filter(ln => ln._key !== lineKey));
+  const removeLine = (key: string) => {
+    // Filter out the line with matching id or cid
+    notifyChange(lines.filter(ln => getLineKey(ln) !== key));
   };
 
-  const updateLine = (lineKey: string, patch: Partial<LineInput>) => {
+  const updateLine = (key: string, patch: Partial<LineInput>) => {
     notifyChange(
       lines.map(ln =>
-        ln._key === lineKey ? { ...ln, ...patch, _key: ln._key } : ln
+        getLineKey(ln) === key ? { ...ln, ...patch } : ln
       )
     );
   };
@@ -169,68 +131,71 @@ export function LineArrayEditor({
             </tr>
           </thead>
           <tbody>
-            {lines.map(ln => (
-              <tr key={ln._key} style={{ borderBottom: "1px solid #eee" }}>
-                {fields.includes("itemId") && (
-                  <td style={{ padding: 8 }}>
-                    <input
-                      type="text"
-                      value={ln.itemId || ""}
-                      onChange={e => updateLine(ln._key!, { itemId: e.target.value })}
-                      placeholder="e.g., item-123"
-                      disabled={disabled}
-                      required
-                      style={{ width: "100%", padding: 4 }}
-                    />
-                  </td>
-                )}
-                {fields.includes("qty") && (
-                  <td style={{ padding: 8 }}>
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={ln.qty ?? 0}
-                      onChange={e => updateLine(ln._key!, { qty: Number(e.target.value) })}
-                      disabled={disabled}
-                      required
-                      style={{ width: 100, padding: 4 }}
-                    />
-                  </td>
-                )}
-                {fields.includes("uom") && (
-                  <td style={{ padding: 8 }}>
-                    <input
-                      type="text"
-                      value={ln.uom || "ea"}
-                      onChange={e => updateLine(ln._key!, { uom: e.target.value })}
-                      placeholder="ea"
-                      disabled={disabled}
-                      style={{ width: 80, padding: 4 }}
-                    />
-                  </td>
-                )}
-                <td style={{ padding: 8, textAlign: "right" }}>
-                  {!disabled && lines.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removeLine(ln._key!)}
-                      style={{
-                        padding: "2px 8px",
-                        fontSize: 12,
-                        cursor: "pointer",
-                        background: "#fee",
-                        border: "1px solid #f88",
-                        borderRadius: 3,
-                        color: "#d32f2f",
-                      }}
-                    >
-                      Remove
-                    </button>
+            {lines.map(ln => {
+              const key = getLineKey(ln);
+              return (
+                <tr key={key} style={{ borderBottom: "1px solid #eee" }}>
+                  {fields.includes("itemId") && (
+                    <td style={{ padding: 8 }}>
+                      <input
+                        type="text"
+                        value={ln.itemId || ""}
+                        onChange={e => updateLine(key, { itemId: e.target.value })}
+                        placeholder="e.g., item-123"
+                        disabled={disabled}
+                        required
+                        style={{ width: "100%", padding: 4 }}
+                      />
+                    </td>
                   )}
-                </td>
-              </tr>
-            ))}
+                  {fields.includes("qty") && (
+                    <td style={{ padding: 8 }}>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={ln.qty ?? 0}
+                        onChange={e => updateLine(key, { qty: Number(e.target.value) })}
+                        disabled={disabled}
+                        required
+                        style={{ width: 100, padding: 4 }}
+                      />
+                    </td>
+                  )}
+                  {fields.includes("uom") && (
+                    <td style={{ padding: 8 }}>
+                      <input
+                        type="text"
+                        value={ln.uom || "ea"}
+                        onChange={e => updateLine(key, { uom: e.target.value })}
+                        placeholder="ea"
+                        disabled={disabled}
+                        style={{ width: 80, padding: 4 }}
+                      />
+                    </td>
+                  )}
+                  <td style={{ padding: 8, textAlign: "right" }}>
+                    {!disabled && lines.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeLine(key)}
+                        style={{
+                          padding: "2px 8px",
+                          fontSize: 12,
+                          cursor: "pointer",
+                          background: "#fee",
+                          border: "1px solid #f88",
+                          borderRadius: 3,
+                          color: "#d32f2f",
+                        }}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}
