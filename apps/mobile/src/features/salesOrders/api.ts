@@ -152,6 +152,7 @@ export { resolveEpc } from "../_shared/epc";
 export async function postScannerAction(payload: {
   action: "receive" | "pick" | "count" | "move";
   epc: string;
+  qty?: number;
   sessionId?: string;
   fromLocationId?: string;
   toLocationId?: string;

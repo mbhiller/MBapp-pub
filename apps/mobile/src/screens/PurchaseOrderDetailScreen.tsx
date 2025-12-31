@@ -1,10 +1,11 @@
 import * as React from "react";
 import { View, Text, ActivityIndicator, FlatList, Pressable, Modal, TextInput, ScrollView, KeyboardAvoidingView, Platform } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavigation, useRoute, useFocusEffect } from "@react-navigation/native";
 import { useObjects } from "../features/_shared/useObjects";
 import { FEATURE_PO_QUICK_RECEIVE } from "../features/_shared/flags";
 import { saveFromSuggestion, receiveLine, receiveLines, submit, approve, cancel, close } from "../features/purchasing/poActions";
+import { postScannerAction } from "../features/salesOrders/api";
 import { useToast } from "../features/_shared/Toast";
 import { copyText } from "../features/_shared/copy";
 import { ReceiveHistorySheet } from "../features/purchasing/ReceiveHistorySheet";
@@ -21,6 +22,7 @@ export default function PurchaseOrderDetailScreen() {
   const route = useRoute<any>();
   const navigation = useNavigation<any>();
   const id = route.params?.id as string | undefined;
+  const insets = useSafeAreaInsets();
 
   const { data, isLoading, refetch } = useObjects<any>({ type: "purchaseOrder", id });
   const po = data;
@@ -56,6 +58,8 @@ export default function PurchaseOrderDetailScreen() {
   const [chooser, setChooser] = React.useState<{
     open: boolean;
     itemId?: string;
+    scan?: string;
+    scanKind?: "inventoryId" | "epc" | "qr";
     candidates?: Array<{ lineId: string; itemId?: string; remaining: number; label?: string }>;
   }>({ open: false });
   const lastRefetchAt = React.useRef<number>(0);
@@ -113,6 +117,26 @@ export default function PurchaseOrderDetailScreen() {
   const getRemainingQty = (line: any) =>
     Math.max(0, Number(line.qty ?? 0) - Number(line.receivedQty ?? 0));
 
+  // Helper: log scanner action (fire-and-forget, best-effort)
+  const logScannerAction = (epc: string, lineId: string, poId: string) => {
+    // Fire-and-forget: do not await, do not block UI
+    postScannerAction({
+      action: "count",
+      epc,
+      qty: 1,
+    }).catch((err: any) => {
+      // Dev-only logging of scanner action failures
+      if (__DEV__) {
+        console.log("[ScannerAction] Failed to log count for EPC", {
+          epc,
+          lineId,
+          poId,
+          error: err?.message || String(err),
+        });
+      }
+    });
+  };
+
   // Helper: apply a scan result
   const onScanResult = async (scan: string) => {
     try {
@@ -149,12 +173,16 @@ export default function PurchaseOrderDetailScreen() {
         setScanInput("");
         setLastScanMessage(`Staged +1 on line ${lineId}`);
         toast(`Added 1x ${itemId}`, "success");
+        // Log scanner action for EPC scans (fire-and-forget, best-effort)
+        if (result.value.kind === "epc" && po?.id) {
+          logScannerAction(scan, lineId, po.id);
+        }
         return;
       }
 
       // Multiple candidates: prompt user to pick a line
       setLastScanMessage("Multiple matches – choose a line");
-      setChooser({ open: true, itemId, candidates });
+      setChooser({ open: true, itemId, scan, scanKind: result.value.kind, candidates });
       setScanInput("");
     } catch (err: any) {
       console.error(err);
@@ -204,6 +232,10 @@ export default function PurchaseOrderDetailScreen() {
       toast(`Added 1x ${itemId}`, "success");
     }
     setLastScanMessage(`Staged +1 on line ${lineId}`);
+    // Log scanner action for EPC scans (fire-and-forget, best-effort)
+    if (chooser.scanKind === "epc" && chooser.scan && po?.id) {
+      logScannerAction(chooser.scan, lineId, po.id);
+    }
     setChooser({ open: false, candidates: [], itemId: undefined });
   };
 
@@ -622,7 +654,7 @@ export default function PurchaseOrderDetailScreen() {
               contentContainerStyle={{ paddingBottom: 48 }}
               style={{ flex: 1 }}
             >
-              <View style={{ padding: 12, gap: 12 }}>
+              <View style={{ padding: 12, paddingTop: insets.top + 12, paddingBottom: insets.bottom + 12, gap: 12 }}>
                 {/* Header with close button */}
                 <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                   <Text style={{ fontSize: 18, fontWeight: "700" }}>Scan to Receive</Text>

@@ -8,11 +8,12 @@ import { receiveStock, releaseStock, consumeStock } from "../shared/db";
 
 type ActionType = "receive" | "pick" | "count" | "move";
 type Body = {
-  sessionId: string;
+  sessionId?: string;
   epc: string;
   action: ActionType;
   fromLocationId?: string | null;
   toLocationId?: string | null;
+  qty?: number;
 };
 
 export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
@@ -25,10 +26,13 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
   if (!body) return json(400, { error: "Invalid JSON" });
 
   const { sessionId, epc, action } = body;
-  if (!sessionId || !epc || !action) return json(400, { error: "sessionId, epc, action are required" });
+  if (!epc || !action) return json(400, { error: "epc, action are required" });
 
-  const session = await getObjectById({ tenantId, type: "scannerSession", id: sessionId });
-  if (!session) return json(404, { error: "Session not found" });
+  // Validate session if provided; optional
+  if (sessionId) {
+    const session = await getObjectById({ tenantId, type: "scannerSession", id: sessionId });
+    if (!session) return json(404, { error: "Session not found" });
+  }
 
   const epcMap = await getObjectById({ tenantId, type: "epcMap", id: epc });
   if (!epcMap || (epcMap as any).status === "retired") return json(404, { error: "EPC not found" });
@@ -42,13 +46,14 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     body: {
       id: actionId,
       type: "scannerAction",
-      sessionId,
       ts: now,
       epc,
       itemId: (epcMap as any).itemId,
       action,
-      fromLocationId: body.fromLocationId ?? null,
-      toLocationId: body.toLocationId ?? null,
+      ...(sessionId ? { sessionId } : {}),
+      ...(body.fromLocationId ? { fromLocationId: body.fromLocationId } : {}),
+      ...(body.toLocationId ? { toLocationId: body.toLocationId } : {}),
+      ...(body.qty ? { qty: body.qty } : { qty: 1 }),
       userId,
       createdAt: now,
       updatedAt: now,

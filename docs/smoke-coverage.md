@@ -1,7 +1,7 @@
-# Smoke Test Coverage (Sprint V, 2025-12-30)
+# Smoke Test Coverage (Sprint S, 2025-12-31)
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Status/Working](MBapp-Status.md) · [Foundations](MBapp-Foundations.md) · [Cadence](MBapp-Cadence.md)  
-**Last Updated:** 2025-12-30
+**Last Updated:** 2025-12-31
 
 ---
 
@@ -10,6 +10,18 @@
 Smoke tests are integration tests for critical API flows. All tests use idempotency keys for safe retry and include party/vendor seeding. Run with `node ops/smoke/smoke.mjs <test-name>`.
 
 **CI Smoke Manifest:** The definitive list of tests run in CI is maintained in [ops/ci-smokes.json](../ops/ci-smokes.json). Additional flows exist in `ops/smoke/smoke.mjs` but are opt-in only. CI includes `smoke:views:crud`, `smoke:workspaces:list`, `smoke:workspaces:mixed-dedupe`, and `smoke:workspaces:get-fallback`.
+
+**Scanner Actions Flows (Sprint S, E2):**
+- `smoke:scanner:actions:record` — **NEW** (E2). Validates POST /scanner/actions endpoint:
+  - Creates product + inventory item
+  - Seeds EPC mapping for a unique EPC → itemId
+  - POST /scanner/actions with action="count", epc=<seeded>, qty=1, no sessionId (validates optional sessionId per spec)
+  - Asserts response.type === "scannerAction" and response.itemId === expected
+  - Lists /objects/scannerAction with retry for eventual consistency; verifies created record appears in list
+  - Idempotency check: replays POST with same Idempotency-Key, asserts same id returned (no duplicate)
+  - Final list query verifies no duplicate created (count remains 1)
+  - Returns detailed steps including attempts, idempotency match, and final list count for diagnostics
+  - **Key invariant validated:** sessionId parameter is optional; request succeeds without it per spec alignment (E1 API changes)
 
 **CI-covered patch-lines flows (Sprint G, enhanced Sprint V):**
 - `smoke:salesOrders:patch-lines` — Creates SO draft with 2 lines (L1, L2), updates L1 qty, removes L2, adds new line; asserts new line receives L3 (not reused L2), `idReused: false`, and all IDs stable. **Sprint V enhancements:** Added format validation: `addedLineIdIsValid` (regex /^L\d+$/ ensures server assigns L{n} format), `allIdsValid` (Array.every checks all IDs match L{n} pattern). Assertions object returned includes these boolean flags and original idReused check.

@@ -5411,6 +5411,160 @@ const tests = {
     return { test:"epc-resolve", result: pass?"PASS":"FAIL", status:r.status, body:r.body };
   },
 
+  "smoke:scanner:actions:record": async ()=>{
+    await ensureBearer();
+
+    // 1) Create product and inventory item
+    const prod = await createProduct({ name: "ScannerActionTest" });
+    if (!prod.ok) {
+      return { test: "scanner:actions:record", result: "FAIL", step: "createProduct", prod };
+    }
+    const prodId = prod.body?.id;
+    recordCreated({ type: 'product', id: prodId, route: '/objects/product', meta: { name: 'ScannerActionTest' } });
+
+    const item = await createInventoryForProduct(prodId, "ScannerActionItem");
+    if (!item.ok) {
+      return { test: "scanner:actions:record", result: "FAIL", step: "createInventory", item };
+    }
+    const itemId = item.body?.id;
+    recordCreated({ type: 'inventory', id: itemId, route: '/objects/inventory', meta: { name: 'ScannerActionItem', productId: prodId } });
+
+    // 2) Seed EPC mapping: create an epcMap entry with EPC as id, pointing to itemId
+    const uniqueEpc = smokeTag(`EPC-${Date.now()}-${Math.random().toString(36).slice(2,7)}`);
+    const epcMapCreate = await post(`/objects/epcMap`, {
+      type: "epcMap",
+      id: uniqueEpc,  // EPC is used as the id in the API
+      epc: uniqueEpc,
+      itemId,
+      status: "active"
+    }, { "Idempotency-Key": idem() });
+    if (!epcMapCreate.ok) {
+      return { test: "scanner:actions:record", result: "FAIL", step: "createEpcMap", epcMapCreate };
+    }
+    const epcMapId = epcMapCreate.body?.id;
+    recordCreated({ type: 'epcMap', id: epcMapId, route: '/objects/epcMap', meta: { epc: uniqueEpc, itemId } });
+
+    // 3) POST /scanner/actions with action="count", epc=<seeded>, qty=1, no sessionId
+    const recordKey = idem();
+    const scannerActionPayload = {
+      action: "count",
+      epc: uniqueEpc,
+      qty: 1,
+      notes: "smoke test"
+    };
+    const scannerActionPost = await post(`/scanner/actions`, scannerActionPayload, { "Idempotency-Key": recordKey });
+    if (!scannerActionPost.ok) {
+      return { test: "scanner:actions:record", result: "FAIL", step: "postScannerActions", scannerActionPost };
+    }
+
+    const scannerActionId = scannerActionPost.body?.id;
+    const scannerActionType = scannerActionPost.body?.type;
+    const scannerActionItemId = scannerActionPost.body?.itemId;
+
+    // Assert response has type === "scannerAction" and itemId matches
+    if (scannerActionType !== "scannerAction") {
+      return { test: "scanner:actions:record", result: "FAIL", step: "assertType", expected: "scannerAction", got: scannerActionType };
+    }
+    if (scannerActionItemId !== itemId) {
+      return { test: "scanner:actions:record", result: "FAIL", step: "assertItemId", expected: itemId, got: scannerActionItemId };
+    }
+    recordCreated({ type: 'scannerAction', id: scannerActionId, route: '/scanner/actions', meta: { epc: uniqueEpc, itemId, action: "count" } });
+
+    // 4) List /objects/scannerAction with retry for eventual consistency
+    let scannerActionsFound = [];
+    let listAttempt = 0;
+    const maxListAttempts = 10;
+    const listRetryDelayMs = 250;
+
+    for (listAttempt = 0; listAttempt < maxListAttempts; listAttempt++) {
+      const listRes = await get(`/objects/scannerAction`, { limit: 50, sort: "desc" });
+      if (!listRes.ok) {
+        return { test: "scanner:actions:record", result: "FAIL", step: "listScannerActions", listRes };
+      }
+      const items = Array.isArray(listRes.body?.items) ? listRes.body.items : [];
+      scannerActionsFound = items.filter(item => item.id === scannerActionId);
+      if (scannerActionsFound.length > 0) {
+        recordFromListResult(items, "scannerAction", `/objects/scannerAction`);
+        break;
+      }
+      if (listAttempt < maxListAttempts - 1) {
+        await sleep(listRetryDelayMs);
+      }
+    }
+
+    if (scannerActionsFound.length === 0) {
+      return {
+        test: "scanner:actions:record",
+        result: "FAIL",
+        step: "assertListContainsScannerAction",
+        scannerActionId,
+        attempts: listAttempt + 1,
+        note: "scannerAction not found in list after retries"
+      };
+    }
+
+    // 5) Idempotency check: POST with same Idempotency-Key
+    const scannerActionReplay = await post(`/scanner/actions`, scannerActionPayload, { "Idempotency-Key": recordKey });
+    if (!scannerActionReplay.ok) {
+      return { test: "scanner:actions:record", result: "FAIL", step: "replayIdempotent", scannerActionReplay };
+    }
+
+    // Verify replay returns same id (idempotency honored)
+    const replayId = scannerActionReplay.body?.id;
+    if (replayId !== scannerActionId) {
+      return {
+        test: "scanner:actions:record",
+        result: "FAIL",
+        step: "assertIdempotencyId",
+        firstId: scannerActionId,
+        replayId,
+        note: "Idempotent request returned different id"
+      };
+    }
+
+    // 6) List again to verify no duplicate (count should still be 1, or at most 1 with same id)
+    const listAfterReplay = await get(`/objects/scannerAction`, { limit: 50, sort: "desc" });
+    if (!listAfterReplay.ok) {
+      return { test: "scanner:actions:record", result: "FAIL", step: "listAfterReplay", listAfterReplay };
+    }
+    const itemsAfter = Array.isArray(listAfterReplay.body?.items) ? listAfterReplay.body.items : [];
+    const duplicatesAfterReplay = itemsAfter.filter(item => item.id === scannerActionId);
+    if (duplicatesAfterReplay.length !== 1) {
+      return {
+        test: "scanner:actions:record",
+        result: "FAIL",
+        step: "assertNoDuplicateAfterReplay",
+        expectedCount: 1,
+        actualCount: duplicatesAfterReplay.length,
+        note: "Idempotent replay should not create duplicate"
+      };
+    }
+
+    const pass = scannerActionType === "scannerAction"
+      && scannerActionItemId === itemId
+      && scannerActionsFound.length > 0
+      && replayId === scannerActionId
+      && duplicatesAfterReplay.length === 1;
+
+    return {
+      test: "scanner:actions:record",
+      result: pass ? "PASS" : "FAIL",
+      steps: {
+        productId: prodId,
+        itemId,
+        epc: uniqueEpc,
+        epcMapId,
+        scannerActionId,
+        type: scannerActionType,
+        responseItemId: scannerActionItemId,
+        listAttempts: listAttempt + 1,
+        idempotencyReplayId: replayId,
+        idempotencyMatch: replayId === scannerActionId,
+        finalListCount: duplicatesAfterReplay.length
+      }
+    };
+  },
+
   /* ===================== Sprint III: Views, Workspaces, Events ===================== */
   
   "smoke:views:crud": async ()=>{
