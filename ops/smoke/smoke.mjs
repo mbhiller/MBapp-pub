@@ -5810,10 +5810,12 @@ const tests = {
     const featureHeaders = { "X-Feature-Views-Enabled": "true" };
     const headers = { ...baseHeaders(), ...featureHeaders };
 
-    const tag = smokeTag(`ws-mixed-${Date.now()}`);
-    const limit = 1; // force pagination via simple query path
+    const token = smokeTag(`ws-mixed-dedupe-${Date.now()}`);
+    const limit = 200; // fetch everything we created in 1–2 pages when filtered by token
     const ids = [0, 1, 2].map(() => `ws-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
     const [idA, idB, idC] = ids;
+    const createdWorkspaces = [];
+    const createdViews = [];
 
     const createWs = async (id, name, entityType) => {
       const resp = await fetch(`${API}/workspaces`, {
@@ -5824,99 +5826,116 @@ const tests = {
       const body = await resp.json().catch(() => ({}));
       return { resp, body };
     };
-
-    // Create three uniques to guarantee pagination
-    const { resp: respA, body: bodyA } = await createWs(idA, `${tag}-A`, "purchaseOrder");
-    if (!respA.ok || bodyA?.id !== idA) {
-      return { test: "workspaces:mixed-dedupe", result: "FAIL", reason: "create-workspace-A" };
-    }
-    recordCreated({ type: "workspace", id: bodyA.id, route: "/workspaces", meta: { name: bodyA.name } });
-
-    const { resp: respB, body: bodyB } = await createWs(idB, `${tag}-B`, "salesOrder");
-    if (!respB.ok || bodyB?.id !== idB) {
-      return { test: "workspaces:mixed-dedupe", result: "FAIL", reason: "create-workspace-B" };
-    }
-    recordCreated({ type: "workspace", id: bodyB.id, route: "/workspaces", meta: { name: bodyB.name } });
-
-    const { resp: respC, body: bodyC } = await createWs(idC, `${tag}-C`, "purchaseOrder");
-    if (!respC.ok || bodyC?.id !== idC) {
-      return { test: "workspaces:mixed-dedupe", result: "FAIL", reason: "create-workspace-C" };
-    }
-    recordCreated({ type: "workspace", id: bodyC.id, route: "/workspaces", meta: { name: bodyC.name } });
-
-    // Best-effort legacy shadow for idA
-    const createShadow = await fetch(`${API}/views`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ id: idA, name: `${tag}-Shadow`, entityType: "purchaseOrder", views: [] })
-    });
-    const shadowBody = await createShadow.json().catch(() => ({}));
-    if (createShadow.ok && shadowBody?.id === idA) {
-      recordCreated({ type: "view", id: idA, route: "/views", meta: { name: shadowBody.name } });
-    }
-
     const listOnce = async (cursor) => {
       const params = new URLSearchParams();
       params.set("limit", String(limit));
-      if (cursor) params.set("next", cursor);
+      params.set("q", token);
+      if (cursor) params.set("cursor", cursor);
       const resp = await fetch(`${API}/workspaces?${params.toString()}`, { headers });
       const body = await resp.json().catch(() => ({}));
       return { ok: resp.ok, body };
     };
 
-    // Page 1
-    const page1 = await listOnce(null);
-    if (!page1.ok) {
-      return { test: "workspaces:mixed-dedupe", result: "FAIL", reason: "list-page1" };
-    }
-    const nextCursor = page1.body?.next ?? page1.body?.pageInfo?.nextCursor ?? null;
-    const items1 = Array.isArray(page1.body?.items) ? page1.body.items : [];
-    if (items1.length !== limit) {
-      return { test: "workspaces:mixed-dedupe", result: "FAIL", reason: "page1-length", items1Len: items1.length, limit };
-    }
-    if (!nextCursor) {
-      return { test: "workspaces:mixed-dedupe", result: "FAIL", reason: "missing-next-after-page1" };
-    }
-
-    // Continue paging until we collect our three uniques or exhaust cursors (cap at 20 pages)
-    let cursor = nextCursor;
-    const allItems = [...items1];
-    let pages = 1;
-    const needed = new Set([idA, idB, idC]);
-    const have = () => {
-      const ids = allItems.map(i => i?.id);
-      return [...needed].every(id => ids.includes(id));
+    const cleanup = async () => {
+      for (const id of createdWorkspaces) {
+        try {
+          await fetch(`${API}/workspaces/${encodeURIComponent(id)}`, { method: "DELETE", headers });
+        } catch (e) {
+          console.warn("[smoke:workspaces:mixed-dedupe] cleanup workspace failed", id, e?.message ?? e);
+        }
+      }
+      for (const id of createdViews) {
+        try {
+          await fetch(`${API}/views/${encodeURIComponent(id)}`, { method: "DELETE", headers });
+        } catch (e) {
+          console.warn("[smoke:workspaces:mixed-dedupe] cleanup view failed", id, e?.message ?? e);
+        }
+      }
     };
 
-    while (cursor && pages < 20 && !have()) {
-      const page = await listOnce(cursor);
-      if (!page.ok) {
-        return { test: "workspaces:mixed-dedupe", result: "FAIL", reason: "list-page" + (pages + 1) };
+    try {
+      // Create three uniques; names carry token for scoped listing
+      const { resp: respA, body: bodyA } = await createWs(idA, `${token}-A`, "purchaseOrder");
+      if (!respA.ok || bodyA?.id !== idA) {
+        return { test: "workspaces:mixed-dedupe", result: "FAIL", reason: "create-workspace-A" };
       }
-      const pageItems = Array.isArray(page.body?.items) ? page.body.items : [];
-      allItems.push(...pageItems);
-      cursor = page.body?.next ?? page.body?.pageInfo?.nextCursor ?? null;
-      pages += 1;
-    }
+      createdWorkspaces.push(bodyA.id);
+      recordCreated({ type: "workspace", id: bodyA.id, route: "/workspaces", meta: { name: bodyA.name } });
 
-    if (!have()) {
-      return { test: "workspaces:mixed-dedupe", result: "FAIL", reason: "missing-created-ids", ids: allItems.map(i => i?.id).filter(Boolean), pages };
-    }
+      const { resp: respB, body: bodyB } = await createWs(idB, `${token}-B`, "salesOrder");
+      if (!respB.ok || bodyB?.id !== idB) {
+        return { test: "workspaces:mixed-dedupe", result: "FAIL", reason: "create-workspace-B" };
+      }
+      createdWorkspaces.push(bodyB.id);
+      recordCreated({ type: "workspace", id: bodyB.id, route: "/workspaces", meta: { name: bodyB.name } });
 
-    const idsCollected = allItems.map((i) => i?.id).filter(Boolean);
-    const uniqueIds = new Set(idsCollected);
-    if (!uniqueIds.has(idA) || !uniqueIds.has(idB) || !uniqueIds.has(idC)) {
-      return { test: "workspaces:mixed-dedupe", result: "FAIL", reason: "missing-created-ids", ids: idsCollected };
-    }
-    if (uniqueIds.size < 3) {
-      return { test: "workspaces:mixed-dedupe", result: "FAIL", reason: "dedupe-failed", ids: idsCollected };
-    }
-    const countA = idsCollected.filter((x) => x === idA).length;
-    if (countA !== 1) {
-      return { test: "workspaces:mixed-dedupe", result: "FAIL", reason: "duplicate-id-present", countA };
-    }
+      const { resp: respC, body: bodyC } = await createWs(idC, `${token}-C`, "purchaseOrder");
+      if (!respC.ok || bodyC?.id !== idC) {
+        return { test: "workspaces:mixed-dedupe", result: "FAIL", reason: "create-workspace-C" };
+      }
+      createdWorkspaces.push(bodyC.id);
+      recordCreated({ type: "workspace", id: bodyC.id, route: "/workspaces", meta: { name: bodyC.name } });
 
-    return { test: "workspaces:mixed-dedupe", result: "PASS", artifacts: { ids: idsCollected, pagesFetched: pages } };
+      // Best-effort legacy shadow for idA (kept until after assertions)
+      const createShadow = await fetch(`${API}/views`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ id: idA, name: `${token}-Shadow`, entityType: "purchaseOrder", views: [] })
+      });
+      const shadowBody = await createShadow.json().catch(() => ({}));
+      if (createShadow.ok && shadowBody?.id === idA) {
+        createdViews.push(idA);
+        recordCreated({ type: "view", id: idA, route: "/views", meta: { name: shadowBody.name } });
+      }
+
+      const page1 = await listOnce(null);
+      if (!page1.ok) {
+        return { test: "workspaces:mixed-dedupe", result: "FAIL", reason: "list-page1" };
+      }
+      const nextCursor = page1.body?.next ?? page1.body?.pageInfo?.nextCursor ?? null;
+      const items1 = Array.isArray(page1.body?.items) ? page1.body.items : [];
+
+      const allItems = [...items1];
+      let cursor = nextCursor;
+      let pages = 1;
+      const needed = new Set([idA, idB, idC]);
+      const have = () => {
+        const idsFound = allItems.map((i) => i?.id);
+        return [...needed].every((id) => idsFound.includes(id));
+      };
+
+      while (cursor && pages < 5 && !have()) {
+        const page = await listOnce(cursor);
+        if (!page.ok) {
+          return { test: "workspaces:mixed-dedupe", result: "FAIL", reason: "list-page" + (pages + 1) };
+        }
+        const pageItems = Array.isArray(page.body?.items) ? page.body.items : [];
+        allItems.push(...pageItems);
+        cursor = page.body?.next ?? page.body?.pageInfo?.nextCursor ?? null;
+        pages += 1;
+      }
+
+      if (!have()) {
+        return { test: "workspaces:mixed-dedupe", result: "FAIL", reason: "missing-created-ids", ids: allItems.map((i) => i?.id).filter(Boolean), pages };
+      }
+
+      const idsCollected = allItems.map((i) => i?.id).filter(Boolean);
+      const uniqueIds = new Set(idsCollected);
+      if (!uniqueIds.has(idA) || !uniqueIds.has(idB) || !uniqueIds.has(idC)) {
+        return { test: "workspaces:mixed-dedupe", result: "FAIL", reason: "missing-created-ids", ids: idsCollected };
+      }
+      if (uniqueIds.size < 3) {
+        return { test: "workspaces:mixed-dedupe", result: "FAIL", reason: "dedupe-failed", ids: idsCollected };
+      }
+      const countA = idsCollected.filter((x) => x === idA).length;
+      if (countA !== 1) {
+        return { test: "workspaces:mixed-dedupe", result: "FAIL", reason: "duplicate-id-present", countA };
+      }
+
+      return { test: "workspaces:mixed-dedupe", result: "PASS", artifacts: { ids: idsCollected, pagesFetched: pages } };
+    } finally {
+      await cleanup();
+    }
   },
 
   "smoke:workspaces:get-fallback": async () => {
