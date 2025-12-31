@@ -1,6 +1,7 @@
 // apps/mobile/src/providers/DevAuthBootstrap.tsx
 import * as React from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { View, Pressable, Text, StyleSheet } from "react-native";
 // Sentry used via dynamic require to avoid hard dependency when DSN not configured
 import { setTelemetryContext } from "../lib/telemetry";
 import { apiClient, getApiBase, setBearerToken, setTenantId, _debugConfig } from "../api/client";
@@ -22,24 +23,33 @@ function tokenKey(base: string, tenant: string) {
 
 export function DevAuthBootstrap({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = React.useState(false);
+  const loggedRef = React.useRef(false);
+  const [scopedKey, setScopedKey] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     (async () => {
-      try {
-        const base = getApiBase();
+      const envBearer = process.env.MBAPP_BEARER ?? null;
+      const hasEnvBearer = Boolean(envBearer);
+      const base = getApiBase();
+      let tenant = DEV_TENANT;
+      let tenantScopedKey = tokenKey(base, tenant);
+      // Will be set to true when token is obtained (either from storage or new login) OR env bearer is used
+      let tokenSource: "env" | "storage" | "none" = "none";
+      let hasFinalToken = false;
 
-        // 1) Load any stored creds (tenant-aware + legacy fallback)
+      try {
+        // 1) Load any stored creds (tenant-aware)
         const storedTenant = await AsyncStorage.getItem(TENANT_KEY);
-        const tenant = ENV_TENANT || storedTenant || DEV_TENANT;
-        const tenantScopedKey = tokenKey(base, tenant);
+        tenant = ENV_TENANT || storedTenant || DEV_TENANT;
+        tenantScopedKey = tokenKey(base, tenant);
+        setScopedKey(tenantScopedKey);
         const [tenantToken, legacyToken] = await Promise.all([
           AsyncStorage.getItem(tenantScopedKey),
           AsyncStorage.getItem(LEGACY_TOKEN_KEY),
         ]);
         let token = tenantToken;
-        if (!token && legacyToken && (storedTenant || DEV_TENANT) === tenant) {
-          // Legacy fallback only when tenant matches
-          token = legacyToken;
+        if (!token && legacyToken) {
+          console.log("DevAuthBootstrap: ignoring legacy token; use scoped key", { tenantScopedKey });
         }
         setTenantId(tenant);
         // Tag Sentry with source and tenantId (no unsafe actorId decode)
@@ -51,10 +61,24 @@ export function DevAuthBootstrap({ children }: { children: React.ReactNode }) {
 
         if (token) {
           setBearerToken(token);
+          hasFinalToken = true;
+          tokenSource = "storage";
           // 🔎 Quick probe: verify token still works
           try {
             await apiClient.get("/auth/policy");
             console.log("DevAuthBootstrap: using stored token", _debugConfig());
+            // Log the final truth now that we've verified the token
+            if (!loggedRef.current) {
+              console.log("DevAuthBootstrap: resolved auth", {
+                base,
+                tenant,
+                tokenKey: tenantScopedKey,
+                tokenSource,
+                hasFinalToken,
+                hasEnvBearer,
+              });
+              loggedRef.current = true;
+            }
             setReady(true);
             return;
           } catch (e) {
@@ -76,6 +100,8 @@ export function DevAuthBootstrap({ children }: { children: React.ReactNode }) {
             [tenantScopedKey, res.token],
             [TENANT_KEY, tenant],
           ]);
+          hasFinalToken = true;
+          tokenSource = "storage";
           console.log("DevAuthBootstrap: obtained new token", _debugConfig());
           // Update telemetry context
           setTelemetryContext({ tenantId: tenant });
@@ -85,11 +111,62 @@ export function DevAuthBootstrap({ children }: { children: React.ReactNode }) {
       } catch (e) {
         console.error("DevAuthBootstrap error:", e);
       } finally {
+        // Log final truth after all async work + token persistence is complete
+        if (!loggedRef.current) {
+          console.log("DevAuthBootstrap: resolved auth", {
+            base,
+            tenant,
+            tokenKey: tenantScopedKey,
+            tokenSource,
+            hasFinalToken,
+            hasEnvBearer,
+          });
+          loggedRef.current = true;
+        }
         setReady(true);
       }
     })();
   }, []);
 
+  const handleClearToken = React.useCallback(async () => {
+    if (!scopedKey) return;
+    try {
+      await AsyncStorage.removeItem(scopedKey);
+      await AsyncStorage.removeItem(TENANT_KEY);
+      setBearerToken(null);
+      console.log("DevAuthBootstrap: cleared token for current base/tenant", { tokenKey: scopedKey });
+    } catch (e) {
+      console.warn("DevAuthBootstrap: failed to clear token", e);
+    }
+  }, [scopedKey]);
+
   if (!ready) return null;
-  return <>{children}</>;
+  return (
+    <View style={{ flex: 1 }}>
+      {__DEV__ && scopedKey && (
+        <Pressable style={styles.devClearBtn} onPress={handleClearToken}>
+          <Text style={styles.devClearText}>Clear token</Text>
+        </Pressable>
+      )}
+      {children}
+    </View>
+  );
 }
+
+const styles = StyleSheet.create({
+  devClearBtn: {
+    position: "absolute",
+    top: 12,
+    right: 12,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+    zIndex: 9999,
+  },
+  devClearText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+});
