@@ -8,6 +8,8 @@
   "smoke:inventory:movements-by-location",
   "smoke:views:crud",
   "smoke:workspaces:list",
+  "smoke:workspaces:mixed-dedupe",
+  "smoke:workspaces:get-fallback",
   "smoke:views:apply-to-po-list",
   "smoke:events:enabled-noop",
   "smoke:close-the-loop",

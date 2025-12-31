@@ -112,13 +112,7 @@ export default function WorkspaceDetailScreen() {
     setSaving(true);
     try {
       await patch(workspace.id, {
-        name: workspace.name || workspace.id,
-        entityType: workspace.entityType,
         views: selectedViews,
-        description: (workspace as any).description,
-        filters: (workspace as any).filters,
-        columns: (workspace as any).columns,
-        shared: (workspace as any).shared,
       });
       toast("✓ Updated workspace", "success");
       closeEdit();

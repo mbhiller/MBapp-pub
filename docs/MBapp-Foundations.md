@@ -111,10 +111,12 @@ const TENANT = process.env.MBAPP_TENANT_ID ?? "DemoTenant";
 See [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) for full OpenAPI definitions. Key patterns:
 
 **Workspaces / Views (alias model):**
-- `/workspaces` is an alias over the same storage as `/views` (type="view"). The backend stores workspaces as objects with `type="view"` and honors the same CRUD semantics.
+- Workspace-first storage with legacy fallback: list/get/read prefer true `type="workspace"` records, then fall back to legacy `type="view"` workspace-like records; results are deduped by id before counting toward limits.
 - Workspace membership is tracked via `views: string[]` (list of view IDs). Mobile WorkspaceDetail uses this to open member views into entity list screens via `viewId`.
-- Known contract gap: the OpenAPI spec allows `name` up to 200 chars, but the current backend validation for workspaces (and views) enforces 1–120 chars; this should be aligned in a future sprint.
-- **Workspace v1 (alias reality):** Workspaces persist as `type="view"`; clients should treat a workspace as `{ id, name, entityType, views[] }` and MUST include `entityType` on updates. Spec divergence is known and queued for future normalization.
+- Name limits: View names validate to 1–120 chars; Workspace names validate to 1–200 chars. Stay within those limits to avoid 400 validation errors.
+- Dual-write flag: `MBAPP_WORKSPACES_DUALWRITE_LEGACY=true` writes both the workspace record and a legacy `type="view"` shadow (and deletes both). Use only during migration to keep legacy consumers aligned; default OFF.
+- Pagination + aliasing: `/workspaces` list accepts `cursor` **or** `next` (handled by `parsePagination`); responses return `cursor`. `/views` list uses `cursor`; only handlers wired through `parsePagination` honor `next` as an alias.
+- **Workspace v1 (alias reality):** Workspaces persist as `{ id, name, entityType?, views[] }`; clients MUST include `entityType` on updates even when unchanged.
 
 **Status Lifecycles:**
 - Purchase Orders: `draft → submitted → approved → (partially-)received → fulfilled → closed` (also `cancelled`)

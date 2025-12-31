@@ -9,7 +9,7 @@
 
 Smoke tests are integration tests for critical API flows. All tests use idempotency keys for safe retry and include party/vendor seeding. Run with `node ops/smoke/smoke.mjs <test-name>`.
 
-**CI Smoke Manifest:** The definitive list of tests run in CI is maintained in [ops/ci-smokes.json](../ops/ci-smokes.json). Additional flows exist in `ops/smoke/smoke.mjs` but are opt-in only. CI includes both `smoke:views:crud` and `smoke:workspaces:list`.
+**CI Smoke Manifest:** The definitive list of tests run in CI is maintained in [ops/ci-smokes.json](../ops/ci-smokes.json). Additional flows exist in `ops/smoke/smoke.mjs` but are opt-in only. CI includes `smoke:views:crud`, `smoke:workspaces:list`, `smoke:workspaces:mixed-dedupe`, and `smoke:workspaces:get-fallback`.
 
 **CI-covered patch-lines flows (Sprint G, enhanced Sprint V):**
 - `smoke:salesOrders:patch-lines` — Creates SO draft with 2 lines (L1, L2), updates L1 qty, removes L2, adds new line; asserts new line receives L3 (not reused L2), `idReused: false`, and all IDs stable. **Sprint V enhancements:** Added format validation: `addedLineIdIsValid` (regex /^L\d+$/ ensures server assigns L{n} format), `allIdsValid` (Array.every checks all IDs match L{n} pattern). Assertions object returned includes these boolean flags and original idReused check.
