@@ -23,6 +23,7 @@ import WorkspacesListPage from "./pages/WorkspacesListPage";
 import WorkspaceDetailPage from "./pages/WorkspaceDetailPage";
 import BackordersListPage from "./pages/BackordersListPage";
 import BackorderDetailPage from "./pages/BackorderDetailPage";
+import SuggestPurchaseOrdersPage from "./pages/SuggestPurchaseOrdersPage";
 import PurchaseOrdersListPage from "./pages/PurchaseOrdersListPage";
 import PurchaseOrderDetailPage from "./pages/PurchaseOrderDetailPage";
 import CreatePurchaseOrderPage from "./pages/CreatePurchaseOrderPage";
@@ -81,6 +82,7 @@ export default function App() {
           <Route path="/workspaces/:id" element={<WorkspaceDetailPage />} />
           <Route path="/backorders" element={<BackordersListPage />} />
           <Route path="/backorders/:id" element={<BackorderDetailPage />} />
+          <Route path="/backorders/:id/suggest-po" element={<SuggestPurchaseOrdersPage />} />
           <Route path="/purchase-orders" element={<PurchaseOrdersListPage />} />
           <Route path="/purchase-orders/new" element={<CreatePurchaseOrderPage />} />
           <Route path="/purchase-orders/:id" element={<PurchaseOrderDetailPage />} />

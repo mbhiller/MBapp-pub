@@ -1,10 +1,52 @@
 // apps/mobile/src/features/purchasing/poActions.ts
 import { apiClient } from "../../api/client";
 
-export async function saveFromSuggestion(draftOrDrafts: any | any[]) {
+export type PurchaseOrderLine = {
+  id?: string;
+  lineId?: string;
+  itemId?: string;
+  qty?: number;
+  receivedQty?: number;
+  backorderRequestIds?: string[];
+  minOrderQtyApplied?: number;
+  adjustedFrom?: number;
+};
+
+export type PurchaseOrderDraft = {
+  id?: string;
+  vendorId: string;
+  status?: string;
+  lines?: PurchaseOrderLine[];
+};
+
+export type SuggestPoResponse = {
+  draft?: PurchaseOrderDraft;
+  drafts?: PurchaseOrderDraft[];
+  skipped?: Array<{ backorderRequestId: string; reason?: string }>;
+};
+
+export type CreateFromSuggestionResponse = {
+  id?: string;
+  ids?: string[];
+};
+
+export async function suggestPurchaseOrders(
+  backorderRequestIds: string[],
+  opts: { vendorId?: string } = {}
+): Promise<SuggestPoResponse> {
+  const requests = backorderRequestIds.map((id) => ({ backorderRequestId: id }));
+  const body: Record<string, any> = { requests };
+  if (opts.vendorId) body.vendorId = opts.vendorId;
+  return apiClient.post(`/purchasing/suggest-po`, body);
+}
+
+export async function saveFromSuggestion(
+  draftOrDrafts: PurchaseOrderDraft | PurchaseOrderDraft[],
+  opts: { idempotencyKey?: string } = {}
+): Promise<CreateFromSuggestionResponse> {
   const body = Array.isArray(draftOrDrafts) ? { drafts: draftOrDrafts } : { draft: draftOrDrafts };
-  // returns { id?: string, ids: string[] }
-  return apiClient.post(`/purchasing/po:create-from-suggestion`, body);
+  const headers = opts.idempotencyKey ? { "Idempotency-Key": opts.idempotencyKey } : undefined;
+  return apiClient.post(`/purchasing/po:create-from-suggestion`, body, headers);
 }
 
 export async function submit(poId: string) {
