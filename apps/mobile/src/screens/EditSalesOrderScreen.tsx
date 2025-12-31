@@ -7,6 +7,7 @@ import { apiClient } from "../api/client";
 import { computePatchLinesDiff, PATCHABLE_LINE_FIELDS } from "../lib/patchLinesDiff";
 import { getPatchLinesErrorMessage } from "../lib/patchLinesErrors";
 import { buildEditableLines, normalizeEditableLines } from "../lib/buildEditableLines";
+import { validateEditableLines } from "../lib/validateEditableLines";
 import type { RootStackParamList } from "../navigation/types";
 import { LineEditor, EditableLine } from "../components/LineEditor";
 
@@ -69,21 +70,10 @@ export default function EditSalesOrderScreen() {
     try {
       const normalizedLines = normalizeEditableLines(currentLines);
 
-      for (let i = 0; i < normalizedLines.length; i++) {
-        const line = normalizedLines[i];
-        const lineLabel = `Line ${i + 1}`;
-        if (!line.itemId) {
-          toast(`${lineLabel}: Item is required`, "warning");
-          return;
-        }
-        if (!line.uom) {
-          toast(`${lineLabel}: UOM is required`, "warning");
-          return;
-        }
-        if (!(Number(line.qty) > 0)) {
-          toast(`${lineLabel}: Qty must be greater than 0`, "warning");
-          return;
-        }
+      const validation = validateEditableLines(normalizedLines);
+      if (!validation.ok) {
+        toast(validation.message, "warning");
+        return;
       }
 
       setSaving(true);

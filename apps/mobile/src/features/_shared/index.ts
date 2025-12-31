@@ -1,2 +1,2 @@
-export { default as LineEditor } from "./LineEditor";
-export type { Line, LineEditorProps, LineId } from "./LineEditor";
+// LineEditor removed (Sprint W): legacy component with label/price/notes schema
+// SO/PO editing now uses apps/mobile/src/components/LineEditor.tsx (patch-lines aligned)

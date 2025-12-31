@@ -192,6 +192,52 @@ Web Edit Page:
 - Sales Orders: patch-lines allowed in `draft|submitted|approved` (UI allows edit in those statuses; 409 `SO_NOT_EDITABLE` otherwise)
 - Purchase Orders: patch-lines **draft-only**; UI gates the Edit CTA to draft and surfaces 409 `PO_NOT_EDITABLE` as “PO is not editable unless Draft.”
 
+
+**Line Editor Component Contract (Sprint W consolidation):**
+
+**Stable Identity:**
+- Every line has `id` (server-assigned L{n} pattern) OR `cid` (client tmp-* only)
+- NEVER fabricate server ids (L{n} pattern) on client
+- Use `generateCid()` from cidGeneration helper for new lines (tmp-{uuid} format)
+
+**React Keying:**
+- Use `getOrGenerateLineKey(line)` for stable React keys
+- Prefers server `id`, falls back to `cid`, generates if missing
+- Never use index-based keys (unstable on reorder/delete)
+
+**Diff Algorithm:**
+- Step 1: Remove ops (id for server lines, cid for client-only)
+- Step 2: Upsert ops (id for updates, cid for new lines)
+- Patchable fields limited to: itemId, qty, uom (INVARIANT 1)
+- No-op skip: identical lines not sent (INVARIANT 5)
+
+**Status Guards:**
+- PO: draft-only (409 PO_NOT_EDITABLE if not draft)
+- SO: draft|submitted|approved (409 SO_NOT_EDITABLE otherwise)
+
+**Error UX (409 guard errors):**
+- Detect via `isPatchLinesStatusGuardError(err)`
+- Show context-aware message via `getPatchLinesErrorMessage(err, "SO"|"PO")`
+- PO message: "Purchase order is not editable in this status (only Draft can be modified)"
+- SO message: "Sales order is not editable in this status"
+- ALWAYS preserve local edits in UI (no form clear, no auto-navigate)
+
+**Validation:**
+- Use `validateEditableLines(lines)` helper (web + mobile)
+- Rules: itemId required (trim), uom required (trim), qty > 0
+- Returns `{ ok: true }` OR `{ ok: false, message: "Line N: [error]" }`
+
+**Key Files:**
+- Mobile Editor: [apps/mobile/src/components/LineEditor.tsx](../apps/mobile/src/components/LineEditor.tsx)
+- Web Editor: [apps/web/src/components/LineArrayEditor.tsx](../apps/web/src/components/LineArrayEditor.tsx)
+- CID Generation (mobile): [apps/mobile/src/lib/cidGeneration.ts](../apps/mobile/src/lib/cidGeneration.ts)
+- CID Generation (web): [apps/web/src/lib/cidGeneration.ts](../apps/web/src/lib/cidGeneration.ts)
+- Diff Logic (mobile): [apps/mobile/src/lib/patchLinesDiff.ts](../apps/mobile/src/lib/patchLinesDiff.ts)
+- Diff Logic (web): [apps/web/src/lib/patchLinesDiff.ts](../apps/web/src/lib/patchLinesDiff.ts)
+- Error Handling (mobile): [apps/mobile/src/lib/patchLinesErrors.ts](../apps/mobile/src/lib/patchLinesErrors.ts)
+- Error Handling (web): [apps/web/src/lib/patchLinesErrors.ts](../apps/web/src/lib/patchLinesErrors.ts)
+- Validation (mobile): [apps/mobile/src/lib/validateEditableLines.ts](../apps/mobile/src/lib/validateEditableLines.ts)
+- Validation (web): [apps/web/src/lib/validateEditableLines.ts](../apps/web/src/lib/validateEditableLines.ts)
 ### 2.6 Line Identity Contract (Canonical `id` vs. Deprecated `lineId`)
 
 **Context:** Through Sprint M, the codebase used `lineId` to reference line items. Starting in Sprint O (E1-E5), the canonical identifier is now `id` (matching patch-lines semantics). This section documents the transition plan and guarantees.

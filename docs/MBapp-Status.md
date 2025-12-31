@@ -146,6 +146,42 @@
 
 - **Status:** ✅ **Complete (Sprint V, 2025-12-30)** — All E1–E4 tasks complete; both web and mobile typecheck pass; smoke syntax valid; all invariants documented and tested.
 
+### Shared Line Editors v1.2 — Consolidation & Harmonization — ✅ Complete (Sprint W, 2025-12-30)
+
+**Epic Summary:** Eliminate duplication and confusion in line editing components/helpers across mobile and web. Remove legacy mobile LineEditor, extract shared validation logic, harmonize patchLinesDiff signatures, and document contracts.
+
+- **E1 (Mobile: Remove Legacy LineEditor):** Deleted `apps/mobile/src/features/_shared/LineEditor.tsx` (legacy component with label/price/notes schema, NOT aligned with patch-lines contract). Updated `features/_shared/index.ts` to remove dead exports. SO/PO edit screens continue using `apps/mobile/src/components/LineEditor.tsx` (patch-lines aligned). **Verification:** `npm run typecheck` (mobile) passes; zero active imports found.
+
+- **E2 (Mobile: Shared Validation Helper):** Created `apps/mobile/src/lib/validateEditableLines.ts` with `validateEditableLines(lines: EditableLine[])` → `{ ok, message }`. Rules: itemId required (trim), uom required (trim), qty > 0. Updated EditSalesOrderScreen and EditPurchaseOrderScreen to replace 16-line per-screen validation loops with 4-5 line validator calls. **Code Reduction:** 32 lines duplicated logic → 10 lines total (centralized helper). **Verification:** `npm run typecheck` (mobile) passes; validation messages match original behavior.
+
+- **E3 (Web: Shared Validation Helper):** Created `apps/web/src/lib/validateEditableLines.ts` with identical contract as mobile. Updated SalesOrderForm and PurchaseOrderForm to replace `.filter(ln => ln.itemId && ln.qty > 0)` silent filtering with explicit per-line validation. **UX Improvement:** Before: silently dropped invalid lines, generic error if all invalid. After: shows specific line-level errors ("Line 2: Quantity must be greater than 0"). **Verification:** `npm run typecheck` (web) passes.
+
+- **E4 (PatchLinesDiff Signature Harmonization):** Added `computePatchLinesDiffPositional(originalLines, editedLines, patchableFields?, makeCid?)` positional-args wrapper to mobile patchLinesDiff.ts matching web's signature. Existing named-args `computePatchLinesDiff({ ... })` still works (backward compatible). Wrapper delegates to existing implementation; zero behavior changes. **Verification:** Both `npm run typecheck` (mobile + web) pass; all existing call sites unchanged.
+
+- **E5 (Documentation):** Updated MBapp-Foundations.md § 2.5 with "Line Editor Component Contract" documenting: stable identity (id || cid, never fabricate L{n}), React keying (getOrGenerateLineKey), diff algorithm (remove then upsert, patchable fields), status guards (PO draft-only, SO draft|submitted|approved), error UX (409 detection, context-aware messages, preserve local edits), validation helpers. Updated MBapp-Status.md with Sprint W summary. Updated .github/copilot-instructions.md with workflow context (P0 + EDIT MODE prompts, branch creation, Definition of Done, spec change checklist).
+
+- **Files Changed:**
+  - **Deleted:** 1 file (legacy mobile LineEditor)
+  - **Created:** 3 files (validateEditableLines mobile + web, positional wrapper)
+  - **Modified:** 6 files (2 edit screens mobile, 2 forms web, 1 patchLinesDiff mobile, 3 docs)
+  - **Total:** 10 file changes
+
+- **Contracts Locked:**
+  1. Mobile has ONE LineEditor path (components/LineEditor.tsx, NOT features/_shared)
+  2. Validation centralized: validateEditableLines helper (mobile + web)
+  3. PatchLinesDiff signatures harmonized (positional wrapper for cross-platform parity)
+  4. Status guards documented (PO draft-only, SO multi-status)
+  5. Error UX documented (409 detection, context messages, preserve edits)
+
+- **Verification Evidence:**
+  - ✅ `npm run typecheck` (mobile): PASS — E1, E2, E4 changes
+  - ✅ `npm run typecheck` (web): PASS — E3, E4 changes
+  - ✅ Legacy component deletion: zero broken imports
+  - ✅ Validation helpers: granular per-line error messages
+  - ✅ Signature harmonization: backward compatible, zero call-site changes
+
+- **Status:** ✅ **Complete (Sprint W, 2025-12-30)** — All E1–E5 tasks complete; mobile + web typecheck pass; legacy component removed; validation centralized; signatures harmonized; contracts documented.
+
 ### Mobile Views Management v1 — ✅ Complete (Sprint S, 2025-12-30)
 
 **Epic Summary:** Mobile ViewsManage screen to list/search/filter views and perform rename/delete with safety prompts.
