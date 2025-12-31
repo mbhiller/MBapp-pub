@@ -82,8 +82,9 @@ export function SalesOrderForm({ initialValue, submitLabel = "Save", onSubmit }:
 
       // Validate lines before processing
       const validation = validateEditableLines(lines);
-      if (!validation.ok) {
-        throw new Error(validation.message);
+      if (validation.ok === false) {
+        const { message } = validation;
+        throw new Error(message);
       }
 
       // CRITICAL: Preserve id/cid exactly as provided by LineArrayEditor

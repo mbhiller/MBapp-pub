@@ -85,6 +85,7 @@ export default function RootStack() {
   const t = useTheme();
   return (
     <Stack.Navigator
+      id={undefined}
       screenOptions={({ navigation }) => ({
     headerRight: () => (
       <>

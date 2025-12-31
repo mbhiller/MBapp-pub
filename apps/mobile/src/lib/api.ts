@@ -8,11 +8,15 @@ const env = process.env as Record<string, string | undefined>;
 const extra = (Constants.expoConfig?.extra ?? {}) as Record<string, any>;
 
 export const API_BASE =
+  env.EXPO_PUBLIC_MBAPP_API_BASE ??
+  env.MBAPP_API_BASE ??
   env.EXPO_PUBLIC_API_BASE ??
   (extra.API_BASE as string | undefined) ??
   "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com";
 
 export const TENANT_ID =
+  env.EXPO_PUBLIC_MBAPP_TENANT_ID ??
+  env.MBAPP_TENANT_ID ??
   env.EXPO_PUBLIC_TENANT_ID ??
   (extra.TENANT_ID as string | undefined) ??
   "DemoTenant";

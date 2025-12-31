@@ -3,19 +3,27 @@
 // Adds: auto refresh on 401 in dev, dual header casings, Accept header.
 import type { PatchLinesOp } from "../lib/patchLinesDiff";
 
+const env = process.env as Record<string, string | undefined>;
+
 let API_BASE = (
-  process.env.MBAPP_API_BASE ??
-  process.env.EXPO_PUBLIC_API_BASE ??
+  env.EXPO_PUBLIC_MBAPP_API_BASE ??
+  env.MBAPP_API_BASE ??
+  env.EXPO_PUBLIC_API_BASE ??
   "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com"
 ).replace(/\/+$/, "");
 
 let TENANT =
-  process.env.MBAPP_TENANT_ID ??
-  process.env.EXPO_PUBLIC_TENANT_ID ??
+  env.EXPO_PUBLIC_MBAPP_TENANT_ID ??
+  env.MBAPP_TENANT_ID ??
+  env.EXPO_PUBLIC_TENANT_ID ??
   "DemoTenant";
 
 let _bearerToken: string | null =
-  (process.env.MBAPP_BEARER as string | undefined) ?? null;
+  (env.MBAPP_BEARER as string | undefined) ?? null;
+
+if (__DEV__) {
+  console.log("[api/client] resolved config", { API_BASE, TENANT, hasBearer: Boolean(_bearerToken) });
+}
 
 export function setApiBase(url: string) { if (url) API_BASE = url.replace(/\/+$/, ""); }
 export function setTenantId(tenantId: string) { if (tenantId) TENANT = tenantId; }
@@ -23,6 +31,7 @@ export function setBearerToken(token: string | null | undefined) { _bearerToken 
 export function getBearerToken(): string | null { return _bearerToken; }
 export function clearBearerToken() { _bearerToken = null; }
 export function getTenantId(): string | undefined { return TENANT; }
+export function getApiBase(): string { return API_BASE; }
 
 export function _debugConfig() {
   return { API_BASE, TENANT, hasBearer: Boolean(_bearerToken) };
