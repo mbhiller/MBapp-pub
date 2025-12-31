@@ -33,7 +33,7 @@ export type CreateWorkspacePayload = {
   views?: string[];
 };
 
-export type PatchWorkspacePayload = Partial<CreateWorkspacePayload>;
+export type PatchWorkspacePayload = Partial<CreateWorkspacePayload> & { ownerId?: string };
 
 /**
  * Convert WorkspaceListParams to Record<string,string> for query params.

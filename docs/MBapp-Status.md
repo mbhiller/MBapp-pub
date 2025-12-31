@@ -8,6 +8,11 @@
 
 ## Current State Summary
 
+### Workspaces CI & Contract Sync — ✅ Complete (Sprint Q, 2025-12-30)
+
+- CI smoke manifest now runs `smoke:workspaces:mixed-dedupe` and `smoke:workspaces:get-fallback` alongside existing views/workspaces flows.
+- Foundations corrected workspace/view contracts: View.name limit is 1–120; Workspace.name limit is 1–200; docs call out workspace-first + legacy fallback, mixed-source dedupe, dual-write flag semantics, and pagination aliasing (`cursor` | `next` for workspaces; `cursor` for views).
+
 ### Line Identity Canonicalization (id vs. lineId) — ✅ Complete (Sprint O, 2025-12-29)
 
 **Epic Summary:** Systematic migration of line identity from deprecated `lineId` to canonical `id` across API, web, and mobile. Backward-compatible 1-sprint transition window with structured logging.
