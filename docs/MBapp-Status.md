@@ -209,14 +209,24 @@
 - **Caveat:** Backend enforces name length ≤120 chars while spec allows 200; workspaces are stored as type="view" aliases with `views: string[]` memberships. Backend update is PUT-only today (PATCH not wired).
 
 ### Backorder → PO → Receive Loop Polish — ✅ Complete (Sprint I + Sprint J)
+
+**Sprint I (2025-12-28):** Backorder visibility and fulfillment tracking.
 - **MOQ Bump Fix:** suggest-po now applies minOrderQty regardless of vendor source (override/backorder derivation).
 - **Runtime Tracking:** BackorderRequest schema includes `fulfilledQty` and `remainingQty` (nullable, server-maintained during PO receive).
 - **Visibility:** Web/Mobile SO detail shows backorder status breakdown (open/converted/fulfilled/ignored); PO detail shows per-line backorder linkage.
 - **Detail Pages:** Web `/backorders/:id` and Mobile `BackorderDetail` screens show full context (SO/item/vendor links), fulfillment progress, and ignore action.
 - **Navigation:** SO detail badges link to filtered backorders; PO chips link to backorder detail; list rows navigate to detail.
 - **Mobile Ignore:** BackordersListScreen supports bulk Ignore action to remove unwanted backorders.
-- **Smoke Coverage:** Tests for ignore action, partial fulfillment, and MOQ bumping; full CI suite passing (28 tests).
+- **Smoke Coverage:** Tests for ignore action, partial fulfillment, and MOQ bumping.
 - **Key Endpoints:** `/objects/backorderRequest/search` (status breakdown), `/purchasing/suggest-po` (MOQ-aware), PO receive (fulfillment tracking), `:ignore` action.
+
+**Sprint J (2025-12-30):** Suggest PO → Create PO workflow on web and mobile.
+- **Web Suggest PO Workflow:** Backorder detail/list → "Suggest PO" button → SuggestPurchaseOrdersPage displays suggest-po results (drafts with vendor/lines/MOQs, skipped reasons) → multi-select drafts → "Create PO(s)" button → POST /purchasing/po:create-from-suggestion → navigate to first created PO detail.
+- **Mobile Suggest PO Workflow:** BackorderDetail → "Suggest PO" button → SuggestPurchaseOrdersScreen displays drafts/skipped with DraftCards/SkippedCards → multi-select drafts → "Create PO(s)" → saves from suggestion → renders response ids as tappable chips for navigation.
+- **Shared API Helpers:** Web and mobile now have typed suggest-po and po:create-from-suggestion helpers (`suggestPurchaseOrders`, `createPurchaseOrdersFromSuggestion` on web; equivalent actions in mobile).
+- **Auth Wiring:** Purchasing helpers accept `{token?, tenantId?}` options; `req()` helper wires both Authorization header (Bearer token) and x-tenant-id header (tenant context), fixed tenant header mismatch on create-from-suggestion.
+- **Type Safety:** PurchaseOrderDraft type unified across web pages/modals (removed duplicate definitions); all calls properly typed without casts.
+- **Smoke Posture:** 31/31 CI tests passing (no new regressions; suggest-po workflow validated via manual end-to-end).
 
 ### Patch-lines Parity (SO/PO) — ✅ Complete (Sprint G)
 - **Endpoints:** `/sales/so/{id}:patch-lines` and `/purchasing/po/{id}:patch-lines` implemented with identical sequencing.
