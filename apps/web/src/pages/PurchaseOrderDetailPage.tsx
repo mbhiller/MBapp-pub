@@ -14,6 +14,8 @@ import {
 import { listInventoryMovements, type InventoryMovement } from "../lib/inventoryMovements";
 import { friendlyPurchasingError } from "../lib/purchasingErrors";
 import LocationPicker from "../components/LocationPicker";
+import { resolveScan } from "@mbapp/scan";
+import { resolveEpc } from "../lib/epc";
 
 const RECEIVE_DEFAULTS_PREFIX = "mbapp_receive_defaults_";
 
@@ -133,6 +135,17 @@ export default function PurchaseOrderDetailPage() {
   const [activityCollapsed, setActivityCollapsed] = useState(true);
   const [selectedActivityLineId, setSelectedActivityLineId] = useState<string>("all");
   const [receiveDefaults, setReceiveDefaults] = useState<{ lot?: string; locationId?: string }>({});
+
+  // Scan-to-receive state
+  const [scanInput, setScanInput] = useState<string>("");
+  const [scanLoading, setScanLoading] = useState(false);
+  const [scanMessage, setScanMessage] = useState<string | null>(null);
+  const [pendingReceives, setPendingReceives] = useState<Record<string, number>>({});
+  const [chooser, setChooser] = useState<{
+    open: boolean;
+    candidates?: Array<{ lineId: string; itemId?: string; remaining: number; label?: string }>;
+    pendingScan?: string;
+  }>({ open: false });
 
   useEffect(() => {
     const defaults = loadReceiveDefaults(tenantId);
@@ -614,6 +627,133 @@ export default function PurchaseOrderDetailPage() {
     }));
   };
 
+  // Auto-clear scan message after 2s
+  useEffect(() => {
+    if (!scanMessage) return;
+    const t = setTimeout(() => setScanMessage(null), 2000);
+    return () => clearTimeout(t);
+  }, [scanMessage]);
+
+  // Scan-to-receive: Add handler
+  const handleScanAdd = async () => {
+    const code = scanInput.trim();
+    if (!code) return;
+
+    setScanLoading(true);
+    setScanMessage(null);
+
+    try {
+      const result = await resolveScan(code, {
+        resolveEpc: (epc) => resolveEpc(epc, { token, tenantId }),
+      });
+
+      if (result.ok === false) {
+        setScanMessage(`EPC not found: ${result.error.reason ?? "unknown"}`);
+        return;
+      }
+
+      const { itemId } = result.value;
+
+      // Find matching lines with remaining qty > 0
+      const candidates = (po?.lines ?? [])
+        .map((ln: any) => {
+          const lineId = getPoLineId(ln);
+          const lnItemId = ln?.itemId != null ? String(ln.itemId) : undefined;
+          const orderedQty = ln?.qty ?? ln?.orderedQty ?? 0;
+          const receivedQty = ln?.receivedQty ?? 0;
+          const remaining = Math.max(0, orderedQty - receivedQty);
+          const label = ln?.productName || ln?.itemId || ln?.productId || lineId;
+          return { lineId, itemId: lnItemId, remaining, label };
+        })
+        .filter(
+          (c) =>
+            !!c.lineId &&
+            !!c.itemId &&
+            String(c.itemId).toLowerCase() === String(itemId).toLowerCase() &&
+            c.remaining > 0
+        );
+
+      if (candidates.length === 0) {
+        setScanMessage("Not on this PO (or fully received)");
+        return;
+      }
+
+      if (candidates.length === 1) {
+        const { lineId, remaining } = candidates[0];
+        const current = pendingReceives[lineId] ?? 0;
+        const next = Math.min(current + 1, remaining);
+        setPendingReceives((prev) => ({ ...prev, [lineId]: next }));
+        setScanMessage(`Staged +1 on line ${lineId}`);
+        setScanInput("");
+        return;
+      }
+
+      // Multiple candidates: open chooser
+      setChooser({ open: true, candidates, pendingScan: code });
+      setScanMessage("Multiple matches – choose a line");
+    } catch (err: any) {
+      const code = err?.status || err?.code || "UNKNOWN_ERROR";
+      setScanMessage(`Scan resolution error (${code})`);
+    } finally {
+      setScanLoading(false);
+    }
+  };
+
+  const handleChooseLine = (choice: { lineId: string; remaining: number }) => {
+    const { lineId, remaining } = choice;
+    const current = pendingReceives[lineId] ?? 0;
+    const next = Math.min(current + 1, remaining);
+    setPendingReceives((prev) => ({ ...prev, [lineId]: next }));
+    setScanMessage(`Staged +1 on line ${lineId}`);
+    setChooser({ open: false });
+  };
+
+  const handleClearPending = () => {
+    setPendingReceives({});
+    setScanMessage(null);
+  };
+
+  const handleSubmitStaged = async () => {
+    const entries = Object.entries(pendingReceives).filter(([, qty]) => qty > 0);
+    if (entries.length === 0) {
+      setActionError("No staged receives to submit.");
+      return;
+    }
+
+    if (!id) return;
+
+    setActionLoading(true);
+    setActionError(null);
+    setActionInfo(null);
+
+    const linesToReceive = entries.map(([lineId, qty]) => ({
+      lineId: lineId,
+      deltaQty: qty,
+      ...(receiveDefaults.lot ? { lot: receiveDefaults.lot } : {}),
+      ...(receiveDefaults.locationId ? { locationId: receiveDefaults.locationId } : {}),
+    }));
+
+    try {
+      const uuid =
+        typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      const idempotencyKey = `web-scan-receive-${id}-${uuid}`;
+
+      await receivePurchaseOrder(id, { lines: linesToReceive }, { token: token || undefined, tenantId, idempotencyKey });
+
+      setPendingReceives({});
+      setScanInput("");
+      setScanMessage(null);
+      await fetchPo();
+      setActionInfo(`Received ${linesToReceive.length} line(s) via scan.`);
+    } catch (err: any) {
+      setActionError(renderFriendly(err));
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   if (loading) return <div>Loading...</div>;
   if (error) {
     return (
@@ -817,6 +957,144 @@ export default function PurchaseOrderDetailPage() {
             <button onClick={handleClearDefaults} disabled={actionLoading}>
               Clear defaults
             </button>
+          </div>
+        </div>
+      )}
+
+      {canReceive && (
+        <div style={{ display: "grid", gap: 12, padding: 16, background: "#f0f8ff", borderRadius: 4, border: "1px solid #b3d9ff" }}>
+          <h3 style={{ margin: 0 }}>Scan to Receive (Manual Entry)</h3>
+
+          {scanMessage && (
+            <div style={{ padding: 8, background: "#e3f2fd", color: "#0d47a1", borderRadius: 4, fontSize: 14 }}>
+              {scanMessage}
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+            <div style={{ display: "grid", gap: 4, flex: 1, maxWidth: 400 }}>
+              <label style={{ fontWeight: 600 }}>Paste EPC or barcode</label>
+              <input
+                type="text"
+                value={scanInput}
+                onChange={(e) => setScanInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    handleScanAdd();
+                  }
+                }}
+                placeholder="EPC, QR code, or item ID"
+                disabled={scanLoading || actionLoading}
+                style={{ padding: 8, fontSize: 14 }}
+              />
+            </div>
+            <button onClick={handleScanAdd} disabled={scanLoading || actionLoading || !scanInput.trim()}>
+              {scanLoading ? "Resolving..." : "Add"}
+            </button>
+          </div>
+
+          {Object.keys(pendingReceives).length > 0 && (
+            <div style={{ display: "grid", gap: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <strong>Staged Receives ({Object.keys(pendingReceives).length} line(s))</strong>
+                <button onClick={handleClearPending} disabled={actionLoading} style={{ fontSize: 12, padding: "4px 8px" }}>
+                  Clear All
+                </button>
+              </div>
+              <div style={{ display: "grid", gap: 4 }}>
+                {Object.entries(pendingReceives).map(([lineId, qty]) => {
+                  const line = po?.lines?.find((l: any) => getPoLineId(l) === lineId);
+                  const itemId = line?.itemId ?? line?.productId ?? "—";
+                  const orderedQty = line?.qty ?? line?.orderedQty ?? 0;
+                  const receivedQty = line?.receivedQty ?? 0;
+                  const remaining = Math.max(0, orderedQty - receivedQty);
+                  return (
+                    <div
+                      key={lineId}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        padding: 8,
+                        background: "#fff",
+                        borderRadius: 4,
+                        border: "1px solid #ddd",
+                      }}
+                    >
+                      <div>
+                        <strong>{itemId}</strong> (Line {lineId})
+                      </div>
+                      <div style={{ fontSize: 14, color: "#4caf50", fontWeight: 600 }}>
+                        +{qty} (remaining: {remaining})
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <button onClick={handleSubmitStaged} disabled={actionLoading} style={{ fontWeight: 600, padding: "10px 16px" }}>
+                {actionLoading ? "Submitting..." : `Submit Staged (${Object.keys(pendingReceives).length} line(s))`}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {chooser.open && chooser.candidates && chooser.candidates.length > 0 && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+          onClick={() => setChooser({ open: false })}
+        >
+          <div
+            style={{
+              background: "#fff",
+              padding: 24,
+              borderRadius: 8,
+              maxWidth: 500,
+              width: "90%",
+              maxHeight: "80vh",
+              overflow: "auto",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ marginTop: 0 }}>Choose Line</h3>
+            <p style={{ color: "#666", fontSize: 14 }}>Multiple lines match this item. Select which line to receive:</p>
+            <div style={{ display: "grid", gap: 8 }}>
+              {chooser.candidates.map((c) => (
+                <button
+                  key={c.lineId}
+                  onClick={() => handleChooseLine(c)}
+                  style={{
+                    textAlign: "left",
+                    padding: 12,
+                    border: "1px solid #ddd",
+                    borderRadius: 4,
+                    background: "#f9f9f9",
+                    cursor: "pointer",
+                  }}
+                >
+                  <div style={{ fontWeight: 600 }}>{c.label || c.itemId}</div>
+                  <div style={{ fontSize: 12, color: "#666" }}>
+                    Line {c.lineId} · {c.remaining} remaining
+                  </div>
+                </button>
+              ))}
+            </div>
+            <div style={{ marginTop: 16, textAlign: "right" }}>
+              <button onClick={() => setChooser({ open: false })} style={{ padding: "8px 16px" }}>
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}

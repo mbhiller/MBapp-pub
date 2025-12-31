@@ -11,7 +11,12 @@
     "skipLibCheck": true,
     "allowJs": false,
     "resolveJsonModule": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "baseUrl": "../..",
+    "paths": {
+      "@mbapp/scan": ["packages/mbapp-scan/src/index.ts"],
+      "@mbapp/scan/*": ["packages/mbapp-scan/src/*"]
+    }
   },
   "include": ["src", "src/vite-env.d.ts"]
 }
