@@ -1531,6 +1531,7 @@ function ErrorBoundary({ children }: { children: React.ReactNode }) {
 - **Status + guard correctness:** Partial receive transitions to `partially-received` (API hyphenated); Close requires `fulfilled` (API 409 otherwise); Cancel only for `draft|submitted`; Receive blocked after `closed|cancelled` with 409 `PO_STATUS_NOT_RECEIVABLE`; Vendor guard supported (FEATURE_ENFORCE_VENDOR_ROLE, non-prod override header X-Feature-Enforce-Vendor: 1) and validated via smoke.
 - **Receiving fidelity:** Per-line receive payload supports `{ lineId, deltaQty, lot?, locationId? }`; lots/locations persist into inventory movements and can be queried with `GET /inventory/{itemId}/movements?refId={poId}&poLineId={lineId}`.
 - **Smokes (opt-in proofs):** `smoke:close-the-loop`, `smoke:close-the-loop-multi-vendor`, `smoke:close-the-loop-partial-receive`, `smoke:vendor-guard-enforced`, `smoke:po-receive-after-close-guard`, `smoke:po-receive-after-cancel-guard`, `smoke:po-receive-lot-location-assertions`.
+- **Web scan-to-receive (Sprint S, 2025-12-31):** Manual paste workflow integrated into PO detail uses `@mbapp/scan` resolver + `/epc/resolve` endpoint to classify and resolve EPCs to itemIds. Matching lines with remaining qty are candidates; single match stages immediately, multi-match shows modal chooser. Staged receives batch-submit with lot/locationId defaults from page state. Workflow: paste → resolve → stage → submit batch. Uses existing `receivePurchaseOrder` API and error patterns.
 
 **End of Report**
 

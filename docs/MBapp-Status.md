@@ -8,6 +8,20 @@
 
 ## Current State Summary
 
+### Web Scan-to-Receive on PO Detail — ✅ Complete (Sprint S, 2025-12-31)
+
+**Epic Summary:** Add manual scan-to-receive workflow to web PurchaseOrderDetailPage, bringing parity with mobile PO detail receive UX.
+
+- **E1 (Setup):** [apps/web/tsconfig.json](../apps/web/tsconfig.json) configured with `@mbapp/scan` path alias to enable clean imports of shared scan resolver.
+- **E2 (EPC Helper):** [apps/web/src/lib/epc.ts](../apps/web/src/lib/epc.ts) created to wrap `GET /epc/resolve` endpoint with apiFetch (tenant/token headers injected). Returns `{ itemId, status? }` or throws on 404/missing itemId.
+- **E3 (UI + Handlers):** [apps/web/src/pages/PurchaseOrderDetailPage.tsx](../apps/web/src/pages/PurchaseOrderDetailPage.tsx) extended with:
+  - **State:** `scanInput`, `scanLoading`, `scanMessage` (auto-clears after 2s), `pendingReceives` (Record<lineId, qty>), `chooser` (multi-match modal)
+  - **Handlers:** `handleScanAdd` (paste EPC → resolveScan → resolveEpc → find candidates → stage or chooser), `handleChooseLine` (select from multi-match), `handleClearPending`, `handleSubmitStaged` (batch receive via receivePurchaseOrder with lot/locationId defaults)
+  - **UI:** Scan input field with Enter-key support, status banner, staged list with remaining qty, Submit button, modal chooser overlay
+- **Verification:** ✅ `npm run typecheck` (web clean), ✅ `npm run smoke:po:receive-with-location-counters` (receive payload correct, status/counters verified)
+- **Workflow:** Paste EPC/barcode → resolve item → find matching PO lines with remaining qty → stage +1 (capped at remaining) → submit batch with apply-once defaults → PO refreshes. Multi-line items trigger modal chooser; single candidate stages immediately.
+- **Status:** ✅ **Complete** — All E1–E3 tasks done; integrated with existing receivePurchaseOrder infrastructure and error handling; feature flag ready for UI toggle if needed.
+
 ### Workspaces CI & Contract Sync — ✅ Complete (Sprint Q, 2025-12-30)
 
 - CI smoke manifest now runs `smoke:workspaces:mixed-dedupe` and `smoke:workspaces:get-fallback` alongside existing views/workspaces flows.
