@@ -4,17 +4,9 @@ import { SalesOrderForm, type SalesOrderFormValue, type SalesOrderLineInput } fr
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
 import { computePatchLinesDiff, SALES_ORDER_PATCHABLE_LINE_FIELDS } from "../lib/patchLinesDiff";
+import { formatPatchLinesError } from "../lib/patchLinesErrors";
 
 type SalesOrder = SalesOrderFormValue & { id: string; status?: string };
-
-function formatError(err: unknown): string {
-  const e = err as any;
-  const parts: string[] = [];
-  if (e?.status) parts.push(`status ${e.status}`);
-  if (e?.code) parts.push(`code ${e.code}`);
-  if (e?.message) parts.push(e.message);
-  return parts.join(" · ") || "Request failed";
-}
 
 export default function EditSalesOrderPage() {
   const { id } = useParams<{ id: string }>();
@@ -49,7 +41,10 @@ export default function EditSalesOrderPage() {
           setOriginalLines(orig);
         }
       } catch (err) {
-        if (!cancelled) setError(formatError(err));
+        if (!cancelled) {
+          const e = err as any;
+          setError(e?.message || "Failed to load order");
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -83,7 +78,8 @@ export default function EditSalesOrderPage() {
       });
       navigate(`/sales-orders/${id}`);
     } catch (err) {
-      setError(formatError(err));
+      // On error: show message but KEEP local edits in UI (don't navigate away or wipe)
+      setError(formatPatchLinesError(err, "SO"));
     }
   };
 

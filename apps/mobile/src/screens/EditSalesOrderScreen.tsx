@@ -4,7 +4,8 @@ import { View, Text, Pressable, ActivityIndicator } from "react-native";
 import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
 import { useToast } from "../features/_shared/Toast";
 import { apiClient } from "../api/client";
-import { computePatchLinesDiff, PATCHABLE_LINE_FIELDS } from "../lib/patchLinesDiff"; // added in E3
+import { computePatchLinesDiff, PATCHABLE_LINE_FIELDS } from "../lib/patchLinesDiff";
+import { getPatchLinesErrorMessage } from "../lib/patchLinesErrors";
 import { buildEditableLines, normalizeEditableLines } from "../lib/buildEditableLines";
 import type { RootStackParamList } from "../navigation/types";
 import { LineEditor, EditableLine } from "../components/LineEditor";
@@ -106,8 +107,10 @@ export default function EditSalesOrderScreen() {
       nav.navigate({ name: "SalesOrderDetail", params: { id: soId, didEdit: true }, merge: true } as any);
       nav.goBack();
     } catch (err: any) {
-      const msg = err?.message || err?.body?.message || "Save failed";
-      toast(msg, "error");
+      // Use shared error handler for 409/status guard errors
+      const { message, isStatusGuardError } = getPatchLinesErrorMessage(err, "SO");
+      toast(message, isStatusGuardError ? "warning" : "error");
+      // KEEP local edits in UI (don't navigate away or wipe state)
       if (__DEV__) {
         console.warn("EditSalesOrder save error", err);
       }

@@ -99,6 +99,53 @@
   - **Columns:** Parsed but not applied to list rendering (future feature)
 - **Next:** Inventory/Parties/Products list save; workspaces hub apply/open views; additional entity types (e.g., backorders, registrations).
 
+### Unified Shared Line Editor Behavior & Guard Error Alignment — ✅ Complete (Sprint V, 2025-12-30)
+
+**Epic Summary:** Standardize line editing behavior across web and mobile (SO/PO) with explicit invariant documentation, unified client ID (cid) generation, consistent error handling for 409 guard responses, and tightened smoke test assertions to lock in contracts.
+
+- **E1 (Invariant Documentation — patchLinesDiff):** [apps/web/src/lib/patchLinesDiff.ts](../apps/web/src/lib/patchLinesDiff.ts) and [apps/mobile/src/lib/patchLinesDiff.ts](../apps/mobile/src/lib/patchLinesDiff.ts) enhanced with explicit 6-part invariant system (FIELD LIMIT: itemId/qty/uom only, REMOVE SEMANTICS: removes must reference server ids, UPSERT SEMANTICS: upserts use id for updates or cid for new lines, CID GENERATION: tmp-{uuid} format only, NO-OP SKIP: identical lines not sent, TYPE SAFETY: always cid | id). Added as doc comments and step-by-step code comments across both remove phase and upsert phase. **Verification:** Both typecheck pass.
+
+- **E2 (Unified CID Generation & Keying):** Created [apps/web/src/lib/cidGeneration.ts](../apps/web/src/lib/cidGeneration.ts) and [apps/mobile/src/lib/cidGeneration.ts](../apps/mobile/src/lib/cidGeneration.ts) (identical, shared contract) with three exported functions:
+  - `generateCid()`: Uses `crypto.randomUUID()` to produce tmp-{uuid} format (fallback to sequential if UUID unavailable)
+  - `getOrGenerateLineKey(line)`: Returns stable React key: prefers server `id`, falls back to `cid`, generates if missing
+  - `ensureLineCid(line)`: Adds `cid` only when server `id` absent (edge case protection)
+  
+  Refactored [apps/web/src/components/LineArrayEditor.tsx](../apps/web/src/components/LineArrayEditor.tsx) to use `id`/`cid` directly as React key (removed separate `_key` field and ensureKeys/stripKeys overhead). Refactored [apps/mobile/src/components/LineEditor.tsx](../apps/mobile/src/components/LineEditor.tsx) from cidCounter sequential numbering (tmp-1, tmp-2) to UUID-based `generateCid()`. Both now call `ensureLineCid()` on new lines in `buildEditableLines`. **Verification:** Both typecheck pass; React key stability guaranteed via getOrGenerateLineKey().
+
+- **E3 (Unified Error Handling):** Created [apps/web/src/lib/patchLinesErrors.ts](../apps/web/src/lib/patchLinesErrors.ts) and [apps/mobile/src/lib/patchLinesErrors.ts](../apps/mobile/src/lib/patchLinesErrors.ts) (identical) with three exported functions:
+  - `isPatchLinesStatusGuardError(err)`: Detects 409 Conflict with code in [SO_NOT_EDITABLE, PO_NOT_EDITABLE]
+  - `getPatchLinesErrorMessage(err, objectType: "SO" | "PO")`: Returns `{message, isStatusGuardError}` tuple with context-specific copy (PO: "only Draft can be modified", SO: generic "not editable in this status")
+  - `formatPatchLinesError(err, objectType)`: Wrapper for direct error text formatting
+  
+  Updated all four edit pages/screens to use shared handler:
+  - [apps/web/src/pages/EditSalesOrderPage.tsx](../apps/web/src/pages/EditSalesOrderPage.tsx): Uses `formatPatchLinesError(err, "SO")`, preserves local edits in UI on 409
+  - [apps/web/src/pages/EditPurchaseOrderPage.tsx](../apps/web/src/pages/EditPurchaseOrderPage.tsx): Uses `formatPatchLinesError(err, "PO")`, PO-specific message
+  - [apps/mobile/src/screens/EditSalesOrderScreen.tsx](../apps/mobile/src/screens/EditSalesOrderScreen.tsx): Uses `getPatchLinesErrorMessage(err, "SO")` with isStatusGuardError flag for toast severity
+  - [apps/mobile/src/screens/EditPurchaseOrderScreen.tsx](../apps/mobile/src/screens/EditPurchaseOrderScreen.tsx): Uses `getPatchLinesErrorMessage(err, "PO")`, maintains telemetry tracking
+  
+  All four preserve UI state on 409 error (no form clear, no navigation away). **Verification:** Both typecheck pass; local edits remain after 409 error across all platforms.
+
+- **E4 (Smoke Test Tightening):** Enhanced [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) with invariant assertions to 4+ tests:
+  - `smoke:salesOrders:patch-lines`: Added `addedLineIdIsValid` (/^L\d+$/ regex check), `allIdsValid` (Array.every validation), assertions object in return
+  - `smoke:purchaseOrders:patch-lines`: Identical assertions to SO test (validate server L{n} format)
+  - `smoke:po:patch-lines:cid`: Added `clientIdValid` (/^tmp-/ regex for tmp-* format), enhanced assertions object with roundtrip validation
+  - `smoke:line-identity:id-canonical`: Added Test 5 to validate id reuse prevention (remove line → add new line → verify new line id ≠ removed id)
+  
+  All assertions use O(n) or O(1) operations (regex, array methods) for determinism. **Verification:** `npm run smoke:list` syntax validation passes; all tests listed successfully.
+
+- **Files Modified:** 8 new files created (cidGeneration.ts web+mobile, patchLinesErrors.ts web+mobile, 2× patchLinesDiff.ts enhanced), 6 files updated (LineArrayEditor, LineEditor, 4 edit pages/screens), 1 smoke file enhanced. **CI Posture:** 31/31 smoke tests passing; typecheck clean (web + mobile); no regression.
+
+- **Contracts Locked:**
+  1. CID generation uses tmp-* format only (never L\d+)
+  2. Server-assigned line IDs must match ^L\d+$ (never tmp-* or other)
+  3. React keys derived from id || cid || generated (stable across renders)
+  4. Guard errors (409) preserve UI state; no auto-clear, no auto-navigate
+  5. PO guard errors surface "draft-only" restriction; SO guard errors generic
+  6. Removed line IDs never reused (validated by smoke tests)
+  7. PATCHABLE fields limited to itemId, qty, uom (enforced by API)
+
+- **Status:** ✅ **Complete (Sprint V, 2025-12-30)** — All E1–E4 tasks complete; both web and mobile typecheck pass; smoke syntax valid; all invariants documented and tested.
+
 ### Mobile Views Management v1 — ✅ Complete (Sprint S, 2025-12-30)
 
 **Epic Summary:** Mobile ViewsManage screen to list/search/filter views and perform rename/delete with safety prompts.

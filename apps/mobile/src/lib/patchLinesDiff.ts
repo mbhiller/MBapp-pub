@@ -1,47 +1,61 @@
-// apps/mobile/src/lib/patchLinesDiff.ts
-// Mobile copy of web patchLinesDiff: compute minimal ops between original and current lines.
+/**
+ * Compute minimal patch-lines operations for SO/PO draft edits.
+ * Returns ops matching the `/so/{id}:patch-lines` and `/po/{id}:patch-lines` request contract.
+ *
+ * INVARIANTS (enforced by all implementations: web, mobile):
+ * 1. FIELD LIMIT: Only itemId, qty, uom are patchable (schema-defined editable set)
+ * 2. REMOVE SEMANTICS: Remove ops always use id (never cid) when server id exists
+ * 3. UPSERT SEMANTICS: Upsert uses id for existing lines, cid for new lines
+ * 4. CID GENERATION: Clients assign tmp-* cids for new lines only; never fabricate L{n} ids
+ * 5. NO-OP SKIP: Updates with no field changes are omitted from ops
+ * 6. TYPE SAFETY: PatchLinesOp types match backend request schema
+ */
 
 export type PatchLinesOp = {
   op: "upsert" | "remove";
-  id?: string;
-  cid?: string;
-  patch?: Record<string, any>;
+  id?: string;     // Server-assigned line id (stable L{n} pattern); used for existing lines
+  cid?: string;    // Client-assigned temporary id (tmp-* prefix); used only for new unsaved lines
+  patch?: Record<string, any>; // Partial update; fields limited to itemId/qty/uom
 };
 
 export type LineWithId = {
-  id?: string;
-  cid?: string; // client-only id for new lines
-  itemId?: string;
-  qty?: number;
-  uom?: string;
-  [key: string]: any;
+  id?: string;     // Server-assigned stable id (L{n})
+  cid?: string;    // Client-assigned temporary id (tmp-*); not sent to API
+  itemId?: string; // Editable
+  qty?: number;    // Editable
+  uom?: string;    // Editable
+  [key: string]: any; // Other fields (not patchable)
 };
 
+// Patchable fields: explicitly limited to prevent accidental data loss
 export const PATCHABLE_LINE_FIELDS = ["itemId", "qty", "uom"] as const;
 export const SALES_ORDER_PATCHABLE_LINE_FIELDS = PATCHABLE_LINE_FIELDS;
 export const PURCHASE_ORDER_PATCHABLE_LINE_FIELDS = PATCHABLE_LINE_FIELDS;
 
-// Detect client-only temp ids
+/** Detect client-only temporary IDs (tmp-* prefix; never sent as id to API) */
 function isClientOnlyId(id: string | undefined): boolean {
   if (!id) return false;
   const trimmed = String(id).trim();
   return trimmed.startsWith("tmp-");
 }
 
-// Prefer server id; fall back to cid
+/** Stable line key for matching before/after: prefer server id (unless tmp-*), fallback to cid */
 function getLineKey(ln: LineWithId): string {
   const id = String(ln.id || "").trim();
   const cid = String(ln.cid || "").trim();
+  // Server id takes precedence (unless it's client-only tmp-*)
   if (id && !isClientOnlyId(id)) return id;
+  // Client-only id or cid
   if (cid) return cid;
   if (id) return id;
   return "";
 }
 
 /**
- * Compute patch-lines ops to transform originalLines into editedLines.
- * Mirrors web semantics: existing lines patch by `id`, new lines by `cid`,
- * removes by `id` (or `cid` for unsaved client-only rows), and skips no-op patches.
+ * Shared implementation for mobile (wrapper with named args).
+ * Mirrors web semantics exactly; see web patchLinesDiff.ts for invariant details.
+ *
+ * INVARIANT 1 (FIELD LIMIT): Only fields in patchableFields array are sent.
  *
  * Example (conceptual):
  * - before: [{ id: "L1", itemId: "A", qty: 2, uom: "ea" }]
@@ -78,7 +92,7 @@ export function computePatchLinesDiff(args: {
 
   const ops: PatchLinesOp[] = [];
 
-  // Removes: any original missing from current
+  // Step 1: Removes (INVARIANT 2: Remove ops always use id, never cid, for server rows)
   for (const [okey, oline] of origByKey.entries()) {
     if (!currByKey.has(okey)) {
       const oid = String(oline.id || "").trim();
@@ -91,7 +105,11 @@ export function computePatchLinesDiff(args: {
     }
   }
 
-  // Upserts
+  // Step 2: Upserts
+  // INVARIANT 1 (FIELD LIMIT): Only patchableFields sent in patch.
+  // INVARIANT 3 (UPSERT ID): Existing lines use id; new lines use cid.
+  // INVARIANT 4 (CID GENERATION): Clients assign tmp-* only; never fabricate L{n}.
+  // INVARIANT 5 (NO-OP SKIP): Omit patch if no field changes.
   for (const ln of editedLines || []) {
     const key = getLineKey(ln);
     const inOriginal = key && origByKey.has(key);
@@ -103,6 +121,7 @@ export function computePatchLinesDiff(args: {
 
     const patch: Record<string, any> = {};
     if (inOriginal && base) {
+      // Existing line: only include fields that changed (INVARIANT 5: no-op skip)
       for (const field of patchableFields) {
         const before = (base as any)[field];
         const after = (ln as any)[field];
@@ -110,23 +129,26 @@ export function computePatchLinesDiff(args: {
         if (changed) patch[field] = after;
       }
     } else {
+      // New line: include all defined patchable fields (INVARIANT 1: only patchableFields)
       for (const field of patchableFields) {
         const val = (ln as any)[field];
         if (val !== undefined && val !== null) patch[field] = val;
       }
     }
 
-    if (Object.keys(patch).length === 0) continue;
+    if (Object.keys(patch).length === 0) continue; // INVARIANT 5: skip no-ops
 
     const op: PatchLinesOp = { op: "upsert", patch };
 
     if (inOriginal) {
+      // INVARIANT 3: Existing lines use id (prefer server id if not tmp-*)
       if (lineId && !isClientOnlyId(lineId)) {
         op.id = lineId;
       } else if (lineCid || (lineId && isClientOnlyId(lineId))) {
         op.cid = lineCid || lineId;
       }
     } else {
+      // INVARIANT 3: New lines use cid (never invent server ids per INVARIANT 4)
       if (lineCid) {
         op.cid = lineCid;
       } else if (lineId && isClientOnlyId(lineId)) {

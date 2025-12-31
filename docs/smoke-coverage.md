@@ -1,4 +1,4 @@
-# Smoke Test Coverage (Sprint O, 2025-12-30)
+# Smoke Test Coverage (Sprint V, 2025-12-30)
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Status/Working](MBapp-Status.md) · [Foundations](MBapp-Foundations.md) · [Cadence](MBapp-Cadence.md)  
 **Last Updated:** 2025-12-30
@@ -11,19 +11,25 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 
 **CI Smoke Manifest:** The definitive list of tests run in CI is maintained in [ops/ci-smokes.json](../ops/ci-smokes.json). Additional flows exist in `ops/smoke/smoke.mjs` but are opt-in only. CI includes both `smoke:views:crud` and `smoke:workspaces:list`.
 
-**CI-covered patch-lines flows (Sprint G):**
-- `smoke:salesOrders:patch-lines` — Creates SO draft with 2 lines (L1, L2), updates L1 qty, removes L2, adds new line; asserts new line receives L3 (not reused L2), `idReused: false`, and all IDs stable.
-- `smoke:purchaseOrders:patch-lines` — Mirrors SO flow for PO; validates identical id assignment behavior, no id reuse, and stable L{n} sequence.
+**CI-covered patch-lines flows (Sprint G, enhanced Sprint V):**
+- `smoke:salesOrders:patch-lines` — Creates SO draft with 2 lines (L1, L2), updates L1 qty, removes L2, adds new line; asserts new line receives L3 (not reused L2), `idReused: false`, and all IDs stable. **Sprint V enhancements:** Added format validation: `addedLineIdIsValid` (regex /^L\d+$/ ensures server assigns L{n} format), `allIdsValid` (Array.every checks all IDs match L{n} pattern). Assertions object returned includes these boolean flags and original idReused check.
+- `smoke:purchaseOrders:patch-lines` — Mirrors SO flow for PO; validates identical id assignment behavior, no id reuse, and stable L{n} sequence. **Sprint V enhancements:** Identical format assertions to SO test (`addedLineIdIsValid`, `allIdsValid` with /^L\d+$/ regex, assertions object in return).
 - `smoke:so:patch-lines:cid` — Adds SO line via `cid`, asserts server assigns `L{n}` id, then patches the same line by `id` and verifies qty update.
-- `smoke:po:patch-lines:cid` — Adds PO line via `cid`, asserts server assigns `L{n}` id, then patches the same line by `id` and verifies qty update (draft-only guard enforced by endpoint).
+- `smoke:po:patch-lines:cid` — Adds PO line via `cid`, asserts server assigns `L{n}` id, then patches the same line by `id` and verifies qty update (draft-only guard enforced by endpoint). **Sprint V enhancements:** Added format validation: `clientIdValid` (regex /^tmp-/ ensures client cid uses tmp-* prefix), enhanced assertions object with roundtrip validation (new line's cid must start with "tmp-", server-assigned id must match /^L\d+/).
 
-**CI-covered Line Identity Canonical flows (Sprint O, 2025-12-29 — E1 through E5):**
+**CI-covered Line Identity Canonical flows (Sprint O, 2025-12-29 — E1 through E5, enhanced Sprint V):**
 - `smoke:line-identity:id-canonical` — Validates that all SO/PO line responses contain canonical `id` field and that action endpoints accept `id` (not `lineId`) in request payloads. Creates PO with 2 lines, receives them using `id` field; creates SO, reserves it using `id` field. Asserts all response lines have `id` and no `lineId` in responses. **Also validates:**
   - API normalizes legacy `lineId` input to `id` and logs structured events
   - Existing action smokes (close-the-loop, partial-receive, backorders-partial-fulfill, outbound-reserve-fulfill-release) all updated to use `id` in payloads
   - Web and mobile clients send canonical `id` in all action payloads (E4, E5)
+  - **Sprint V enhancement:** Test 5 added to validate no-id-reuse (remove existing line → add new line → verify new line id ≠ removed id)
 
-**Guarantee:** Both smokes validate that removed line IDs are **reserved and never reused** by the server, ensuring stable line identity across edits.
+**Guarantee (Sprint V):** All patch-lines smokes validate invariants via deterministic pattern matching:
+  1. Client-generated IDs (cids) must use `tmp-{uuid}` format (never /^L\d+$/)
+  2. Server-assigned IDs must match `/^L\d+$/` pattern (never tmp-* or other formats)
+  3. Removed line IDs are reserved and **never reused** by the server (validated by id-canonical Test 5)
+  4. React keying stable (derived from id || cid || generated)
+  5. All assertions use O(n) or O(1) operations (regex, Array.every, Array.find) for test determinism
 
 **CI-covered Views/Workspaces flows (Sprint H + Sprint Q):**
 - `smoke:views:crud` — Creates view with unique timestamped name, validates CRUD operations (create, list with `q=<exact name>`, get, update, delete). Uses 5-attempt retry with 300ms delay for eventual consistency. **Deterministic:** filters by exact unique name instead of paginating through all views.
