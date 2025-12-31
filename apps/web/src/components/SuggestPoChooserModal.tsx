@@ -1,19 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/http";
-
-export type PurchaseOrderDraft = {
-  id?: string;
-  vendorId?: string;
-  vendorName?: string;
-  lines?: Array<{
-    id?: string;
-    lineId?: string;
-    itemId?: string;
-    qty?: number;
-    [key: string]: any;
-  }>;
-  [key: string]: any;
-};
+import type { PurchaseOrderDraft } from "../lib/api";
 
 export type SkippedReason = {
   backorderRequestId: string;

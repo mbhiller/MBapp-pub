@@ -6,11 +6,42 @@ const TENANT   = import.meta.env.VITE_TENANT ?? "DemoTenant";
 export type Page<T> = { items: T[]; next?: string };
 type Order = "asc" | "desc";
 
-async function req<T = any>(path: string, init: RequestInit = {}): Promise<T> {
+// Lightweight PO types for suggest/create workflows
+export type PurchaseOrderLine = {
+  id?: string;
+  lineId?: string;
+  itemId?: string;
+  qty?: number;
+  receivedQty?: number;
+  backorderRequestIds?: string[];
+  minOrderQtyApplied?: number;
+  adjustedFrom?: number;
+};
+
+export type PurchaseOrderDraft = {
+  id?: string;
+  vendorId: string;
+  status?: string;
+  lines?: PurchaseOrderLine[];
+};
+
+export type SuggestPoResponse = {
+  draft?: PurchaseOrderDraft;
+  drafts?: PurchaseOrderDraft[];
+  skipped?: Array<{ backorderRequestId: string; reason?: string }>;
+};
+
+export type CreateFromSuggestionResponse = {
+  id?: string;
+  ids?: string[];
+};
+
+async function req<T = any>(path: string, init: RequestInit = {}, opts: { token?: string | null; tenantId?: string | null } = {}): Promise<T> {
   const hasBody = init.body != null && init.method && init.method !== "GET";
   const headers: Record<string, string> = {
-    "x-tenant-id": TENANT,
+    "x-tenant-id": opts.tenantId || TENANT,
     ...(hasBody ? { "content-type": "application/json" } : {}),
+    ...(opts.token ? { "Authorization": `Bearer ${opts.token}` } : {}),
     ...(init.headers as Record<string, string> | undefined),
   };
   const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
@@ -63,6 +94,31 @@ export function updateObject<T>(type: string, id: string, patch: any): Promise<T
 
 export function deleteObject(type: string, id: string): Promise<{ ok: true }> {
   return req(`/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+/** ---------- Purchasing helpers (suggest/create from BOs) ---------- **/
+
+export function suggestPurchaseOrders(
+  backorderRequestIds: string[],
+  opts: { vendorId?: string; token?: string | null; tenantId?: string | null } = {}
+): Promise<SuggestPoResponse> {
+  const requests = backorderRequestIds.map((id) => ({ backorderRequestId: id }));
+  const body: Record<string, any> = { requests };
+  if (opts.vendorId) body.vendorId = opts.vendorId;
+  return req(`/purchasing/suggest-po`, { method: "POST", body: JSON.stringify(body) }, { token: opts.token ?? undefined, tenantId: opts.tenantId ?? undefined });
+}
+
+export function createPurchaseOrdersFromSuggestion(
+  draftOrDrafts: PurchaseOrderDraft | PurchaseOrderDraft[],
+  opts: { idempotencyKey?: string; token?: string | null; tenantId?: string | null } = {}
+): Promise<CreateFromSuggestionResponse> {
+  const body = Array.isArray(draftOrDrafts) ? { drafts: draftOrDrafts } : { draft: draftOrDrafts };
+  const headers = opts.idempotencyKey ? { "Idempotency-Key": opts.idempotencyKey } : undefined;
+  return req(`/purchasing/po:create-from-suggestion`, {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers,
+  }, { token: opts.token ?? undefined, tenantId: opts.tenantId ?? undefined });
 }
 
 /** ---------- Legacy helpers kept for existing demo UI ---------- **/
@@ -185,6 +241,8 @@ export const updateResource = (id: string, patch: Partial<Resource>) => updateOb
 export const api = {
   // canonical core
   listObjects, getObject, createObject, updateObject, deleteObject,
+  // purchasing
+  suggestPurchaseOrders, createPurchaseOrdersFromSuggestion,
   // products/clients/resources typed helpers
   listProducts, searchProducts, getProduct, createProduct, updateProduct,
   listClients, getClient, createClient, updateClient,

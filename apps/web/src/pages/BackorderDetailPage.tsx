@@ -152,6 +152,13 @@ export default function BackorderDetailPage() {
     }
   };
 
+  const handleSuggestPo = () => {
+    if (!id) return;
+    navigate(`/backorders/${encodeURIComponent(id)}/suggest-po`, {
+      state: { vendorId: backorder?.preferredVendorId },
+    });
+  };
+
   if (loading) {
     return (
       <div style={{ padding: 24 }}>
@@ -191,6 +198,21 @@ export default function BackorderDetailPage() {
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button onClick={() => navigate("/backorders")}>← Back to List</button>
+          {backorder.status === "open" && (
+            <button
+              onClick={handleSuggestPo}
+              style={{
+                backgroundColor: "#1976d2",
+                color: "#fff",
+                border: "none",
+                padding: "8px 16px",
+                cursor: "pointer",
+                borderRadius: 4,
+              }}
+            >
+              Suggest PO
+            </button>
+          )}
           {backorder.status === "open" && (
             <button
               onClick={handleIgnore}

@@ -9,13 +9,12 @@ import {
   type BackorderRequest,
 } from "../lib/backorders";
 import {
-  suggestPo,
-  createPurchaseOrderFromSuggestion,
+  suggestPurchaseOrders,
+  createPurchaseOrdersFromSuggestion,
   type SuggestPoResponse,
-} from "../lib/purchasing";
-import SuggestPoChooserModal, {
   type PurchaseOrderDraft,
-} from "../components/SuggestPoChooserModal";
+} from "../lib/api";
+import SuggestPoChooserModal from "../components/SuggestPoChooserModal";
 import VendorPicker from "../components/VendorPicker";
 
 function formatError(err: unknown): string {
@@ -253,73 +252,18 @@ export default function BackordersListPage() {
     }
   };
 
-  const handleSuggestPo = async () => {
+  const handleSuggestPo = () => {
     if (selectedIds.length === 0) return;
-    setActionLoading(true);
-    setActionError(null);
-    setActionInfo(null);
-    setSuggestResult(null);
-    try {
-      // Step 1: Convert backorders
-      await Promise.all(
-        selectedIds.map((id) => convertBackorderRequest(id, { token: token || undefined, tenantId }))
-      );
-
-      // Step 2: Suggest PO
-      const res = await suggestPo(
-        { backorderRequestIds: selectedIds, vendorId: vendorFilter.trim() || undefined },
-        { token: token || undefined, tenantId }
-      );
-
-      setSuggestResult(res);
-
-      // Step 3: Handle response
-      const drafts = res.drafts ?? (res.draft ? [res.draft] : []);
-      if (drafts.length === 0) {
-        if (res.skipped && res.skipped.length > 0) {
-          setActionError(
-            `No PO drafts created: all ${res.skipped.length} backorder(s) were skipped (see details below)`
-          );
-        } else {
-          setActionError("No drafts returned from suggest-po");
-        }
-        // Do NOT clear selection here - let user retry after reviewing skipped reasons
-        updateSearchParams({ next: null });
-        setItems([]);
-        await fetchPage();
-        return;
-      }
-
-      // For single draft: create and navigate immediately
-      if (drafts.length === 1) {
-        const createRes = await createPurchaseOrderFromSuggestion(
-          { draft: drafts[0] },
-          { token: token || undefined, tenantId }
-        );
-        const ids = Array.isArray(createRes.ids) ? createRes.ids : (createRes.id ? [createRes.id] : []);
-        const createdId = ids[0];
-        if (createdId) {
-          if (ids.length > 1) setActionInfo(`Created ${ids.length} purchase orders; opening the first.`);
-          setSelected({});
-          updateSearchParams({ next: null });
-          setItems([]);
-          await fetchPage();
-          navigate(`/purchase-orders/${createdId}`);
-        } else {
-          setActionError("PO created but no ID returned");
-        }
-        return;
-      }
-
-      // For multiple drafts: show chooser modal
-      setModalDrafts(drafts);
-      setModalSkipped(res.skipped);
-      setModalOpen(true);
-    } catch (err) {
-      setActionError(formatError(err));
-    } finally {
-      setActionLoading(false);
+    // For now, support single backorder select to reuse SuggestPurchaseOrdersPage flow
+    if (selectedIds.length === 1) {
+      // Navigate to the detail suggest-po page
+      navigate(`/backorders/${encodeURIComponent(selectedIds[0])}/suggest-po`, {
+        state: { vendorId: vendorFilter.trim() || undefined },
+      });
+      return;
     }
+    // Multi-select not yet supported; prompt user
+    setActionError("Please select a single backorder to suggest PO. Multi-select coming soon.");
   };
 
   const allSelected = items.length > 0 && items.every((bo) => selected[bo.id]);
@@ -390,8 +334,8 @@ export default function BackordersListPage() {
             <button onClick={handleBulkIgnore} disabled={actionLoading || selectedIds.length === 0}>
               {actionLoading ? "Ignoring..." : "Bulk Ignore"}
             </button>
-            <button onClick={handleSuggestPo} disabled={actionLoading || selectedIds.length === 0}>
-              {actionLoading ? "Processing..." : "Suggest PO"}
+            <button onClick={handleSuggestPo} disabled={selectedIds.length === 0}>
+              Suggest PO
             </button>
           </div>
         )}
@@ -601,10 +545,7 @@ export default function BackordersListPage() {
           setActionError(null);
           setActionInfo(null);
           try {
-            const createRes = await createPurchaseOrderFromSuggestion(
-              { draft },
-              { token: token || undefined, tenantId }
-            );
+            const createRes = await createPurchaseOrdersFromSuggestion(draft, { token, tenantId });
             const ids = Array.isArray(createRes.ids) ? createRes.ids : (createRes.id ? [createRes.id] : []);
             const createdId = ids[0];
             if (createdId) {
@@ -633,10 +574,7 @@ export default function BackordersListPage() {
           try {
             // Create all selected POs in parallel
             const createResPromises = drafts.map((draft) =>
-              createPurchaseOrderFromSuggestion(
-                { draft },
-                { token: token || undefined, tenantId }
-              )
+              createPurchaseOrdersFromSuggestion(draft, { token, tenantId })
             );
             const createResults = await Promise.all(createResPromises);
 

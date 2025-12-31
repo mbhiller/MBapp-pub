@@ -88,6 +88,14 @@ export default function BackorderDetailScreen() {
     }
   }, [id, backorder?.id]);
 
+  const handleSuggestPo = () => {
+    if (!backorder?.id) return;
+    nav.navigate("SuggestPurchaseOrders", {
+      backorderRequestIds: [backorder.id],
+      vendorId: backorder.preferredVendorId,
+    });
+  };
+
   const handleIgnore = async () => {
     if (!id || backorder?.status !== "open") return;
     
@@ -192,20 +200,33 @@ export default function BackorderDetailScreen() {
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
           <Text style={{ fontSize: 20, fontWeight: "700", color: t.colors.text }}>Backorder Detail</Text>
           {backorder.status === "open" && (
-            <Pressable
-              onPress={handleIgnore}
-              disabled={actionLoading}
-              style={{
-                paddingVertical: 8,
-                paddingHorizontal: 12,
-                backgroundColor: actionLoading ? t.colors.border : "#666",
-                borderRadius: 8,
-              }}
-            >
-              <Text style={{ color: "#fff", fontWeight: "600", fontSize: 12 }}>
-                {actionLoading ? "Ignoring..." : "Ignore"}
-              </Text>
-            </Pressable>
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              <Pressable
+                onPress={handleSuggestPo}
+                style={{
+                  paddingVertical: 8,
+                  paddingHorizontal: 12,
+                  backgroundColor: t.colors.primary,
+                  borderRadius: 8,
+                }}
+              >
+                <Text style={{ color: t.colors.buttonText || "#fff", fontWeight: "600", fontSize: 12 }}>Suggest PO</Text>
+              </Pressable>
+              <Pressable
+                onPress={handleIgnore}
+                disabled={actionLoading}
+                style={{
+                  paddingVertical: 8,
+                  paddingHorizontal: 12,
+                  backgroundColor: actionLoading ? t.colors.border : "#666",
+                  borderRadius: 8,
+                }}
+              >
+                <Text style={{ color: "#fff", fontWeight: "600", fontSize: 12 }}>
+                  {actionLoading ? "Ignoring..." : "Ignore"}
+                </Text>
+              </Pressable>
+            </View>
           )}
         </View>
         <Pressable
