@@ -1,5 +1,5 @@
 import * as React from "react";
-import { View, Text, ActivityIndicator, FlatList, Pressable, Modal, TextInput, ScrollView } from "react-native";
+import { View, Text, ActivityIndicator, FlatList, Pressable, Modal, TextInput, ScrollView, KeyboardAvoidingView, Platform, SafeAreaView } from "react-native";
 import { useNavigation, useRoute, useFocusEffect } from "@react-navigation/native";
 import { useObjects } from "../features/_shared/useObjects";
 import { FEATURE_PO_QUICK_RECEIVE } from "../features/_shared/flags";
@@ -52,7 +52,14 @@ export default function PurchaseOrderDetailScreen() {
   const [scanInput, setScanInput] = React.useState("");
   const [pendingReceives, setPendingReceives] = React.useState<Map<string, number>>(new Map());
   const [scanHistory, setScanHistory] = React.useState<Array<{ lineId: string; itemId: string; delta: number }>>([])
+  const [chooser, setChooser] = React.useState<{
+    open: boolean;
+    itemId?: string;
+    candidates?: Array<{ lineId: string; itemId?: string; remaining: number; label?: string }>;
+  }>({ open: false });
   const lastRefetchAt = React.useRef<number>(0);
+  const scanScrollRef = React.useRef<ScrollView>(null);
+  const [lastScanMessage, setLastScanMessage] = React.useState<string | null>(null);
 
   // Refresh on focus after edit or when data missing, throttled to avoid repeat fetches
   useFocusEffect(
@@ -84,6 +91,13 @@ export default function PurchaseOrderDetailScreen() {
     }, [navigation, refetch, route.params, po, toast])
   );
 
+  // Clear banner after a short delay
+  React.useEffect(() => {
+    if (!lastScanMessage) return;
+    const t = setTimeout(() => setLastScanMessage(null), 2000);
+    return () => clearTimeout(t);
+  }, [lastScanMessage]);
+
   if (isLoading) return <ActivityIndicator />;
 
   // Deterministic idempotency key per (poId, lineId, qty, lot, location)
@@ -102,45 +116,49 @@ export default function PurchaseOrderDetailScreen() {
   const onScanResult = async (scan: string) => {
     try {
       const result = await resolveScan(scan);
-      if (!result.ok) {
-        toast(`Scan not recognized: ${result.error.reason ?? "unknown"}`, "info");
+      if (result.ok === false) {
+        const reason = result.error.reason ?? "unknown";
+        setLastScanMessage(`EPC not found: ${reason}`);
+        toast(`Scan not recognized: ${reason}`, "info");
         return;
       }
-
       const { itemId } = result.value;
-      const lineId = pickBestMatchingLineId({
-        lines,
-        itemId,
-        getLineId: (line: any) => String(line?.id ?? line?.lineId ?? ""),
-        getLineItemId: (line: any) => (line?.itemId != null ? String(line.itemId) : undefined),
-        getRemaining: (line: any) => Math.max(0, Number(line?.qty ?? 0) - Number(line?.receivedQty ?? 0)),
-      });
-      if (!lineId) {
-        toast(`No line found for item ${itemId}`, "info");
+      const candidates = (lines || [])
+        .map((ln: any) => {
+          const lineId = String(ln?.id ?? ln?.lineId ?? "");
+          const lnItemId = ln?.itemId != null ? String(ln.itemId) : undefined;
+          const remaining = getRemainingQty(ln);
+          const label = ln?.productName || ln?.itemId || ln?.productId || lineId;
+          return { lineId, itemId: lnItemId, remaining, label };
+        })
+        .filter((c) => !!c.lineId && !!c.itemId && String(c.itemId).toLowerCase() === String(itemId).toLowerCase() && c.remaining > 0);
+
+      if (candidates.length === 0) {
+        setLastScanMessage("Not on this PO (or fully received)");
+        toast(`Scanned item not on this PO (or fully received)`, "info");
+        setScanInput("");
         return;
       }
-      const targetLine = lines.find((ln: any) => String(ln?.id ?? ln?.lineId ?? "") === lineId);
-      const remaining = targetLine ? getRemainingQty(targetLine) : 0;
 
-      if (remaining <= 0) {
-        toast(`Item ${itemId} is fully received`, "info");
+      if (candidates.length === 1) {
+        const { lineId, remaining } = candidates[0];
+        const updated = incrementCapped(pendingReceives, lineId, remaining, 1);
+        setPendingReceives(updated);
+        setScanHistory((prev) => [...prev, { lineId, itemId, delta: 1 }]);
+        setScanInput("");
+        setLastScanMessage(`Staged +1 on line ${lineId}`);
+        toast(`Added 1x ${itemId}`, "success");
         return;
       }
 
-      // Increment pending receive by 1, capped at remaining
-      const updated = incrementCapped(pendingReceives, lineId, remaining, 1);
-      setPendingReceives(updated);
-
-      // Track scan in history
-      setScanHistory((prev) => [
-        ...prev,
-        { lineId, itemId, delta: 1 },
-      ]);
-
+      // Multiple candidates: prompt user to pick a line
+      setLastScanMessage("Multiple matches – choose a line");
+      setChooser({ open: true, itemId, candidates });
       setScanInput("");
-      toast(`Added 1x ${itemId}`, "success");
     } catch (err: any) {
       console.error(err);
+      const code = err?.status || err?.code || "UNKNOWN_ERROR";
+      setLastScanMessage(`Scan resolution error (${code})`);
       toast(err?.message || "Scan resolution error", "error");
     }
   };
@@ -174,6 +192,18 @@ export default function PurchaseOrderDetailScreen() {
     setPendingReceives(new Map());
     setScanHistory([]);
     toast("Cleared pending receives", "info");
+  };
+
+  const handleChooseLine = (choice: { lineId: string; remaining: number; itemId?: string }) => {
+    const { lineId, remaining, itemId } = choice;
+    const updated = incrementCapped(pendingReceives, lineId, remaining, 1);
+    setPendingReceives(updated);
+    if (itemId) {
+      setScanHistory((prev) => [...prev, { lineId, itemId, delta: 1 }]);
+      toast(`Added 1x ${itemId}`, "success");
+    }
+    setLastScanMessage(`Staged +1 on line ${lineId}`);
+    setChooser({ open: false, candidates: [], itemId: undefined });
   };
 
   // Helper: submit all pending receives
@@ -507,6 +537,34 @@ export default function PurchaseOrderDetailScreen() {
         </Pressable>
       </View>
 
+      {/* Scan ambiguity chooser */}
+      <Modal visible={chooser.open} transparent animationType="slide" onRequestClose={() => setChooser({ open: false, candidates: [], itemId: undefined })}>
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "center", padding: 16 }}>
+          <View style={{ backgroundColor: "white", borderRadius: 12, padding: 16 }}>
+            <Text style={{ fontSize: 16, fontWeight: "700", marginBottom: 8 }}>Select line for {chooser.itemId}</Text>
+            <ScrollView style={{ maxHeight: 260 }}>
+              {(chooser.candidates ?? []).map((c) => (
+                <Pressable
+                  key={c.lineId}
+                  onPress={() => handleChooseLine(c)}
+                  style={{ paddingVertical: 10, borderBottomWidth: 1, borderColor: "#eee" }}
+                >
+                  <Text style={{ fontWeight: "700" }}>Line {c.lineId}</Text>
+                  <Text style={{ color: "#444" }}>{c.label ?? c.itemId ?? ""}</Text>
+                  <Text style={{ color: "#666", marginTop: 2 }}>Remaining: {c.remaining}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+            <Pressable
+              onPress={() => setChooser({ open: false, candidates: [], itemId: undefined })}
+              style={{ marginTop: 12, alignSelf: "flex-end", paddingHorizontal: 12, paddingVertical: 8 }}
+            >
+              <Text style={{ color: "#1976d2", fontWeight: "700" }}>Cancel</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
       {/* Order-level defaults for quick receive */}
       {receivable && (
         <View style={{ marginTop: 12, gap: 8 as any }}>
@@ -541,92 +599,123 @@ export default function PurchaseOrderDetailScreen() {
         </View>
       )}
 
-      {/* Scan-to-Receive Mode */}
-      {receivable && (
+      {/* Scan-to-Receive Mode Button */}
+      {receivable && !scanMode && (
         <View style={{ marginTop: 12, paddingBottom: 12, borderTopWidth: 1, borderTopColor: "#ccc", paddingTop: 12 }}>
-          {!scanMode ? (
-            <Btn
-              label="Scan to Receive"
-              onPress={() => setScanMode(true)}
-            />
-          ) : (
-            <View style={{ gap: 12 }}>
-              <Text style={{ fontWeight: "700" }}>Scan to Receive</Text>
-
-              {/* Scanner panel */}
-              <ScannerPanel
-                value={scanInput}
-                onChange={(raw) => {
-                  setScanInput(raw);
-                  if (raw.trim()) onScanResult(raw);
-                }}
-              />
-
-              {/* Pending receives list */}
-              {pendingReceives.size > 0 && (
-                <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: "#e0e0e0" }}>
-                  <Text style={{ fontWeight: "600", marginBottom: 8 }}>
-                    Pending Receives ({pendingReceives.size})
-                  </Text>
-                  <ScrollView style={{ maxHeight: 200 }}>
-                    {Array.from(pendingReceives.entries()).map(([lineId, delta]) => {
-                      const line = lines.find(
-                        (l: any) => String(l.id ?? l.lineId) === lineId
-                      );
-                      if (!line) return null;
-                      const ordered = Number(line.qty ?? 0);
-                      const received = Number(line.receivedQty ?? 0);
-                      const remaining = ordered - received;
-                      return (
-                        <View
-                          key={lineId}
-                          style={{
-                            flexDirection: "row",
-                            alignItems: "center",
-                            paddingVertical: 6,
-                            paddingHorizontal: 8,
-                            backgroundColor: "#f5f5f5",
-                            borderRadius: 6,
-                            marginBottom: 6,
-                            gap: 8,
-                          }}
-                        >
-                          <View style={{ flex: 1 }}>
-                            <Text style={{ fontWeight: "600" }}>{line.itemId}</Text>
-                            <Text style={{ fontSize: 12, color: "#666" }}>
-                              {ordered} ordered, {received} received, {remaining} remaining
-                            </Text>
-                            <Text style={{ fontSize: 12, fontWeight: "600", color: "#4CAF50" }}>
-                              +{delta} pending
-                            </Text>
-                          </View>
-                        </View>
-                      );
-                    })}
-                  </ScrollView>
-                </View>
-              )}
-
-              {/* Actions */}
-              <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-                {scanHistory.length > 0 && (
-                  <Btn label="Undo Last" onPress={undoLastScan} />
-                )}
-                {pendingReceives.size > 0 && (
-                  <Btn label="Clear All" onPress={clearPendingReceives} />
-                )}
-                {pendingReceives.size > 0 && (
-                  <Btn
-                    label={`Submit ${pendingReceives.size} line(s)`}
-                    onPress={submitPendingReceives}
-                  />
-                )}
-                <Btn label="Cancel" onPress={() => setScanMode(false)} />
-              </View>
-            </View>
-          )}
+          <Btn
+            label="Scan to Receive"
+            onPress={() => setScanMode(true)}
+          />
         </View>
       )}
+
+      {/* Scan-to-Receive Modal */}
+      <Modal visible={scanMode} animationType="slide" onRequestClose={() => setScanMode(false)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: "#fff" }}>
+          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
+            <ScrollView
+              ref={(ref) => {
+                scanScrollRef.current = ref;
+              }}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ paddingBottom: 48 }}
+              style={{ flex: 1 }}
+            >
+              <View style={{ padding: 12, gap: 12 }}>
+                {/* Header with close button */}
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <Text style={{ fontSize: 18, fontWeight: "700" }}>Scan to Receive</Text>
+                  <Pressable onPress={() => setScanMode(false)} hitSlop={10}>
+                    <Text style={{ fontSize: 16, color: "#1976d2", fontWeight: "600" }}>Close</Text>
+                  </Pressable>
+                </View>
+
+                {lastScanMessage ? (
+                  <View style={{ paddingVertical: 8, paddingHorizontal: 10, backgroundColor: "#eef7ff", borderRadius: 8, borderWidth: 1, borderColor: "#c6e2ff" }}>
+                    <Text style={{ color: "#0d47a1", fontWeight: "600" }}>{lastScanMessage}</Text>
+                  </View>
+                ) : null}
+
+                {/* Scanner panel */}
+                <ScannerPanel
+                  value={scanInput}
+                  onChange={(raw) => {
+                    setScanInput(raw);
+                  }}
+                  onSubmit={(raw) => {
+                    setScanInput(raw);
+                    if (raw.trim()) onScanResult(raw);
+                  }}
+                  onManualInputFocus={() => {
+                    scanScrollRef.current?.scrollToEnd({ animated: true });
+                  }}
+                />
+
+                {/* Pending receives list */}
+                {pendingReceives.size > 0 && (
+                  <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: "#e0e0e0" }}>
+                    <Text style={{ fontWeight: "600", marginBottom: 8 }}>
+                      Pending Receives ({pendingReceives.size})
+                    </Text>
+                    <ScrollView style={{ maxHeight: 200 }}>
+                      {Array.from(pendingReceives.entries()).map(([lineId, delta]) => {
+                        const line = lines.find(
+                          (l: any) => String(l.id ?? l.lineId) === lineId
+                        );
+                        if (!line) return null;
+                        const ordered = Number(line.qty ?? 0);
+                        const received = Number(line.receivedQty ?? 0);
+                        const remaining = ordered - received;
+                        return (
+                          <View
+                            key={lineId}
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              paddingVertical: 6,
+                              paddingHorizontal: 8,
+                              backgroundColor: "#f5f5f5",
+                              borderRadius: 6,
+                              marginBottom: 6,
+                              gap: 8,
+                            }}
+                          >
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ fontWeight: "600" }}>{line.itemId}</Text>
+                              <Text style={{ fontSize: 12, color: "#666" }}>
+                                {ordered} ordered, {received} received, {remaining} remaining
+                              </Text>
+                              <Text style={{ fontSize: 12, fontWeight: "600", color: "#4CAF50" }}>
+                                +{delta} pending
+                              </Text>
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </ScrollView>
+                  </View>
+                )}
+
+                {/* Actions */}
+                <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                  {scanHistory.length > 0 && (
+                    <Btn label="Undo Last" onPress={undoLastScan} />
+                  )}
+                  {pendingReceives.size > 0 && (
+                    <Btn label="Clear All" onPress={clearPendingReceives} />
+                  )}
+                  {pendingReceives.size > 0 && (
+                    <Btn
+                      label={`Submit ${pendingReceives.size} line(s)`}
+                      onPress={submitPendingReceives}
+                    />
+                  )}
+                </View>
+              </View>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
+      </Modal>
 
       <FlatList
         style={{ marginTop: 12 }}

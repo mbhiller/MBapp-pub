@@ -209,7 +209,7 @@ export default function SalesOrderDetailScreen() {
   const onScanResult = async (scan: string) => {
     try {
       const result = await resolveScan(scan);
-      if (!result.ok) {
+      if (result.ok === false) {
         toast(`Scan not recognized: ${result.error.reason ?? "unknown"}`, "info");
         return;
       }

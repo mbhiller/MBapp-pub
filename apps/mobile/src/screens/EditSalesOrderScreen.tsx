@@ -71,8 +71,9 @@ export default function EditSalesOrderScreen() {
       const normalizedLines = normalizeEditableLines(currentLines);
 
       const validation = validateEditableLines(normalizedLines);
-      if (!validation.ok) {
-        toast(validation.message, "warning");
+      if (validation.ok === false) {
+        const { message } = validation;
+        toast(message, "warning");
         return;
       }
 

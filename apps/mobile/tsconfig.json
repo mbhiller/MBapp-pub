@@ -18,6 +18,12 @@
     ],
     "baseUrl": ".",
     "paths": {
+      "@mbapp/scan": [
+        "../../packages/mbapp-scan/src/index.ts"
+      ],
+      "@mbapp/scan/*": [
+        "../../packages/mbapp-scan/src/*"
+      ],
       "*": [
         "./src/*",
         "*"

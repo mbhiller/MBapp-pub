@@ -10,18 +10,10 @@ import {
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 
-type APIGWEvent = {
-  rawPath?: string;
-  rawQueryString?: string;
-  requestContext?: { http?: { method?: string; path?: string } };
-  headers?: Record<string, string | undefined>;
-  body?: string | object | null;
-};
-
-const TABLE = process.env.OBJECTS_TABLE!;
+const TABLE = process.env.OBJECTS_TABLE;
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
-const json = (status: number, body: unknown) => ({
+const json = (status, body) => ({
   statusCode: status,
   headers: {
     "Content-Type": "application/json",
@@ -42,19 +34,19 @@ const nocontent = (status = 204) => ({
   body: "",
 });
 
-function lowerHeaders(h?: Record<string, string | undefined>) {
+function lowerHeaders(h) {
   return Object.fromEntries(
     Object.entries(h ?? {}).map(([k, v]) => [k.toLowerCase(), v])
-  ) as Record<string, string | undefined>;
+  );
 }
 
-function parse(event: APIGWEvent) {
+function parse(event) {
   const method = event.requestContext?.http?.method ?? "GET";
   const path = event.rawPath ?? event.requestContext?.http?.path ?? "/";
   const h = lowerHeaders(event.headers);
   const tenant = h["x-tenant-id"] || "DemoTenant";
   const qs = Object.fromEntries(new URLSearchParams(event.rawQueryString || ""));
-  let body: any = {};
+  let body = {};
   try {
     body =
       typeof event.body === "string"
@@ -66,12 +58,12 @@ function parse(event: APIGWEvent) {
   return { method, path, tenant, qs, body };
 }
 
-function m(path: string, re: RegExp) {
+function m(path, re) {
   const t = re.exec(path);
   return t ? t.slice(1) : null;
 }
 
-export const handler = async (event: APIGWEvent) => {
+export const handler = async (event) => {
   const { method, path, tenant, qs, body } = parse(event);
 
   if (method === "OPTIONS") return nocontent();

@@ -1,4 +1,14 @@
 {
-  "compilerOptions": {},
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@mbapp/scan": [
+        "packages/mbapp-scan/src/index.ts"
+      ],
+      "@mbapp/scan/*": [
+        "packages/mbapp-scan/src/*"
+      ]
+    }
+  },
   "extends": "expo/tsconfig.base"
 }

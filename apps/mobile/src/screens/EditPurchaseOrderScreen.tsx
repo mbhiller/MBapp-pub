@@ -123,9 +123,10 @@ export default function EditPurchaseOrderScreen() {
       const normalizedLines = normalizeEditableLines(currentLines);
 
       const validation = validateEditableLines(normalizedLines);
-      if (!validation.ok) {
+      if (validation.ok === false) {
         track("po_edit_lines_submitted", { ...baseClick, result: "fail", errorCode: "VALIDATION" });
-        toast(validation.message, "warning");
+        const { message } = validation;
+        toast(message, "warning");
         return;
       }
 

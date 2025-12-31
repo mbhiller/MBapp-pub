@@ -123,7 +123,9 @@ export default function PurchaseOrderDetailPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionInfo, setActionInfo] = useState<string | null>(null);
-  const [lineState, setLineState] = useState<Record<string, { deltaQty: number; lot?: string; locationId?: string; editQty?: number }>>({});
+  const [lineState, setLineState] = useState<
+    Record<string, Partial<{ deltaQty: number; lot: string; locationId: string; editQty: number }>>
+  >({});
   const [lineErrors, setLineErrors] = useState<Record<string, string>>({});
   const [activity, setActivity] = useState<Array<InventoryMovement & { lineId?: string }>>([]);
   const [activityError, setActivityError] = useState<string | null>(null);
@@ -433,9 +435,9 @@ export default function PurchaseOrderDetailPage() {
         const remaining = Math.max(0, orderedQty - receivedQty);
         if (remaining <= 0) return null;
 
-        const state = lineState[lineId] ?? {};
-        const lot = (state.lot ?? receiveDefaults.lot ?? "").trim();
-        const locationId = (state.locationId ?? receiveDefaults.locationId ?? "").trim();
+        const state = lineState[lineId];
+        const lot = (state?.lot ?? receiveDefaults.lot ?? "").trim();
+        const locationId = (state?.locationId ?? receiveDefaults.locationId ?? "").trim();
 
         // UX rule: require location for bulk receive (example requirement)
         const REQUIRE_LOCATION_FOR_BULK = true;
@@ -576,12 +578,12 @@ export default function PurchaseOrderDetailPage() {
       po.lines?.forEach((line) => {
         const lineId = line.id ?? line.lineId ?? "";
         if (!lineId) return;
-        const current = next[lineId] ?? {};
-        const needsLot = !current.lot && lot;
-        const needsLocation = !current.locationId && locationId;
+        const current = next[lineId];
+        const needsLot = !current?.lot && lot;
+        const needsLocation = !current?.locationId && locationId;
         if (needsLot || needsLocation) {
           next[lineId] = {
-            ...current,
+            ...(current ?? {}),
             ...(needsLot ? { lot } : {}),
             ...(needsLocation ? { locationId } : {}),
           };

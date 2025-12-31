@@ -6,6 +6,8 @@
   "scripts": {
     "start": "expo start",
     "start:dev": "set EXPO_PUBLIC_API_BASE=https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com&& set EXPO_PUBLIC_TENANT_ID=DemoTenant&& expo start -c",
+    "expo:demo": "cross-env EXPO_PUBLIC_MBAPP_TENANT_ID=DemoTenant EXPO_PUBLIC_MBAPP_API_BASE=https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com npx expo start -c",
+    "expo:smoke": "cross-env EXPO_PUBLIC_MBAPP_TENANT_ID=SmokeTenant EXPO_PUBLIC_MBAPP_API_BASE=https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com npx expo start -c",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
@@ -42,6 +44,7 @@
     "@babel/core": "^7.20.0",
     "@types/react": "^19.1.12",
     "@types/react-native": "^0.72.8",
+    "cross-env": "^10.1.0",
     "dotenv": "^17.2.2",
     "esbuild": "^0.25.9",
     "typescript": "~5.9.2",
