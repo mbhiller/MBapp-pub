@@ -162,3 +162,19 @@ export function computePatchLinesDiff(args: {
 
   return ops;
 }
+
+/**
+ * Positional-args wrapper for cross-platform signature parity with web.
+ * Web uses: computePatchLinesDiff(originalLines, currentLines, fields?)
+ * Mobile can now use either named args (above) or positional args (this wrapper).
+ * 
+ * Both signatures delegate to the same implementation; behavior is identical.
+ */
+export function computePatchLinesDiffPositional(
+  originalLines: LineWithId[],
+  editedLines: LineWithId[],
+  patchableFields?: ReadonlyArray<string>,
+  makeCid?: () => string
+): PatchLinesOp[] {
+  return computePatchLinesDiff({ originalLines, editedLines, patchableFields, makeCid });
+}

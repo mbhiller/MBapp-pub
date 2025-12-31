@@ -1,5 +1,6 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { LineArrayEditor, type LineInput } from "./LineArrayEditor";
+import { validateEditableLines } from "../lib/validateEditableLines";
 
 /**
  * Purchase Order Line Input Type
@@ -76,23 +77,25 @@ export function PurchaseOrderForm({ initialValue, submitLabel = "Save", onSubmit
       const trimmedVendor = vendorId.trim();
       if (!trimmedVendor) throw new Error("vendorId is required");
 
+      // Validate lines before processing
+      const validation = validateEditableLines(lines);
+      if (!validation.ok) {
+        throw new Error(validation.message);
+      }
+
       // CRITICAL: Preserve id/cid exactly as provided by LineArrayEditor
       // Do NOT generate synthetic IDs - let computePatchLinesDiff handle identity
-      const cleanedLines: PurchaseOrderLineInput[] = lines
-        .map((ln) => {
-          const line: PurchaseOrderLineInput = {
-            itemId: ln.itemId.trim(),
-            qty: Number(ln.qty ?? 0),
-            uom: (ln.uom || "ea").trim() || "ea",
-          };
-          // Preserve id or cid (don't generate fallbacks)
-          if (ln.id) line.id = String(ln.id).trim();
-          if ((ln as any).cid) line.cid = String((ln as any).cid).trim();
-          return line;
-        })
-        .filter((ln) => ln.itemId && ln.qty > 0);
-
-      if (cleanedLines.length === 0) throw new Error("At least one line with itemId and qty>0 is required");
+      const cleanedLines: PurchaseOrderLineInput[] = lines.map((ln) => {
+        const line: PurchaseOrderLineInput = {
+          itemId: ln.itemId.trim(),
+          qty: Number(ln.qty ?? 0),
+          uom: (ln.uom || "ea").trim() || "ea",
+        };
+        // Preserve id or cid (don't generate fallbacks)
+        if (ln.id) line.id = String(ln.id).trim();
+        if ((ln as any).cid) line.cid = String((ln as any).cid).trim();
+        return line;
+      });
 
       // Pass to parent (Edit page will use computePatchLinesDiff, Create page will send as-is)
       await onSubmit({

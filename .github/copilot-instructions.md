@@ -1,11 +1,24 @@
 # MBapp – Repo Instructions
 
 ## How we work
+- **Context:** Copilot only receives Prompt 0 (read-only investigation) and EDIT MODE prompts (E1…En). Prompts must be self-contained; no chat history is preserved.
 - Follow the cadence:
-	- Prompt 0 read-only investigation (no edits)
+	- **Prompt 0:** Read-only investigation (no edits, gather findings)
 	- Propose labeled edit prompts (E1…En)
-	- Implement + run relevant checks (typecheck/smokes) + cleanup + docs + PR text
+	- **EDIT MODE (E1…En):** Implement + run relevant checks (typecheck/smokes) + cleanup + docs
 - Default to small, reviewable patches.
+- **Branch creation (Step 1):** User creates branch before E1; Copilot implements changes on that branch.
+- **Definition of Done (before PR):**
+	- ✅ All edits implemented per spec
+	- ✅ Typecheck passes (apps/web + apps/mobile + apps/api as relevant)
+	- ✅ Smoke tests pass (if API/contract changes)
+	- ✅ Docs updated (MBapp-Status.md, MBapp-Foundations.md as relevant)
+	- ✅ No regressions (existing features still work)
+- **After spec changes:** Run verification sequence:
+	- `npm run spec:lint` (validate YAML)
+	- `npm run spec:bundle` (generate openapi.json)
+	- `npm run spec:types:api` (regenerate API types)
+	- `npm run spec:types:mobile` (regenerate mobile types)
 
 ## Safety + correctness
 - Never change tenant/auth behavior without validating with smokes.

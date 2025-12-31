@@ -10,6 +10,7 @@ import type { RootStackParamList } from "../navigation/types";
 import { track, trackScreenView } from "../lib/telemetry";
 import { LineEditor, EditableLine } from "../components/LineEditor";
 import { buildEditableLines, normalizeEditableLines } from "../lib/buildEditableLines";
+import { validateEditableLines } from "../lib/validateEditableLines";
 
 export type PurchaseOrder = {
   id: string;
@@ -121,24 +122,11 @@ export default function EditPurchaseOrderScreen() {
     try {
       const normalizedLines = normalizeEditableLines(currentLines);
 
-      for (let i = 0; i < normalizedLines.length; i++) {
-        const line = normalizedLines[i];
-        const label = `Line ${i + 1}`;
-        if (!line.itemId) {
-          track("po_edit_lines_submitted", { ...baseClick, result: "fail", errorCode: "VALIDATION" });
-          toast(`${label}: Item is required`, "warning");
-          return;
-        }
-        if (!line.uom) {
-          track("po_edit_lines_submitted", { ...baseClick, result: "fail", errorCode: "VALIDATION" });
-          toast(`${label}: UOM is required`, "warning");
-          return;
-        }
-        if (!(Number(line.qty) > 0)) {
-          track("po_edit_lines_submitted", { ...baseClick, result: "fail", errorCode: "VALIDATION" });
-          toast(`${label}: Qty must be greater than 0`, "warning");
-          return;
-        }
+      const validation = validateEditableLines(normalizedLines);
+      if (!validation.ok) {
+        track("po_edit_lines_submitted", { ...baseClick, result: "fail", errorCode: "VALIDATION" });
+        toast(validation.message, "warning");
+        return;
       }
 
       setSaving(true);
