@@ -4165,6 +4165,284 @@ const tests = {
     return { test: "salesOrders:commit-nonstrict-backorder", result: pass ? "PASS" : "FAIL", current, adjust, create, submit, commit, bo };
   },
 
+  // SO patch-lines: verify draft-only enforcement (E2 rule)
+  // STRICT: patch-lines must be allowed in draft and blocked (409 SO_NOT_EDITABLE) after submit.
+  "smoke:salesOrders:patch-lines-draft-only-after-submit": async () => {
+    await ensureBearer();
+
+    const { partyId } = await seedParties(api);
+    const prod = await createProduct({ name: "SO-DraftOnly" });
+    if (!prod.ok) return { test: "salesOrders:patch-lines-draft-only-after-submit", result: "FAIL", prod };
+    const inv = await createInventoryForProduct(prod.body?.id, "SO-DraftOnly-Item");
+    if (!inv.ok) return { test: "salesOrders:patch-lines-draft-only-after-submit", result: "FAIL", inv };
+    const itemId = inv.body?.id;
+
+    // 1) Create draft SO with 2 lines
+    const create = await post(
+      `/objects/salesOrder`,
+      {
+        type: "salesOrder",
+        status: "draft",
+        partyId,
+        lines: [
+          { itemId, uom: "ea", qty: 5 },
+          { itemId, uom: "ea", qty: 3 }
+        ]
+      },
+      { "Idempotency-Key": idem() }
+    );
+    if (!create.ok) return { test: "salesOrders:patch-lines-draft-only-after-submit", result: "FAIL", create };
+    const soId = create.body?.id;
+    const lines = Array.isArray(create.body?.lines) ? create.body.lines : [];
+    const lineId = lines[0]?.id ?? lines[0]?.lineId;
+
+    // 2) PATCH-LINES in draft: update qty on first line → must succeed
+    const patchInDraft = await post(
+      `/sales/so/${encodeURIComponent(soId)}:patch-lines`,
+      {
+        ops: [
+          { op: "upsert", id: lineId, patch: { qty: 10 } }
+        ]
+      },
+      { "Idempotency-Key": idem() }
+    );
+    if (!patchInDraft.ok) return { test: "salesOrders:patch-lines-draft-only-after-submit", result: "FAIL", patchInDraft };
+    const updatedLine = patchInDraft.body?.lines?.find((l) => (l.id ?? l.lineId) === lineId);
+    const qtyUpdated = updatedLine && Number(updatedLine.qty) === 10;
+
+    // 3) Submit the SO
+    const submit = await post(
+      `/sales/so/${encodeURIComponent(soId)}:submit`,
+      {},
+      { "Idempotency-Key": idem() }
+    );
+    if (!submit.ok) return { test: "salesOrders:patch-lines-draft-only-after-submit", result: "FAIL", submit };
+
+    // 4) PATCH-LINES on submitted SO must fail with 409 SO_NOT_EDITABLE
+    const patchAfterSubmit = await post(
+      `/sales/so/${encodeURIComponent(soId)}:patch-lines`,
+      {
+        ops: [
+          { op: "upsert", id: lineId, patch: { qty: 15 } }
+        ]
+      },
+      { "Idempotency-Key": idem() }
+    );
+    
+    // STRICT enforcement: must be blocked
+    const blockedCorrectly = !patchAfterSubmit.ok && patchAfterSubmit.status === 409;
+    const errorCodeCorrect = patchAfterSubmit.body?.details?.code === "SO_NOT_EDITABLE";
+
+    const pass = create.ok && patchInDraft.ok && qtyUpdated && submit.ok && blockedCorrectly && errorCodeCorrect;
+    return {
+      test: "salesOrders:patch-lines-draft-only-after-submit",
+      result: pass ? "PASS" : "FAIL",
+      create,
+      patchInDraft,
+      qtyUpdated,
+      submit,
+      patchAfterSubmit,
+      blockedCorrectly,
+      errorCodeCorrect
+    };
+  },
+
+  // SO fulfill: verify idempotency with Idempotency-Key replay
+  "smoke:salesOrders:fulfill-idempotency-replay": async () => {
+    await ensureBearer();
+
+    const { partyId } = await seedParties(api);
+    const prod = await createProduct({ name: "SO-FulfillIdem" });
+    if (!prod.ok) return { test: "salesOrders:fulfill-idempotency-replay", result: "FAIL", prod };
+    const inv = await createInventoryForProduct(prod.body?.id, "SO-FulfillIdem-Item");
+    if (!inv.ok) return { test: "salesOrders:fulfill-idempotency-replay", result: "FAIL", inv };
+    const itemId = inv.body?.id;
+
+    // Set up on-hand inventory
+    const adjRes = await post(
+      `/objects/${MV_TYPE}`,
+      { itemId, type: "adjust", qty: 100 }
+    );
+
+    // 1) Create SO with fulfillable line
+    const create = await post(
+      `/objects/salesOrder`,
+      {
+        type: "salesOrder",
+        status: "draft",
+        partyId,
+        lines: [{ itemId, uom: "ea", qty: 50 }]
+      },
+      { "Idempotency-Key": idem() }
+    );
+    if (!create.ok) return { test: "salesOrders:fulfill-idempotency-replay", result: "FAIL", create };
+    const soId = create.body?.id;
+    const lineId = create.body?.lines?.[0]?.id ?? create.body?.lines?.[0]?.lineId;
+
+    // 2) Submit + Commit + Reserve
+    const submit = await post(`/sales/so/${encodeURIComponent(soId)}:submit`, {}, { "Idempotency-Key": idem() });
+    if (!submit.ok) return { test: "salesOrders:fulfill-idempotency-replay", result: "FAIL", submit };
+    const commit = await post(`/sales/so/${encodeURIComponent(soId)}:commit`, {}, { "Idempotency-Key": idem() });
+    if (!commit.ok) return { test: "salesOrders:fulfill-idempotency-replay", result: "FAIL", commit };
+    const reserve = await post(
+      `/sales/so/${encodeURIComponent(soId)}:reserve`,
+      { lines: [{ id: lineId, deltaQty: 25 }] },
+      { "Idempotency-Key": idem() }
+    );
+    if (!reserve.ok) return { test: "salesOrders:fulfill-idempotency-replay", result: "FAIL", reserve };
+
+    // 3) First fulfill with Idempotency-Key = K1
+    const key1 = idem();
+    const fulfill1 = await post(
+      `/sales/so/${encodeURIComponent(soId)}:fulfill`,
+      { lines: [{ id: lineId, deltaQty: 10 }] },
+      { "Idempotency-Key": key1 }
+    );
+    if (!fulfill1.ok) return { test: "salesOrders:fulfill-idempotency-replay", result: "FAIL", fulfill1 };
+    const so1 = fulfill1.body;
+    const line1 = so1?.lines?.find((l) => (l.id ?? l.lineId) === lineId);
+    const fulfilledAfterFirst = Number(line1?.fulfilledQty ?? 0);
+
+    // 4) Re-play fulfill with same Idempotency-Key K1
+    const fulfill2 = await post(
+      `/sales/so/${encodeURIComponent(soId)}:fulfill`,
+      { lines: [{ id: lineId, deltaQty: 10 }] },
+      { "Idempotency-Key": key1 }
+    );
+    if (!fulfill2.ok) return { test: "salesOrders:fulfill-idempotency-replay", result: "FAIL", fulfill2 };
+    const so2 = fulfill2.body;
+    const line2 = so2?.lines?.find((l) => (l.id ?? l.lineId) === lineId);
+    const fulfilledAfterSecond = Number(line2?.fulfilledQty ?? 0);
+
+    // 5) Assert: second call returns 200, qty unchanged, status unchanged, no movements duplication
+    const secondCallSucceeded = fulfill2.ok && fulfill2.status === 200;
+    const qtyUnchanged = fulfilledAfterFirst === fulfilledAfterSecond;
+    const statusUnchanged = so1?.status === so2?.status;  // both should be partially_fulfilled
+    const idempotentPayload = so1?.id === so2?.id;  // same SO ID in response
+    
+    // Verify fulfill1 increased qty correctly (10 fulfilled on line with qty 50)
+    const fulfillmentCorrect = fulfilledAfterFirst === 10;
+
+    const pass = create.ok && submit.ok && commit.ok && reserve.ok && fulfill1.ok && fulfill2.ok && 
+                 secondCallSucceeded && qtyUnchanged && statusUnchanged && idempotentPayload && fulfillmentCorrect;
+    return {
+      test: "salesOrders:fulfill-idempotency-replay",
+      result: pass ? "PASS" : "FAIL",
+      create,
+      fulfill1,
+      fulfilledAfterFirst,
+      fulfill2,
+      fulfilledAfterSecond,
+      secondCallSucceeded,
+      qtyUnchanged,
+      statusUnchanged,
+      idempotentPayload,
+      fulfillmentCorrect
+    };
+  },
+
+  // SO fulfill: verify Idempotency-Key reuse with different payload is rejected
+  "smoke:salesOrders:fulfill-idempotency-key-reuse-different-payload": async () => {
+    await ensureBearer();
+
+    const { partyId } = await seedParties(api);
+    const prod = await createProduct({ name: "SO-FulfillKeyReuse" });
+    if (!prod.ok) return { test: "salesOrders:fulfill-idempotency-key-reuse-different-payload", result: "FAIL", prod };
+    const inv = await createInventoryForProduct(prod.body?.id, "SO-FulfillKeyReuse-Item");
+    if (!inv.ok) return { test: "salesOrders:fulfill-idempotency-key-reuse-different-payload", result: "FAIL", inv };
+    const itemId = inv.body?.id;
+
+    // Set up on-hand inventory
+    const adjRes = await post(
+      `/objects/${MV_TYPE}`,
+      { itemId, type: "adjust", qty: 100 }
+    );
+
+    // Create SO with 2 fulfillable lines
+    const create = await post(
+      `/objects/salesOrder`,
+      {
+        type: "salesOrder",
+        status: "draft",
+        partyId,
+        lines: [
+          { itemId, uom: "ea", qty: 50 },
+          { itemId, uom: "ea", qty: 30 }
+        ]
+      },
+      { "Idempotency-Key": idem() }
+    );
+    if (!create.ok) return { test: "salesOrders:fulfill-idempotency-key-reuse-different-payload", result: "FAIL", create };
+    const soId = create.body?.id;
+    const lineIds = create.body?.lines?.map((l) => l.id ?? l.lineId) ?? [];
+
+    // Submit + Commit + Reserve
+    const submit = await post(`/sales/so/${encodeURIComponent(soId)}:submit`, {}, { "Idempotency-Key": idem() });
+    const commit = await post(`/sales/so/${encodeURIComponent(soId)}:commit`, {}, { "Idempotency-Key": idem() });
+    const reserve = await post(
+      `/sales/so/${encodeURIComponent(soId)}:reserve`,
+      { lines: [{ id: lineIds[0], deltaQty: 25 }, { id: lineIds[1], deltaQty: 15 }] },
+      { "Idempotency-Key": idem() }
+    );
+
+    // Use same Idempotency-Key K2 with different payloads
+    // STRICT first-write-wins: second call with different payload MUST return early cached result
+    const key2 = idem();
+
+    // Payload A: fulfill line[0] with 5
+    const fulfillA = await post(
+      `/sales/so/${encodeURIComponent(soId)}:fulfill`,
+      { lines: [{ id: lineIds[0], deltaQty: 5 }] },
+      { "Idempotency-Key": key2 }
+    );
+    if (!fulfillA.ok) return { test: "salesOrders:fulfill-idempotency-key-reuse-different-payload", result: "FAIL", fulfillA };
+    const soA = fulfillA.body;
+    const lineA = soA?.lines?.find((l) => (l.id ?? l.lineId) === lineIds[0]);
+    const lineB_afterA = soA?.lines?.find((l) => (l.id ?? l.lineId) === lineIds[1]);
+    const qtyFulfilledLineA = Number(lineA?.fulfilledQty ?? 0);  // should be 5
+    const qtyFulfilledLineB_afterA = Number(lineB_afterA?.fulfilledQty ?? 0);  // should be 0
+
+    // Payload B: fulfill line[1] with 10 (same key, different line/qty)
+    // This should trigger early key hit and return cached result from fulfillA
+    const fulfillB = await post(
+      `/sales/so/${encodeURIComponent(soId)}:fulfill`,
+      { lines: [{ id: lineIds[1], deltaQty: 10 }] },
+      { "Idempotency-Key": key2 }
+    );
+    if (!fulfillB.ok) return { test: "salesOrders:fulfill-idempotency-key-reuse-different-payload", result: "FAIL", fulfillB };
+    const soB = fulfillB.body;
+    const lineA_afterB = soB?.lines?.find((l) => (l.id ?? l.lineId) === lineIds[0]);
+    const lineB_afterB = soB?.lines?.find((l) => (l.id ?? l.lineId) === lineIds[1]);
+    const qtyFulfilledLineA_afterB = Number(lineA_afterB?.fulfilledQty ?? 0);  // should still be 5 (no change)
+    const qtyFulfilledLineB_afterB = Number(lineB_afterB?.fulfilledQty ?? 0);  // should still be 0 (payload B NOT applied)
+
+    // Assertions for first-write-wins
+    const secondCallSucceeded = fulfillB.ok && fulfillB.status === 200;
+    const secondReturnedCachedResult = soB?.id === soA?.id;  // same SO from cache
+    const lineAStatePreserved = qtyFulfilledLineA === qtyFulfilledLineA_afterB;  // line A qty unchanged
+    const lineBNotModified = qtyFulfilledLineB_afterA === qtyFulfilledLineB_afterB && qtyFulfilledLineB_afterB === 0;  // line B never fulfilled
+    const payloadBNotApplied = qtyFulfilledLineB_afterB === 0;  // strict: line B was NOT touched
+
+    const pass = create.ok && submit.ok && commit.ok && reserve.ok && fulfillA.ok && fulfillB.ok && 
+                 secondCallSucceeded && secondReturnedCachedResult && lineAStatePreserved && lineBNotModified && payloadBNotApplied;
+    return {
+      test: "salesOrders:fulfill-idempotency-key-reuse-different-payload",
+      result: pass ? "PASS" : "FAIL",
+      create,
+      fulfillA,
+      qtyFulfilledLineA,
+      qtyFulfilledLineB_afterA,
+      fulfillB,
+      qtyFulfilledLineA_afterB,
+      qtyFulfilledLineB_afterB,
+      secondCallSucceeded,
+      secondReturnedCachedResult,
+      lineAStatePreserved,
+      lineBNotModified,
+      payloadBNotApplied
+    };
+  },
+
   /* ===================== Purchase Orders ===================== */
   "smoke:purchaseOrders:draft-create-edit-lines": async () => {
     await ensureBearer();

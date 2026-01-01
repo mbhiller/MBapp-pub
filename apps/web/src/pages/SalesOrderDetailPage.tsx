@@ -692,6 +692,7 @@ export default function SalesOrderDetailPage() {
   }, [backorders]);
 
   const status = order?.status ?? "";
+  const canEdit = status === "draft";
   const canSubmit = status === "draft";
   const canCommit = status === "submitted" || status === "committed" || status === "draft";
   const canReserve = status === "submitted" || status === "committed";
@@ -987,7 +988,9 @@ export default function SalesOrderDetailPage() {
               {actionLoading === "cancel" ? "Cancelling..." : "Cancel"}
             </button>
           ) : null}
-          <button onClick={() => navigate(`/sales-orders/${id}/edit`)}>Edit</button>
+          {canEdit ? (
+            <button onClick={() => navigate(`/sales-orders/${id}/edit`)}>Edit</button>
+          ) : null}
         </div>
         {canRelease ? (
           <label style={{ display: "grid", gap: 4, maxWidth: 360 }}>

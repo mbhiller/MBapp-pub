@@ -32,6 +32,58 @@ const json = (s: number, b: unknown): APIGatewayProxyResultV2 => ({
 const tid = (e: APIGatewayProxyEventV2) => resolveTenantId(e);
 const parse = <T=any>(e: APIGatewayProxyEventV2): T => { try { return JSON.parse(e.body||"{}"); } catch { return {} as any; } };
 
+/** Idempotency ledger: (tenant, soId) × Idempotency-Key */
+async function alreadyAppliedKey(tenantId: string, soId: string, idk?: string | null) {
+  if (!idk) return false;
+  const key = { pk: `IDEMP#${tenantId}#so-fulfill#${soId}`, sk: `idk#${idk}` };
+  const got = await ddb.send(new GetCommand({ TableName: tableObjects, Key: key as any }));
+  return Boolean(got.Item);
+}
+async function markAppliedKey(tenantId: string, soId: string, idk?: string | null) {
+  if (!idk) return;
+  const now = new Date().toISOString();
+  await ddb.send(new PutCommand({
+    TableName: tableObjects,
+    Item: { pk: `IDEMP#${tenantId}#so-fulfill#${soId}`, sk: `idk#${idk}`, createdAt: now } as any
+  }));
+}
+
+/** Canonical signature of request lines for payload-based idempotency */
+function canonicalizeLines(lines: LineReq[]) {
+  const norm = lines.map(l => ({
+    id: l.id ?? undefined,
+    lineId: l.lineId ?? undefined,
+    deltaQty: Number(l.deltaQty ?? 0),
+    locationId: l.locationId ?? undefined,
+    lot: l.lot ?? undefined,
+  }));
+  norm.sort((a, b) =>
+    String(a.id ?? a.lineId).localeCompare(String(b.id ?? b.lineId)) ||
+    a.deltaQty - b.deltaQty ||
+    String(a.lot ?? "").localeCompare(String(b.lot ?? "")) ||
+    String(a.locationId ?? "").localeCompare(String(b.locationId ?? ""))
+  );
+  return JSON.stringify(norm);
+}
+function hashStr(s: string) {
+  // tiny stable hash (djb2 xor variant) -> base36
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h) ^ s.charCodeAt(i);
+  return (h >>> 0).toString(36);
+}
+async function alreadyAppliedSig(tenantId: string, soId: string, sig: string) {
+  const key = { pk: `IDEMP#${tenantId}#so-fulfill#${soId}`, sk: `sig#${sig}` };
+  const got = await ddb.send(new GetCommand({ TableName: tableObjects, Key: key as any }));
+  return Boolean(got.Item);
+}
+async function markAppliedSig(tenantId: string, soId: string, sig: string) {
+  const now = new Date().toISOString();
+  await ddb.send(new PutCommand({
+    TableName: tableObjects,
+    Item: { pk: `IDEMP#${tenantId}#so-fulfill#${soId}`, sk: `sig#${sig}`, createdAt: now } as any
+  }));
+}
+
 async function loadSO(tenantId: string, id: string): Promise<SalesOrder|null> {
   const res = await ddb.send(new GetCommand({ TableName: tableObjects, Key: { pk: tenantId, sk: `salesOrder#${id}` } }));
   return (res.Item as SalesOrder) ?? null;
@@ -80,13 +132,23 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     if (!tenantId || !id) return badRequest("Missing tenant or id", undefined, requestId);
     const logCtx = { ...baseCtx, tenantId, route: event.rawPath ?? event.requestContext?.http?.path, method: event.requestContext?.http?.method };
 
+    // Extract idempotency key early
+    const idk = (event.headers?.["Idempotency-Key"] || event.headers?.["idempotency-key"] || null) as string | null;
+
     const body = parse<{ lines: LineReq[] }>(event);
     const reqLines = Array.isArray(body?.lines) ? body.lines : [];
     if (reqLines.length === 0) return json(400, { message: "lines[] required" });
 
     const so = await loadSO(tenantId, id);
     if (!so) return notFound("Sales order not found", requestId);
-    logger.info(logCtx, "so-fulfill.load", { soId: so.id, status: so.status, reqCount: reqLines.length });
+    logger.info(logCtx, "so-fulfill.load", { soId: so.id, status: so.status, reqCount: reqLines.length, idempotencyKey: idk });
+
+    // Early idempotency check (safe to short-circuit before validation)
+    if (idk && await alreadyAppliedKey(tenantId, so.id, idk)) {
+      logger.info(logCtx, "so-fulfill.idempotency-key-hit", { soId: so.id, idempotencyKey: idk });
+      const fresh = await loadSO(tenantId, so.id);
+      return json(200, fresh ?? so);
+    }
 
     // Guard status: allow fulfill from committed or partially_fulfilled
     if (!["committed", "partially_fulfilled"].includes(so.status)) {
@@ -111,11 +173,15 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     for (let i = 0; i < reqLines.length; i++) {
       const l = reqLines[i];
       const lineKey = l.id ?? l.lineId;
-      if (!lineKey || typeof l.deltaQty !== "number" || l.deltaQty <= 0) {
-        return badRequest("Each line requires { id or lineId, deltaQty>0 }", undefined, requestId);
+      // Explicit validation: lineKey required, deltaQty must be positive integer
+      if (!lineKey) {
+        return badRequest("Each line requires { id or lineId }", undefined, requestId);
+      }
+      if (typeof l.deltaQty !== "number" || !Number.isFinite(l.deltaQty) || l.deltaQty <= 0) {
+        return badRequest(`Line ${lineKey}: deltaQty must be a positive number`, { code: "INVALID_QTY", lineKey, deltaQty: l.deltaQty }, requestId);
       }
       if (!linesById.has(lineKey)) {
-        return notFound(`Unknown line id=${lineKey}`, requestId);
+        return badRequest(`Unknown line id=${lineKey}`, { code: "UNKNOWN_LINE", lineKey }, requestId);
       }
       normalizedLines.push({ lineKey, deltaQty: l.deltaQty, locationId: l.locationId, lot: l.lot });
       lineIdUsage[i] = !l.id && !!l.lineId;
@@ -125,6 +191,14 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     const legacyCount = lineIdUsage.filter(Boolean).length;
     if (legacyCount > 0) {
       logger.info(logCtx, "so-fulfill.legacy_lineId", { legacyLineIdCount: legacyCount, totalLines: normalizedLines.length });
+    }
+
+    // Payload signature idempotency (AFTER validation - only mark successful operations as idempotent)
+    const sig = hashStr(`${so.id ?? id}::${canonicalizeLines(reqLines)}`);
+    if (await alreadyAppliedSig(tenantId, so.id, sig)) {
+      logger.info(logCtx, "so-fulfill.payload-signature-hit", { soId: so.id, signature: sig });
+      const fresh = await loadSO(tenantId, so.id);
+      return json(200, fresh ?? so);
     }
 
     // Prevent over-fulfillment & update SO lines in-memory
@@ -149,7 +223,7 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
           result: "fail",
           errorCode: "OVER_FULFILLMENT",
         });
-        return conflictError("Over-fulfillment blocked", { lineId: r.lineKey, ordered: line.qty, fulfilledSoFar: already, attempt: r.deltaQty }, requestId);
+        return conflictError("Over-fulfillment blocked", { code: "OVER_FULFILLMENT", lineId: r.lineKey, ordered: line.qty, fulfilledSoFar: already, attempt: r.deltaQty }, requestId);
       }
     }
 
@@ -214,6 +288,11 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
       result: "success",
     });
 
+    // Mark idempotency AFTER successful write (both key and payload signature)
+    if (idk) await markAppliedKey(tenantId, so.id, idk);
+    await markAppliedSig(tenantId, so.id, sig);
+
+    logger.info(logCtx, "so-fulfill.success", { soId: so.id, status: nextStatus, lineCount: normalizedLines.length });
     return json(200, updated);
   } catch (err: any) {
     logger.error({ requestId }, "so-fulfill.error", { message: err?.message });
