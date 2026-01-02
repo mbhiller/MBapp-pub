@@ -24,6 +24,21 @@ This doc explains how our **router**, **auth**, and **module endpoints** are str
     - `"*:read"` → read action on all types
     - `"product:*"` → all actions on product type
     - `"product:read"` → exact permission match
+  - **Canonical permission keys:** Use singular module prefixes (`party`, `product`, `inventory`, `purchase`, `sales`, `view`, `workspace`, `scanner`, etc.) in `<resource>:<action>` form. `/auth/policy` returns these canonical keys. Clients may honor legacy aliases for backward compatibility, but canonical keys are the contract.
+
+### Permission key semantics & derived policy (canonical)
+
+- **hasPerm wildcard resolution:** Checks exact match first, then `resource:*`, `*:action`, `*:read`, `*:*`, `*` (superuser). Same semantics apply across modules.
+- **Derived policy matrix (canonical keys):**
+
+| Role | Derived policy keys |
+|------|----------------------|
+| admin | `*` |
+| operator | `*:read`, `sales:*`, `purchase:*`, `inventory:*`, `view:*`, `workspace:*`, `scanner:use` |
+| viewer | `*:read` |
+| warehouse | `*:read`, `inventory:*`, `purchase:receive`, `scanner:use` |
+
+- **Contract reminder:** Canonical keys are singular; legacy plural/alias keys may be accepted by some clients for transition only.
 - `injectPreAuth(event, auth)` → stores auth into `event.requestContext.authorizer.mbapp`.
 - `requirePerm(auth, "<type>:<action>")` guards routes with wildcard support: `type:*`, `*:action`, `*:*`, `*`.
 - **Tenant header**: send both `X-Tenant-Id` and `x-tenant-id`.
