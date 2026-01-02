@@ -2,6 +2,7 @@ import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { ok, bad, error } from "../common/responses";
 import { getAuth, requirePerm } from "../auth/middleware";
 import { writeWorkspace } from "./repo";
+import { getObjectById } from "../objects/repo";
 
 const DUALWRITE_LEGACY = process.env.MBAPP_WORKSPACES_DUALWRITE_LEGACY === "true";
 
@@ -34,7 +35,39 @@ export async function handle(event: APIGatewayProxyEventV2) {
       return bad({ message: "entityType must be a string if provided" });
     }
 
+    // defaultViewId is optional; if provided ensure string
+    if (typeof body.defaultViewId !== "undefined" && body.defaultViewId !== null && typeof body.defaultViewId !== "string") {
+      return bad({ message: "defaultViewId must be a string if provided" });
+    }
+
     const views = Array.isArray(body.views) ? body.views : [];
+
+    // Validate defaultViewId if provided
+    if (body.defaultViewId) {
+      // Must be in views array
+      if (!views.includes(body.defaultViewId)) {
+        return bad({ message: `defaultViewId '${body.defaultViewId}' not found in views array` });
+      }
+
+      // If entityType is set, validate view entityType compatibility
+      if (body.entityType) {
+        const view = await getObjectById({
+          tenantId: auth.tenantId,
+          type: "view",
+          id: body.defaultViewId,
+        });
+
+        if (!view) {
+          return bad({ message: `Unknown viewId: ${body.defaultViewId}` });
+        }
+
+        if (view.entityType && view.entityType !== body.entityType) {
+          return bad({
+            message: `Default view has entityType '${view.entityType}' but workspace has '${body.entityType}'`,
+          });
+        }
+      }
+    }
 
     const result = await writeWorkspace({
       tenantId: auth.tenantId,

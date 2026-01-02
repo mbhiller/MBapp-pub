@@ -8,6 +8,14 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
+const ROUTE_BY_ENTITY: Record<string, keyof RootStackParamList> = {
+  purchaseOrder: "PurchaseOrdersList",
+  salesOrder: "SalesOrdersList",
+  inventoryItem: "InventoryList",
+  party: "PartyList",
+  product: "ProductsList",
+};
+
 const ENTITY_TYPES = [
   { label: "All", value: undefined },
   { label: "Purchase Order", value: "purchaseOrder" },
@@ -25,6 +33,28 @@ export default function WorkspaceHubScreen({ navigation }: { navigation: Navigat
   const { data, isLoading, error, refetch } = useWorkspaceItems({ q, entityType });
 
   const handleItemPress = (item: any) => {
+    navigation.navigate("WorkspaceDetail", { workspaceId: item.id } as any);
+  };
+
+  const handleOpen = (item: any) => {
+    const viewId = item.defaultViewId ?? item.views?.[0];
+    
+    // No views pinned — navigate to detail
+    if (!viewId) {
+      navigation.navigate("WorkspaceDetail", { workspaceId: item.id } as any);
+      return;
+    }
+
+    // If workspace.entityType is set, use it directly
+    if (item.entityType) {
+      const routeName = ROUTE_BY_ENTITY[item.entityType];
+      if (routeName) {
+        navigation.navigate(routeName as any, { viewId } as any);
+        return;
+      }
+    }
+
+    // Fallback: navigate to workspace detail
     navigation.navigate("WorkspaceDetail", { workspaceId: item.id } as any);
   };
 
@@ -132,31 +162,50 @@ export default function WorkspaceHubScreen({ navigation }: { navigation: Navigat
         )}
 
         {data.map((item) => (
-          <Pressable
-            key={item.id}
-            onPress={() => handleItemPress(item)}
-            style={{
-              padding: 12,
-              backgroundColor: t.colors.card,
-              borderWidth: 1,
-              borderColor: t.colors.border,
-              borderRadius: 8,
-            }}
-          >
-            <Text style={{ color: t.colors.text, fontWeight: "600", marginBottom: 4 }}>
-              {item.name}
-            </Text>
-            <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-              <Text style={{ color: t.colors.textMuted, fontSize: 12 }}>
-                {item.entityType}
+          <View key={item.id} style={{ marginBottom: 8 }}>
+            <Pressable
+              onPress={() => handleItemPress(item)}
+              style={{
+                padding: 12,
+                backgroundColor: t.colors.card,
+                borderWidth: 1,
+                borderColor: t.colors.border,
+                borderTopLeftRadius: 8,
+                borderTopRightRadius: 8,
+              }}
+            >
+              <Text style={{ color: t.colors.text, fontWeight: "600", marginBottom: 4 }}>
+                {item.name}
               </Text>
-              {item.updatedAt && (
+              <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
                 <Text style={{ color: t.colors.textMuted, fontSize: 12 }}>
-                  · Updated {new Date(item.updatedAt).toLocaleDateString()}
+                  {item.entityType}
                 </Text>
-              )}
-            </View>
-          </Pressable>
+                {item.updatedAt && (
+                  <Text style={{ color: t.colors.textMuted, fontSize: 12 }}>
+                    · Updated {new Date(item.updatedAt).toLocaleDateString()}
+                  </Text>
+                )}
+              </View>
+            </Pressable>
+            <Pressable
+              onPress={() => handleOpen(item)}
+              style={{
+                padding: 10,
+                backgroundColor: t.colors.primary,
+                borderWidth: 1,
+                borderTopWidth: 0,
+                borderColor: t.colors.border,
+                borderBottomLeftRadius: 8,
+                borderBottomRightRadius: 8,
+                alignItems: "center",
+              }}
+            >
+              <Text style={{ color: t.colors.buttonText ?? "#fff", fontWeight: "700", fontSize: 14 }}>
+                Open
+              </Text>
+            </Pressable>
+          </View>
         ))}
       </ScrollView>
     </View>

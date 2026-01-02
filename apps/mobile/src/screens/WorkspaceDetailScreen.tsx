@@ -46,6 +46,7 @@ export default function WorkspaceDetailScreen() {
 
   const [editVisible, setEditVisible] = React.useState(false);
   const [selectedViews, setSelectedViews] = React.useState<string[]>([]);
+  const [selectedDefault, setSelectedDefault] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
 
   // Load available views for this workspace entity type
@@ -112,11 +113,16 @@ export default function WorkspaceDetailScreen() {
   React.useEffect(() => {
     if (workspace?.views) {
       setSelectedViews(workspace.views);
+      setSelectedDefault(workspace.defaultViewId ?? null);
     }
   }, [workspace]);
 
   const toggleView = React.useCallback((id: string) => {
     setSelectedViews((prev) => (prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]));
+  }, []);
+
+  const toggleDefault = React.useCallback((id: string) => {
+    setSelectedDefault((prev) => (prev === id ? null : id));
   }, []);
 
   const openView = React.useCallback(
@@ -145,6 +151,7 @@ export default function WorkspaceDetailScreen() {
       return;
     }
     setSelectedViews(workspace.views ?? []);
+    setSelectedDefault(workspace.defaultViewId ?? null);
     setEditVisible(true);
   }, [toast, workspace]);
 
@@ -176,9 +183,13 @@ export default function WorkspaceDetailScreen() {
       }
     }
 
+    // If defaultViewId is set but not in selectedViews, clear it
+    const finalDefaultViewId = selectedDefault && selectedViews.includes(selectedDefault) ? selectedDefault : null;
+
     try {
       await patch(workspace.id, {
         views: selectedViews,
+        defaultViewId: finalDefaultViewId,
       });
       toast("✓ Updated workspace", "success");
       closeEdit();
@@ -188,7 +199,7 @@ export default function WorkspaceDetailScreen() {
     } finally {
       setSaving(false);
     }
-  }, [closeEdit, patch, refetch, selectedViews, toast, workspace?.id, workspace?.entityType, viewMetadata, views]);
+  }, [closeEdit, patch, refetch, selectedViews, selectedDefault, toast, workspace?.id, workspace?.entityType, viewMetadata, views]);
 
   const renderMember = (viewId: string) => {
     const meta = viewMetadata[viewId] || views.find((vv) => vv.id === viewId) || null;
@@ -196,6 +207,7 @@ export default function WorkspaceDetailScreen() {
     const description = meta?.description;
     const entityType = meta?.entityType || workspace?.entityType;
     const err = viewErrors[viewId];
+    const isDefault = workspace?.defaultViewId === viewId;
     return (
       <Pressable
         key={viewId}
@@ -205,11 +217,27 @@ export default function WorkspaceDetailScreen() {
           borderWidth: 1,
           borderColor: t.colors.border,
           borderRadius: 8,
-          backgroundColor: t.colors.card,
+          backgroundColor: isDefault ? "#e0f0ff" : t.colors.card,
           marginBottom: 8,
         }}
       >
-        <Text style={{ color: t.colors.text, fontWeight: "600" }}>{name}</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 4 }}>
+          <Text style={{ color: t.colors.text, fontWeight: "600", flex: 1 }}>{name}</Text>
+          {isDefault && (
+            <View
+              style={{
+                paddingHorizontal: 8,
+                paddingVertical: 3,
+                borderRadius: 4,
+                backgroundColor: t.colors.primary,
+              }}
+            >
+              <Text style={{ color: t.colors.primaryText ?? "#fff", fontSize: 10, fontWeight: "700" }}>
+                DEFAULT
+              </Text>
+            </View>
+          )}
+        </View>
         {description ? (
           <Text style={{ color: t.colors.textMuted, fontSize: 12, marginTop: 4 }} numberOfLines={2}>
             {description}
@@ -231,66 +259,113 @@ export default function WorkspaceDetailScreen() {
 
   const renderCheckboxRow = (view: SavedView) => {
     const checked = selectedViews.includes(view.id);
+    const isDefault = selectedDefault === view.id;
     const isMismatched = workspace?.entityType && view.entityType && view.entityType !== workspace.entityType;
     const canSelect = !isMismatched;
+    const canBeDefault = checked && !isMismatched;
 
     return (
-      <Pressable
+      <View
         key={view.id}
-        onPress={() => canSelect && toggleView(view.id)}
-        disabled={!canSelect}
         style={{
-          flexDirection: "row",
-          alignItems: "center",
           paddingVertical: 10,
           borderBottomWidth: 1,
           borderColor: t.colors.border,
           opacity: canSelect ? 1 : 0.5,
         }}
       >
-        <View
+        <Pressable
+          onPress={() => canSelect && toggleView(view.id)}
+          disabled={!canSelect}
           style={{
-            width: 20,
-            height: 20,
-            borderRadius: 4,
-            borderWidth: 1,
-            borderColor: checked ? t.colors.primary : t.colors.border,
-            backgroundColor: checked ? t.colors.primary : "transparent",
-            marginRight: 12,
+            flexDirection: "row",
             alignItems: "center",
-            justifyContent: "center",
           }}
         >
-          {checked ? <Text style={{ color: t.colors.primaryText ?? "#fff", fontWeight: "700" }}>✓</Text> : null}
-        </View>
-        <View style={{ flex: 1 }}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 }}>
-            <Text style={{ color: t.colors.text, fontWeight: "600" }}>{view.name || view.id}</Text>
-            {isMismatched && (
-              <View
-                style={{
-                  paddingHorizontal: 6,
-                  paddingVertical: 2,
-                  borderRadius: 4,
-                  backgroundColor: t.colors.danger ?? "crimson",
-                }}
-              >
-                <Text style={{ color: t.colors.primaryText ?? "#fff", fontSize: 10, fontWeight: "700" }}>
-                  Mismatch
-                </Text>
-              </View>
-            )}
+          <View
+            style={{
+              width: 20,
+              height: 20,
+              borderRadius: 4,
+              borderWidth: 1,
+              borderColor: checked ? t.colors.primary : t.colors.border,
+              backgroundColor: checked ? t.colors.primary : "transparent",
+              marginRight: 12,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            {checked ? <Text style={{ color: t.colors.primaryText ?? "#fff", fontWeight: "700" }}>✓</Text> : null}
           </View>
-          {view.description ? (
-            <Text style={{ color: t.colors.textMuted, fontSize: 12 }} numberOfLines={1}>
-              {view.description}
+          <View style={{ flex: 1 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 }}>
+              <Text style={{ color: t.colors.text, fontWeight: "600" }}>{view.name || view.id}</Text>
+              {isMismatched && (
+                <View
+                  style={{
+                    paddingHorizontal: 6,
+                    paddingVertical: 2,
+                    borderRadius: 4,
+                    backgroundColor: t.colors.danger ?? "crimson",
+                  }}
+                >
+                  <Text style={{ color: t.colors.primaryText ?? "#fff", fontSize: 10, fontWeight: "700" }}>
+                    Mismatch
+                  </Text>
+                </View>
+              )}
+              {isDefault && (
+                <View
+                  style={{
+                    paddingHorizontal: 6,
+                    paddingVertical: 2,
+                    borderRadius: 4,
+                    backgroundColor: t.colors.primary,
+                  }}
+                >
+                  <Text style={{ color: t.colors.primaryText ?? "#fff", fontSize: 10, fontWeight: "700" }}>
+                    DEFAULT
+                  </Text>
+                </View>
+              )}
+            </View>
+            {view.description ? (
+              <Text style={{ color: t.colors.textMuted, fontSize: 12 }} numberOfLines={1}>
+                {view.description}
+              </Text>
+            ) : null}
+            <Text style={{ color: t.colors.textMuted, fontSize: 11, marginTop: 2 }}>
+              Entity: {view.entityType || "(unknown)"}
             </Text>
-          ) : null}
-          <Text style={{ color: t.colors.textMuted, fontSize: 11, marginTop: 2 }}>
-            Entity: {view.entityType || "(unknown)"}
-          </Text>
-        </View>
-      </Pressable>
+          </View>
+        </Pressable>
+        {canBeDefault && (
+          <Pressable
+            onPress={() => toggleDefault(view.id)}
+            style={{
+              marginTop: 8,
+              marginLeft: 32,
+              paddingHorizontal: 12,
+              paddingVertical: 6,
+              borderRadius: 6,
+              borderWidth: 1,
+              borderColor: isDefault ? t.colors.border : t.colors.primary,
+              backgroundColor: isDefault ? t.colors.card : "transparent",
+              alignSelf: "flex-start",
+            }}
+          >
+            <Text
+              style={{
+                color: isDefault ? t.colors.textMuted : t.colors.primary,
+                fontSize: 12,
+                fontWeight: "600",
+              }}
+            >
+              {isDefault ? "Unset Default" : "Set as Default"}
+            </Text>
+          </Pressable>
+        )}
+      </View>
     );
   };
 

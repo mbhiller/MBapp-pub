@@ -6620,6 +6620,267 @@ const tests = {
     return { test: "workspaces:get-fallback", result: "PASS", artifacts: { id, source: "legacy" } };
   },
 
+  "smoke:workspaces:default-view-validation": async () => {
+    await ensureBearer();
+    const featureHeaders = { "X-Feature-Views-Enabled": "true" };
+    const headers = { ...baseHeaders(), ...featureHeaders };
+
+    const tag = smokeTag(`ws-defaultview-${Date.now()}`);
+    const wsId = `ws-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const createdViews = [];
+    const createdWorkspaces = [];
+
+    const cleanup = async () => {
+      for (const id of createdWorkspaces) {
+        try {
+          await fetch(`${API}/workspaces/${encodeURIComponent(id)}`, { method: "DELETE", headers });
+        } catch (e) {
+          console.warn("[smoke:workspaces:default-view-validation] cleanup workspace failed", id, e?.message ?? e);
+        }
+      }
+      for (const id of createdViews) {
+        try {
+          await fetch(`${API}/views/${encodeURIComponent(id)}`, { method: "DELETE", headers });
+        } catch (e) {
+          console.warn("[smoke:workspaces:default-view-validation] cleanup view failed", id, e?.message ?? e);
+        }
+      }
+    };
+
+    try {
+      // 1) Create two views for purchaseOrder entityType
+      const viewACreate = await fetch(`${API}/views`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          name: `${tag}-ViewA`,
+          entityType: "purchaseOrder",
+          filters: [],
+          columns: ["id", "vendorId"]
+        })
+      });
+      const viewABody = await viewACreate.json().catch(() => ({}));
+      if (!viewACreate.ok || !viewABody?.id) {
+        return { test: "workspaces:default-view-validation", result: "FAIL", step: "createViewA" };
+      }
+      const viewAId = viewABody.id;
+      createdViews.push(viewAId);
+      recordCreated({ type: "view", id: viewAId, route: "/views", meta: { name: viewABody.name } });
+
+      const viewBCreate = await fetch(`${API}/views`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          name: `${tag}-ViewB`,
+          entityType: "purchaseOrder",
+          filters: [],
+          columns: ["id", "status"]
+        })
+      });
+      const viewBBody = await viewBCreate.json().catch(() => ({}));
+      if (!viewBCreate.ok || !viewBBody?.id) {
+        return { test: "workspaces:default-view-validation", result: "FAIL", step: "createViewB" };
+      }
+      const viewBId = viewBBody.id;
+      createdViews.push(viewBId);
+      recordCreated({ type: "view", id: viewBId, route: "/views", meta: { name: viewBBody.name } });
+
+      // 2) Create workspace with views [A,B], defaultViewId=B
+      const wsCreate = await fetch(`${API}/workspaces`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          id: wsId,
+          name: `${tag}-Workspace`,
+          entityType: "purchaseOrder",
+          views: [viewAId, viewBId],
+          defaultViewId: viewBId
+        })
+      });
+      const wsBody = await wsCreate.json().catch(() => ({}));
+      if (!wsCreate.ok || wsBody?.id !== wsId) {
+        return { test: "workspaces:default-view-validation", result: "FAIL", step: "createWorkspace", wsBody };
+      }
+      createdWorkspaces.push(wsId);
+      recordCreated({ type: "workspace", id: wsId, route: "/workspaces", meta: { name: wsBody.name } });
+
+      // 3) GET workspace and assert defaultViewId=B
+      const wsGet1 = await fetch(`${API}/workspaces/${encodeURIComponent(wsId)}`, { headers });
+      const wsGet1Body = await wsGet1.json().catch(() => ({}));
+      if (!wsGet1.ok || wsGet1Body?.defaultViewId !== viewBId) {
+        return {
+          test: "workspaces:default-view-validation",
+          result: "FAIL",
+          step: "assertDefaultViewB",
+          expected: viewBId,
+          actual: wsGet1Body?.defaultViewId
+        };
+      }
+
+      // 4) PATCH defaultViewId=A
+      const patchA = await fetch(`${API}/workspaces/${encodeURIComponent(wsId)}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ defaultViewId: viewAId })
+      });
+      if (!patchA.ok) {
+        return { test: "workspaces:default-view-validation", result: "FAIL", step: "patchDefaultViewA", status: patchA.status };
+      }
+
+      // 5) GET workspace and assert defaultViewId=A
+      const wsGet2 = await fetch(`${API}/workspaces/${encodeURIComponent(wsId)}`, { headers });
+      const wsGet2Body = await wsGet2.json().catch(() => ({}));
+      if (!wsGet2.ok || wsGet2Body?.defaultViewId !== viewAId) {
+        return {
+          test: "workspaces:default-view-validation",
+          result: "FAIL",
+          step: "assertDefaultViewA",
+          expected: viewAId,
+          actual: wsGet2Body?.defaultViewId
+        };
+      }
+
+      // 6) PATCH defaultViewId="unknown" => expect 400
+      const unknownId = "unknown-view-id";
+      const patchUnknown = await fetch(`${API}/workspaces/${encodeURIComponent(wsId)}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ defaultViewId: unknownId })
+      });
+      if (patchUnknown.ok || patchUnknown.status !== 400) {
+        return {
+          test: "workspaces:default-view-validation",
+          result: "FAIL",
+          step: "patchUnknownViewId",
+          expected: 400,
+          actual: patchUnknown.status,
+          note: "Should reject unknown viewId"
+        };
+      }
+      const patchUnknownBody = await patchUnknown.json().catch(() => ({}));
+      const hasUnknownError = patchUnknownBody?.message?.includes("Unknown viewId") || patchUnknownBody?.message?.includes(unknownId);
+      if (!hasUnknownError) {
+        return {
+          test: "workspaces:default-view-validation",
+          result: "FAIL",
+          step: "assertUnknownViewIdMessage",
+          message: patchUnknownBody?.message,
+          note: "Error message should mention Unknown viewId"
+        };
+      }
+
+      // 7) Create a mismatched view (salesOrder) and attempt defaultViewId=mismatch
+      const viewMismatchCreate = await fetch(`${API}/views`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          name: `${tag}-ViewMismatch`,
+          entityType: "salesOrder",
+          filters: [],
+          columns: ["id"]
+        })
+      });
+      const viewMismatchBody = await viewMismatchCreate.json().catch(() => ({}));
+      if (!viewMismatchCreate.ok || !viewMismatchBody?.id) {
+        return { test: "workspaces:default-view-validation", result: "FAIL", step: "createViewMismatch" };
+      }
+      const viewMismatchId = viewMismatchBody.id;
+      createdViews.push(viewMismatchId);
+      recordCreated({ type: "view", id: viewMismatchId, route: "/views", meta: { name: viewMismatchBody.name } });
+
+      // First add mismatched view to workspace.views (should fail validation)
+      const patchMismatchViews = await fetch(`${API}/workspaces/${encodeURIComponent(wsId)}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ views: [viewAId, viewBId, viewMismatchId] })
+      });
+      if (patchMismatchViews.ok || patchMismatchViews.status !== 400) {
+        return {
+          test: "workspaces:default-view-validation",
+          result: "FAIL",
+          step: "patchMismatchedViewInViews",
+          expected: 400,
+          actual: patchMismatchViews.status,
+          note: "Should reject mismatched entityType in views[]"
+        };
+      }
+
+      // Now try to set as default (without adding to views first, should also fail)
+      const patchMismatch = await fetch(`${API}/workspaces/${encodeURIComponent(wsId)}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ defaultViewId: viewMismatchId })
+      });
+      if (patchMismatch.ok || patchMismatch.status !== 400) {
+        return {
+          test: "workspaces:default-view-validation",
+          result: "FAIL",
+          step: "patchMismatchedDefaultView",
+          expected: 400,
+          actual: patchMismatch.status,
+          note: "Should reject mismatched entityType for defaultViewId"
+        };
+      }
+      const patchMismatchBody = await patchMismatch.json().catch(() => ({}));
+      const hasMismatchError = patchMismatchBody?.message?.includes("not found in views array") || patchMismatchBody?.message?.includes(viewMismatchId);
+      if (!hasMismatchError) {
+        return {
+          test: "workspaces:default-view-validation",
+          result: "FAIL",
+          step: "assertMismatchMessage",
+          message: patchMismatchBody?.message,
+          note: "Error message should mention view not in views array or mismatch"
+        };
+      }
+
+      // 8) PATCH views removing the default while keeping defaultViewId => expect 400
+      // Current state: defaultViewId=viewAId, views=[viewAId, viewBId]
+      // Try to set views=[viewBId] only (removing viewAId which is the default)
+      const patchRemoveDefault = await fetch(`${API}/workspaces/${encodeURIComponent(wsId)}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          views: [viewBId],
+          defaultViewId: viewAId  // Still referencing removed view
+        })
+      });
+      if (patchRemoveDefault.ok || patchRemoveDefault.status !== 400) {
+        return {
+          test: "workspaces:default-view-validation",
+          result: "FAIL",
+          step: "patchRemoveDefaultView",
+          expected: 400,
+          actual: patchRemoveDefault.status,
+          note: "Should reject defaultViewId not in views[]"
+        };
+      }
+      const patchRemoveDefaultBody = await patchRemoveDefault.json().catch(() => ({}));
+      const hasNotInViewsError = patchRemoveDefaultBody?.message?.includes("not found in views array");
+      if (!hasNotInViewsError) {
+        return {
+          test: "workspaces:default-view-validation",
+          result: "FAIL",
+          step: "assertNotInViewsMessage",
+          message: patchRemoveDefaultBody?.message,
+          note: "Error message should mention defaultViewId not in views array"
+        };
+      }
+
+      return {
+        test: "workspaces:default-view-validation",
+        result: "PASS",
+        artifacts: {
+          workspaceId: wsId,
+          viewAId,
+          viewBId,
+          viewMismatchId
+        }
+      };
+    } finally {
+      await cleanup();
+    }
+  },
+
   "smoke:views:apply-to-po-list": async () => {
     await ensureBearer();
 

@@ -53,6 +53,11 @@ export async function handle(event: APIGatewayProxyEventV2) {
       return bad({ message: "entityType must be a string if provided" });
     }
 
+    // defaultViewId is optional; if provided ensure string
+    if (typeof body.defaultViewId !== "undefined" && body.defaultViewId !== null && typeof body.defaultViewId !== "string") {
+      return bad({ message: "defaultViewId must be a string if provided" });
+    }
+
     const merged: any = { ...existing, ...body, id: existing.id, type: "workspace" };
 
     // Normalize views default
@@ -83,6 +88,33 @@ export async function handle(event: APIGatewayProxyEventV2) {
         if (view.entityType && view.entityType !== merged.entityType) {
           return bad({
             message: `View ${viewId} has entityType '${view.entityType}' but workspace has '${merged.entityType}'`,
+          });
+        }
+      }
+    }
+
+    // Validate defaultViewId if provided
+    if (merged.defaultViewId) {
+      // Must be in views array
+      if (!merged.views.includes(merged.defaultViewId)) {
+        return bad({ message: `defaultViewId '${merged.defaultViewId}' not found in views array` });
+      }
+
+      // If entityType is set, validate view entityType compatibility (reuse existing view if already fetched)
+      if (merged.entityType) {
+        const view = await getObjectById({
+          tenantId: auth.tenantId,
+          type: "view",
+          id: merged.defaultViewId,
+        });
+
+        if (!view) {
+          return bad({ message: `Unknown viewId: ${merged.defaultViewId}` });
+        }
+
+        if (view.entityType && view.entityType !== merged.entityType) {
+          return bad({
+            message: `Default view has entityType '${view.entityType}' but workspace has '${merged.entityType}'`,
           });
         }
       }

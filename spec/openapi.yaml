@@ -4837,6 +4837,10 @@ components:
               items:
                 type: string
               default: []
+            defaultViewId:
+              type: string
+              nullable: true
+              description: Optional ID of default view to open when workspace is selected. Must be in views[] and entityType-compatible (if workspace.entityType set).
             ownerId:
               type: string
               description: User/party who owns this workspace

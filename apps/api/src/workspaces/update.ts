@@ -2,6 +2,7 @@ import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { ok, notFound, bad, error } from "../common/responses";
 import { getAuth, requirePerm } from "../auth/middleware";
 import { getWorkspaceById, writeWorkspace } from "./repo";
+import { getObjectById } from "../objects/repo";
 
 const DUALWRITE_LEGACY = process.env.MBAPP_WORKSPACES_DUALWRITE_LEGACY === "true";
 
@@ -38,6 +39,11 @@ export async function handle(event: APIGatewayProxyEventV2) {
       return bad({ message: "entityType must be a string if provided" });
     }
 
+    // defaultViewId is optional; if provided ensure string
+    if (typeof body.defaultViewId !== "undefined" && body.defaultViewId !== null && typeof body.defaultViewId !== "string") {
+      return bad({ message: "defaultViewId must be a string if provided" });
+    }
+
     const existing = await getWorkspaceById({ tenantId: auth.tenantId, id });
     if (!existing) return notFound();
 
@@ -48,6 +54,33 @@ export async function handle(event: APIGatewayProxyEventV2) {
       type: "workspace",
       views,
     };
+
+    // Validate defaultViewId if provided
+    if (merged.defaultViewId) {
+      // Must be in views array
+      if (!merged.views.includes(merged.defaultViewId)) {
+        return bad({ message: `defaultViewId '${merged.defaultViewId}' not found in views array` });
+      }
+
+      // If entityType is set, validate view entityType compatibility
+      if (merged.entityType) {
+        const view = await getObjectById({
+          tenantId: auth.tenantId,
+          type: "view",
+          id: merged.defaultViewId,
+        });
+
+        if (!view) {
+          return bad({ message: `Unknown viewId: ${merged.defaultViewId}` });
+        }
+
+        if (view.entityType && view.entityType !== merged.entityType) {
+          return bad({
+            message: `Default view has entityType '${view.entityType}' but workspace has '${merged.entityType}'`,
+          });
+        }
+      }
+    }
 
     const result = await writeWorkspace({
       tenantId: auth.tenantId,

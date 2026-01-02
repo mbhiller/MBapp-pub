@@ -9,6 +9,7 @@ type Workspace = {
   entityType?: string;
   description?: string;
   views?: string[];
+  defaultViewId?: string | null;
   createdAt?: string;
   updatedAt?: string;
   [key: string]: any;
@@ -242,6 +243,34 @@ export default function WorkspaceDetailPage() {
     const currentViews = workspace.views ?? [];
     const updatedViews = currentViews.filter((v) => v !== viewId);
 
+    // If removing the default view, clear defaultViewId client-side
+    const isRemovingDefault = workspace.defaultViewId === viewId;
+
+    setUpdateLoading(true);
+    setUpdateError(null);
+    try {
+      const patchBody: any = { views: updatedViews };
+      if (isRemovingDefault) {
+        patchBody.defaultViewId = null;
+      }
+
+      await apiFetch(`/workspaces/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        token: token || undefined,
+        tenantId,
+        body: patchBody,
+      });
+      await fetchWorkspace();
+    } catch (err) {
+      setUpdateError(formatError(err));
+    } finally {
+      setUpdateLoading(false);
+    }
+  };
+
+  const handleSetDefault = async (viewId: string) => {
+    if (!id || !workspace) return;
+
     setUpdateLoading(true);
     setUpdateError(null);
     try {
@@ -249,7 +278,27 @@ export default function WorkspaceDetailPage() {
         method: "PATCH",
         token: token || undefined,
         tenantId,
-        body: { views: updatedViews },
+        body: { defaultViewId: viewId },
+      });
+      await fetchWorkspace();
+    } catch (err) {
+      setUpdateError(formatError(err));
+    } finally {
+      setUpdateLoading(false);
+    }
+  };
+
+  const handleUnsetDefault = async () => {
+    if (!id || !workspace) return;
+
+    setUpdateLoading(true);
+    setUpdateError(null);
+    try {
+      await apiFetch(`/workspaces/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        token: token || undefined,
+        tenantId,
+        body: { defaultViewId: null },
       });
       await fetchWorkspace();
     } catch (err) {
@@ -348,6 +397,7 @@ export default function WorkspaceDetailPage() {
                   const name = meta?.name || viewId;
                   const description = meta?.description;
                   const error = viewMetadataErrors[viewId];
+                  const isDefault = workspace.defaultViewId === viewId;
 
                   return (
                     <div
@@ -358,12 +408,28 @@ export default function WorkspaceDetailPage() {
                         padding: 12,
                         display: "grid",
                         gap: 6,
-                        background: "#fafafa",
+                        background: isDefault ? "#f0f8ff" : "#fafafa",
                       }}
                     >
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                         <div style={{ display: "flex", flexDirection: "column" }}>
-                          <span style={{ fontWeight: 600 }}>{name}</span>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <span style={{ fontWeight: 600 }}>{name}</span>
+                            {isDefault && (
+                              <span
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  padding: "2px 8px",
+                                  background: "#08a",
+                                  color: "#fff",
+                                  borderRadius: 4,
+                                }}
+                              >
+                                DEFAULT
+                              </span>
+                            )}
+                          </div>
                           <span style={{ fontSize: 12, color: "#666" }}>{viewId}</span>
                         </div>
                         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -380,6 +446,39 @@ export default function WorkspaceDetailPage() {
                           >
                             Open
                           </Link>
+                          {isDefault ? (
+                            <button
+                              onClick={handleUnsetDefault}
+                              disabled={updateLoading}
+                              style={{
+                                padding: "4px 8px",
+                                fontSize: 12,
+                                background: "#fff",
+                                color: "#666",
+                                border: "1px solid #ddd",
+                                borderRadius: 4,
+                                cursor: "pointer",
+                              }}
+                            >
+                              Unset Default
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleSetDefault(viewId)}
+                              disabled={updateLoading}
+                              style={{
+                                padding: "4px 8px",
+                                fontSize: 12,
+                                background: "#e0f0ff",
+                                color: "#08a",
+                                border: "1px solid #08a",
+                                borderRadius: 4,
+                                cursor: "pointer",
+                              }}
+                            >
+                              Set Default
+                            </button>
+                          )}
                           <button
                             onClick={() => handleRemoveView(viewId)}
                             disabled={updateLoading}
