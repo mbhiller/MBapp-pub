@@ -53,6 +53,46 @@ function acquireBearerFromScript() {
   return tok;
 }
 
+// Helper: decode JWT payload (base64url) and return mbapp.tenantId if present
+function decodeJwtTenant(token) {
+  try {
+    const tok = String(token || "").trim();
+    const parts = tok.split(".");
+    if (parts.length < 2) return undefined;
+    let b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    while (b64.length % 4) b64 += "=";
+    const json = Buffer.from(b64, "base64").toString("utf8");
+    const payload = JSON.parse(json);
+    const t = payload?.mbapp?.tenantId;
+    return t ? String(t) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function acquireSmokeToken({ base, tenantId, email }) {
+  const url = `${base.replace(/\/+$/, "")}/auth/dev-login`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-tenant-id": tenantId,
+    },
+    body: JSON.stringify({ email, tenantId })
+  });
+
+  if (!res.ok) {
+    const bodyText = await res.text().catch(() => "");
+    throw new Error(`dev-login failed: ${res.status} ${res.statusText} ${bodyText.slice(0, 300)}`.trim());
+  }
+
+  const data = await res.json();
+  if (!data?.token) {
+    throw new Error("dev-login succeeded but returned no token");
+  }
+  return String(data.token);
+}
+
 // Select bearer: prefer Smoke-specific, then generic, then dev token, else acquire
 let selectedBearer = (process.env.MBAPP_BEARER_SMOKE || "").trim();
 let selectedTokenVar = selectedBearer ? "MBAPP_BEARER_SMOKE" : null;
@@ -83,21 +123,26 @@ if (!process.env.MBAPP_API_BASE || !process.env.MBAPP_API_BASE.trim()) {
   process.env.MBAPP_API_BASE = DEFAULT_BASE;
 }
 
-// Helper: decode JWT payload (base64url) and return mbapp.tenantId if present
-function decodeJwtTenant(bearer){
-  try{
-    const tok = String(bearer||"").trim();
-    const parts = tok.split(".");
-    if(parts.length < 2) return null;
-    let b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    while (b64.length % 4) b64 += "=";
-    const json = Buffer.from(b64, "base64").toString("utf8");
-    const payload = JSON.parse(json);
-    const t = payload?.mbapp?.tenantId;
-    return t ? String(t) : null;
-  }catch{ return null; }
+let jwtTenant = decodeJwtTenant(process.env.MBAPP_BEARER);
+const isCIStrict = process.env.CI === "true";
+let autoAcquiredSmokeBearer = false;
+
+if (isCIStrict && (!selectedBearer || jwtTenant !== requestedTenant)) {
+  try {
+    const base = (process.env.MBAPP_API_BASE && process.env.MBAPP_API_BASE.trim()) || DEFAULT_BASE;
+    const email = process.env.MBAPP_SMOKE_EMAIL || "dev@example.com";
+    const freshToken = await acquireSmokeToken({ base, tenantId: requestedTenant, email });
+    selectedBearer = freshToken;
+    selectedTokenVar = "MBAPP_BEARER_SMOKE";
+    process.env.MBAPP_BEARER = freshToken;
+    process.env.MBAPP_BEARER_SMOKE = freshToken;
+    if (!process.env.DEV_API_TOKEN) process.env.DEV_API_TOKEN = freshToken;
+    jwtTenant = decodeJwtTenant(freshToken);
+    autoAcquiredSmokeBearer = true;
+  } catch (err) {
+    console.error(`[ci-smokes] Auto-acquire SmokeTenant token failed: ${err?.message || err}`);
+  }
 }
-const jwtTenant = decodeJwtTenant(process.env.MBAPP_BEARER);
 
 const cfgPath = "ops/ci-smokes.json";
 if (!fs.existsSync(cfgPath)) {
@@ -123,17 +168,18 @@ if (filteredFlows.length !== flows.length) {
 
 // Guard: bearer tenant must match requested tenant unless explicit dual overrides
 const allowTenantMismatch = process.env.MBAPP_SMOKE_ALLOW_TENANT_MISMATCH === "1";
-const isCIStrict = process.env.CI === "true";
 const originalRequestedTenant = requestedTenant;
-if (jwtTenant && jwtTenant !== requestedTenant) {
-  if (isCIStrict) {
-    console.error(
-      `[ci-smokes] Need SmokeTenant JWT (MBAPP_BEARER_SMOKE).\n` +
-      `  originalRequestedTenant=${originalRequestedTenant}\n` +
-      `  jwtTenant=${jwtTenant}`
-    );
-    process.exit(2);
-  }
+if (isCIStrict && (!jwtTenant || jwtTenant !== requestedTenant)) {
+  console.error(
+    `[ci-smokes] Need SmokeTenant JWT (MBAPP_BEARER_SMOKE).\n` +
+    `  originalRequestedTenant=${originalRequestedTenant}\n` +
+    `  jwtTenant=${jwtTenant || "(missing)"}\n` +
+    `  autoAcquired=${autoAcquiredSmokeBearer}`
+  );
+  process.exit(2);
+}
+
+if (!isCIStrict && jwtTenant && jwtTenant !== requestedTenant) {
   // Local runs: only allow running in non-Smoke tenant if BOTH overrides are set
   if (allowNonSmokeTenant && allowTenantMismatch) {
     requestedTenant = jwtTenant; // user explicitly opts to run under the token's tenant
@@ -159,6 +205,7 @@ console.log(JSON.stringify({
   tokenVar: selectedTokenVar,
   hasToken: Boolean(selectedBearer),
   jwtTenant,
+  autoAcquired: autoAcquiredSmokeBearer,
   allowMismatch: allowTenantMismatch,
   allowNonSmokeTenant
 }));

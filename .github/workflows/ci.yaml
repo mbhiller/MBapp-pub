@@ -101,6 +101,7 @@ jobs:
       MBAPP_API_BASE: ${{ secrets.MBAPP_API_BASE }}
       MBAPP_TENANT_ID: "SmokeTenant"
       MBAPP_SMOKE_TENANT_ID: "SmokeTenant"
+      MBAPP_SMOKE_EMAIL: "dev@example.com"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
