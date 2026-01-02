@@ -158,6 +158,83 @@
   - **PO:** q (contains), status (eq), vendorId (eq)
   - **SO:** q (contains), status (eq)
   - **Sort:** Limited to createdAt/updatedAt with asc/desc (other fields dropped during normalization)
+
+### Views Feature Parity: Inventory + Parties (Web/Mobile) — ✅ Complete (Sprint J, 2026-01-02)
+
+**Epic Summary:** Add Views feature to Inventory and Parties lists on both web and mobile, with real filtering assertions in smokes to prevent view apply regressions.
+
+- **E1 (Web Mappers + InventoryListPage/PartiesListPage Wiring):** [apps/web/src/lib/viewFilterMappers.ts](../apps/web/src/lib/viewFilterMappers.ts) created with two mappers:
+  - `mapViewToInventoryFilters(view)` — Converts View filters to inventory list state: `q` (search/name) and `productId` (filter). Returns `{ applied: Record<string, any>, unsupported: Array }` structure.
+  - `mapViewToPartyFilters(view)` — Converts View filters to parties list state: `q` (search/name) only. Role filtering marked unsupported on web endpoint (server does not support role param).
+  - Both mappers support eq/contains/in operators on their respective fields.
+  
+  [apps/web/src/pages/InventoryListPage.tsx](../apps/web/src/pages/InventoryListPage.tsx) wired with:
+  - ViewSelector component placed above search controls
+  - `?viewId` URL parameter auto-detected on load and immediately applied via `handleApplyView`
+  - `currentFilterState` tracks active q + productIdFilter for SaveViewButton metadata
+  - SaveViewButton shows active view name when a view is applied
+  
+  [apps/web/src/pages/PartiesListPage.tsx](../apps/web/src/pages/PartiesListPage.tsx) wired identically:
+  - ViewSelector for view selection/apply
+  - URL viewId auto-apply on load
+  - SaveViewButton with active view metadata (q only, role unsupported)
+  
+  ✅ Web typecheck clean (Exit Code 0).
+
+- **E2 (Mobile ViewPickerModal/SaveViewModal + InventoryListScreen/PartyListScreen):** [apps/mobile/src/screens/InventoryListScreen.tsx](../apps/mobile/src/screens/InventoryListScreen.tsx) integrated with:
+  - New state: `showViewPicker`, `showSaveModal`, `appliedView`
+  - View control buttons (Views icon, Save button) in header
+  - `handleApplyView` calls `mapViewToMobileState("inventoryItem")` to convert View filters to {q, filter:{productId}, sort} state
+  - `handleSaveView` creates/updates views via API with current filter + sort state via `buildViewFromState`
+  - ViewPickerModal + SaveViewModal rendered with proper entity type and current state
+  
+  [apps/mobile/src/screens/PartyListScreen.tsx](../apps/mobile/src/screens/PartyListScreen.tsx) integrated identically:
+  - View picker/save modals, state handlers
+  - `handleApplyView` maps q + role from View filters
+  - Current state tracks {q, filter:{role}} for save operations
+  
+  ✅ Mobile typecheck clean (Exit Code 0).
+
+- **E3 (Smoke Coverage — Real Filtering Assertions):**
+  - `smoke:views:apply-to-product-list` (existing, strengthened):
+    - Creates 2 products with distinct tokens (productName contains token1 vs. token2)
+    - Creates View with `q contains token1` filter
+    - Lists products with `q=token1` (derived from view)
+    - **Assertion:** Product 1 (token1) present in results; Product 2 (token2) absent
+    - Validates that view filter actually constrains results (not just routing concern)
+  
+  - `smoke:views:apply-to-inventory-list` (NEW):
+    - Creates Product A + Inventory Item A (itemName contains tokenA), then Product B + Item B (tokenB)
+    - Creates View with `productId eq {prodA.id}` filter
+    - Lists inventory with `filter.productId={prodA.id}` (derived from view)
+    - **Assertion:** Item A present; Item B absent
+    - Validates productId filtering on inventory list and proper view-to-filter mapping
+  
+  - `smoke:views:apply-to-party-list` (NEW):
+    - Creates Party A (name contains tokenA, role="customer"), Party B (tokenB, role="vendor")
+    - Creates View with `q contains tokenA` filter
+    - Lists parties with `q=tokenA` (derived from view)
+    - **Assertion:** Party A present; Party B absent
+    - Validates q filtering on parties list
+  
+  Both new smokes follow the dual-entity filtering pattern: create two entities with distinct search tokens, apply view with single-entity filter, assert filter constrains results. Registered in [ops/ci-smokes.json](../ops/ci-smokes.json) flows array for CI execution.
+  
+  ✅ All typechecks pass (api, web, mobile); new smokes integrated into CI manifest.
+
+- **Definition of Done:**
+  - ✅ Web mappers created (inventory + parties, q/productId/role support)
+  - ✅ InventoryListPage wired (ViewSelector, viewId auto-apply, SaveViewButton metadata)
+  - ✅ PartiesListPage wired (ViewSelector, viewId auto-apply, SaveViewButton metadata)
+  - ✅ Mobile InventoryListScreen integrated (ViewPickerModal, SaveViewModal, apply/save handlers)
+  - ✅ Mobile PartyListScreen integrated (identical pattern)
+  - ✅ apply-to-product-list strengthened with real filtering assertions
+  - ✅ apply-to-inventory-list smoke added with dual-entity productId filtering
+  - ✅ apply-to-party-list smoke added with dual-entity q filtering
+  - ✅ New smokes registered in CI manifest
+  - ✅ All typechecks pass (Exit Code 0 across api, web, mobile)
+  - ✅ No regressions (existing views/smokes unchanged)
+
+- **Technical Guarantee:** Inventory and Parties list views now feature-complete on both web and mobile. Views apply correctly via URL params or UI picker, filters constrain actual results (verified by dual-entity smokes with assertions), and SaveViewButton/SaveViewModal integrate properly with active view state. All changes backward-compatible; no migrations needed.
   - **Shared:** Defaults to false if omitted (not exposed in UI for v1)
   - **Columns:** Parsed but not applied to list rendering (future feature)
 - **Next:** Inventory/Parties/Products list save; workspaces hub apply/open views; additional entity types (e.g., backorders, registrations).

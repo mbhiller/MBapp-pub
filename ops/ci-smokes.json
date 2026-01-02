@@ -12,6 +12,8 @@
   "smoke:workspaces:get-fallback",
   "smoke:views:apply-to-po-list",
   "smoke:views:apply-to-product-list",
+  "smoke:views:apply-to-inventory-list",
+  "smoke:views:apply-to-party-list",
   "smoke:events:enabled-noop",
   "smoke:close-the-loop",
   "smoke:backorders:partial-fulfill",

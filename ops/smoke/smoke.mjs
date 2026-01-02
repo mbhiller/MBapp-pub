@@ -6923,65 +6923,68 @@ const tests = {
     const featureHeaders = { "X-Feature-Views-Enabled": "true" };
     const runTimestamp = Date.now();
     let viewId = null;
+    let prod1Id = null;
+    let prod2Id = null;
 
     try {
-      // 1) Create a product to view
-      const productSku = smokeTag(`VPROD-${runTimestamp}`);
-      const productName = `View Test Product - ${runTimestamp}`;
-      
-      const prodCreate = await post(`/objects/product`, {
+      // 1) Create two products with distinct tokens
+      const token1 = smokeTag(`VPRODT1-${runTimestamp}`);
+      const token2 = smokeTag(`VPRODT2-${runTimestamp}`);
+
+      const prod1Create = await post(`/objects/product`, {
         type: "product",
         kind: "good",
-        name: productName,
-        sku: productSku
+        name: `Product with ${token1}`,
+        sku: token1
       }, { "Idempotency-Key": idem() });
-      
-      if (!prodCreate.ok || !prodCreate.body?.id) {
-        return { test: "views:apply-to-product-list", result: "FAIL", step: "createProduct", prodCreate };
-      }
-      const prodId = prodCreate.body.id;
-      recordCreated({ type: 'product', id: prodId, route: '/objects/product', meta: { name: productName, sku: productSku } });
 
-      // 2) Verify product can be found via search (establish baseline)
-      let productFoundInSearch = false;
-      let searchItems = [];
-      for (let attempt = 0; attempt < 5; attempt++) {
-        if (attempt > 0) await sleep(200);
-        const searchRes = await get(`/objects/product`, { limit: 50, q: productSku });
-        if (searchRes.ok && Array.isArray(searchRes.body?.items)) {
-          searchItems = searchRes.body.items;
-          productFoundInSearch = searchItems.some(p => p.id === prodId);
-          if (productFoundInSearch) break;
-        }
+      if (!prod1Create.ok || !prod1Create.body?.id) {
+        return { test: "views:apply-to-product-list", result: "FAIL", step: "createProduct1", prod1Create };
       }
+      prod1Id = prod1Create.body.id;
+      recordCreated({ type: 'product', id: prod1Id, route: '/objects/product', meta: { sku: token1 } });
 
-      if (!productFoundInSearch) {
-        return {
-          test: "views:apply-to-product-list",
-          result: "FAIL",
-          step: "verifyProductInSearch",
-          reason: "product-not-found-in-search-results",
-          prodId,
-          sku: productSku,
-          searchAttempts: 5,
-          firstFiveSearchResults: searchItems.slice(0, 5).map(p => ({ id: p.id, sku: p.sku, name: p.name }))
-        };
+      const prod2Create = await post(`/objects/product`, {
+        type: "product",
+        kind: "good",
+        name: `Product with ${token2}`,
+        sku: token2
+      }, { "Idempotency-Key": idem() });
+
+      if (!prod2Create.ok || !prod2Create.body?.id) {
+        return { test: "views:apply-to-product-list", result: "FAIL", step: "createProduct2", prod2Create };
+      }
+      prod2Id = prod2Create.body.id;
+      recordCreated({ type: 'product', id: prod2Id, route: '/objects/product', meta: { sku: token2 } });
+
+      // 2) Verify both products exist via GET by id
+      const getProd1 = await get(`/objects/product/${encodeURIComponent(prod1Id)}`);
+      if (!getProd1.ok) {
+        return { test: "views:apply-to-product-list", result: "FAIL", step: "verifyProd1", getProd1 };
       }
 
-      // 3) Create a View configured for products (no complex filters, just basic view)
+      const getProd2 = await get(`/objects/product/${encodeURIComponent(prod2Id)}`);
+      if (!getProd2.ok) {
+        return { test: "views:apply-to-product-list", result: "FAIL", step: "verifyProd2", getProd2 };
+      }
+
+      const maxAttempts = 10;
+      const delayMs = 250;
+
+      // 3) Create a View with q filter for token1
       const viewCreateHeaders = { ...baseHeaders(), ...featureHeaders };
       const viewCreate = await fetch(`${API}/views`, {
         method: "POST",
         headers: viewCreateHeaders,
         body: JSON.stringify({
-          name: smokeTag(`ViewProductList-${runTimestamp}`),
+          name: smokeTag(`ViewProductFilter-${runTimestamp}`),
           entityType: "product",
-          filters: [], // Start with empty filters; views work without filters
-          description: "smoke:views:apply-to-product-list view"
+          filters: [{ field: "q", op: "contains", value: token1 }],
+          description: "smoke:views:apply-to-product-list filter test"
         })
       });
       const viewBody = await viewCreate.json().catch(() => ({}));
-      
+
       if (!viewCreate.ok || !viewBody?.id) {
         return {
           test: "views:apply-to-product-list",
@@ -6992,89 +6995,394 @@ const tests = {
         };
       }
       viewId = viewBody.id;
-      recordCreated({ type: 'view', id: viewId, route: '/views', meta: { name: viewBody?.name, entityType: "product" } });
+      recordCreated({ type: 'view', id: viewId, route: '/views', meta: { entityType: "product" } });
 
-      // 4) Fetch the view back (verify it persists)
-      const viewGetHeaders = { ...baseHeaders(), ...featureHeaders };
-      const viewGet = await fetch(`${API}/views/${encodeURIComponent(viewId)}`, {
-        method: "GET",
-        headers: viewGetHeaders
-      });
-      const viewGetBody = await viewGet.json().catch(() => ({}));
-      
-      if (!viewGet.ok || !viewGetBody?.id) {
-        return {
-          test: "views:apply-to-product-list",
-          result: "FAIL",
-          step: "getView",
-          status: viewGet.status,
-          body: snippet(viewGetBody, 400)
-        };
-      }
+      // 4) Derive query params from view filters and list products
+      const derivedQueryParams = { limit: 100, q: token1 };
+      let prod1InFiltered = false;
+      let prod2InFiltered = false;
+      let filteredItems = [];
 
-      // 5) Verify we can list products (simulating view application)
-      // When views are applied, derived query params are used on the product list endpoint
-      let listWithViewApplied = null;
-      for (let attempt = 0; attempt < 5; attempt++) {
-        if (attempt > 0) await sleep(200);
-        listWithViewApplied = await get(`/objects/product`, { limit: 50 });
-        if (listWithViewApplied.ok && Array.isArray(listWithViewApplied.body?.items)) {
-          break;
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        if (attempt > 0) await sleep(delayMs);
+        const listFiltered = await get(`/objects/product`, derivedQueryParams);
+        if (listFiltered.ok && Array.isArray(listFiltered.body?.items)) {
+          const items = listFiltered.body.items;
+          filteredItems = items;
+          prod1InFiltered = items.some(p => p.id === prod1Id);
+          prod2InFiltered = items.some(p => p.id === prod2Id);
+          if (prod1InFiltered && !prod2InFiltered) break;
         }
       }
 
-      if (!listWithViewApplied?.ok) {
+      // 5) Assert: Product 1 (token1) is in filtered results
+      if (!prod1InFiltered) {
         return {
           test: "views:apply-to-product-list",
           result: "FAIL",
-          step: "listProducts",
-          reason: "product-list-failed",
-          status: listWithViewApplied?.status
+          step: "assertProd1InFiltered",
+          reason: "filtered-product-not-in-results",
+          prod1Id,
+          filteredCount: filteredItems.length
         };
       }
 
-      const listItems = Array.isArray(listWithViewApplied.body?.items) ? listWithViewApplied.body.items : [];
-      const allListItemsAreProducts = listItems.every(p => p.type === "product" || !p.type); // type may be implicit
-      
+      // 6) Assert: Product 2 (token2) is NOT in filtered results
+      if (prod2InFiltered) {
+        return {
+          test: "views:apply-to-product-list",
+          result: "FAIL",
+          step: "assertProd2NotInFiltered",
+          reason: "non-matching-product-should-not-be-in-filtered-results",
+          prod2Id,
+          filteredCount: filteredItems.length
+        };
+      }
+
+      const pass = prod1InFiltered && !prod2InFiltered;
       return {
         test: "views:apply-to-product-list",
-        result: allListItemsAreProducts ? "PASS" : "FAIL",
-        message: "View created for products; product list returns valid items",
+        result: pass ? "PASS" : "FAIL",
+        message: "Applied view filter (q contains) to product list",
         steps: {
-          product: { id: prodId, sku: productSku, foundInSearch: productFoundInSearch },
-          view: { id: viewId, entityType: "product", filters: viewGetBody?.filters },
-          listVerification: {
-            itemCount: listItems.length,
-            allProductType: allListItemsAreProducts,
-            sampleItems: listItems.slice(0, 3).map(p => ({ id: p.id, sku: p.sku, name: p.name }))
-          }
+          prod1: { id: prod1Id, sku: token1, inFiltered: prod1InFiltered },
+          prod2: { id: prod2Id, sku: token2, inFiltered: prod2InFiltered },
+          view: { id: viewId, filters: viewBody?.filters },
+          derivedQueryParams,
+          results: { filteredCount: filteredItems.length }
         }
       };
     } finally {
       if (viewId) {
         const deleteHeaders = { ...baseHeaders(), ...featureHeaders };
         let deleted = false;
-        let lastError = null;
         for (let attempt = 0; attempt < 5 && !deleted; attempt++) {
           const delResp = await fetch(`${API}/views/${encodeURIComponent(viewId)}`, { method: "DELETE", headers: deleteHeaders });
           if (delResp.ok || delResp.status === 404) {
             deleted = true;
             break;
           }
-          lastError = {
-            status: delResp.status,
-            body: await delResp.json().catch(async () => await delResp.text().catch(() => null)),
-          };
           await sleep(300);
         }
-        if (!deleted) {
-          console.error(JSON.stringify({
-            test: "views:apply-to-product-list",
-            cleanup: "delete-view",
-            viewId,
-            smokeRunId: runTimestamp,
-            lastError,
-          }));
+      }
+    }
+  },
+
+  "smoke:views:apply-to-inventory-list": async () => {
+    await ensureBearer();
+
+    const featureHeaders = { "X-Feature-Views-Enabled": "true" };
+    const runTimestamp = Date.now();
+    let viewId = null;
+    let prodAId = null;
+    let prodBId = null;
+    let itemAId = null;
+    let itemBId = null;
+
+    try {
+      // 1) Create product A + inventory item A
+      const tokenA = smokeTag(`VINVA-${runTimestamp}`);
+      const tokenB = smokeTag(`VINVB-${runTimestamp}`);
+
+      const prodA = await post(`/objects/product`, {
+        type: "product",
+        kind: "good",
+        name: `Product A ${tokenA}`,
+        sku: tokenA
+      }, { "Idempotency-Key": idem() });
+
+      if (!prodA.ok || !prodA.body?.id) {
+        return { test: "views:apply-to-inventory-list", result: "FAIL", step: "createProdA", prodA };
+      }
+      prodAId = prodA.body.id;
+      recordCreated({ type: 'product', id: prodAId, route: '/objects/product', meta: { sku: tokenA } });
+
+      const itemA = await createInventoryForProduct(prodAId, `Item A ${tokenA}`);
+      if (!itemA.ok || !itemA.body?.id) {
+        return { test: "views:apply-to-inventory-list", result: "FAIL", step: "createItemA", itemA };
+      }
+      itemAId = itemA.body.id;
+      recordCreated({ type: 'inventory', id: itemAId, route: '/objects/inventory', meta: { productId: prodAId } });
+
+      // 2) Create product B + inventory item B
+      const prodB = await post(`/objects/product`, {
+        type: "product",
+        kind: "good",
+        name: `Product B ${tokenB}`,
+        sku: tokenB
+      }, { "Idempotency-Key": idem() });
+
+      if (!prodB.ok || !prodB.body?.id) {
+        return { test: "views:apply-to-inventory-list", result: "FAIL", step: "createProdB", prodB };
+      }
+      prodBId = prodB.body.id;
+      recordCreated({ type: 'product', id: prodBId, route: '/objects/product', meta: { sku: tokenB } });
+
+      const itemB = await createInventoryForProduct(prodBId, `Item B ${tokenB}`);
+      if (!itemB.ok || !itemB.body?.id) {
+        return { test: "views:apply-to-inventory-list", result: "FAIL", step: "createItemB", itemB };
+      }
+      itemBId = itemB.body.id;
+      recordCreated({ type: 'inventory', id: itemBId, route: '/objects/inventory', meta: { productId: prodBId } });
+
+      // 3) Verify both items exist via GET by id
+      const getItemA = await get(`/objects/inventory/${encodeURIComponent(itemAId)}`);
+      if (!getItemA.ok) {
+        return { test: "views:apply-to-inventory-list", result: "FAIL", step: "verifyItemA", getItemA };
+      }
+
+      const getItemB = await get(`/objects/inventory/${encodeURIComponent(itemBId)}`);
+      if (!getItemB.ok) {
+        return { test: "views:apply-to-inventory-list", result: "FAIL", step: "verifyItemB", getItemB };
+      }
+
+      const maxAttempts = 10;
+      const delayMs = 250;
+
+      // 4) Create a View with productId filter for product A
+      const viewCreateHeaders = { ...baseHeaders(), ...featureHeaders };
+      const viewCreate = await fetch(`${API}/views`, {
+        method: "POST",
+        headers: viewCreateHeaders,
+        body: JSON.stringify({
+          name: smokeTag(`ViewInventoryFilter-${runTimestamp}`),
+          entityType: "inventoryItem",
+          filters: [{ field: "productId", op: "eq", value: prodAId }],
+          description: "smoke:views:apply-to-inventory-list filter test"
+        })
+      });
+      const viewBody = await viewCreate.json().catch(() => ({}));
+
+      if (!viewCreate.ok || !viewBody?.id) {
+        return {
+          test: "views:apply-to-inventory-list",
+          result: "FAIL",
+          step: "createView",
+          status: viewCreate.status,
+          body: snippet(viewBody, 400)
+        };
+      }
+      viewId = viewBody.id;
+      recordCreated({ type: 'view', id: viewId, route: '/views', meta: { entityType: "inventoryItem" } });
+
+      // 5) Derive query params from view filters and list inventory
+      const derivedQueryParams = { limit: 100, "filter.productId": prodAId };
+      let itemAInFiltered = false;
+      let itemBInFiltered = false;
+      let filteredItems = [];
+
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        if (attempt > 0) await sleep(delayMs);
+        const listFiltered = await get(`/objects/inventory`, derivedQueryParams);
+        if (listFiltered.ok && Array.isArray(listFiltered.body?.items)) {
+          const items = listFiltered.body.items;
+          filteredItems = items;
+          itemAInFiltered = items.some(i => i.id === itemAId);
+          itemBInFiltered = items.some(i => i.id === itemBId);
+          if (itemAInFiltered && !itemBInFiltered) break;
+        }
+      }
+
+      // 6) Assert: Item A (prodA) is in filtered results
+      if (!itemAInFiltered) {
+        return {
+          test: "views:apply-to-inventory-list",
+          result: "FAIL",
+          step: "assertItemAInFiltered",
+          reason: "filtered-inventory-item-not-in-results",
+          itemAId,
+          filteredCount: filteredItems.length
+        };
+      }
+
+      // 7) Assert: Item B (prodB) is NOT in filtered results
+      if (itemBInFiltered) {
+        return {
+          test: "views:apply-to-inventory-list",
+          result: "FAIL",
+          step: "assertItemBNotInFiltered",
+          reason: "non-matching-inventory-item-should-not-be-in-filtered-results",
+          itemBId,
+          filteredCount: filteredItems.length
+        };
+      }
+
+      const pass = itemAInFiltered && !itemBInFiltered;
+      return {
+        test: "views:apply-to-inventory-list",
+        result: pass ? "PASS" : "FAIL",
+        message: "Applied view filter (productId eq) to inventory list",
+        steps: {
+          itemA: { id: itemAId, productId: prodAId, inFiltered: itemAInFiltered },
+          itemB: { id: itemBId, productId: prodBId, inFiltered: itemBInFiltered },
+          view: { id: viewId, filters: viewBody?.filters },
+          derivedQueryParams,
+          results: { filteredCount: filteredItems.length }
+        }
+      };
+    } finally {
+      if (viewId) {
+        const deleteHeaders = { ...baseHeaders(), ...featureHeaders };
+        let deleted = false;
+        for (let attempt = 0; attempt < 5 && !deleted; attempt++) {
+          const delResp = await fetch(`${API}/views/${encodeURIComponent(viewId)}`, { method: "DELETE", headers: deleteHeaders });
+          if (delResp.ok || delResp.status === 404) {
+            deleted = true;
+            break;
+          }
+          await sleep(300);
+        }
+      }
+    }
+  },
+
+  "smoke:views:apply-to-party-list": async () => {
+    await ensureBearer();
+
+    const featureHeaders = { "X-Feature-Views-Enabled": "true" };
+    const runTimestamp = Date.now();
+    let viewId = null;
+    let partyAId = null;
+    let partyBId = null;
+
+    try {
+      // 1) Create party A with token and role "customer"
+      const tokenA = smokeTag(`VPARTY-${runTimestamp}`);
+      const tokenB = smokeTag(`VPARTYB-${runTimestamp}`);
+
+      const partyA = await post(`/objects/party`, {
+        type: "party",
+        kind: "organization",
+        name: `Party A ${tokenA}`,
+        roles: ["customer"]
+      }, { "Idempotency-Key": idem() });
+
+      if (!partyA.ok || !partyA.body?.id) {
+        return { test: "views:apply-to-party-list", result: "FAIL", step: "createPartyA", partyA };
+      }
+      partyAId = partyA.body.id;
+      recordCreated({ type: 'party', id: partyAId, route: '/objects/party', meta: { roles: ["customer"] } });
+
+      // 2) Create party B with different token and role "vendor"
+      const partyB = await post(`/objects/party`, {
+        type: "party",
+        kind: "organization",
+        name: `Party B ${tokenB}`,
+        roles: ["vendor"]
+      }, { "Idempotency-Key": idem() });
+
+      if (!partyB.ok || !partyB.body?.id) {
+        return { test: "views:apply-to-party-list", result: "FAIL", step: "createPartyB", partyB };
+      }
+      partyBId = partyB.body.id;
+      recordCreated({ type: 'party', id: partyBId, route: '/objects/party', meta: { roles: ["vendor"] } });
+
+      // 3) Verify both parties exist via GET by id
+      const getPartyA = await get(`/objects/party/${encodeURIComponent(partyAId)}`);
+      if (!getPartyA.ok) {
+        return { test: "views:apply-to-party-list", result: "FAIL", step: "verifyPartyA", getPartyA };
+      }
+
+      const getPartyB = await get(`/objects/party/${encodeURIComponent(partyBId)}`);
+      if (!getPartyB.ok) {
+        return { test: "views:apply-to-party-list", result: "FAIL", step: "verifyPartyB", getPartyB };
+      }
+
+      const maxAttempts = 10;
+      const delayMs = 250;
+
+      // 4) Create a View with q filter for tokenA (safe, no role requirement on list endpoint)
+      const viewCreateHeaders = { ...baseHeaders(), ...featureHeaders };
+      const viewCreate = await fetch(`${API}/views`, {
+        method: "POST",
+        headers: viewCreateHeaders,
+        body: JSON.stringify({
+          name: smokeTag(`ViewPartyFilter-${runTimestamp}`),
+          entityType: "party",
+          filters: [{ field: "q", op: "contains", value: tokenA }],
+          description: "smoke:views:apply-to-party-list filter test"
+        })
+      });
+      const viewBody = await viewCreate.json().catch(() => ({}));
+
+      if (!viewCreate.ok || !viewBody?.id) {
+        return {
+          test: "views:apply-to-party-list",
+          result: "FAIL",
+          step: "createView",
+          status: viewCreate.status,
+          body: snippet(viewBody, 400)
+        };
+      }
+      viewId = viewBody.id;
+      recordCreated({ type: 'view', id: viewId, route: '/views', meta: { entityType: "party" } });
+
+      // 5) Derive query params from view filters and list parties
+      const derivedQueryParams = { limit: 100, q: tokenA };
+      let partyAInFiltered = false;
+      let partyBInFiltered = false;
+      let filteredItems = [];
+
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        if (attempt > 0) await sleep(delayMs);
+        const listFiltered = await get(`/objects/party`, derivedQueryParams);
+        if (listFiltered.ok && Array.isArray(listFiltered.body?.items)) {
+          const items = listFiltered.body.items;
+          filteredItems = items;
+          partyAInFiltered = items.some(p => p.id === partyAId);
+          partyBInFiltered = items.some(p => p.id === partyBId);
+          if (partyAInFiltered && !partyBInFiltered) break;
+        }
+      }
+
+      // 6) Assert: Party A (tokenA) is in filtered results
+      if (!partyAInFiltered) {
+        return {
+          test: "views:apply-to-party-list",
+          result: "FAIL",
+          step: "assertPartyAInFiltered",
+          reason: "filtered-party-not-in-results",
+          partyAId,
+          filteredCount: filteredItems.length
+        };
+      }
+
+      // 7) Assert: Party B (tokenB) is NOT in filtered results
+      if (partyBInFiltered) {
+        return {
+          test: "views:apply-to-party-list",
+          result: "FAIL",
+          step: "assertPartyBNotInFiltered",
+          reason: "non-matching-party-should-not-be-in-filtered-results",
+          partyBId,
+          filteredCount: filteredItems.length
+        };
+      }
+
+      const pass = partyAInFiltered && !partyBInFiltered;
+      return {
+        test: "views:apply-to-party-list",
+        result: pass ? "PASS" : "FAIL",
+        message: "Applied view filter (q contains) to party list",
+        steps: {
+          partyA: { id: partyAId, name: `Party A ${tokenA}`, inFiltered: partyAInFiltered },
+          partyB: { id: partyBId, name: `Party B ${tokenB}`, inFiltered: partyBInFiltered },
+          view: { id: viewId, filters: viewBody?.filters },
+          derivedQueryParams,
+          results: { filteredCount: filteredItems.length }
+        }
+      };
+    } finally {
+      if (viewId) {
+        const deleteHeaders = { ...baseHeaders(), ...featureHeaders };
+        let deleted = false;
+        for (let attempt = 0; attempt < 5 && !deleted; attempt++) {
+          const delResp = await fetch(`${API}/views/${encodeURIComponent(viewId)}`, { method: "DELETE", headers: deleteHeaders });
+          if (delResp.ok || delResp.status === 404) {
+            deleted = true;
+            break;
+          }
+          await sleep(300);
         }
       }
     }
