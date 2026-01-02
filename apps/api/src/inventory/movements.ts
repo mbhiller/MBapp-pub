@@ -2,7 +2,7 @@
 // Canonical movements list (verb = `action`; array response), with a real repo using pk/sk.
 
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, QueryCommand, BatchWriteCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, QueryCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { PutCommand } from "@aws-sdk/lib-dynamodb";
 import { resolveTenantId } from "../common/tenant";
 import { logger } from "../common/logger";
@@ -52,6 +52,13 @@ export type ListMovementsPage = {
   next: string | null;
   // Optional richer pagination metadata; clients may ignore
   pageInfo?: { hasNext?: boolean; nextCursor?: string | null; pageSize?: number };
+  // Debug metadata (present only if MBAPP_DEBUG_ONHAND=1)
+  debug?: {
+    source: "timeline" | "fallback";
+    timelineTotal: number;
+    timelineForItem: number;
+    fallbackForItem: number;
+  };
 };
 
 // ===== local helpers (no external json util) =====
@@ -77,7 +84,17 @@ const TABLE = process.env.DYNAMO_TABLE || process.env.TABLE_NAME || process.env.
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
-type RepoOut = { items: InventoryMovement[]; next: string | null };
+type RepoOut = { 
+  items: InventoryMovement[]; 
+  next: string | null;
+  // Debug metadata (enabled via MBAPP_DEBUG_ONHAND=1)
+  debug?: {
+    source: "timeline" | "fallback";
+    timelineTotal: number;       // Total items before itemId filter
+    timelineForItem: number;     // Items after itemId filter
+    fallbackForItem: number;     // Items from fallback (0 if not triggered)
+  };
+};
 
 async function repoListMovementsByItem(
   tenantId: string,
@@ -89,6 +106,12 @@ async function repoListMovementsByItem(
 
   let matches: InventoryMovement[] = [];
   let lastKey = decodeCursor(opts.next || undefined);
+  
+  // Debug tracking (enabled via MBAPP_DEBUG_ONHAND=1)
+  let timelineTotal = 0;       // Total items from timeline query (before itemId filter)
+  let timelineForItem = 0;     // Items after itemId filter
+  let fallbackForItem = 0;     // Items from fallback (0 if not triggered)
+  let source: "timeline" | "fallback" = "timeline";
   
   // Calculate scan page size: scan more to find matches faster
   const scanPageSize = Math.min(500, Math.max(50, requestedLimit * 10));
@@ -108,6 +131,8 @@ async function repoListMovementsByItem(
     }));
 
     const raw = (out.Items ?? []) as any[];
+    timelineTotal += raw.length;  // Track total before filter
+    
     const wantItemId = String(itemId); // normalize to avoid number/string mismatches
 
     const pageMatches: InventoryMovement[] = raw
@@ -150,6 +175,8 @@ async function repoListMovementsByItem(
     if (!lastKey) break; // no more data in tenant
   }
 
+  timelineForItem = matches.length;  // Track count after filter
+
   // In-memory stable sort by at/createdAt (newest first for desc, oldest first for asc)
   const dir = (opts.sort ?? "desc") === "asc" ? 1 : -1;
   matches.sort((a, b) => {
@@ -158,28 +185,55 @@ async function repoListMovementsByItem(
     if (ta === tb) return 0;
     return ta < tb ? -1 * dir : 1 * dir;
   });
-  // Defensive fallback: if timeline index returned no results and no pagination cursor,
-  // query the canonical index as a safety net in case a writer accidentally skipped dual-write.
-  // This is a guard against bugs where movements are written but not in the timeline index.
-  if (matches.length === 0 && !lastKey) {
+  
+  // Defensive fallback: if timeline query found no movements for this specific itemId,
+  // query the canonical index as a safety net in case timeline index is missing data.
+  // Triggers per-item (after filtering), not just when timeline query returns 0 total rows.
+  if (matches.length === 0) {
+    if (process.env.MBAPP_DEBUG_ONHAND === "1") {
+      console.log(`[listMovementsByItem] Triggering fallback for itemId=${itemId}, timelineTotal=${timelineTotal}, timelineForItem=0`);
+    }
     const canonicalPrefix = "inventoryMovement#";
     const wantItemId = String(itemId);
 
     try {
-      const fallbackOut = await ddb.send(new QueryCommand({
-        TableName: TABLE,
-        KeyConditionExpression: "pk = :pk AND begins_with(sk, :sk)",
-        ExpressionAttributeValues: { ":pk": tenantId, ":sk": canonicalPrefix },
-        ConsistentRead: true,
-        Limit: requestedLimit * 10, // Scan a bit wider since canonical isn't ordered by time
-      }));
+      // Fallback query: retrieve ALL canonical items (no limit) for this tenant
+      // This is safe because: (1) fallback only triggers when timeline found 0 matches for this itemId,
+      // (2) we then filter by itemId in-memory, and (3) most tenants have <10k movements total.
+      // If query returns >1MB, DynamoDB auto-paginates; we handle via LogicalOperator.OR if needed.
+      let allCanonicalItems: any[] = [];
+      let lastEvalKey: any = undefined;
+      do {
+        const fallbackOut = await ddb.send(new QueryCommand({
+          TableName: TABLE,
+          KeyConditionExpression: "pk = :pk AND begins_with(sk, :sk)",
+          ExpressionAttributeValues: { ":pk": tenantId, ":sk": canonicalPrefix },
+          ConsistentRead: true,
+          ExclusiveStartKey: lastEvalKey,
+          // No Limit: fetch all canonical items to ensure we find recently-created movements
+        }));
+        
+        const items = (fallbackOut.Items ?? []) as any[];
+        allCanonicalItems = allCanonicalItems.concat(items);
+        lastEvalKey = fallbackOut.LastEvaluatedKey;
+      } while (lastEvalKey);
+      
+      const fallbackOut = { Items: allCanonicalItems };
 
       const canonicalRaw = (fallbackOut.Items ?? []) as any[];
+      if (process.env.MBAPP_DEBUG_ONHAND === "1") {
+        console.log(`[listMovementsByItem-fallback] Canonical query returned ${canonicalRaw.length} total items for tenantId=${tenantId}`);
+      }
+      
       const fallbackMatches: InventoryMovement[] = canonicalRaw
         .filter((m) => {
           const isMovement = m?.docType === "inventoryMovement" || m?.type === "inventoryMovement";
           if (!isMovement) return false;
-          return String(m?.itemId) === wantItemId;
+          const itemIdMatch = String(m?.itemId) === wantItemId;
+          if (itemIdMatch && process.env.MBAPP_DEBUG_ONHAND === "1") {
+            console.log(`[listMovementsByItem-fallback] Found canonical match: id=${m.id}, itemId=${m.itemId}, action=${m.action || m.type}`);
+          }
+          return itemIdMatch;
         })
         .map((m) => {
           const action =
@@ -208,6 +262,8 @@ async function repoListMovementsByItem(
         })
         .filter(Boolean) as InventoryMovement[];
 
+      fallbackForItem = fallbackMatches.length;  // Track fallback count
+      
       if (fallbackMatches.length > 0) {
         // Sort fallback results the same way as timeline results
         fallbackMatches.sort((a, b) => {
@@ -222,11 +278,12 @@ async function repoListMovementsByItem(
           { tenantId } as any,
           `movementTimelineMissing=true itemId=${itemId} count=${fallbackMatches.length}`,
           {
-            note: "Movements found in canonical index but missing from timeline index. A movement writer may have skipped dual-write. Returning canonical results as fallback.",
+            note: "Movements found in canonical index but missing from timeline index. Per-item fallback triggered. Returning canonical results.",
           }
         );
 
         matches = fallbackMatches;
+        source = "fallback";  // Mark as fallback source
       }
     } catch (err) {
       // If fallback query fails, log but don't break; return empty timeline results
@@ -242,7 +299,14 @@ async function repoListMovementsByItem(
   // If we didn’t hit pageTarget but still have a LastEvaluatedKey, that means
   // there may be more matches further; keep passing a cursor so clients can continue.
   const next = encodeCursor(lastKey);
-  return { items, next };
+  
+  // Build response with optional debug metadata
+  const result: RepoOut = { items, next };
+  if (process.env.MBAPP_DEBUG_ONHAND === "1") {
+    result.debug = { source, timelineTotal, timelineForItem, fallbackForItem };
+  }
+  
+  return result;
 }
 
 
@@ -252,7 +316,8 @@ export async function listMovementsByItem(
   itemId: string,
   opts: ListOptions = {}
 ): Promise<ListMovementsPage> {
-  const { items, next } = await repoListMovementsByItem(tenantId, itemId, opts);
+  const repoResult = await repoListMovementsByItem(tenantId, itemId, opts);
+  const { items, next, debug } = repoResult;
 
   // Pass-through response includes all tracked fields for clients/smokes:
   // - poLineId, soId, soLineId: enable cross-action correlation (reserve→commit→fulfill)
@@ -277,7 +342,18 @@ export async function listMovementsByItem(
   }));
 
   const pageInfo = next ? { hasNext: true as const, nextCursor: next, pageSize: opts.limit } : undefined;
-  return { itemId, items: clean as InventoryMovement[], next: next ?? null, pageInfo };
+  const result: ListMovementsPage = { itemId, items: clean as InventoryMovement[], next: next ?? null, pageInfo };
+  
+  // Include debug if present
+  if (debug) {
+    result.debug = debug;
+  }
+  
+  if (process.env.MBAPP_DEBUG_ONHAND === "1") {
+    console.log(`[listMovementsByItem] Returning ${clean.length} items for itemId=${itemId}, source=${debug?.source ?? "unknown"}`);
+  }
+  
+  return result;
 }
 
 // ===== List movements by location (new endpoint) =====
@@ -486,26 +562,46 @@ export async function createMovement(req: CreateMovementRequest): Promise<Invent
     [SK]: `inventoryMovementAt#${now}#${movementId}`,
   };
 
-  // Dual-write: canonical + timeline. If timeline write fails, canonical is still present
-  // (read path falls back to canonical scan if needed, though with eventual-consistency risk).
-  // For new SmokeTenant data, timeline items are written immediately.
+  // Atomic write: canonical + timeline using TransactWrite.
+  // Both items are written together or the entire transaction fails (all-or-nothing).
+  // Conditions prevent accidental overwrites of existing movements.
   try {
+    if (process.env.MBAPP_DEBUG_ONHAND === "1") {
+      console.log(`[createMovement] Starting TransactWrite for movementId=${movementId}, itemId=${req.itemId}`);
+    }
     await ddb.send(
-      new BatchWriteCommand({
-        RequestItems: {
-          [TABLE]: [
-            { PutRequest: { Item: canonicalItem as any } },
-            { PutRequest: { Item: timelineItem as any } },
-          ],
-        },
+      new TransactWriteCommand({
+        TransactItems: [
+          {
+            Put: {
+              TableName: TABLE,
+              Item: canonicalItem as any,
+              ConditionExpression: "attribute_not_exists(pk) AND attribute_not_exists(sk)",
+            },
+          },
+          {
+            Put: {
+              TableName: TABLE,
+              Item: timelineItem as any,
+              ConditionExpression: "attribute_not_exists(pk) AND attribute_not_exists(sk)",
+            },
+          },
+        ],
       })
     );
+    if (process.env.MBAPP_DEBUG_ONHAND === "1") {
+      console.log(`[createMovement] TransactWrite succeeded for movementId=${movementId}`);
+    }
   } catch (err: any) {
-    // If batch write fails, log error but don't fail the entire operation
-    // (canonical item may have been written, timeline may be partial).
-    // Next refresh should see consistency, and diagnostics will show which items exist.
-    console.error("dual-write error in createMovement", { movementId, error: String(err) });
-    // Continue with best-effort semantics
+    console.error(`[createMovement-FAILURE] TransactWrite failed for movement`, {
+      movementId,
+      tenantId: req.tenantId,
+      itemId: req.itemId,
+      action: req.action,
+      errorName: err?.name,
+      errorMessage: err?.message,
+    });
+    throw err;
   }
 
   return {

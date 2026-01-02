@@ -30,17 +30,6 @@ if (!API_RAW || typeof API_RAW !== "string" || !/^https?:\/\//.test(API_RAW)) {
 const API = API_RAW.replace(/\/+$/, "");
 const EMAIL = process.env.MBAPP_DEV_EMAIL ?? "dev@example.com";
 
-const TOKEN = process.env.MBAPP_BEARER;
-if (!TOKEN || TOKEN.trim().length === 0) {
-  console.error('[smokes] MBAPP_BEARER is required. Set a valid bearer token in the environment.');
-  process.exit(2);
-}
-
-if (!API || typeof API !== "string" || !/^https?:\/\//.test(API)) {
-  console.error(`[smokes] MBAPP_API_BASE is not set or invalid. Got: "${API ?? ""}"`);
-  console.error(`[smokes] Expected a full URL like https://...  Check CI secrets/env wiring or local Set-MBEnv.ps1.`);
-  process.exit(2);
-}
 // Helper: decode JWT payload (base64url) and return mbapp.tenantId if present
 function decodeJwtTenant(bearer){
   try{
@@ -55,35 +44,88 @@ function decodeJwtTenant(bearer){
     return t ? String(t) : null;
   }catch{ return null; }
 }
-const jwtTenant = decodeJwtTenant(TOKEN);
-console.log(JSON.stringify({ base: API, tenant: TENANT, smokeRunId: SMOKE_RUN_ID, tokenVar: "MBAPP_BEARER", hasToken: true, jwtTenant }));
 
-// Guard: bearer tenant must match requested TENANT unless override
-const allowTenantMismatch = process.env.MBAPP_SMOKE_ALLOW_TENANT_MISMATCH === "1";
-if (!allowTenantMismatch && process.env.MBAPP_BEARER && jwtTenant && jwtTenant !== TENANT) {
-  console.error(`[smokes] Bearer token tenant ("${jwtTenant}") does not match requested tenant ("${TENANT}"). Set MBAPP_SMOKE_ALLOW_TENANT_MISMATCH=1 to override.`);
-  process.exit(2);
+// Token management: acquire via /auth/dev-login if not supplied
+let tokenAcquired = false;
+let jwtTenant = null; // Set after token acquisition
+
+async function acquireToken() {
+  if (tokenAcquired) return; // already done
+  
+  const existingToken = process.env.MBAPP_BEARER;
+  if (existingToken && existingToken.trim().length > 0) {
+    jwtTenant = decodeJwtTenant(existingToken);
+    const allowMismatch = process.env.MBAPP_SMOKE_ALLOW_TENANT_MISMATCH === "1";
+    if (!allowMismatch && jwtTenant && jwtTenant !== TENANT) {
+      console.error(`[smokes] Existing MBAPP_BEARER tenant ("${jwtTenant}") does not match requested tenant ("${TENANT}"). Set MBAPP_SMOKE_ALLOW_TENANT_MISMATCH=1 to override, or unset MBAPP_BEARER to auto-acquire.`);
+      process.exit(2);
+    }
+    console.log(JSON.stringify({ base: API, tenant: TENANT, smokeRunId: SMOKE_RUN_ID, tokenVar: "MBAPP_BEARER", hasToken: true, jwtTenant, source: "env" }));
+    tokenAcquired = true;
+    return;
+  }
+
+  // Auto-acquire via /auth/dev-login
+  console.log(`[smokes] No MBAPP_BEARER set; acquiring token via POST ${API}/auth/dev-login...`);
+  const loginBody = {
+    email: EMAIL,
+    tenantId: TENANT
+  };
+  
+  try {
+    const res = await fetch(`${API}/auth/dev-login`, {
+      method: "POST",
+      headers: { 
+        "content-type": "application/json",
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify(loginBody)
+    });
+    
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      console.error(`[smokes] Failed to acquire token via /auth/dev-login: ${res.status} ${res.statusText}`);
+      console.error(`[smokes] Response: ${errText}`);
+      process.exit(2);
+    }
+    
+    const data = await res.json();
+    if (!data.token) {
+      console.error(`[smokes] /auth/dev-login succeeded but returned no token: ${JSON.stringify(data)}`);
+      process.exit(2);
+    }
+    
+    process.env.MBAPP_BEARER = data.token;
+    jwtTenant = decodeJwtTenant(data.token);
+    console.log(JSON.stringify({ base: API, tenant: TENANT, smokeRunId: SMOKE_RUN_ID, tokenVar: "MBAPP_BEARER", hasToken: true, jwtTenant, source: "auto-acquired" }));
+    tokenAcquired = true;
+  } catch (err) {
+    console.error(`[smokes] Error acquiring token: ${err.message}`);
+    process.exit(2);
+  }
 }
 
 /* ---------- Auth & HTTP ---------- */
-async function ensureBearer(){ /* bearer must be provided via MBAPP_BEARER at startup */ }
+async function ensureBearer(){ 
+  await acquireToken();
+}
 function baseHeaders(){
-  const h={"accept":"application/json","Content-Type":"application/json","X-Tenant-Id":TENANT};
+  const h={"accept":"application/json","content-type":"application/json","x-tenant-id":TENANT};
   const token=process.env.MBAPP_BEARER;
-  if(token) h["Authorization"]=`Bearer ${token}`;
+  if(token) h["authorization"]=`Bearer ${token}`;
   return h;
 }
 // Allow per-request Authorization override: "default" | "invalid" | "none"
 function buildHeaders(base = {}, auth = "default") {
-  const h = { "content-type": "application/json", ...base };
+  const h = { "content-type": "application/json", "x-tenant-id": TENANT, ...base };
   const token = process.env.MBAPP_BEARER;
   if (auth === "default") {
-    if (token) h.Authorization = `Bearer ${token}`;
+    if (token) h.authorization = `Bearer ${token}`;
   } else if (auth === "invalid") {
-    h.Authorization = "Bearer invalid";
+    h.authorization = "Bearer invalid";
   } else if (auth === "none") {
-    // do not set Authorization at all
-    if (h.Authorization) delete h.Authorization;
+    // do not set authorization at all
+    if (h.authorization) delete h.authorization;
   }
   return h;
 }
@@ -100,115 +142,156 @@ function qs(params){
 function idem() {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 }
-async function get(p, params, opts){
-  const headers = buildHeaders({ ...baseHeaders(), ...((opts&&opts.headers)||{}) }, (opts&&opts.auth) ?? "default");
-  const r=await fetch(API + p + qs(params), {headers});
-  const b=await r.json().catch(()=>({}));
-  const result = {ok:r.ok,status:r.status,body:b};
-  // On failure, include diagnostic headers and request details
-  if (!r.ok) {
-    result.method = "GET";
-    result.url = API + p + qs(params);
-    const reqId = r.headers.get("x-amzn-requestid") ?? r.headers.get("x-amzn-RequestId");
-    const apigwId = r.headers.get("x-amz-apigw-id");
-    const date = r.headers.get("date");
-    result.responseHeaders = {
-      "x-amzn-requestid": reqId,
-      "x-amz-apigw-id": apigwId,
-      date
-    };
-    if (!reqId) {
-      try {
-        result.allHeaders = Object.fromEntries(r.headers.entries());
-      } catch {/* noop */}
-    }
+
+// Debug helper: log request/response details when DEBUG=1
+function debugRequest(method, url, headers, status) {
+  if (process.env.DEBUG !== "1" && process.env.MBAPP_DEBUG !== "1") return;
+  const hasAuth = !!headers.authorization || !!headers.Authorization;
+  const tenantKey = headers["x-tenant-id"] ? "x-tenant-id" : 
+                    headers["X-Tenant-Id"] ? "X-Tenant-Id" : "(none)";
+  console.log(`[DEBUG] ${method} ${url} → ${status} | auth=${hasAuth} | tenant-header=${tenantKey}`);
+}
+
+// Auto-retry wrapper: refresh token on 401/403 and retry once
+async function withAuthRetry(fn) {
+  const result = await fn();
+  
+  // If request succeeded or wasn't an auth failure, return as-is
+  if (result.ok || (result.status !== 401 && result.status !== 403)) {
+    return result;
   }
-  return result;
+  
+  // Auth failure: refresh token and retry once
+  console.log(`[smokes] Auth failure (${result.status}), refreshing token and retrying...`);
+  tokenAcquired = false; // Force re-acquisition
+  delete process.env.MBAPP_BEARER;
+  await acquireToken();
+  
+  // Retry the operation with new token
+  return await fn();
+}
+
+async function get(p, params, opts){
+  return await withAuthRetry(async () => {
+    const headers = buildHeaders({ ...baseHeaders(), ...((opts&&opts.headers)||{}) }, (opts&&opts.auth) ?? "default");
+    const url = API + p + qs(params);
+    const r=await fetch(url, {headers});
+    debugRequest("GET", url, headers, r.status);
+    const b=await r.json().catch(()=>({}));
+    const result = {ok:r.ok,status:r.status,body:b};
+    // On failure, include diagnostic headers and request details
+    if (!r.ok) {
+      result.method = "GET";
+      result.url = API + p + qs(params);
+      const reqId = r.headers.get("x-amzn-requestid") ?? r.headers.get("x-amzn-RequestId");
+      const apigwId = r.headers.get("x-amz-apigw-id");
+      const date = r.headers.get("date");
+      result.responseHeaders = {
+        "x-amzn-requestid": reqId,
+        "x-amz-apigw-id": apigwId,
+        date
+      };
+      if (!reqId) {
+        try {
+          result.allHeaders = Object.fromEntries(r.headers.entries());
+        } catch {/* noop */}
+      }
+    }
+    return result;
+  });
 }
 async function post(p,body,h={},opts){
-  const headers = buildHeaders({ ...baseHeaders(), ...h, ...((opts&&opts.headers)||{}) }, (opts&&opts.auth) ?? "default");
-  const r=await fetch(API+p,{method:"POST",headers,body:JSON.stringify(body??{})});
-  const j=await r.json().catch(()=>({}));
-  try{
-    const hasId = j && typeof j.id !== "undefined";
-    if (r.ok && hasId && isSmokeArtifact(body, j, p)) {
-      const route = p;
-      const type = j?.type || body?.type || (route.startsWith('/objects/') ? (route.split('/')[2] || 'object')
-                    : route.startsWith('/views') ? 'view'
-                    : route.startsWith('/workspaces') ? 'workspace'
-                    : route.startsWith('/registrations') ? 'registration'
-                    : route.startsWith('/resources') ? 'resource'
-                    : route.startsWith('/reservations') ? 'reservation'
-                    : undefined);
-      const meta = {};
-      for (const k of ["name","sku","entityType","itemId","productId","title"]) {
-        if (body && typeof body[k] !== "undefined") meta[k] = body[k];
+  return await withAuthRetry(async () => {
+    const headers = buildHeaders({ ...baseHeaders(), ...h, ...((opts&&opts.headers)||{}) }, (opts&&opts.auth) ?? "default");
+    const url = API+p;
+    const r=await fetch(url,{method:"POST",headers,body:JSON.stringify(body??{})});
+    debugRequest("POST", url, headers, r.status);
+    const j=await r.json().catch(()=>({}));
+    try{
+      const hasId = j && typeof j.id !== "undefined";
+      if (r.ok && hasId && isSmokeArtifact(body, j, p)) {
+        const route = p;
+        const type = j?.type || body?.type || (route.startsWith('/objects/') ? (route.split('/')[2] || 'object')
+                      : route.startsWith('/views') ? 'view'
+                      : route.startsWith('/workspaces') ? 'workspace'
+                      : route.startsWith('/registrations') ? 'registration'
+                      : route.startsWith('/resources') ? 'resource'
+                      : route.startsWith('/reservations') ? 'reservation'
+                      : undefined);
+        const meta = {};
+        for (const k of ["name","sku","entityType","itemId","productId","title"]) {
+          if (body && typeof body[k] !== "undefined") meta[k] = body[k];
+        }
+        meta.status = r.status;
+        recordCreated({ type, id: j.id, route, meta });
       }
-      meta.status = r.status;
-      recordCreated({ type, id: j.id, route, meta });
+    }catch{/* noop */}
+    const result = {ok:r.ok,status:r.status,body:j};
+    // On failure, include diagnostic headers and request details
+    if (!r.ok) {
+      result.method = "POST";
+      result.url = API+p;
+      result.requestPayload = body;
+      const reqId = r.headers.get("x-amzn-requestid") ?? r.headers.get("x-amzn-RequestId");
+      const apigwId = r.headers.get("x-amz-apigw-id");
+      const date = r.headers.get("date");
+      result.responseHeaders = {
+        "x-amzn-requestid": reqId,
+        "x-amz-apigw-id": apigwId,
+        date
+      };
+      if (!reqId) {
+        try {
+          result.allHeaders = Object.fromEntries(r.headers.entries());
+        } catch {/* noop */}
+      }
     }
-  }catch{/* noop */}
-  const result = {ok:r.ok,status:r.status,body:j};
-  // On failure, include diagnostic headers and request details
-  if (!r.ok) {
-    result.method = "POST";
-    result.url = API+p;
-    result.requestPayload = body;
-    const reqId = r.headers.get("x-amzn-requestid") ?? r.headers.get("x-amzn-RequestId");
-    const apigwId = r.headers.get("x-amz-apigw-id");
-    const date = r.headers.get("date");
-    result.responseHeaders = {
-      "x-amzn-requestid": reqId,
-      "x-amz-apigw-id": apigwId,
-      date
-    };
-    if (!reqId) {
-      try {
-        result.allHeaders = Object.fromEntries(r.headers.entries());
-      } catch {/* noop */}
-    }
-  }
-  return result;
+    return result;
+  });
 }
 async function put(p,body,h={},opts){
-  const headers = buildHeaders({ ...baseHeaders(), ...h, ...((opts&&opts.headers)||{}) }, (opts&&opts.auth) ?? "default");
-  const r=await fetch(API+p,{method:"PUT",headers,body:JSON.stringify(body??{})});
-  const j=await r.json().catch(()=>({}));
-  // PUT typically updates, but if it returns a new id (upsert case), record it
-  try{
-    const hasId = j && typeof j.id !== "undefined";
-    const isNewId = hasId && body && (!body.id || body.id !== j.id);
-    if (r.ok && isNewId && isSmokeArtifact(body, j, p)) {
-      const route = p;
-      const type = j?.type || body?.type || 'object';
-      const meta = { action: 'upsert', status: r.status };
-      for (const k of ["name","sku","entityType","itemId","productId"]) {
-        if (body && typeof body[k] !== "undefined") meta[k] = body[k];
+  return await withAuthRetry(async () => {
+    const headers = buildHeaders({ ...baseHeaders(), ...h, ...((opts&&opts.headers)||{}) }, (opts&&opts.auth) ?? "default");
+    const url = API+p;
+    const r=await fetch(url,{method:"PUT",headers,body:JSON.stringify(body??{})});
+    debugRequest("PUT", url, headers, r.status);
+    const j=await r.json().catch(()=>({}));
+    // PUT typically updates, but if it returns a new id (upsert case), record it
+    try{
+      const hasId = j && typeof j.id !== "undefined";
+      const isNewId = hasId && body && (!body.id || body.id !== j.id);
+      if (r.ok && isNewId && isSmokeArtifact(body, j, p)) {
+        const route = p;
+        const type = j?.type || body?.type || 'object';
+        const meta = { action: 'upsert', status: r.status };
+        for (const k of ["name","sku","entityType","itemId","productId"]) {
+          if (body && typeof body[k] !== "undefined") meta[k] = body[k];
+        }
+        recordCreated({ type, id: j.id, route, meta });
       }
-      recordCreated({ type, id: j.id, route, meta });
+    }catch{/* noop */}
+    const result = {ok:r.ok,status:r.status,body:j};
+    // On failure, include diagnostic headers and request details
+    if (!r.ok) {
+      result.method = "PUT";
+      result.url = API+p;
+      result.requestPayload = body;
+      const reqId = r.headers.get("x-amzn-requestid") ?? r.headers.get("x-amzn-RequestId");
+      const apigwId = r.headers.get("x-amz-apigw-id");
+      const date = r.headers.get("date");
+      result.responseHeaders = {
+        "x-amzn-requestid": reqId,
+        "x-amz-apigw-id": apigwId,
+        date
+      };
+      if (!reqId) {
+        try {
+          result.allHeaders = Object.fromEntries(r.headers.entries());
+        } catch {/* noop */}
+      }
     }
-  }catch{/* noop */}
-  const result = {ok:r.ok,status:r.status,body:j};
-  // On failure, include diagnostic headers and request details
-  if (!r.ok) {
-    result.method = "PUT";
-    result.url = API+p;
-    result.requestPayload = body;
-    const reqId = r.headers.get("x-amzn-requestid") ?? r.headers.get("x-amzn-RequestId");
-    const apigwId = r.headers.get("x-amz-apigw-id");
-    const date = r.headers.get("date");
-    result.responseHeaders = {
-      "x-amzn-requestid": reqId,
-      "x-amz-apigw-id": apigwId,
-      date
-    };
-    if (!reqId) {
-      try {
-        result.allHeaders = Object.fromEntries(r.headers.entries());
-      } catch {/* noop */}
-    }
-  }
-  return result;
+    return result;
+  });
 }
 
 /* ---------- Helpers ---------- */
