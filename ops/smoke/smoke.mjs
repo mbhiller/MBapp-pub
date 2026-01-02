@@ -30,17 +30,6 @@ if (!API_RAW || typeof API_RAW !== "string" || !/^https?:\/\//.test(API_RAW)) {
 const API = API_RAW.replace(/\/+$/, "");
 const EMAIL = process.env.MBAPP_DEV_EMAIL ?? "dev@example.com";
 
-const TOKEN = process.env.MBAPP_BEARER;
-if (!TOKEN || TOKEN.trim().length === 0) {
-  console.error('[smokes] MBAPP_BEARER is required. Set a valid bearer token in the environment.');
-  process.exit(2);
-}
-
-if (!API || typeof API !== "string" || !/^https?:\/\//.test(API)) {
-  console.error(`[smokes] MBAPP_API_BASE is not set or invalid. Got: "${API ?? ""}"`);
-  console.error(`[smokes] Expected a full URL like https://...  Check CI secrets/env wiring or local Set-MBEnv.ps1.`);
-  process.exit(2);
-}
 // Helper: decode JWT payload (base64url) and return mbapp.tenantId if present
 function decodeJwtTenant(bearer){
   try{
@@ -55,35 +44,88 @@ function decodeJwtTenant(bearer){
     return t ? String(t) : null;
   }catch{ return null; }
 }
-const jwtTenant = decodeJwtTenant(TOKEN);
-console.log(JSON.stringify({ base: API, tenant: TENANT, smokeRunId: SMOKE_RUN_ID, tokenVar: "MBAPP_BEARER", hasToken: true, jwtTenant }));
 
-// Guard: bearer tenant must match requested TENANT unless override
-const allowTenantMismatch = process.env.MBAPP_SMOKE_ALLOW_TENANT_MISMATCH === "1";
-if (!allowTenantMismatch && process.env.MBAPP_BEARER && jwtTenant && jwtTenant !== TENANT) {
-  console.error(`[smokes] Bearer token tenant ("${jwtTenant}") does not match requested tenant ("${TENANT}"). Set MBAPP_SMOKE_ALLOW_TENANT_MISMATCH=1 to override.`);
-  process.exit(2);
+// Token management: acquire via /auth/dev-login if not supplied
+let tokenAcquired = false;
+let jwtTenant = null; // Set after token acquisition
+
+async function acquireToken() {
+  if (tokenAcquired) return; // already done
+  
+  const existingToken = process.env.MBAPP_BEARER;
+  if (existingToken && existingToken.trim().length > 0) {
+    jwtTenant = decodeJwtTenant(existingToken);
+    const allowMismatch = process.env.MBAPP_SMOKE_ALLOW_TENANT_MISMATCH === "1";
+    if (!allowMismatch && jwtTenant && jwtTenant !== TENANT) {
+      console.error(`[smokes] Existing MBAPP_BEARER tenant ("${jwtTenant}") does not match requested tenant ("${TENANT}"). Set MBAPP_SMOKE_ALLOW_TENANT_MISMATCH=1 to override, or unset MBAPP_BEARER to auto-acquire.`);
+      process.exit(2);
+    }
+    console.log(JSON.stringify({ base: API, tenant: TENANT, smokeRunId: SMOKE_RUN_ID, tokenVar: "MBAPP_BEARER", hasToken: true, jwtTenant, source: "env" }));
+    tokenAcquired = true;
+    return;
+  }
+
+  // Auto-acquire via /auth/dev-login
+  console.log(`[smokes] No MBAPP_BEARER set; acquiring token via POST ${API}/auth/dev-login...`);
+  const loginBody = {
+    email: EMAIL,
+    tenantId: TENANT
+  };
+  
+  try {
+    const res = await fetch(`${API}/auth/dev-login`, {
+      method: "POST",
+      headers: { 
+        "content-type": "application/json",
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify(loginBody)
+    });
+    
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      console.error(`[smokes] Failed to acquire token via /auth/dev-login: ${res.status} ${res.statusText}`);
+      console.error(`[smokes] Response: ${errText}`);
+      process.exit(2);
+    }
+    
+    const data = await res.json();
+    if (!data.token) {
+      console.error(`[smokes] /auth/dev-login succeeded but returned no token: ${JSON.stringify(data)}`);
+      process.exit(2);
+    }
+    
+    process.env.MBAPP_BEARER = data.token;
+    jwtTenant = decodeJwtTenant(data.token);
+    console.log(JSON.stringify({ base: API, tenant: TENANT, smokeRunId: SMOKE_RUN_ID, tokenVar: "MBAPP_BEARER", hasToken: true, jwtTenant, source: "auto-acquired" }));
+    tokenAcquired = true;
+  } catch (err) {
+    console.error(`[smokes] Error acquiring token: ${err.message}`);
+    process.exit(2);
+  }
 }
 
 /* ---------- Auth & HTTP ---------- */
-async function ensureBearer(){ /* bearer must be provided via MBAPP_BEARER at startup */ }
+async function ensureBearer(){ 
+  await acquireToken();
+}
 function baseHeaders(){
-  const h={"accept":"application/json","Content-Type":"application/json","X-Tenant-Id":TENANT};
+  const h={"accept":"application/json","content-type":"application/json","x-tenant-id":TENANT};
   const token=process.env.MBAPP_BEARER;
-  if(token) h["Authorization"]=`Bearer ${token}`;
+  if(token) h["authorization"]=`Bearer ${token}`;
   return h;
 }
 // Allow per-request Authorization override: "default" | "invalid" | "none"
 function buildHeaders(base = {}, auth = "default") {
-  const h = { "content-type": "application/json", ...base };
+  const h = { "content-type": "application/json", "x-tenant-id": TENANT, ...base };
   const token = process.env.MBAPP_BEARER;
   if (auth === "default") {
-    if (token) h.Authorization = `Bearer ${token}`;
+    if (token) h.authorization = `Bearer ${token}`;
   } else if (auth === "invalid") {
-    h.Authorization = "Bearer invalid";
+    h.authorization = "Bearer invalid";
   } else if (auth === "none") {
-    // do not set Authorization at all
-    if (h.Authorization) delete h.Authorization;
+    // do not set authorization at all
+    if (h.authorization) delete h.authorization;
   }
   return h;
 }
@@ -100,115 +142,156 @@ function qs(params){
 function idem() {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 }
-async function get(p, params, opts){
-  const headers = buildHeaders({ ...baseHeaders(), ...((opts&&opts.headers)||{}) }, (opts&&opts.auth) ?? "default");
-  const r=await fetch(API + p + qs(params), {headers});
-  const b=await r.json().catch(()=>({}));
-  const result = {ok:r.ok,status:r.status,body:b};
-  // On failure, include diagnostic headers and request details
-  if (!r.ok) {
-    result.method = "GET";
-    result.url = API + p + qs(params);
-    const reqId = r.headers.get("x-amzn-requestid") ?? r.headers.get("x-amzn-RequestId");
-    const apigwId = r.headers.get("x-amz-apigw-id");
-    const date = r.headers.get("date");
-    result.responseHeaders = {
-      "x-amzn-requestid": reqId,
-      "x-amz-apigw-id": apigwId,
-      date
-    };
-    if (!reqId) {
-      try {
-        result.allHeaders = Object.fromEntries(r.headers.entries());
-      } catch {/* noop */}
-    }
+
+// Debug helper: log request/response details when DEBUG=1
+function debugRequest(method, url, headers, status) {
+  if (process.env.DEBUG !== "1" && process.env.MBAPP_DEBUG !== "1") return;
+  const hasAuth = !!headers.authorization || !!headers.Authorization;
+  const tenantKey = headers["x-tenant-id"] ? "x-tenant-id" : 
+                    headers["X-Tenant-Id"] ? "X-Tenant-Id" : "(none)";
+  console.log(`[DEBUG] ${method} ${url} → ${status} | auth=${hasAuth} | tenant-header=${tenantKey}`);
+}
+
+// Auto-retry wrapper: refresh token on 401/403 and retry once
+async function withAuthRetry(fn) {
+  const result = await fn();
+  
+  // If request succeeded or wasn't an auth failure, return as-is
+  if (result.ok || (result.status !== 401 && result.status !== 403)) {
+    return result;
   }
-  return result;
+  
+  // Auth failure: refresh token and retry once
+  console.log(`[smokes] Auth failure (${result.status}), refreshing token and retrying...`);
+  tokenAcquired = false; // Force re-acquisition
+  delete process.env.MBAPP_BEARER;
+  await acquireToken();
+  
+  // Retry the operation with new token
+  return await fn();
+}
+
+async function get(p, params, opts){
+  return await withAuthRetry(async () => {
+    const headers = buildHeaders({ ...baseHeaders(), ...((opts&&opts.headers)||{}) }, (opts&&opts.auth) ?? "default");
+    const url = API + p + qs(params);
+    const r=await fetch(url, {headers});
+    debugRequest("GET", url, headers, r.status);
+    const b=await r.json().catch(()=>({}));
+    const result = {ok:r.ok,status:r.status,body:b};
+    // On failure, include diagnostic headers and request details
+    if (!r.ok) {
+      result.method = "GET";
+      result.url = API + p + qs(params);
+      const reqId = r.headers.get("x-amzn-requestid") ?? r.headers.get("x-amzn-RequestId");
+      const apigwId = r.headers.get("x-amz-apigw-id");
+      const date = r.headers.get("date");
+      result.responseHeaders = {
+        "x-amzn-requestid": reqId,
+        "x-amz-apigw-id": apigwId,
+        date
+      };
+      if (!reqId) {
+        try {
+          result.allHeaders = Object.fromEntries(r.headers.entries());
+        } catch {/* noop */}
+      }
+    }
+    return result;
+  });
 }
 async function post(p,body,h={},opts){
-  const headers = buildHeaders({ ...baseHeaders(), ...h, ...((opts&&opts.headers)||{}) }, (opts&&opts.auth) ?? "default");
-  const r=await fetch(API+p,{method:"POST",headers,body:JSON.stringify(body??{})});
-  const j=await r.json().catch(()=>({}));
-  try{
-    const hasId = j && typeof j.id !== "undefined";
-    if (r.ok && hasId && isSmokeArtifact(body, j, p)) {
-      const route = p;
-      const type = j?.type || body?.type || (route.startsWith('/objects/') ? (route.split('/')[2] || 'object')
-                    : route.startsWith('/views') ? 'view'
-                    : route.startsWith('/workspaces') ? 'workspace'
-                    : route.startsWith('/registrations') ? 'registration'
-                    : route.startsWith('/resources') ? 'resource'
-                    : route.startsWith('/reservations') ? 'reservation'
-                    : undefined);
-      const meta = {};
-      for (const k of ["name","sku","entityType","itemId","productId","title"]) {
-        if (body && typeof body[k] !== "undefined") meta[k] = body[k];
+  return await withAuthRetry(async () => {
+    const headers = buildHeaders({ ...baseHeaders(), ...h, ...((opts&&opts.headers)||{}) }, (opts&&opts.auth) ?? "default");
+    const url = API+p;
+    const r=await fetch(url,{method:"POST",headers,body:JSON.stringify(body??{})});
+    debugRequest("POST", url, headers, r.status);
+    const j=await r.json().catch(()=>({}));
+    try{
+      const hasId = j && typeof j.id !== "undefined";
+      if (r.ok && hasId && isSmokeArtifact(body, j, p)) {
+        const route = p;
+        const type = j?.type || body?.type || (route.startsWith('/objects/') ? (route.split('/')[2] || 'object')
+                      : route.startsWith('/views') ? 'view'
+                      : route.startsWith('/workspaces') ? 'workspace'
+                      : route.startsWith('/registrations') ? 'registration'
+                      : route.startsWith('/resources') ? 'resource'
+                      : route.startsWith('/reservations') ? 'reservation'
+                      : undefined);
+        const meta = {};
+        for (const k of ["name","sku","entityType","itemId","productId","title"]) {
+          if (body && typeof body[k] !== "undefined") meta[k] = body[k];
+        }
+        meta.status = r.status;
+        recordCreated({ type, id: j.id, route, meta });
       }
-      meta.status = r.status;
-      recordCreated({ type, id: j.id, route, meta });
+    }catch{/* noop */}
+    const result = {ok:r.ok,status:r.status,body:j};
+    // On failure, include diagnostic headers and request details
+    if (!r.ok) {
+      result.method = "POST";
+      result.url = API+p;
+      result.requestPayload = body;
+      const reqId = r.headers.get("x-amzn-requestid") ?? r.headers.get("x-amzn-RequestId");
+      const apigwId = r.headers.get("x-amz-apigw-id");
+      const date = r.headers.get("date");
+      result.responseHeaders = {
+        "x-amzn-requestid": reqId,
+        "x-amz-apigw-id": apigwId,
+        date
+      };
+      if (!reqId) {
+        try {
+          result.allHeaders = Object.fromEntries(r.headers.entries());
+        } catch {/* noop */}
+      }
     }
-  }catch{/* noop */}
-  const result = {ok:r.ok,status:r.status,body:j};
-  // On failure, include diagnostic headers and request details
-  if (!r.ok) {
-    result.method = "POST";
-    result.url = API+p;
-    result.requestPayload = body;
-    const reqId = r.headers.get("x-amzn-requestid") ?? r.headers.get("x-amzn-RequestId");
-    const apigwId = r.headers.get("x-amz-apigw-id");
-    const date = r.headers.get("date");
-    result.responseHeaders = {
-      "x-amzn-requestid": reqId,
-      "x-amz-apigw-id": apigwId,
-      date
-    };
-    if (!reqId) {
-      try {
-        result.allHeaders = Object.fromEntries(r.headers.entries());
-      } catch {/* noop */}
-    }
-  }
-  return result;
+    return result;
+  });
 }
 async function put(p,body,h={},opts){
-  const headers = buildHeaders({ ...baseHeaders(), ...h, ...((opts&&opts.headers)||{}) }, (opts&&opts.auth) ?? "default");
-  const r=await fetch(API+p,{method:"PUT",headers,body:JSON.stringify(body??{})});
-  const j=await r.json().catch(()=>({}));
-  // PUT typically updates, but if it returns a new id (upsert case), record it
-  try{
-    const hasId = j && typeof j.id !== "undefined";
-    const isNewId = hasId && body && (!body.id || body.id !== j.id);
-    if (r.ok && isNewId && isSmokeArtifact(body, j, p)) {
-      const route = p;
-      const type = j?.type || body?.type || 'object';
-      const meta = { action: 'upsert', status: r.status };
-      for (const k of ["name","sku","entityType","itemId","productId"]) {
-        if (body && typeof body[k] !== "undefined") meta[k] = body[k];
+  return await withAuthRetry(async () => {
+    const headers = buildHeaders({ ...baseHeaders(), ...h, ...((opts&&opts.headers)||{}) }, (opts&&opts.auth) ?? "default");
+    const url = API+p;
+    const r=await fetch(url,{method:"PUT",headers,body:JSON.stringify(body??{})});
+    debugRequest("PUT", url, headers, r.status);
+    const j=await r.json().catch(()=>({}));
+    // PUT typically updates, but if it returns a new id (upsert case), record it
+    try{
+      const hasId = j && typeof j.id !== "undefined";
+      const isNewId = hasId && body && (!body.id || body.id !== j.id);
+      if (r.ok && isNewId && isSmokeArtifact(body, j, p)) {
+        const route = p;
+        const type = j?.type || body?.type || 'object';
+        const meta = { action: 'upsert', status: r.status };
+        for (const k of ["name","sku","entityType","itemId","productId"]) {
+          if (body && typeof body[k] !== "undefined") meta[k] = body[k];
+        }
+        recordCreated({ type, id: j.id, route, meta });
       }
-      recordCreated({ type, id: j.id, route, meta });
+    }catch{/* noop */}
+    const result = {ok:r.ok,status:r.status,body:j};
+    // On failure, include diagnostic headers and request details
+    if (!r.ok) {
+      result.method = "PUT";
+      result.url = API+p;
+      result.requestPayload = body;
+      const reqId = r.headers.get("x-amzn-requestid") ?? r.headers.get("x-amzn-RequestId");
+      const apigwId = r.headers.get("x-amz-apigw-id");
+      const date = r.headers.get("date");
+      result.responseHeaders = {
+        "x-amzn-requestid": reqId,
+        "x-amz-apigw-id": apigwId,
+        date
+      };
+      if (!reqId) {
+        try {
+          result.allHeaders = Object.fromEntries(r.headers.entries());
+        } catch {/* noop */}
+      }
     }
-  }catch{/* noop */}
-  const result = {ok:r.ok,status:r.status,body:j};
-  // On failure, include diagnostic headers and request details
-  if (!r.ok) {
-    result.method = "PUT";
-    result.url = API+p;
-    result.requestPayload = body;
-    const reqId = r.headers.get("x-amzn-requestid") ?? r.headers.get("x-amzn-RequestId");
-    const apigwId = r.headers.get("x-amz-apigw-id");
-    const date = r.headers.get("date");
-    result.responseHeaders = {
-      "x-amzn-requestid": reqId,
-      "x-amz-apigw-id": apigwId,
-      date
-    };
-    if (!reqId) {
-      try {
-        result.allHeaders = Object.fromEntries(r.headers.entries());
-      } catch {/* noop */}
-    }
-  }
-  return result;
+    return result;
+  });
 }
 
 /* ---------- Helpers ---------- */
@@ -4163,6 +4246,284 @@ const tests = {
     const shortages = Array.isArray(commit.body?.shortages) ? commit.body.shortages : [];
     const pass = submit.ok && commit.ok && shortages.length > 0 && found;
     return { test: "salesOrders:commit-nonstrict-backorder", result: pass ? "PASS" : "FAIL", current, adjust, create, submit, commit, bo };
+  },
+
+  // SO patch-lines: verify draft-only enforcement (E2 rule)
+  // STRICT: patch-lines must be allowed in draft and blocked (409 SO_NOT_EDITABLE) after submit.
+  "smoke:salesOrders:patch-lines-draft-only-after-submit": async () => {
+    await ensureBearer();
+
+    const { partyId } = await seedParties(api);
+    const prod = await createProduct({ name: "SO-DraftOnly" });
+    if (!prod.ok) return { test: "salesOrders:patch-lines-draft-only-after-submit", result: "FAIL", prod };
+    const inv = await createInventoryForProduct(prod.body?.id, "SO-DraftOnly-Item");
+    if (!inv.ok) return { test: "salesOrders:patch-lines-draft-only-after-submit", result: "FAIL", inv };
+    const itemId = inv.body?.id;
+
+    // 1) Create draft SO with 2 lines
+    const create = await post(
+      `/objects/salesOrder`,
+      {
+        type: "salesOrder",
+        status: "draft",
+        partyId,
+        lines: [
+          { itemId, uom: "ea", qty: 5 },
+          { itemId, uom: "ea", qty: 3 }
+        ]
+      },
+      { "Idempotency-Key": idem() }
+    );
+    if (!create.ok) return { test: "salesOrders:patch-lines-draft-only-after-submit", result: "FAIL", create };
+    const soId = create.body?.id;
+    const lines = Array.isArray(create.body?.lines) ? create.body.lines : [];
+    const lineId = lines[0]?.id ?? lines[0]?.lineId;
+
+    // 2) PATCH-LINES in draft: update qty on first line → must succeed
+    const patchInDraft = await post(
+      `/sales/so/${encodeURIComponent(soId)}:patch-lines`,
+      {
+        ops: [
+          { op: "upsert", id: lineId, patch: { qty: 10 } }
+        ]
+      },
+      { "Idempotency-Key": idem() }
+    );
+    if (!patchInDraft.ok) return { test: "salesOrders:patch-lines-draft-only-after-submit", result: "FAIL", patchInDraft };
+    const updatedLine = patchInDraft.body?.lines?.find((l) => (l.id ?? l.lineId) === lineId);
+    const qtyUpdated = updatedLine && Number(updatedLine.qty) === 10;
+
+    // 3) Submit the SO
+    const submit = await post(
+      `/sales/so/${encodeURIComponent(soId)}:submit`,
+      {},
+      { "Idempotency-Key": idem() }
+    );
+    if (!submit.ok) return { test: "salesOrders:patch-lines-draft-only-after-submit", result: "FAIL", submit };
+
+    // 4) PATCH-LINES on submitted SO must fail with 409 SO_NOT_EDITABLE
+    const patchAfterSubmit = await post(
+      `/sales/so/${encodeURIComponent(soId)}:patch-lines`,
+      {
+        ops: [
+          { op: "upsert", id: lineId, patch: { qty: 15 } }
+        ]
+      },
+      { "Idempotency-Key": idem() }
+    );
+    
+    // STRICT enforcement: must be blocked
+    const blockedCorrectly = !patchAfterSubmit.ok && patchAfterSubmit.status === 409;
+    const errorCodeCorrect = patchAfterSubmit.body?.details?.code === "SO_NOT_EDITABLE";
+
+    const pass = create.ok && patchInDraft.ok && qtyUpdated && submit.ok && blockedCorrectly && errorCodeCorrect;
+    return {
+      test: "salesOrders:patch-lines-draft-only-after-submit",
+      result: pass ? "PASS" : "FAIL",
+      create,
+      patchInDraft,
+      qtyUpdated,
+      submit,
+      patchAfterSubmit,
+      blockedCorrectly,
+      errorCodeCorrect
+    };
+  },
+
+  // SO fulfill: verify idempotency with Idempotency-Key replay
+  "smoke:salesOrders:fulfill-idempotency-replay": async () => {
+    await ensureBearer();
+
+    const { partyId } = await seedParties(api);
+    const prod = await createProduct({ name: "SO-FulfillIdem" });
+    if (!prod.ok) return { test: "salesOrders:fulfill-idempotency-replay", result: "FAIL", prod };
+    const inv = await createInventoryForProduct(prod.body?.id, "SO-FulfillIdem-Item");
+    if (!inv.ok) return { test: "salesOrders:fulfill-idempotency-replay", result: "FAIL", inv };
+    const itemId = inv.body?.id;
+
+    // Set up on-hand inventory
+    const adjRes = await post(
+      `/objects/${MV_TYPE}`,
+      { itemId, type: "adjust", qty: 100 }
+    );
+
+    // 1) Create SO with fulfillable line
+    const create = await post(
+      `/objects/salesOrder`,
+      {
+        type: "salesOrder",
+        status: "draft",
+        partyId,
+        lines: [{ itemId, uom: "ea", qty: 50 }]
+      },
+      { "Idempotency-Key": idem() }
+    );
+    if (!create.ok) return { test: "salesOrders:fulfill-idempotency-replay", result: "FAIL", create };
+    const soId = create.body?.id;
+    const lineId = create.body?.lines?.[0]?.id ?? create.body?.lines?.[0]?.lineId;
+
+    // 2) Submit + Commit + Reserve
+    const submit = await post(`/sales/so/${encodeURIComponent(soId)}:submit`, {}, { "Idempotency-Key": idem() });
+    if (!submit.ok) return { test: "salesOrders:fulfill-idempotency-replay", result: "FAIL", submit };
+    const commit = await post(`/sales/so/${encodeURIComponent(soId)}:commit`, {}, { "Idempotency-Key": idem() });
+    if (!commit.ok) return { test: "salesOrders:fulfill-idempotency-replay", result: "FAIL", commit };
+    const reserve = await post(
+      `/sales/so/${encodeURIComponent(soId)}:reserve`,
+      { lines: [{ id: lineId, deltaQty: 25 }] },
+      { "Idempotency-Key": idem() }
+    );
+    if (!reserve.ok) return { test: "salesOrders:fulfill-idempotency-replay", result: "FAIL", reserve };
+
+    // 3) First fulfill with Idempotency-Key = K1
+    const key1 = idem();
+    const fulfill1 = await post(
+      `/sales/so/${encodeURIComponent(soId)}:fulfill`,
+      { lines: [{ id: lineId, deltaQty: 10 }] },
+      { "Idempotency-Key": key1 }
+    );
+    if (!fulfill1.ok) return { test: "salesOrders:fulfill-idempotency-replay", result: "FAIL", fulfill1 };
+    const so1 = fulfill1.body;
+    const line1 = so1?.lines?.find((l) => (l.id ?? l.lineId) === lineId);
+    const fulfilledAfterFirst = Number(line1?.fulfilledQty ?? 0);
+
+    // 4) Re-play fulfill with same Idempotency-Key K1
+    const fulfill2 = await post(
+      `/sales/so/${encodeURIComponent(soId)}:fulfill`,
+      { lines: [{ id: lineId, deltaQty: 10 }] },
+      { "Idempotency-Key": key1 }
+    );
+    if (!fulfill2.ok) return { test: "salesOrders:fulfill-idempotency-replay", result: "FAIL", fulfill2 };
+    const so2 = fulfill2.body;
+    const line2 = so2?.lines?.find((l) => (l.id ?? l.lineId) === lineId);
+    const fulfilledAfterSecond = Number(line2?.fulfilledQty ?? 0);
+
+    // 5) Assert: second call returns 200, qty unchanged, status unchanged, no movements duplication
+    const secondCallSucceeded = fulfill2.ok && fulfill2.status === 200;
+    const qtyUnchanged = fulfilledAfterFirst === fulfilledAfterSecond;
+    const statusUnchanged = so1?.status === so2?.status;  // both should be partially_fulfilled
+    const idempotentPayload = so1?.id === so2?.id;  // same SO ID in response
+    
+    // Verify fulfill1 increased qty correctly (10 fulfilled on line with qty 50)
+    const fulfillmentCorrect = fulfilledAfterFirst === 10;
+
+    const pass = create.ok && submit.ok && commit.ok && reserve.ok && fulfill1.ok && fulfill2.ok && 
+                 secondCallSucceeded && qtyUnchanged && statusUnchanged && idempotentPayload && fulfillmentCorrect;
+    return {
+      test: "salesOrders:fulfill-idempotency-replay",
+      result: pass ? "PASS" : "FAIL",
+      create,
+      fulfill1,
+      fulfilledAfterFirst,
+      fulfill2,
+      fulfilledAfterSecond,
+      secondCallSucceeded,
+      qtyUnchanged,
+      statusUnchanged,
+      idempotentPayload,
+      fulfillmentCorrect
+    };
+  },
+
+  // SO fulfill: verify Idempotency-Key reuse with different payload is rejected
+  "smoke:salesOrders:fulfill-idempotency-key-reuse-different-payload": async () => {
+    await ensureBearer();
+
+    const { partyId } = await seedParties(api);
+    const prod = await createProduct({ name: "SO-FulfillKeyReuse" });
+    if (!prod.ok) return { test: "salesOrders:fulfill-idempotency-key-reuse-different-payload", result: "FAIL", prod };
+    const inv = await createInventoryForProduct(prod.body?.id, "SO-FulfillKeyReuse-Item");
+    if (!inv.ok) return { test: "salesOrders:fulfill-idempotency-key-reuse-different-payload", result: "FAIL", inv };
+    const itemId = inv.body?.id;
+
+    // Set up on-hand inventory
+    const adjRes = await post(
+      `/objects/${MV_TYPE}`,
+      { itemId, type: "adjust", qty: 100 }
+    );
+
+    // Create SO with 2 fulfillable lines
+    const create = await post(
+      `/objects/salesOrder`,
+      {
+        type: "salesOrder",
+        status: "draft",
+        partyId,
+        lines: [
+          { itemId, uom: "ea", qty: 50 },
+          { itemId, uom: "ea", qty: 30 }
+        ]
+      },
+      { "Idempotency-Key": idem() }
+    );
+    if (!create.ok) return { test: "salesOrders:fulfill-idempotency-key-reuse-different-payload", result: "FAIL", create };
+    const soId = create.body?.id;
+    const lineIds = create.body?.lines?.map((l) => l.id ?? l.lineId) ?? [];
+
+    // Submit + Commit + Reserve
+    const submit = await post(`/sales/so/${encodeURIComponent(soId)}:submit`, {}, { "Idempotency-Key": idem() });
+    const commit = await post(`/sales/so/${encodeURIComponent(soId)}:commit`, {}, { "Idempotency-Key": idem() });
+    const reserve = await post(
+      `/sales/so/${encodeURIComponent(soId)}:reserve`,
+      { lines: [{ id: lineIds[0], deltaQty: 25 }, { id: lineIds[1], deltaQty: 15 }] },
+      { "Idempotency-Key": idem() }
+    );
+
+    // Use same Idempotency-Key K2 with different payloads
+    // STRICT first-write-wins: second call with different payload MUST return early cached result
+    const key2 = idem();
+
+    // Payload A: fulfill line[0] with 5
+    const fulfillA = await post(
+      `/sales/so/${encodeURIComponent(soId)}:fulfill`,
+      { lines: [{ id: lineIds[0], deltaQty: 5 }] },
+      { "Idempotency-Key": key2 }
+    );
+    if (!fulfillA.ok) return { test: "salesOrders:fulfill-idempotency-key-reuse-different-payload", result: "FAIL", fulfillA };
+    const soA = fulfillA.body;
+    const lineA = soA?.lines?.find((l) => (l.id ?? l.lineId) === lineIds[0]);
+    const lineB_afterA = soA?.lines?.find((l) => (l.id ?? l.lineId) === lineIds[1]);
+    const qtyFulfilledLineA = Number(lineA?.fulfilledQty ?? 0);  // should be 5
+    const qtyFulfilledLineB_afterA = Number(lineB_afterA?.fulfilledQty ?? 0);  // should be 0
+
+    // Payload B: fulfill line[1] with 10 (same key, different line/qty)
+    // This should trigger early key hit and return cached result from fulfillA
+    const fulfillB = await post(
+      `/sales/so/${encodeURIComponent(soId)}:fulfill`,
+      { lines: [{ id: lineIds[1], deltaQty: 10 }] },
+      { "Idempotency-Key": key2 }
+    );
+    if (!fulfillB.ok) return { test: "salesOrders:fulfill-idempotency-key-reuse-different-payload", result: "FAIL", fulfillB };
+    const soB = fulfillB.body;
+    const lineA_afterB = soB?.lines?.find((l) => (l.id ?? l.lineId) === lineIds[0]);
+    const lineB_afterB = soB?.lines?.find((l) => (l.id ?? l.lineId) === lineIds[1]);
+    const qtyFulfilledLineA_afterB = Number(lineA_afterB?.fulfilledQty ?? 0);  // should still be 5 (no change)
+    const qtyFulfilledLineB_afterB = Number(lineB_afterB?.fulfilledQty ?? 0);  // should still be 0 (payload B NOT applied)
+
+    // Assertions for first-write-wins
+    const secondCallSucceeded = fulfillB.ok && fulfillB.status === 200;
+    const secondReturnedCachedResult = soB?.id === soA?.id;  // same SO from cache
+    const lineAStatePreserved = qtyFulfilledLineA === qtyFulfilledLineA_afterB;  // line A qty unchanged
+    const lineBNotModified = qtyFulfilledLineB_afterA === qtyFulfilledLineB_afterB && qtyFulfilledLineB_afterB === 0;  // line B never fulfilled
+    const payloadBNotApplied = qtyFulfilledLineB_afterB === 0;  // strict: line B was NOT touched
+
+    const pass = create.ok && submit.ok && commit.ok && reserve.ok && fulfillA.ok && fulfillB.ok && 
+                 secondCallSucceeded && secondReturnedCachedResult && lineAStatePreserved && lineBNotModified && payloadBNotApplied;
+    return {
+      test: "salesOrders:fulfill-idempotency-key-reuse-different-payload",
+      result: pass ? "PASS" : "FAIL",
+      create,
+      fulfillA,
+      qtyFulfilledLineA,
+      qtyFulfilledLineB_afterA,
+      fulfillB,
+      qtyFulfilledLineA_afterB,
+      qtyFulfilledLineB_afterB,
+      secondCallSucceeded,
+      secondReturnedCachedResult,
+      lineAStatePreserved,
+      lineBNotModified,
+      payloadBNotApplied
+    };
   },
 
   /* ===================== Purchase Orders ===================== */

@@ -99,7 +99,22 @@
     "smoke:purchaseOrders:patch-lines": "node ops/smoke/smoke.mjs smoke:purchaseOrders:patch-lines",
     "smoke:salesOrders:draft-lines-server-assign-ids": "node ops/smoke/smoke.mjs smoke:salesOrders:draft-lines-server-assign-ids",
     "smoke:webish:purchaseOrders:list-detail-join": "node ops/smoke/smoke.mjs smoke:webish:purchaseOrders:list-detail-join",
-    "smoke:salesOrders:patch-lines": "node ops/smoke/smoke.mjs smoke:salesOrders:patch-lines"
+    "smoke:salesOrders:patch-lines": "node ops/smoke/smoke.mjs smoke:salesOrders:patch-lines",
+    "smoke:backorders:ignore": "node ops/smoke/smoke.mjs smoke:backorders:ignore",
+    "smoke:backorders:partial-fulfill": "node ops/smoke/smoke.mjs smoke:backorders:partial-fulfill",
+    "smoke:line-identity:id-canonical": "node ops/smoke/smoke.mjs smoke:line-identity:id-canonical",
+    "smoke:po:create-from-suggestion:line-ids": "node ops/smoke/smoke.mjs smoke:po:create-from-suggestion:line-ids",
+    "smoke:po:patch-lines:cid": "node ops/smoke/smoke.mjs smoke:po:patch-lines:cid",
+    "smoke:salesOrders:fulfill-idempotency-key-reuse-different-payload": "node ops/smoke/smoke.mjs smoke:salesOrders:fulfill-idempotency-key-reuse-different-payload",
+    "smoke:salesOrders:fulfill-idempotency-replay": "node ops/smoke/smoke.mjs smoke:salesOrders:fulfill-idempotency-replay",
+    "smoke:salesOrders:patch-lines-draft-only-after-submit": "node ops/smoke/smoke.mjs smoke:salesOrders:patch-lines-draft-only-after-submit",
+    "smoke:scanner:actions:record": "node ops/smoke/smoke.mjs smoke:scanner:actions:record",
+    "smoke:so:patch-lines:cid": "node ops/smoke/smoke.mjs smoke:so:patch-lines:cid",
+    "smoke:suggest-po:moq": "node ops/smoke/smoke.mjs smoke:suggest-po:moq",
+    "smoke:views:apply-to-po-list": "node ops/smoke/smoke.mjs smoke:views:apply-to-po-list",
+    "smoke:views:validate-filters": "node ops/smoke/smoke.mjs smoke:views:validate-filters",
+    "smoke:workspaces:get-fallback": "node ops/smoke/smoke.mjs smoke:workspaces:get-fallback",
+    "smoke:workspaces:mixed-dedupe": "node ops/smoke/smoke.mjs smoke:workspaces:mixed-dedupe"
   },
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "^3.882.0",

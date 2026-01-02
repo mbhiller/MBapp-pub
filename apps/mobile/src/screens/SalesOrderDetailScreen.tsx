@@ -579,7 +579,7 @@ export default function SalesOrderDetailScreen() {
   const isCancelled = ["canceled", "cancelled"].includes(so?.status);
   const isClosed = so?.status === "closed";
 
-  const canEditLines = ["draft", "submitted", "approved"].includes(String(so?.status || "").toLowerCase());
+  const canEditLines = String(so?.status || "").toLowerCase() === "draft";
 
   const canSubmit = so?.status === "draft";
   const canCommit = ["submitted"].includes(so?.status);

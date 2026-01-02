@@ -62,8 +62,10 @@ function parseOps(event: APIGatewayProxyEventV2): PatchLineOp[] | null {
 }
 
 function allowedToPatch(status: OrderStatus): boolean {
-  // Allow editing lines up to approval; disallow once committed/fulfilled/cancelled/closed.
-  return status === "draft" || status === "submitted" || status === "approved";
+  // Align with PO: only allow editing in draft (pre-submission).
+  // Once submitted, SO enters workflow; disallow edits to prevent state inconsistency.
+  const s = String(status || "").toLowerCase();
+  return s === "draft";
 }
 
 export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {

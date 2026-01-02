@@ -8,6 +8,36 @@
 
 ## Current State Summary
 
+### Sprint N1 — Sales Orders Foundation Lock-in — ✅ Complete (2026-01-01)
+
+- so-fulfill dual-ledger idempotency hardened (early key + payload signature; replay-safe, first-write-wins on key reuse).
+- SO patch-lines set to **draft-only** across API/web/mobile; after submit returns 409 `SO_NOT_EDITABLE`; Edit buttons gated to draft.
+- New SO smokes added and passing in CI: draft-only patch-lines guard; fulfill idempotency replay; fulfill Idempotency-Key reuse (first-write-wins).
+
+### Sales Orders Foundations Hardening — ✅ Complete (Sprint S, 2025-12-31)
+
+**Epic Summary:** Audit SO feature against PO "known good" patterns; identify and resolve 2 critical drifts: (1) SO fulfill lacked idempotency; (2) SO patch-lines allowed edits post-submit.
+
+- **PROMPT 0 (Investigation):** Comprehensive read-only audit of SO foundations vs. PO patterns across spec, API, web, mobile, smokes, and docs. Identified 2 major drifts: SO fulfill had NO idempotency ledger (vs. PO receive dual-ledger pattern); SO patch-lines allowed draft|submitted|approved (vs. PO draft-only). Delivered 8-section findings report with spec/API/web/mobile line-level citations and recommendations.
+
+- **E1 (SO Fulfill Idempotency Hardening):** [apps/api/src/sales/so-fulfill.ts](../apps/api/src/sales/so-fulfill.ts) enhanced with dual-ledger idempotency pattern matching PO receive. Added 6 new helper functions: `alreadyAppliedKey(tenantId, soId, idk)`, `markAppliedKey()`, `canonicalizeLines()`, `hashStr()`, `alreadyAppliedSig()`, `markAppliedSig()`. Handler now performs early Idempotency-Key check (before validation, safe to cache invalid requests) and payload signature check (after validation, only mark successful operations). Marks both key and signature after successful write. Introduces 3 explicit error codes: INVALID_QTY, UNKNOWN_LINE, OVER_FULFILLMENT. ✅ Typecheck PASS (api).
+
+- **E2 (SO Patch-Lines Draft-Only Enforcement):** Restricted SO patch-lines to draft-only across full stack for parity with PO. [apps/api/src/sales/so-patch-lines.ts](../apps/api/src/sales/so-patch-lines.ts) changed `allowedToPatch()` to `status === "draft"` only (returns 409 Conflict with code SO_NOT_EDITABLE if not draft). [apps/mobile/src/screens/SalesOrderDetailScreen.tsx](../apps/mobile/src/screens/SalesOrderDetailScreen.tsx) simplified `canEditLines` to draft-only check. [apps/web/src/pages/SalesOrderDetailPage.tsx](../apps/web/src/pages/SalesOrderDetailPage.tsx) added `canEdit` guard and wrapped Edit button in conditional. ✅ All 3 typechecks PASS (api, web, mobile).
+
+- **E3 (Smoke Coverage):** [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) extended with 3 new SO smokes (lines 4171–4415):
+  - `smoke:salesOrders:patch-lines-draft-only-after-submit` — Verifies patch-lines allowed in draft and strictly blocked post-submit with 409 `SO_NOT_EDITABLE`.
+  - `smoke:salesOrders:fulfill-idempotency-replay` — Proves same Idempotency-Key replay returns 200 OK and leaves SO state unchanged (no double-apply of fulfilledQty or status).
+  - `smoke:salesOrders:fulfill-idempotency-key-reuse-different-payload` — First-write-wins: same key with different payload returns cached first result; no additional lines are fulfilled.
+
+- **Definition of Done:**
+  - ✅ All edits implemented per spec (E1 dual-ledger + E2 draft-only + E3 smoke coverage)
+  - ✅ Typecheck passes (apps/api, apps/web, apps/mobile)
+  - ✅ Smoke tests added (3 new integration smokes covering both E1/E2)
+  - ✅ No regressions (existing PO/SO smokes unchanged; new smokes non-breaking)
+  - ✅ Docs updated (Status.md this section; Foundations.md to follow with post-deployment validation)
+
+- **Guarantee:** SO fulfill now matches PO receive idempotency pattern (dual-ledger, early+late checks, mark-after-write). SO patch-lines is draft-only across API/web/mobile; attempts after submit return 409 `SO_NOT_EDITABLE`. Integration smokes lock in both behaviors.
+
 ### Web Scan-to-Receive on PO Detail — ✅ Complete (Sprint S, 2025-12-31)
 
 **Epic Summary:** Add manual scan-to-receive workflow to web PurchaseOrderDetailPage, bringing parity with mobile PO detail receive UX.

@@ -190,9 +190,13 @@ Web Edit Page:
 - Web: [apps/web/src/components/LineArrayEditor.tsx](../apps/web/src/components/LineArrayEditor.tsx) — Shared editor component
 - Smokes: [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) — Regression tests (lines 6672-6876)
 
-**Status Guards (mobile PO vs SO patch-lines):**
-- Sales Orders: patch-lines allowed in `draft|submitted|approved` (UI allows edit in those statuses; 409 `SO_NOT_EDITABLE` otherwise)
-- Purchase Orders: patch-lines **draft-only**; UI gates the Edit CTA to draft and surfaces 409 `PO_NOT_EDITABLE` as “PO is not editable unless Draft.”
+**Status Guards (patch-lines):**
+- Sales Orders: patch-lines **draft-only**; once submitted/approved, endpoint returns 409 with code `SO_NOT_EDITABLE` (body.details.code) and UI hides Edit when not draft.
+- Purchase Orders: patch-lines **draft-only**; once submitted/approved, endpoint returns 409 with code `PO_NOT_EDITABLE` and UI hides Edit when not draft.
+
+**Fulfill Idempotency (SO):**
+- Dual-ledger idempotency matches PO receive pattern. Same Idempotency-Key replay returns 200 with current SO state and does **not** reapply movements or advance status.
+- Idempotency-Key reuse with a different payload is **first-write-wins**: second call returns 200 with cached first result; no additional movements or fulfilledQty changes are applied.
 
 
 **Line Editor Component Contract (Sprint W consolidation):**
