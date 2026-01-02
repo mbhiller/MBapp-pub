@@ -8,17 +8,20 @@ const SK = process.env.MBAPP_TABLE_SK || "sk";
 const json = (s:number,b:unknown):APIGatewayProxyResultV2=>({statusCode:s,headers:{"content-type":"application/json"},body:JSON.stringify(b)});
 
 export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
-  const tenantId = (event as any)?.requestContext?.authorizer?.mbapp?.tenantId as string;
+  const tenantId = (event as any)?.requestContext?.authorizer?.mbapp?.tenantId as string | undefined;
   const userId = (event as any)?.requestContext?.authorizer?.mbapp?.userId as string | undefined;
   const requestId = (event as any)?.requestContext?.requestId as string | undefined;
   const route = (event as any)?.rawPath as string | undefined;
   const method = (event as any)?.requestContext?.http?.method as string | undefined;
-  const id = event.pathParameters?.id as string;
+  const id = event.pathParameters?.id as string | undefined;
   const now = new Date().toISOString();
   const started = Date.now();
 
   // Build minimal log/emit context
   const ctx = { tenantId, userId, requestId, route, method };
+
+  if (!tenantId) return json(400, { message: "Missing tenant" });
+  if (!id) return json(400, { message: "Missing id" });
 
   // Fetch existing record to capture statusBefore and related IDs
   let existing: any = null;
@@ -29,12 +32,16 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     } as any));
     existing = got?.Item || null;
   } catch {}
+  if (!existing) {
+    return json(404, { message: "BackorderRequest not found" });
+  }
   const res = await ddb.send(new UpdateCommand({
     TableName: tableObjects,
     Key: { [PK]: tenantId, [SK]: `backorderRequest#${id}` },
     UpdateExpression: "SET #s = :s, updatedAt = :u",
     ExpressionAttributeNames: { "#s": "status" },
     ExpressionAttributeValues: { ":s": "ignored", ":u": now },
+    ConditionExpression: "attribute_exists(pk) AND attribute_exists(sk)",
     ReturnValues: "ALL_NEW",
   }));
   const updated = res.Attributes as any;

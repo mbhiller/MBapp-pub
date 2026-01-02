@@ -3722,6 +3722,22 @@ components:
           type: number
           minimum: 0
           description: Ordered quantity
+        qtyRequested:
+          type: number
+          nullable: true
+          description: Original requested qty (pre-adjustment)
+        qtySuggested:
+          type: number
+          nullable: true
+          description: Suggested qty after MOQ adjustments
+        adjustedFrom:
+          type: number
+          nullable: true
+          description: When MOQ applied, original requested qty
+        minOrderQtyApplied:
+          type: number
+          nullable: true
+          description: Applied MOQ when suggestion bumps qty
         qtyReceived:
           type: number
           default: 0

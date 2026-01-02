@@ -756,10 +756,28 @@ export default function PurchaseOrderDetailScreen() {
         keyExtractor={(l: any) => String(l.id ?? l.itemId)}
         renderItem={({ item: line }: any) => {
           const canReceive = receivable && !vendorGuardActive;
+          const qtySuggested = line.qtySuggested ?? line.qty;
+          const qtyRequested = line.qtyRequested;
           return (
             <View style={{ padding: 10, borderWidth: 1, borderRadius: 8, marginBottom: 8 }}>
               <Text style={{ fontWeight: "600" }}>{line.itemId}</Text>
-              <Text>Qty: {line.qty} {line.uom || "ea"}</Text>
+              <Text>
+                Qty: {qtySuggested} {line.uom || "ea"}
+              </Text>
+              {qtyRequested != null && qtyRequested !== qtySuggested && (
+                <Text style={{ color: "#666" }}>
+                  Requested {qtyRequested}{line.uom ? ` ${line.uom}` : ""}
+                </Text>
+              )}
+              {(line.minOrderQtyApplied != null || line.adjustedFrom != null) && (
+                <Text style={{ color: "#666" }}>
+                  MOQ applied: {line.minOrderQtyApplied ?? "—"}
+                  {line.adjustedFrom != null ? ` (from ${line.adjustedFrom})` : ""}
+                </Text>
+              )}
+              {Array.isArray(line.backorderRequestIds) && line.backorderRequestIds.length > 0 && (
+                <Text style={{ color: "#666" }}>Backorders: {line.backorderRequestIds.join(", ")}</Text>
+              )}
 
               <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
                 {canReceive ? (

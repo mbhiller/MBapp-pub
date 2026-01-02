@@ -8,6 +8,7 @@ import { useColors } from "../features/_shared/useColors";
 import { apiClient } from "../api/client";
 import { useToast } from "../features/_shared/Toast";
 import { copyText } from "../features/_shared/copy";
+import { suggestPurchaseOrders, saveFromSuggestion, type PurchaseOrderDraft } from "../features/purchasing/poActions";
 
 type BackorderRequest = {
   id: string;
@@ -134,6 +135,62 @@ export default function BackorderDetailScreen() {
     );
   };
 
+  const handleConvert = async () => {
+    if (!id || backorder?.status !== "open") return;
+
+    Alert.alert(
+      "Convert Backorder",
+      "Convert this backorder and suggest a purchase order?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Convert",
+          onPress: async () => {
+            setActionLoading(true);
+            try {
+              await apiClient.post(`/objects/backorderRequest/${encodeURIComponent(id)}:convert`, {});
+              toast("Converted", "success");
+              track("BO_Convert_Clicked", { objectType: "backorderRequest", objectId: id, result: "success" });
+
+              const res = await suggestPurchaseOrders([id], backorder?.preferredVendorId ? { vendorId: backorder.preferredVendorId } : {});
+              const drafts: PurchaseOrderDraft[] = Array.isArray(res?.drafts) ? res?.drafts : res?.draft ? [res.draft] : [];
+              const skipped = Array.isArray(res?.skipped) ? res?.skipped : [];
+              if (skipped.length) {
+                const reasons = skipped
+                  .slice(0, 2)
+                  .map((s) => s?.reason || "skipped")
+                  .join(", ");
+                toast(`Skipped ${skipped.length}: ${reasons}${skipped.length > 2 ? "..." : ""}`, "info");
+              }
+
+              if (drafts.length === 1) {
+                const createRes = await saveFromSuggestion(drafts[0]);
+                const createdId = createRes?.id ?? createRes?.ids?.[0];
+                if (createdId) {
+                  nav.navigate("PurchaseOrderDetail", { id: createdId });
+                } else {
+                  nav.navigate("SuggestPurchaseOrders", { backorderRequestIds: [id], vendorId: backorder?.preferredVendorId });
+                }
+              } else if (drafts.length > 1) {
+                nav.navigate("SuggestPurchaseOrders", { backorderRequestIds: [id], vendorId: backorder?.preferredVendorId });
+              } else {
+                toast("No drafts returned", "info");
+              }
+
+              await refetch?.();
+            } catch (err: any) {
+              console.error(err);
+              track("BO_Convert_Clicked", { objectType: "backorderRequest", objectId: id, result: "fail", errorCode: err?.code || err?.status });
+              Alert.alert("Error", err?.message || "Failed to convert backorder");
+            } finally {
+              setActionLoading(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const formatDateTime = (value?: string | null) => {
     if (!value) return "—";
     const d = new Date(value);
@@ -203,14 +260,31 @@ export default function BackorderDetailScreen() {
             <View style={{ flexDirection: "row", gap: 8 }}>
               <Pressable
                 onPress={handleSuggestPo}
+                disabled={actionLoading}
                 style={{
                   paddingVertical: 8,
                   paddingHorizontal: 12,
-                  backgroundColor: t.colors.primary,
+                  backgroundColor: actionLoading ? t.colors.border : t.colors.primary,
                   borderRadius: 8,
                 }}
               >
-                <Text style={{ color: t.colors.buttonText || "#fff", fontWeight: "600", fontSize: 12 }}>Suggest PO</Text>
+                <Text style={{ color: t.colors.buttonText || "#fff", fontWeight: "600", fontSize: 12 }}>
+                  {actionLoading ? "Working..." : "Suggest PO"}
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={handleConvert}
+                disabled={actionLoading}
+                style={{
+                  paddingVertical: 8,
+                  paddingHorizontal: 12,
+                  backgroundColor: actionLoading ? t.colors.border : "#2e7d32",
+                  borderRadius: 8,
+                }}
+              >
+                <Text style={{ color: "#fff", fontWeight: "600", fontSize: 12 }}>
+                  {actionLoading ? "Working..." : "Convert"}
+                </Text>
               </Pressable>
               <Pressable
                 onPress={handleIgnore}

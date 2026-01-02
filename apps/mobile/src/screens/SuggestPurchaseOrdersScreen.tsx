@@ -18,7 +18,9 @@ function DraftCard({ draft }: { draft: PurchaseOrderDraft }) {
   return (
     <View style={{ borderWidth: 1, borderColor: t.colors.border, borderRadius: 10, padding: 12, backgroundColor: t.colors.card }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-        <Text style={{ fontWeight: "700", color: t.colors.text }}>Vendor: {draft.vendorId || "(unknown)"}</Text>
+        <Text style={{ fontWeight: "700", color: t.colors.text }}>
+          Vendor: {draft.vendorName ? `${draft.vendorName} (${draft.vendorId})` : draft.vendorId || "(unknown)"}
+        </Text>
         {draft.status ? <Text style={{ color: t.colors.textMuted, fontSize: 12 }}>Status: {draft.status}</Text> : null}
       </View>
       {lines.length === 0 && <Text style={{ color: t.colors.textMuted }}>No lines suggested.</Text>}
@@ -26,12 +28,19 @@ function DraftCard({ draft }: { draft: PurchaseOrderDraft }) {
         <View key={ln.id || ln.lineId || `${ln.itemId || "line"}-${idx}`} style={{ padding: 8, borderWidth: 1, borderColor: t.colors.border, borderRadius: 8, marginTop: 6 }}>
           <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 2 }}>
             <Text style={{ fontWeight: "600", color: t.colors.text }}>Item: {ln.itemId || "(unknown)"}</Text>
-            <Text style={{ color: t.colors.text }}>Qty: {ln.qty ?? "—"}</Text>
+            <Text style={{ color: t.colors.text }}>
+              Qty: {ln.qtySuggested ?? ln.qty ?? "—"}{ln.uom ? ` ${ln.uom}` : ""}
+            </Text>
           </View>
+          {ln.qtyRequested != null && ln.qtyRequested !== (ln.qtySuggested ?? ln.qty) && (
+            <Text style={{ color: t.colors.textMuted, fontSize: 12 }}>
+              Requested {ln.qtyRequested}{ln.uom ? ` ${ln.uom}` : ""}
+            </Text>
+          )}
           {(ln.minOrderQtyApplied != null || ln.adjustedFrom != null) && (
             <Text style={{ color: t.colors.textMuted, fontSize: 12 }}>
-              {ln.minOrderQtyApplied != null ? `MOQ Applied: ${ln.minOrderQtyApplied} ` : ""}
-              {ln.adjustedFrom != null ? `(from ${ln.adjustedFrom})` : ""}
+              {ln.minOrderQtyApplied != null ? `MOQ applied: ${ln.minOrderQtyApplied}` : ""}
+              {ln.adjustedFrom != null ? ` (from ${ln.adjustedFrom})` : ""}
             </Text>
           )}
           {ln.backorderRequestIds?.length ? (

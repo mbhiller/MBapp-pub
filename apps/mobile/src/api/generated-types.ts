@@ -2661,6 +2661,14 @@ export interface components {
             uom: string;
             /** @description Ordered quantity */
             qty: number;
+            /** @description Original requested qty (pre-adjustment) */
+            qtyRequested?: number | null;
+            /** @description Suggested qty after MOQ adjustments */
+            qtySuggested?: number | null;
+            /** @description When MOQ applied, original requested qty */
+            adjustedFrom?: number | null;
+            /** @description Applied MOQ when suggestion bumps qty */
+            minOrderQtyApplied?: number | null;
             /** @default 0 */
             qtyReceived: number;
             unitPrice?: number | null;

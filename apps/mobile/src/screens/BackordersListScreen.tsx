@@ -5,8 +5,8 @@ import { useNavigation, useRoute, useFocusEffect } from "@react-navigation/nativ
 import { useObjects } from "../features/_shared/useObjects";
 import { useColors } from "../features/_shared/useColors";
 import { apiClient } from "../api/client";
-import DraftChooserModal, { PurchaseOrderDraft as Draft } from "../features/purchasing/DraftChooserModal";
-import { saveFromSuggestion } from "../features/purchasing/poActions";
+import DraftChooserModal from "../features/purchasing/DraftChooserModal";
+import { saveFromSuggestion, type PurchaseOrderDraft as Draft } from "../features/purchasing/poActions";
 import { useToast } from "../features/_shared/Toast";
 import { copyText } from "../features/_shared/copy";
 import { VendorPicker } from "../features/_shared/fields";

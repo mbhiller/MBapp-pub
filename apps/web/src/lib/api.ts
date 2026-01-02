@@ -13,6 +13,10 @@ export type PurchaseOrderLine = {
   itemId?: string;
   qty?: number;
   receivedQty?: number;
+  qtyRequested?: number;
+  qtySuggested?: number;
+  uom?: string;
+  productId?: string;
   backorderRequestIds?: string[];
   minOrderQtyApplied?: number;
   adjustedFrom?: number;
@@ -21,7 +25,11 @@ export type PurchaseOrderLine = {
 export type PurchaseOrderDraft = {
   id?: string;
   vendorId: string;
+  vendorName?: string;
   status?: string;
+  currency?: string;
+  createdAt?: string;
+  updatedAt?: string;
   lines?: PurchaseOrderLine[];
 };
 

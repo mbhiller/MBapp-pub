@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
 import { apiFetch } from "../lib/http";
 import type { PurchaseOrderDraft } from "../lib/api";
 
 export type SkippedReason = {
   backorderRequestId: string;
-  reason: string;
+  reason?: string;
 };
 
 export type SuggestPoChooserModalProps = {
@@ -36,7 +36,7 @@ export default function SuggestPoChooserModal({
   const [selectedDrafts, setSelectedDrafts] = useState<Set<number>>(new Set());
   const [submitting, setSubmitting] = useState(false);
 
-  const humanizeReason = (reason: string): string => {
+  const humanizeReason = (reason?: string): string => {
     const map: Record<string, string> = {
       no_preferred_vendor: "No preferred vendor set",
       no_vendor: "No vendor available",
@@ -44,9 +44,16 @@ export default function SuggestPoChooserModal({
       already_fulfilled: "Already fulfilled",
       invalid_backorder: "Invalid backorder request",
       unsupported_item: "Item not eligible for purchase",
+      missing_vendor: "No vendor available",
+      not_found: "Backorder not found",
+      ignored: "Backorder is ignored",
+      zero_qty: "Quantity is zero",
+      missing_item: "Backorder missing item",
     };
-    if (map[reason]) return map[reason];
-    return reason.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+    if (!reason) return "No reason provided";
+    const key = reason.toLowerCase();
+    if (map[key]) return map[key];
+    return key.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
   };
 
   // Fetch missing vendor names
@@ -80,12 +87,15 @@ export default function SuggestPoChooserModal({
 
   // Reset selection when modal opens/closes
   useEffect(() => {
-    if (!open) setSelectedDrafts(new Set());
+    if (!open) {
+      setSelectedDrafts(new Set());
+      setSubmitting(false);
+    }
   }, [open]);
 
   if (!open) return null;
 
-  const handleBackdropClick = (e: React.MouseEvent) => {
+  const handleBackdropClick = (e: MouseEvent) => {
     if (e.target === e.currentTarget) {
       onClose();
     }
@@ -202,9 +212,14 @@ export default function SuggestPoChooserModal({
 
           {drafts.map((draft, idx) => {
             const vendorId = draft.vendorId ?? "Unknown";
-            const vendorName = vendorNameById[vendorId] ?? vendorId;
-            const lineCount = draft.lines?.length ?? 0;
-            const totalQty = draft.lines?.reduce((sum, line) => sum + (line.qty ?? 0), 0) ?? 0;
+            const vendorName = draft.vendorName || vendorNameById[vendorId] || vendorId;
+            const lines = draft.lines ?? [];
+            const lineCount = lines.length;
+            const totalQty = lines.reduce((sum, line) => sum + (line.qtySuggested ?? line.qty ?? 0), 0) ?? 0;
+            const moqBumpedCount = lines.filter((ln) =>
+              (ln.minOrderQtyApplied && (ln.qtyRequested ?? ln.qty ?? 0) < ln.minOrderQtyApplied) ||
+              ((ln.qtySuggested ?? ln.qty ?? 0) > (ln.qtyRequested ?? ln.qty ?? 0))
+            ).length;
             const isSelected = selectedDrafts.has(idx);
 
             const draftButton = (
@@ -258,6 +273,7 @@ export default function SuggestPoChooserModal({
                     <div style={{ fontSize: 16, fontWeight: 600 }}>{vendorName}</div>
                     <div style={{ fontSize: 14, color: "#666", marginTop: 4 }}>
                       {lineCount} line{lineCount !== 1 ? "s" : ""} · {totalQty} total qty
+                      {moqBumpedCount > 0 ? ` · ${moqBumpedCount} MOQ bump${moqBumpedCount > 1 ? "s" : ""}` : ""}
                     </div>
                   </div>
                 </div>
@@ -272,6 +288,37 @@ export default function SuggestPoChooserModal({
                   </div>
                 )}
                 {draftButton}
+                {lines.length > 0 && (
+                  <div style={{ padding: 12, border: "1px solid #eee", borderRadius: 4, background: "#fafafa" }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Lines</div>
+                    <div style={{ display: "grid", gap: 8 }}>
+                      {lines.map((ln, lineIdx) => {
+                        const requested = ln.qtyRequested ?? ln.qty ?? 0;
+                        const suggested = ln.qtySuggested ?? ln.qty ?? 0;
+                        const bumped = suggested > requested;
+                        return (
+                          <div key={ln.id || ln.lineId || `${ln.itemId || ln.productId || "line"}-${lineIdx}`} style={{ fontSize: 13, display: "grid", gap: 4 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                              <div style={{ fontWeight: 600 }}>{ln.itemId || ln.productId || "Item"}</div>
+                              <div>
+                                {bumped ? `${requested} → ${suggested}` : suggested} {ln.uom || "ea"}
+                              </div>
+                            </div>
+                            {bumped && (
+                              <div style={{ color: "#d32f2f" }}>
+                                Bumped to MOQ{ln.minOrderQtyApplied ? ` (${ln.minOrderQtyApplied})` : ""}
+                                {ln.adjustedFrom != null && ln.adjustedFrom !== requested ? ` from ${ln.adjustedFrom}` : ""}
+                              </div>
+                            )}
+                            {ln.backorderRequestIds?.length ? (
+                              <div style={{ color: "#555" }}>Backorders: {ln.backorderRequestIds.join(", ")}</div>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
