@@ -83,7 +83,7 @@ function ViewLink({
     const listPageRoute = getListPageRoute(view.entityType);
     if (listPageRoute) {
       return (
-        <li key={viewId} style={{ marginBottom: 8 }}>
+        <span>
           <Link
             to={`${listPageRoute}?viewId=${encodeURIComponent(viewId)}`}
             style={{ color: "#08a", textDecoration: "none", fontWeight: 500 }}
@@ -94,7 +94,7 @@ function ViewLink({
           <span style={{ fontSize: 12, color: "#666", marginLeft: 8 }}>
             ({view.entityType})
           </span>
-        </li>
+        </span>
       );
     }
   }
@@ -102,33 +102,33 @@ function ViewLink({
   // If loading, show placeholder
   if (loading) {
     return (
-      <li key={viewId} style={{ marginBottom: 8, color: "#999" }}>
+      <span style={{ color: "#999" }}>
         {viewId} (loading...)
-      </li>
+      </span>
     );
   }
 
   // If error, show non-blocking error with fallback link to Views page
   if (error) {
     return (
-      <li key={viewId} style={{ marginBottom: 8 }}>
+      <span>
         <Link to={`/views/${encodeURIComponent(viewId)}`} style={{ color: "#08a", textDecoration: "none" }}>
           {viewId}
         </Link>
         <span style={{ fontSize: 12, color: "#f77", marginLeft: 8 }}>
           (metadata error: {error})
         </span>
-      </li>
+      </span>
     );
   }
 
   // If no view metadata, render fallback link to Views detail page
   return (
-    <li key={viewId} style={{ marginBottom: 8 }}>
+    <span>
       <Link to={`/views/${encodeURIComponent(viewId)}`} style={{ color: "#08a", textDecoration: "none" }}>
         {viewId}
       </Link>
-    </li>
+    </span>
   );
 }
 
@@ -139,25 +139,122 @@ export default function WorkspaceDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  // Views management state
+  const [newViewId, setNewViewId] = useState("");
+  const [availableViews, setAvailableViews] = useState<ViewMetadata[]>([]);
+  const [viewsLoading, setViewsLoading] = useState(false);
+  const [updateLoading, setUpdateLoading] = useState(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+
+  const fetchWorkspace = useCallback(async () => {
     if (!id) return;
-    const fetchWorkspace = async () => {
-      setLoading(true);
-      setError(null);
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await apiFetch<Workspace>(`/workspaces/${encodeURIComponent(id)}`, {
+        token: token || undefined,
+        tenantId,
+      });
+      setWorkspace(result);
+    } catch (err) {
+      setError(formatError(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [id, token, tenantId]);
+
+  useEffect(() => {
+    fetchWorkspace();
+  }, [fetchWorkspace]);
+
+  // Load available views when workspace entityType is known
+  useEffect(() => {
+    if (!workspace?.entityType) return;
+    const fetchViews = async () => {
+      setViewsLoading(true);
       try {
-        const result = await apiFetch<Workspace>(`/workspaces/${encodeURIComponent(id)}`, {
+        const result = await apiFetch<{ items?: ViewMetadata[] }>("/views", {
           token: token || undefined,
           tenantId,
+          query: { entityType: workspace.entityType, limit: 100 },
         });
-        setWorkspace(result);
+        setAvailableViews(result.items ?? []);
       } catch (err) {
-        setError(formatError(err));
+        console.error("Failed to load views:", err);
       } finally {
-        setLoading(false);
+        setViewsLoading(false);
       }
     };
-    fetchWorkspace();
-  }, [id, token, tenantId]);
+    fetchViews();
+  }, [workspace?.entityType, token, tenantId]);
+
+  const handleDelete = async () => {
+    if (!id || !workspace) return;
+    if (!window.confirm(`Delete workspace "${workspace.name}"? This cannot be undone.`)) return;
+
+    try {
+      await apiFetch(`/workspaces/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        token: token || undefined,
+        tenantId,
+      });
+      // Navigate back to list
+      window.location.href = "/workspaces";
+    } catch (err) {
+      alert("Delete failed: " + formatError(err));
+    }
+  };
+
+  const handleAddView = async () => {
+    if (!id || !workspace || !newViewId.trim()) return;
+    const viewId = newViewId.trim();
+    const currentViews = workspace.views ?? [];
+    if (currentViews.includes(viewId)) {
+      setUpdateError("View already in workspace");
+      return;
+    }
+
+    setUpdateLoading(true);
+    setUpdateError(null);
+    try {
+      await apiFetch(`/workspaces/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        token: token || undefined,
+        tenantId,
+        body: { views: [...currentViews, viewId] },
+      });
+      setNewViewId("");
+      await fetchWorkspace();
+    } catch (err) {
+      setUpdateError(formatError(err));
+    } finally {
+      setUpdateLoading(false);
+    }
+  };
+
+  const handleRemoveView = async (viewId: string) => {
+    if (!id || !workspace) return;
+    if (!window.confirm(`Remove view "${viewId}" from workspace?`)) return;
+
+    const currentViews = workspace.views ?? [];
+    const updatedViews = currentViews.filter((v) => v !== viewId);
+
+    setUpdateLoading(true);
+    setUpdateError(null);
+    try {
+      await apiFetch(`/workspaces/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        token: token || undefined,
+        tenantId,
+        body: { views: updatedViews },
+      });
+      await fetchWorkspace();
+    } catch (err) {
+      setUpdateError(formatError(err));
+    } finally {
+      setUpdateLoading(false);
+    }
+  };
 
   if (loading) {
     return <div>Loading...</div>;
@@ -188,7 +285,19 @@ export default function WorkspaceDetailPage() {
     <div style={{ display: "grid", gap: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h1>{workspace.name || "Workspace"}</h1>
-        <span style={{ fontSize: 14, color: "#666" }}>(Read-only)</span>
+        <button
+          onClick={handleDelete}
+          style={{
+            padding: "8px 16px",
+            background: "#c00",
+            color: "#fff",
+            border: "none",
+            borderRadius: 4,
+            cursor: "pointer",
+          }}
+        >
+          Delete Workspace
+        </button>
       </div>
 
       <div style={{ display: "grid", gap: 12, maxWidth: 600 }}>
@@ -213,19 +322,35 @@ export default function WorkspaceDetailPage() {
         )}
         {workspace.views && Array.isArray(workspace.views) && (
           <div>
-            <strong>Views:</strong>
+            <strong>Views ({workspace.views.length}):</strong>
             {workspace.views.length === 0 ? (
               <div style={{ marginTop: 4, color: "#666" }}>(none)</div>
             ) : (
-              <ul style={{ marginTop: 4, paddingLeft: 20 }}>
+              <ul style={{ marginTop: 4, paddingLeft: 20, listStyle: "none" }}>
                 {workspace.views.map((viewId) => (
                   typeof viewId === "string" ? (
-                    <ViewLink
-                      key={viewId}
-                      viewId={viewId}
-                      token={token || undefined}
-                      tenantId={tenantId}
-                    />
+                    <li key={viewId} style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+                      <ViewLink
+                        viewId={viewId}
+                        token={token || undefined}
+                        tenantId={tenantId}
+                      />
+                      <button
+                        onClick={() => handleRemoveView(viewId)}
+                        disabled={updateLoading}
+                        style={{
+                          padding: "4px 8px",
+                          fontSize: 12,
+                          background: "#fee",
+                          color: "#c00",
+                          border: "1px solid #fcc",
+                          borderRadius: 4,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Remove
+                      </button>
+                    </li>
                   ) : (
                     <li key={JSON.stringify(viewId)} style={{ marginBottom: 8, color: "#999" }}>
                       {JSON.stringify(viewId)} (invalid format)
@@ -234,6 +359,63 @@ export default function WorkspaceDetailPage() {
                 ))}
               </ul>
             )}
+
+            <div style={{ marginTop: 16, padding: 12, background: "#f9f9f9", borderRadius: 4 }}>
+              <strong style={{ display: "block", marginBottom: 8 }}>Add View:</strong>
+              {workspace.entityType ? (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <select
+                    value={newViewId}
+                    onChange={(e) => setNewViewId(e.target.value)}
+                    style={{ flex: 1, minWidth: 200, padding: 8 }}
+                    disabled={updateLoading || viewsLoading}
+                  >
+                    <option value="">-- Select a view --</option>
+                    {availableViews
+                      .filter((v) => !workspace.views?.includes(v.id))
+                      .map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.name || v.id}
+                        </option>
+                      ))}
+                  </select>
+                  <button
+                    onClick={handleAddView}
+                    disabled={!newViewId || updateLoading}
+                    style={{ padding: "8px 16px" }}
+                  >
+                    {updateLoading ? "Adding..." : "Add"}
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <input
+                    value={newViewId}
+                    onChange={(e) => setNewViewId(e.target.value)}
+                    placeholder="Enter view ID"
+                    style={{ flex: 1, minWidth: 200, padding: 8 }}
+                    disabled={updateLoading}
+                  />
+                  <button
+                    onClick={handleAddView}
+                    disabled={!newViewId || updateLoading}
+                    style={{ padding: "8px 16px" }}
+                  >
+                    {updateLoading ? "Adding..." : "Add"}
+                  </button>
+                </div>
+              )}
+              <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
+                {workspace.entityType
+                  ? `Showing views for entityType: ${workspace.entityType}`
+                  : "No entityType set — enter view ID manually"}
+              </div>
+              {updateError && (
+                <div style={{ marginTop: 8, padding: 8, background: "#fee", color: "#c00", borderRadius: 4, fontSize: 14 }}>
+                  {updateError}
+                </div>
+              )}
+            </div>
           </div>
         )}
         <div>

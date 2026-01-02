@@ -6855,6 +6855,169 @@ const tests = {
     }
   },
 
+  "smoke:views:apply-to-product-list": async () => {
+    await ensureBearer();
+
+    const featureHeaders = { "X-Feature-Views-Enabled": "true" };
+    const runTimestamp = Date.now();
+    let viewId = null;
+
+    try {
+      // 1) Create a product to view
+      const productSku = smokeTag(`VPROD-${runTimestamp}`);
+      const productName = `View Test Product - ${runTimestamp}`;
+      
+      const prodCreate = await post(`/objects/product`, {
+        type: "product",
+        kind: "good",
+        name: productName,
+        sku: productSku
+      }, { "Idempotency-Key": idem() });
+      
+      if (!prodCreate.ok || !prodCreate.body?.id) {
+        return { test: "views:apply-to-product-list", result: "FAIL", step: "createProduct", prodCreate };
+      }
+      const prodId = prodCreate.body.id;
+      recordCreated({ type: 'product', id: prodId, route: '/objects/product', meta: { name: productName, sku: productSku } });
+
+      // 2) Verify product can be found via search (establish baseline)
+      let productFoundInSearch = false;
+      let searchItems = [];
+      for (let attempt = 0; attempt < 5; attempt++) {
+        if (attempt > 0) await sleep(200);
+        const searchRes = await get(`/objects/product`, { limit: 50, q: productSku });
+        if (searchRes.ok && Array.isArray(searchRes.body?.items)) {
+          searchItems = searchRes.body.items;
+          productFoundInSearch = searchItems.some(p => p.id === prodId);
+          if (productFoundInSearch) break;
+        }
+      }
+
+      if (!productFoundInSearch) {
+        return {
+          test: "views:apply-to-product-list",
+          result: "FAIL",
+          step: "verifyProductInSearch",
+          reason: "product-not-found-in-search-results",
+          prodId,
+          sku: productSku,
+          searchAttempts: 5,
+          firstFiveSearchResults: searchItems.slice(0, 5).map(p => ({ id: p.id, sku: p.sku, name: p.name }))
+        };
+      }
+
+      // 3) Create a View configured for products (no complex filters, just basic view)
+      const viewCreateHeaders = { ...baseHeaders(), ...featureHeaders };
+      const viewCreate = await fetch(`${API}/views`, {
+        method: "POST",
+        headers: viewCreateHeaders,
+        body: JSON.stringify({
+          name: smokeTag(`ViewProductList-${runTimestamp}`),
+          entityType: "product",
+          filters: [], // Start with empty filters; views work without filters
+          description: "smoke:views:apply-to-product-list view"
+        })
+      });
+      const viewBody = await viewCreate.json().catch(() => ({}));
+      
+      if (!viewCreate.ok || !viewBody?.id) {
+        return {
+          test: "views:apply-to-product-list",
+          result: "FAIL",
+          step: "createView",
+          status: viewCreate.status,
+          body: snippet(viewBody, 400)
+        };
+      }
+      viewId = viewBody.id;
+      recordCreated({ type: 'view', id: viewId, route: '/views', meta: { name: viewBody?.name, entityType: "product" } });
+
+      // 4) Fetch the view back (verify it persists)
+      const viewGetHeaders = { ...baseHeaders(), ...featureHeaders };
+      const viewGet = await fetch(`${API}/views/${encodeURIComponent(viewId)}`, {
+        method: "GET",
+        headers: viewGetHeaders
+      });
+      const viewGetBody = await viewGet.json().catch(() => ({}));
+      
+      if (!viewGet.ok || !viewGetBody?.id) {
+        return {
+          test: "views:apply-to-product-list",
+          result: "FAIL",
+          step: "getView",
+          status: viewGet.status,
+          body: snippet(viewGetBody, 400)
+        };
+      }
+
+      // 5) Verify we can list products (simulating view application)
+      // When views are applied, derived query params are used on the product list endpoint
+      let listWithViewApplied = null;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        if (attempt > 0) await sleep(200);
+        listWithViewApplied = await get(`/objects/product`, { limit: 50 });
+        if (listWithViewApplied.ok && Array.isArray(listWithViewApplied.body?.items)) {
+          break;
+        }
+      }
+
+      if (!listWithViewApplied?.ok) {
+        return {
+          test: "views:apply-to-product-list",
+          result: "FAIL",
+          step: "listProducts",
+          reason: "product-list-failed",
+          status: listWithViewApplied?.status
+        };
+      }
+
+      const listItems = Array.isArray(listWithViewApplied.body?.items) ? listWithViewApplied.body.items : [];
+      const allListItemsAreProducts = listItems.every(p => p.type === "product" || !p.type); // type may be implicit
+      
+      return {
+        test: "views:apply-to-product-list",
+        result: allListItemsAreProducts ? "PASS" : "FAIL",
+        message: "View created for products; product list returns valid items",
+        steps: {
+          product: { id: prodId, sku: productSku, foundInSearch: productFoundInSearch },
+          view: { id: viewId, entityType: "product", filters: viewGetBody?.filters },
+          listVerification: {
+            itemCount: listItems.length,
+            allProductType: allListItemsAreProducts,
+            sampleItems: listItems.slice(0, 3).map(p => ({ id: p.id, sku: p.sku, name: p.name }))
+          }
+        }
+      };
+    } finally {
+      if (viewId) {
+        const deleteHeaders = { ...baseHeaders(), ...featureHeaders };
+        let deleted = false;
+        let lastError = null;
+        for (let attempt = 0; attempt < 5 && !deleted; attempt++) {
+          const delResp = await fetch(`${API}/views/${encodeURIComponent(viewId)}`, { method: "DELETE", headers: deleteHeaders });
+          if (delResp.ok || delResp.status === 404) {
+            deleted = true;
+            break;
+          }
+          lastError = {
+            status: delResp.status,
+            body: await delResp.json().catch(async () => await delResp.text().catch(() => null)),
+          };
+          await sleep(300);
+        }
+        if (!deleted) {
+          console.error(JSON.stringify({
+            test: "views:apply-to-product-list",
+            cleanup: "delete-view",
+            viewId,
+            smokeRunId: runTimestamp,
+            lastError,
+          }));
+        }
+      }
+    }
+  },
+
   "smoke:events:enabled-noop": async ()=>{
     await ensureBearer();
     

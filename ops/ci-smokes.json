@@ -11,6 +11,7 @@
   "smoke:workspaces:mixed-dedupe",
   "smoke:workspaces:get-fallback",
   "smoke:views:apply-to-po-list",
+  "smoke:views:apply-to-product-list",
   "smoke:events:enabled-noop",
   "smoke:close-the-loop",
   "smoke:backorders:partial-fulfill",

@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { SaveViewButton } from "../components/SaveViewButton";
+import { ViewSelector } from "../components/ViewSelector";
 import { useAuth } from "../providers/AuthProvider";
+import { mapViewToProductFilters } from "../lib/viewFilterMappers";
+import type { ViewConfig } from "../hooks/useViewFilters";
 
 type Product = {
   id: string;
@@ -26,6 +29,7 @@ function formatError(err: unknown): string {
 }
 
 export default function ProductsListPage() {
+  const [searchParams] = useSearchParams();
   const { token, tenantId } = useAuth();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("");
@@ -33,6 +37,8 @@ export default function ProductsListPage() {
   const [next, setNext] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [appliedView, setAppliedView] = useState<ViewConfig | null>(null);
+  const [activeViewId, setActiveViewId] = useState<string | null>(null);
 
   const fetchPage = useCallback(
     async (cursor?: string) => {
@@ -63,9 +69,55 @@ export default function ProductsListPage() {
     fetchPage();
   }, [fetchPage]);
 
+  // Handle View application: apply mapped filters and refresh the list
+  const handleApplyView = useCallback(
+    (mappedState: Record<string, any>) => {
+      const newQ = mappedState.q !== undefined ? mappedState.q : filter;
+      setSearch(newQ);
+      setFilter(newQ);
+      // fetchPage will be called by useEffect when filter changes
+    },
+    [filter]
+  );
+
+  // Current filter state for View save/overwrite operations
+  const currentFilterState = {
+    q: filter,
+  };
+
   const onSearch = () => {
     setFilter(search.trim());
   };
+
+  // Initialize from URL params: viewId
+  useEffect(() => {
+    const urlViewId = searchParams.get("viewId") || "";
+
+    // Handle ?viewId=<id>: fetch and apply the view
+    if (urlViewId) {
+      setActiveViewId(urlViewId);
+      (async () => {
+        try {
+          const view = await apiFetch<ViewConfig>(`/views/${urlViewId}`, {
+            token: token || undefined,
+            tenantId,
+          });
+          if (view) {
+            setAppliedView(view);
+            const mapped = mapViewToProductFilters(view);
+            if (mapped.applied.q !== undefined) {
+              setSearch(mapped.applied.q);
+              setFilter(mapped.applied.q);
+            }
+          }
+        } catch (err) {
+          // Silently fail if view not found; user can select from ViewSelector
+        }
+      })();
+    } else {
+      setActiveViewId(null);
+    }
+  }, [searchParams, token, tenantId]);
 
   const currentViewFilters = [
     filter.trim() ? { field: "q", op: "contains", value: filter.trim() } : null,
@@ -77,6 +129,13 @@ export default function ProductsListPage() {
         <h1>Products</h1>
         <Link to="/products/new">Create Product</Link>
       </div>
+
+      <ViewSelector
+        entityType="product"
+        mapViewToFilterState={mapViewToProductFilters}
+        onApplyView={handleApplyView}
+        currentFilterState={currentFilterState}
+      />
 
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <input
@@ -92,6 +151,8 @@ export default function ProductsListPage() {
           entityType="product"
           filters={currentViewFilters}
           buttonLabel="Save as View"
+          activeViewId={activeViewId || undefined}
+          activeViewName={appliedView?.name}
         />
       </div>
 

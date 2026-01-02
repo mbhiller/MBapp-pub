@@ -47,6 +47,15 @@ export default function WorkspacesListPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Create modal state
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createName, setCreateName] = useState("");
+  const [createEntityType, setCreateEntityType] = useState("");
+  const [createDescription, setCreateDescription] = useState("");
+  const [createShared, setCreateShared] = useState(false);
+  const [createLoading, setCreateLoading] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
   const fetchPage = useCallback(
     async (cursor?: string) => {
       setLoading(true);
@@ -81,11 +90,58 @@ export default function WorkspacesListPage() {
     setFilter(search.trim());
   };
 
+  const handleCreate = async () => {
+    if (!createName.trim()) {
+      setCreateError("Name is required");
+      return;
+    }
+    setCreateLoading(true);
+    setCreateError(null);
+    try {
+      const payload: any = {
+        name: createName.trim(),
+        shared: createShared,
+      };
+      if (createEntityType) payload.entityType = createEntityType;
+      if (createDescription.trim()) payload.description = createDescription.trim();
+
+      const result = await apiFetch<Workspace>("/workspaces", {
+        method: "POST",
+        token: token || undefined,
+        tenantId,
+        body: payload,
+      });
+
+      // Close modal and reset
+      setShowCreateModal(false);
+      setCreateName("");
+      setCreateEntityType("");
+      setCreateDescription("");
+      setCreateShared(false);
+
+      // Refresh list
+      setItems([]);
+      setNext(null);
+      await fetchPage();
+
+      // Navigate to new workspace detail
+      if (result?.id) {
+        window.location.href = `/workspaces/${result.id}`;
+      }
+    } catch (err) {
+      setCreateError(formatError(err));
+    } finally {
+      setCreateLoading(false);
+    }
+  };
+
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h1>Workspaces</h1>
-        <span style={{ fontSize: 14, color: "#666" }}>(Read-only in v1)</span>
+        <button onClick={() => setShowCreateModal(true)} style={{ padding: "8px 16px" }}>
+          + Create Workspace
+        </button>
       </div>
 
       <div style={{ display: "grid", gap: 8 }}>
@@ -168,6 +224,123 @@ export default function WorkspacesListPage() {
           <button onClick={() => fetchPage(next)} disabled={loading}>
             {loading ? "Loading..." : "Load More"}
           </button>
+        </div>
+      )}
+
+      {showCreateModal && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+          onClick={() => setShowCreateModal(false)}
+        >
+          <div
+            style={{
+              background: "#fff",
+              padding: 24,
+              borderRadius: 8,
+              maxWidth: 500,
+              width: "90%",
+              maxHeight: "80vh",
+              overflow: "auto",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2>Create Workspace</h2>
+            <div style={{ display: "grid", gap: 12, marginTop: 16 }}>
+              <div>
+                <label style={{ display: "block", marginBottom: 4, fontWeight: 500 }}>
+                  Name *
+                </label>
+                <input
+                  value={createName}
+                  onChange={(e) => setCreateName(e.target.value)}
+                  placeholder="My Workspace"
+                  style={{ width: "100%", padding: 8 }}
+                  maxLength={200}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: "block", marginBottom: 4, fontWeight: 500 }}>
+                  Entity Type
+                </label>
+                <select
+                  value={createEntityType}
+                  onChange={(e) => setCreateEntityType(e.target.value)}
+                  style={{ width: "100%", padding: 8 }}
+                >
+                  <option value="">-- None --</option>
+                  {ENTITY_TYPES.map((type) => (
+                    <option key={type} value={type}>
+                      {type}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: "block", marginBottom: 4, fontWeight: 500 }}>
+                  Description
+                </label>
+                <textarea
+                  value={createDescription}
+                  onChange={(e) => setCreateDescription(e.target.value)}
+                  placeholder="Optional description"
+                  style={{ width: "100%", padding: 8, minHeight: 80 }}
+                />
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input
+                  type="checkbox"
+                  id="create-shared"
+                  checked={createShared}
+                  onChange={(e) => setCreateShared(e.target.checked)}
+                />
+                <label htmlFor="create-shared">Shared</label>
+              </div>
+
+              {createError && (
+                <div style={{ padding: 12, background: "#fee", color: "#c00", borderRadius: 4 }}>
+                  {createError}
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <button
+                  onClick={handleCreate}
+                  disabled={createLoading}
+                  style={{ flex: 1, padding: "10px 16px" }}
+                >
+                  {createLoading ? "Creating..." : "Create"}
+                </button>
+                <button
+                  onClick={() => {
+                    setShowCreateModal(false);
+                    setCreateName("");
+                    setCreateEntityType("");
+                    setCreateDescription("");
+                    setCreateShared(false);
+                    setCreateError(null);
+                  }}
+                  disabled={createLoading}
+                  style={{ padding: "10px 16px" }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

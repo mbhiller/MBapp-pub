@@ -85,3 +85,39 @@ export function mapViewToSOFilters(view: ViewConfig): FilterMapResult {
 
   return { applied, unsupported };
 }
+
+/**
+ * Maps a saved View's filters to ProductsListPage filter state.
+ *
+ * Supported fields in Views:
+ * - q (search): contains, startsWith
+ * - name: contains, startsWith (alias for q)
+ *
+ * Example View filters:
+ * [{ field: "q", op: "contains", value: "Widget" }]
+ */
+export function mapViewToProductFilters(view: ViewConfig): FilterMapResult {
+  const applied: Record<string, any> = {};
+  const unsupported: Array<{ field: string; reason: string }> = [];
+
+  view.filters?.forEach((filter) => {
+    const { field, op, value } = filter;
+
+    // Map supported fields
+    if (field === "q" || field === "search" || field === "name") {
+      if (op === "contains" || op === "startsWith") {
+        applied.q = value || "";
+      } else {
+        unsupported.push({ field, reason: `operator '${op}' not supported` });
+      }
+    } else {
+      unsupported.push({ field, reason: "field not mapped for product list" });
+    }
+  });
+
+  if (view.sort?.field) {
+    unsupported.push({ field: view.sort.field, reason: "sort not yet supported in UI" });
+  }
+
+  return { applied, unsupported };
+}
