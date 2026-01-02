@@ -8,6 +8,12 @@
 
 ## Current State Summary
 
+### RBAC Policy Cleanup + Mobile Permissions — ✅ Complete (Sprint P, 2026-01-02)
+
+- Removed unused/stale policy handler and confirmed `/auth/policy` returns the canonical `Record<string, boolean>` policy map.
+- Mobile auth: permission keys now use canonical singular prefixes (with legacy alias compatibility), removed the permissive fallback, and added a loading state around policy fetch/apply.
+- Added smoke `smoke:auth:warehouse-receive-deny-approve` to CI coverage (warehouse receive allowed, approve denied, product create denied).
+
 ### Mobile Views Parity (SO/PO) — ✅ Complete (Sprint N, 2026-01-02)
 
 **Epic Summary:** Add ViewPicker modal to mobile Sales Orders and Purchase Orders list screens for operator speed parity with Products/Inventory/Parties screens.

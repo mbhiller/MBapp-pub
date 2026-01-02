@@ -46,7 +46,8 @@
   "smoke:line-identity:id-canonical",
   "smoke:epc:resolve",
   "smoke:scanner:actions:record",
-  "smoke:auth:policy-derivation"
+  "smoke:auth:policy-derivation",
+  "smoke:auth:warehouse-receive-deny-approve"
   ]
 
 }

@@ -9,7 +9,7 @@ export default function ModuleHubScreen({ navigation }: any) {
   const t = useColors();
   const [policy, setPolicy] = React.useState<Record<string, boolean> | null>(null);
   const [policyError, setPolicyError] = React.useState(false);
-  const [loading, setLoading] = React.useState(false);
+  const [loading, setLoading] = React.useState(true); // Start as loading (true) until first fetch
 
   const loadPolicy = React.useCallback(async () => {
     setLoading(true);
@@ -19,11 +19,11 @@ export default function ModuleHubScreen({ navigation }: any) {
       if (p) {
         setPolicy(p);
       } else {
-        setPolicy(null);
+        setPolicy({});  // Empty policy if API returns null/undefined
         setPolicyError(true);
       }
     } catch {
-      setPolicy(null);
+      setPolicy({});  // Empty policy on error
       setPolicyError(true);
     } finally {
       setLoading(false);
@@ -82,9 +82,15 @@ export default function ModuleHubScreen({ navigation }: any) {
         ))}
       </View>
 
-      {!loading && modules.length === 0 && (
+      {!loading && modules.length === 0 && !policyError && (
         <Text style={{ color: t.colors.muted, textAlign: "center", marginTop: 24 }}>
           No modules available for your role.
+        </Text>
+      )}
+
+      {loading && modules.length === 0 && (
+        <Text style={{ color: t.colors.muted, textAlign: "center", marginTop: 24 }}>
+          Loading permissions...
         </Text>
       )}
 

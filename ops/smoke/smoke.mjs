@@ -6206,6 +6206,305 @@ const tests = {
     };
   },
 
+  "smoke:auth:warehouse-receive-deny-approve": async () => {
+    // Test: warehouse role can receive POs but cannot approve them
+    // Flow:
+    //   1) Setup: create vendor, product, draft PO, submit it (as admin)
+    //   2) Mint warehouse token (roles:["warehouse"], no explicit policy)
+    //   3) Verify /auth/policy returns warehouse permissions
+    //   4) Verify warehouse can receive PO (200)
+    //   5) Verify warehouse cannot approve PO (403)
+    //   6) Verify warehouse cannot create products (403)
+
+    await ensureBearer(); // Use admin/default token for setup
+
+    // Step 1: Setup - create vendor, product, and submitted PO
+    const vendorName = smokeTag(`WarehouseVendor-${Date.now()}`);
+    const vendor = await post("/objects/party", {
+      type: "party",
+      name: vendorName,
+      roles: ["vendor"]
+    });
+
+    if (!vendor.ok || !vendor.body?.id) {
+      return {
+        test: "auth:warehouse-receive-deny-approve",
+        result: "FAIL",
+        step: "create-vendor",
+        vendor
+      };
+    }
+    const vendorId = vendor.body.id;
+
+    const productSku = `WH-TEST-${Date.now()}`;
+    const product = await post("/objects/product", {
+      type: "product",
+      name: smokeTag(`WarehouseProduct-${Date.now()}`),
+      sku: productSku
+    });
+
+    if (!product.ok || !product.body?.id) {
+      return {
+        test: "auth:warehouse-receive-deny-approve",
+        result: "FAIL",
+        step: "create-product",
+        product
+      };
+    }
+    const productId = product.body.id;
+
+    const po = await post("/objects/purchaseOrder", {
+      type: "purchaseOrder",
+      vendorId,
+      status: "draft",  // Explicitly set to draft
+      lines: [{ productId, qty: 10, unitCost: 5.0 }]
+    });
+
+    if (!po.ok || !po.body?.id) {
+      return {
+        test: "auth:warehouse-receive-deny-approve",
+        result: "FAIL",
+        step: "create-po",
+        po
+      };
+    }
+    const poId = po.body.id;
+    // Verify PO is in draft state before submitting
+    const poCheck = await get(`/objects/purchaseOrder/${encodeURIComponent(poId)}`);
+    if (!poCheck.ok) {
+      return {
+        test: "auth:warehouse-receive-deny-approve",
+        result: "FAIL",
+        step: "get-po-before-submit",
+        poCheck
+      };
+    }
+
+
+    // Submit the PO so it can be approved/received
+    const submit = await post(`/purchasing/po/${encodeURIComponent(poId)}:submit`, {});
+    if (!submit.ok) {
+      return {
+        test: "auth:warehouse-receive-deny-approve",
+        result: "FAIL",
+        step: "submit-po",
+        submit,
+        poStatusBeforeSubmit: poCheck.body?.status,
+        poBeforeSubmit: poCheck.body
+      };
+    }
+
+    // Approve the PO (with admin token) so it can be received
+    const approve = await post(`/purchasing/po/${encodeURIComponent(poId)}:approve`, {});
+    if (!approve.ok) {
+      return {
+        test: "auth:warehouse-receive-deny-approve",
+        result: "FAIL",
+        step: "approve-po-as-admin",
+        approve
+      };
+    }
+
+    // Step 2: Mint warehouse token
+    const loginPayload = {
+      tenantId: TENANT,
+      roles: ["warehouse"]
+      // IMPORTANT: no 'policy' field - let derivation handle it
+    };
+    const loginRes = await fetch(`${API}/auth/dev-login`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify(loginPayload)
+    });
+
+    if (!loginRes.ok) {
+      const errText = await loginRes.text().catch(() => "");
+      return {
+        test: "auth:warehouse-receive-deny-approve",
+        result: "FAIL",
+        step: "dev-login",
+        status: loginRes.status,
+        error: errText
+      };
+    }
+
+    const loginData = await loginRes.json();
+    const warehouseToken = loginData.token;
+    if (!warehouseToken) {
+      return {
+        test: "auth:warehouse-receive-deny-approve",
+        result: "FAIL",
+        step: "extract-token",
+        loginData
+      };
+    }
+
+    // Step 3: Verify /auth/policy returns warehouse permissions
+    const policyRes = await fetch(`${API}/auth/policy`, {
+      headers: {
+        "authorization": `Bearer ${warehouseToken}`,
+        "x-tenant-id": TENANT
+      }
+    });
+
+    if (!policyRes.ok) {
+      return {
+        test: "auth:warehouse-receive-deny-approve",
+        result: "FAIL",
+        step: "get-policy",
+        status: policyRes.status,
+        body: await policyRes.json().catch(() => ({}))
+      };
+    }
+
+    const policyData = await policyRes.json();
+
+    // Assert warehouse policy shape
+    const isObject = policyData && typeof policyData === "object" && !Array.isArray(policyData);
+    const hasReadAll = policyData["*:read"] === true;
+    const hasInventoryAll = policyData["inventory:*"] === true;
+    const hasPurchaseReceive = policyData["purchase:receive"] === true;
+    const hasScannerUse = policyData["scanner:use"] === true;
+    const noSuperuser = policyData["*"] !== true && policyData["*:*"] !== true;
+    const noPurchaseApprove = policyData["purchase:approve"] !== true;
+
+    if (!isObject || !hasReadAll || !hasInventoryAll || !hasPurchaseReceive || !noSuperuser || !noPurchaseApprove) {
+      return {
+        test: "auth:warehouse-receive-deny-approve",
+        result: "FAIL",
+        step: "assert-policy-shape",
+        policyData,
+        assertions: {
+          isObject,
+          hasReadAll,
+          hasInventoryAll,
+          hasPurchaseReceive,
+          hasScannerUse,
+          noSuperuser,
+          noPurchaseApprove
+        }
+      };
+    }
+
+    // Step 4: Verify warehouse can receive PO (allowed)
+    const receivePayload = {
+      lines: [{ lineId: po.body.lines[0].id, deltaQty: 5 }]
+    };
+    const receiveRes = await fetch(`${API}/purchasing/po/${encodeURIComponent(poId)}:receive`, {
+      method: "POST",
+      headers: {
+        "authorization": `Bearer ${warehouseToken}`,
+        "x-tenant-id": TENANT,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(receivePayload)
+    });
+
+    const receiveOk = receiveRes.ok;
+    const receiveStatus = receiveRes.status;
+    if (!receiveOk) {
+      return {
+        test: "auth:warehouse-receive-deny-approve",
+        result: "FAIL",
+        step: "receive-allowed-check",
+        expectedStatus: 200,
+        actualStatus: receiveStatus,
+        body: await receiveRes.json().catch(() => ({}))
+      };
+    }
+
+    // Step 5: Verify warehouse cannot approve PO (denied)
+    const approveRes = await fetch(`${API}/purchasing/po/${encodeURIComponent(poId)}:approve`, {
+      method: "POST",
+      headers: {
+        "authorization": `Bearer ${warehouseToken}`,
+        "x-tenant-id": TENANT,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({})
+    });
+
+    const approveDenied = approveRes.status === 403;
+    const approveBody = await approveRes.json().catch(() => ({}));
+    const hasForbiddenMessage = approveBody?.message &&
+      (approveBody.message.toLowerCase().includes("forbidden") ||
+       approveBody.message.toLowerCase().includes("missing permission"));
+
+    if (!approveDenied || !hasForbiddenMessage) {
+      return {
+        test: "auth:warehouse-receive-deny-approve",
+        result: "FAIL",
+        step: "approve-denied-check",
+        expectedStatus: 403,
+        actualStatus: approveRes.status,
+        expectedMessagePattern: "forbidden | missing permission",
+        actualMessage: approveBody?.message,
+        body: approveBody
+      };
+    }
+
+    // Step 6: Verify warehouse cannot create products (denied)
+    const createProductPayload = {
+      type: "product",
+      name: smokeTag(`WarehouseDenyTest-${Date.now()}`),
+      sku: `DENY-${Date.now()}`
+    };
+    const createProductRes = await fetch(`${API}/objects/product`, {
+      method: "POST",
+      headers: {
+        "authorization": `Bearer ${warehouseToken}`,
+        "x-tenant-id": TENANT,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(createProductPayload)
+    });
+
+    const productDenied = createProductRes.status === 403;
+    const productDenyBody = await createProductRes.json().catch(() => ({}));
+    const hasProductForbiddenMessage = productDenyBody?.message &&
+      (productDenyBody.message.toLowerCase().includes("forbidden") ||
+       productDenyBody.message.toLowerCase().includes("missing permission"));
+
+    if (!productDenied || !hasProductForbiddenMessage) {
+      return {
+        test: "auth:warehouse-receive-deny-approve",
+        result: "FAIL",
+        step: "product-create-denied-check",
+        expectedStatus: 403,
+        actualStatus: createProductRes.status,
+        expectedMessagePattern: "forbidden | missing permission",
+        actualMessage: productDenyBody?.message,
+        body: productDenyBody
+      };
+    }
+
+    // All checks passed
+    return {
+      test: "auth:warehouse-receive-deny-approve",
+      result: "PASS",
+      summary: "Warehouse role: can receive POs, cannot approve POs or create products",
+      assertions: {
+        policyIsObject: isObject,
+        policyHasReadAll: hasReadAll,
+        policyHasInventoryAll: hasInventoryAll,
+        policyHasPurchaseReceive: hasPurchaseReceive,
+        policyHasScannerUse: hasScannerUse,
+        policyNoSuperuser: noSuperuser,
+        policyNoPurchaseApprove: noPurchaseApprove,
+        receiveAllowed: receiveOk,
+        approveDenied: approveDenied,
+        approveForbiddenMessage: hasForbiddenMessage,
+        productCreateDenied: productDenied,
+        productForbiddenMessage: hasProductForbiddenMessage
+      },
+      policySnapshot: policyData,
+      artifacts: { vendorId, productId, poId }
+    };
+  },
+
   /* ===================== Sprint III: Views, Workspaces, Events ===================== */
   
   "smoke:views:crud": async ()=>{

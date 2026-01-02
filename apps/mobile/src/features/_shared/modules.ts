@@ -10,14 +10,63 @@ export type ModuleEntry = {
   enabled?: () => boolean;
 };
 
+/**
+ * Expand policy map with backward-compatible alias keys.
+ * API uses singular: party, product, purchase, sales
+ * Legacy mobile used plural/compound: parties, products, purchaseorder, salesorder
+ */
+function expandPolicyWithAliases(policy: Record<string, boolean>): Record<string, boolean> {
+  const expanded = { ...policy };
+  
+  // Alias mappings (both directions)
+  const aliases: Array<[string, string]> = [
+    ["party", "parties"],
+    ["product", "products"],
+    ["purchase", "purchaseorder"],
+    ["sales", "salesorder"],
+  ];
+
+  // For each key in the original policy, add mirrored aliases
+  for (const [key, value] of Object.entries(policy)) {
+    if (!value) continue; // only expand truthy permissions
+    
+    const lowerKey = key.toLowerCase();
+    for (const [canonical, legacy] of aliases) {
+      // If key starts with canonical prefix, add legacy alias
+      if (lowerKey.startsWith(canonical + ":")) {
+        const suffix = key.slice(canonical.length); // preserves ":read", ":*", etc.
+        expanded[legacy + suffix] = value;
+      }
+      // If key starts with legacy prefix, add canonical alias
+      if (lowerKey.startsWith(legacy + ":")) {
+        const suffix = key.slice(legacy.length);
+        expanded[canonical + suffix] = value;
+      }
+      // Handle exact matches (no suffix)
+      if (lowerKey === canonical) {
+        expanded[legacy] = value;
+      }
+      if (lowerKey === legacy) {
+        expanded[canonical] = value;
+      }
+    }
+  }
+
+  return expanded;
+}
+
 // helper: case-insensitive policy + wildcard support
 function makePolicyMatcher(policy?: Record<string, boolean> | null) {
   if (!policy) {
-    // no policy -> allow everything
-    return (_perm: string) => true;
+    // CRITICAL: No policy loaded → deny all (explicit dev bypass available below if needed)
+    // If you need a dev-only bypass, use: if (!policy && __DEV__) return (_perm) => true;
+    return (_perm: string) => false;
   }
+
+  // Expand policy with backward-compatible aliases before matching
+  const expandedPolicy = expandPolicyWithAliases(policy);
   const P = Object.fromEntries(
-    Object.entries(policy).map(([k, v]) => [k.toLowerCase(), v])
+    Object.entries(expandedPolicy).map(([k, v]) => [k.toLowerCase(), v])
   );
 
   return (perm: string) => {
@@ -42,7 +91,16 @@ function makePolicyMatcher(policy?: Record<string, boolean> | null) {
 
 /** Given the auth policy map, return only modules the user can access. */
 export function visibleModules(policy?: Record<string, boolean> | null): readonly ModuleEntry[] {
-  if (!policy) return [];
+  // Policy not loaded yet or empty → return empty (don't show any gated modules)
+  if (!policy || Object.keys(policy).length === 0) {
+    // Allow dev-only modules to show even without policy
+    return MODULES.filter((m) => {
+      const enabled = typeof m.enabled === "function" ? m.enabled() : true;
+      const devOnly = !m.required || m.required.length === 0; // modules with no requirements
+      return enabled && devOnly;
+    });
+  }
+
   const can = makePolicyMatcher(policy);
   return MODULES.filter((m) => {
     const allowed = (m.required ?? []).every(can);
@@ -54,16 +112,17 @@ export function visibleModules(policy?: Record<string, boolean> | null): readonl
 // NOTE: remove the "hub" tile (you land on Hub already)
 export const MODULES: readonly ModuleEntry[] = [
 
-  // Domain modules (guarded)
+  // Domain modules (guarded) - using CANONICAL API permission keys
+  // Aliases for legacy keys (parties/products/purchaseorder/salesorder) handled by expandPolicyWithAliases()
 
-  { key: "parties",       title: "Parties",          screen: "PartyList",      icon: "users",           required: ["parties:read"] },
+  { key: "parties",       title: "Parties",          screen: "PartyList",      icon: "users",           required: ["party:read"] },
   { key: "inventory",     title: "Inventory",        screen: "InventoryList",    icon: "boxes",           required: ["inventory:read"] },
-  { key: "products",      title: "Products",         screen: "ProductsList",     icon: "package",         required: ["products:read"] },
+  { key: "products",      title: "Products",         screen: "ProductsList",     icon: "package",         required: ["product:read"] },
 
 
   // Purchasing / Sales
-  { key: "purchaseOrders", title: "Purchasing",      screen: "PurchaseOrdersList", icon: "cart-arrowdown", required: ["purchaseorder:read"] },
-  { key: "salesOrders",    title: "Sales",           screen: "SalesOrdersList",    icon: "cart-plus",      required: ["salesorder:read"] },
+  { key: "purchaseOrders", title: "Purchasing",      screen: "PurchaseOrdersList", icon: "cart-arrowdown", required: ["purchase:read"] },
+  { key: "salesOrders",    title: "Sales",           screen: "SalesOrdersList",    icon: "cart-plus",      required: ["sales:read"] },
   { key: "backorders",     title: "Backorders",      screen: "BackordersList",     icon: "box",            enabled: () => __DEV__ },
 
   // Resources (read-only)
