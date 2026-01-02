@@ -2,8 +2,24 @@ import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { ok, notFound, bad, error } from "../common/responses";
 import { getAuth, requirePerm } from "../auth/middleware";
 import { getWorkspaceById, writeWorkspace } from "./repo";
+import { getObjectById } from "../objects/repo";
 
 const DUALWRITE_LEGACY = process.env.MBAPP_WORKSPACES_DUALWRITE_LEGACY === "true";
+
+/**
+ * Deduplicate views array while preserving order (first occurrence wins).
+ */
+function dedupeViews(views: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const viewId of views) {
+    if (!seen.has(viewId)) {
+      seen.add(viewId);
+      result.push(viewId);
+    }
+  }
+  return result;
+}
 
 export async function handle(event: APIGatewayProxyEventV2) {
   try {
@@ -45,6 +61,31 @@ export async function handle(event: APIGatewayProxyEventV2) {
     // If name missing after merge, fail (must be present on resulting doc)
     if (!merged.name || typeof merged.name !== "string" || merged.name.length < 1 || merged.name.length > 200) {
       return bad({ message: "name is required and must be 1-200 characters" });
+    }
+
+    // Deduplicate views (first occurrence wins)
+    merged.views = dedupeViews(merged.views);
+
+    // If workspace has entityType set (existing or new), enforce view.entityType compatibility
+    if (merged.entityType) {
+      for (const viewId of merged.views) {
+        const view = await getObjectById({
+          tenantId: auth.tenantId,
+          type: "view",
+          id: viewId,
+        });
+
+        if (!view) {
+          return bad({ message: `Unknown viewId: ${viewId}` });
+        }
+
+        // If view has an entityType and it differs from workspace.entityType, reject
+        if (view.entityType && view.entityType !== merged.entityType) {
+          return bad({
+            message: `View ${viewId} has entityType '${view.entityType}' but workspace has '${merged.entityType}'`,
+          });
+        }
+      }
     }
 
     const result = await writeWorkspace({

@@ -154,8 +154,28 @@ export default function WorkspaceDetailScreen() {
   }, []);
 
   const handleSave = React.useCallback(async () => {
-    if (!workspace?.id || !workspace.entityType) return;
+    if (!workspace?.id) return;
     setSaving(true);
+
+    // Check for entityType mismatches if workspace.entityType is set
+    if (workspace.entityType) {
+      const mismatches: string[] = [];
+      for (const viewId of selectedViews) {
+        const meta = viewMetadata[viewId] || views.find((v) => v.id === viewId) || null;
+        if (meta?.entityType && meta.entityType !== workspace.entityType) {
+          mismatches.push(`${meta.name || viewId} (${meta.entityType})`);
+        }
+      }
+      if (mismatches.length > 0) {
+        toast(
+          `✗ Cannot save: ${mismatches.length} view(s) have mismatched entity types: ${mismatches.join(", ")}`,
+          "error"
+        );
+        setSaving(false);
+        return;
+      }
+    }
+
     try {
       await patch(workspace.id, {
         views: selectedViews,
@@ -168,7 +188,7 @@ export default function WorkspaceDetailScreen() {
     } finally {
       setSaving(false);
     }
-  }, [closeEdit, patch, refetch, selectedViews, toast, workspace?.id]);
+  }, [closeEdit, patch, refetch, selectedViews, toast, workspace?.id, workspace?.entityType, viewMetadata, views]);
 
   const renderMember = (viewId: string) => {
     const meta = viewMetadata[viewId] || views.find((vv) => vv.id === viewId) || null;
@@ -211,16 +231,21 @@ export default function WorkspaceDetailScreen() {
 
   const renderCheckboxRow = (view: SavedView) => {
     const checked = selectedViews.includes(view.id);
+    const isMismatched = workspace?.entityType && view.entityType && view.entityType !== workspace.entityType;
+    const canSelect = !isMismatched;
+
     return (
       <Pressable
         key={view.id}
-        onPress={() => toggleView(view.id)}
+        onPress={() => canSelect && toggleView(view.id)}
+        disabled={!canSelect}
         style={{
           flexDirection: "row",
           alignItems: "center",
           paddingVertical: 10,
           borderBottomWidth: 1,
           borderColor: t.colors.border,
+          opacity: canSelect ? 1 : 0.5,
         }}
       >
         <View
@@ -239,12 +264,31 @@ export default function WorkspaceDetailScreen() {
           {checked ? <Text style={{ color: t.colors.primaryText ?? "#fff", fontWeight: "700" }}>✓</Text> : null}
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={{ color: t.colors.text, fontWeight: "600" }}>{view.name || view.id}</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 }}>
+            <Text style={{ color: t.colors.text, fontWeight: "600" }}>{view.name || view.id}</Text>
+            {isMismatched && (
+              <View
+                style={{
+                  paddingHorizontal: 6,
+                  paddingVertical: 2,
+                  borderRadius: 4,
+                  backgroundColor: t.colors.danger ?? "crimson",
+                }}
+              >
+                <Text style={{ color: t.colors.primaryText ?? "#fff", fontSize: 10, fontWeight: "700" }}>
+                  Mismatch
+                </Text>
+              </View>
+            )}
+          </View>
           {view.description ? (
             <Text style={{ color: t.colors.textMuted, fontSize: 12 }} numberOfLines={1}>
               {view.description}
             </Text>
           ) : null}
+          <Text style={{ color: t.colors.textMuted, fontSize: 11, marginTop: 2 }}>
+            Entity: {view.entityType || "(unknown)"}
+          </Text>
         </View>
       </Pressable>
     );

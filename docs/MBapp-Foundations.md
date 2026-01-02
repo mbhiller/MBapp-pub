@@ -118,6 +118,13 @@ See [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) for full OpenAPI defin
 - Pagination + aliasing: `/workspaces` list accepts `cursor` **or** `next` (handled by `parsePagination`); responses return `cursor`. `/views` list uses `cursor`; only handlers wired through `parsePagination` honor `next` as an alias.
 - **Workspace v1 (alias reality):** Workspaces persist as `{ id, name, entityType?, views[] }`; clients MUST include `entityType` on updates even when unchanged.
 
+**Workspace View Pinning Invariants (Sprint L):**
+- **entityType Compatibility Rule:** If `workspace.entityType` is set (e.g., `purchaseOrder`), all pinned views in `views[]` MUST have matching `view.entityType` or no `entityType` set. Server PATCH endpoint validates and rejects with 400 if a pinned view's `entityType` differs.
+- **Deduplication:** PATCH `/workspaces/{id}` with `views[]` automatically dedupes by viewId (first occurrence wins) before persisting; prevents accidental duplicates.
+- **Unknown viewId rejection:** If a viewId in the PATCH payload does not exist (not found in `type="view"`), PATCH returns 400 with message `"Unknown viewId: <id>"`.
+- **Mixed hubs allowed:** Workspaces without `entityType` set can act as "mixed hubs" with views of any entity type; no validation applied. Navigation in WorkspaceDetail uses each view's `entityType` to route to appropriate list screen.
+- **Client-side guards:** Web and mobile clients validate entityType compatibility before sending PATCH; mismatched views are blocked with clear error messages. This prevents invalid payloads from reaching the API.
+
 **Status Lifecycles:**
 - Purchase Orders: `draft → submitted → approved → (partially-)received → fulfilled → closed` (also `cancelled`)
 - Sales Orders: `draft → submitted → approved → (partially-)fulfilled → completed` (also `cancelled`)
