@@ -8,6 +8,17 @@
 
 ## Current State Summary
 
+### Workspace View Pinning Polish — ✅ Complete (Sprint L, 2026-01-02)
+
+**Epic Summary:** Enforce workspace–view entityType compatibility; prevent duplicate/unknown view IDs in pinned lists; surface mismatches with clear error handling across API, web, and mobile.
+
+- **E1 (API Validation):** [apps/api/src/workspaces/patch.ts](../apps/api/src/workspaces/patch.ts) now deduplicates `views[]` array (first occurrence wins) and validates entityType compatibility: if workspace has `entityType` set, rejects any pinned view whose `entityType` differs with 400 error. Also rejects unknown viewIds. Workspaces without `entityType` allow any views (mixed hubs).
+- **E2 (Web Client Guard):** [apps/web/src/pages/WorkspaceDetailPage.tsx](../apps/web/src/pages/WorkspaceDetailPage.tsx) enhanced `handleAddView` with client-side validation: fetches view metadata, checks for duplicates, validates entityType compatibility before PATCH. Blocks mismatched views with inline error message.
+- **E3 (Mobile Client Guard):** [apps/mobile/src/screens/WorkspaceDetailScreen.tsx](../apps/mobile/src/screens/WorkspaceDetailScreen.tsx) shows "Mismatch" badges on incompatible views in edit modal; disables selection of mismatched views; blocks Save with error listing mismatched views if workspace.entityType is set.
+- **E4 (Documentation):** [MBapp-Foundations.md](MBapp-Foundations.md) documents invariants: entityType rule, deduplication, unknown rejection, mixed hubs, client-side guards. [MBapp-Status.md](MBapp-Status.md) records Sprint L summary.
+- **Verification:** ✅ API typecheck + all CI smokes pass; web/mobile typechecks clean; no regressions.
+- **Rule:** If `workspace.entityType` is set, all pinned `views[]` must match it (or have no entityType). Workspaces without entityType can mix view types and use WorkspaceDetail to navigate via view.entityType.
+
 ### Workspace View Routing — ✅ Complete (Sprint K, 2026-01-02)
 
 - Web WorkspaceDetail launches entity list pages with `?viewId=` using each view’s `entityType`, falling back to `/views/:id` when the entity type has no mapped list screen.

@@ -171,6 +171,8 @@ export default function WorkspaceDetailPage() {
     if (!id || !workspace || !newViewId.trim()) return;
     const viewId = newViewId.trim();
     const currentViews = workspace.views ?? [];
+
+    // Check for duplicate
     if (currentViews.includes(viewId)) {
       setUpdateError("View already in workspace");
       return;
@@ -178,7 +180,46 @@ export default function WorkspaceDetailPage() {
 
     setUpdateLoading(true);
     setUpdateError(null);
+
     try {
+      // If workspace has entityType, validate view.entityType compatibility
+      if (workspace.entityType) {
+        // Ensure we have metadata for this viewId
+        if (!(viewId in viewMetadataMap)) {
+          try {
+            const viewData = await apiFetch<ViewMetadata>(`/views/${encodeURIComponent(viewId)}`, {
+              token: token || undefined,
+              tenantId,
+            });
+            setViewMetadataMap((prev) => ({
+              ...prev,
+              [viewId]: viewData,
+            }));
+          } catch (fetchErr) {
+            setUpdateError(`Failed to load view metadata: ${formatError(fetchErr)}`);
+            setUpdateLoading(false);
+            return;
+          }
+        }
+
+        const viewMeta = viewMetadataMap[viewId];
+        if (!viewMeta) {
+          setUpdateError(`View "${viewId}" not found`);
+          setUpdateLoading(false);
+          return;
+        }
+
+        // Check entityType compatibility
+        if (viewMeta.entityType && viewMeta.entityType !== workspace.entityType) {
+          setUpdateError(
+            `View "${viewId}" has entityType "${viewMeta.entityType}" but workspace expects "${workspace.entityType}"`
+          );
+          setUpdateLoading(false);
+          return;
+        }
+      }
+
+      // Validation passed; attempt to add view
       await apiFetch(`/workspaces/${encodeURIComponent(id)}`, {
         method: "PATCH",
         token: token || undefined,
