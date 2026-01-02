@@ -10,6 +10,9 @@ import type { RootStackParamList } from "../navigation/types";
 import { useColors } from "../features/_shared/useColors";
 import { useViewsApi } from "../features/views/hooks";
 import { mapViewToMobileState, type SavedView } from "../features/views/applyView";
+import ViewPickerModal from "../features/views/ViewPickerModal";
+import SaveViewModal from "../features/views/SaveViewModal";
+import { buildViewFromState } from "../features/views/buildViewFromState";
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -24,6 +27,8 @@ export default function PartyListScreen() {
   const [q, setQ] = React.useState("");
   const [role, setRole] = React.useState("");
   const [appliedView, setAppliedView] = React.useState<SavedView | null>(null);
+  const [showViewPicker, setShowViewPicker] = React.useState(false);
+  const [showSaveModal, setShowSaveModal] = React.useState(false);
   const listRef = React.useRef<FlatList<Party>>(null);
 
   React.useEffect(() => {
@@ -59,6 +64,19 @@ export default function PartyListScreen() {
     setAppliedView(null);
     setQ("");
     setRole("");
+  };
+
+  const handleApplyView = (view: SavedView) => {
+    const result = mapViewToMobileState("party", view);
+    setAppliedView(view);
+    if (result.applied.q !== undefined) setQ(result.applied.q ?? "");
+    if (result.applied.filter?.role !== undefined) setRole(String(result.applied.filter.role ?? ""));
+    setShowViewPicker(false);
+  };
+
+  const handleSaveView = (view: SavedView) => {
+    setAppliedView(view);
+    setShowSaveModal(false);
   };
 
   const load = async () => {
@@ -186,6 +204,43 @@ export default function PartyListScreen() {
           </Pressable>
         </View>
       )}
+
+      {/* View Controls Row */}
+      <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+        <Pressable
+          onPress={() => setShowViewPicker(true)}
+          style={{
+            flex: 1,
+            padding: 10,
+            backgroundColor: t.colors.card,
+            borderWidth: 1,
+            borderColor: t.colors.border,
+            borderRadius: 8,
+            alignItems: "center",
+          }}
+        >
+          <Text style={{ color: t.colors.primary, fontWeight: "600" }}>
+            📋 Views
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setShowSaveModal(true)}
+          style={{
+            flex: 1,
+            padding: 10,
+            backgroundColor: t.colors.card,
+            borderWidth: 1,
+            borderColor: t.colors.border,
+            borderRadius: 8,
+            alignItems: "center",
+          }}
+        >
+          <Text style={{ color: t.colors.primary, fontWeight: "600" }}>
+            💾 Save
+          </Text>
+        </Pressable>
+      </View>
+
       {lastError && (
         <View
           style={{
@@ -265,6 +320,24 @@ export default function PartyListScreen() {
           renderItem={renderItem}
         />
       )}
+
+      {/* View Picker Modal */}
+      <ViewPickerModal
+        visible={showViewPicker}
+        onClose={() => setShowViewPicker(false)}
+        onSelect={handleApplyView}
+        entityType="party"
+      />
+
+      {/* Save View Modal */}
+      <SaveViewModal
+        visible={showSaveModal}
+        onClose={() => setShowSaveModal(false)}
+        onSaved={handleSaveView}
+        entityType="party"
+        currentState={{ q, filter: { role } }}
+        appliedView={appliedView}
+      />
     </View>
   );
 }

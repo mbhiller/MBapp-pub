@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { SaveViewButton } from "../components/SaveViewButton";
+import { ViewSelector } from "../components/ViewSelector";
 import { useAuth } from "../providers/AuthProvider";
+import { mapViewToPartyFilters } from "../lib/viewFilterMappers";
+import type { ViewConfig } from "../hooks/useViewFilters";
 
 type Party = {
   id: string;
@@ -24,12 +27,15 @@ function formatError(err: unknown): string {
 
 export default function PartiesListPage() {
   const { token, tenantId } = useAuth();
+  const [searchParams] = useSearchParams();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("");
   const [items, setItems] = useState<Party[]>([]);
   const [next, setNext] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [appliedView, setAppliedView] = useState<ViewConfig | null>(null);
+  const [activeViewId, setActiveViewId] = useState<string | null>(null);
 
   const fetchPage = useCallback(
     async (cursor?: string) => {
@@ -64,6 +70,52 @@ export default function PartiesListPage() {
     setFilter(search.trim());
   };
 
+  // Handle View application: apply mapped filters and refresh the list
+  const handleApplyView = useCallback(
+    (mappedState: Record<string, any>) => {
+      if (mappedState.q !== undefined) {
+        const newQ = mappedState.q ?? "";
+        setSearch(newQ);
+        setFilter(newQ);
+      }
+    },
+    []
+  );
+
+  const currentFilterState = {
+    q: filter,
+  };
+
+  // Initialize from URL params: viewId
+  useEffect(() => {
+    const urlViewId = searchParams.get("viewId") || "";
+
+    if (urlViewId) {
+      setActiveViewId(urlViewId);
+      (async () => {
+        try {
+          const view = await apiFetch<ViewConfig>(`/views/${urlViewId}`, {
+            token: token || undefined,
+            tenantId,
+          });
+          if (view) {
+            setAppliedView(view);
+            const mapped = mapViewToPartyFilters(view);
+            if (mapped.applied.q !== undefined) {
+              const newQ = mapped.applied.q ?? "";
+              setSearch(newQ);
+              setFilter(newQ);
+            }
+          }
+        } catch {
+          // Ignore silently if view cannot be fetched
+        }
+      })();
+    } else {
+      setActiveViewId(null);
+    }
+  }, [searchParams, tenantId, token]);
+
   const currentViewFilters = [
     filter.trim() ? { field: "q", op: "contains", value: filter.trim() } : null,
   ].filter(Boolean) as Array<{ field: string; op: string; value: any }>;
@@ -74,6 +126,13 @@ export default function PartiesListPage() {
         <h1>Parties</h1>
         <Link to="/parties/new">Create Party</Link>
       </div>
+
+      <ViewSelector
+        entityType="party"
+        mapViewToFilterState={mapViewToPartyFilters}
+        onApplyView={handleApplyView}
+        currentFilterState={currentFilterState}
+      />
 
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <input
@@ -89,6 +148,8 @@ export default function PartiesListPage() {
           entityType="party"
           filters={currentViewFilters}
           buttonLabel="Save as View"
+          activeViewId={activeViewId || undefined}
+          activeViewName={appliedView?.name}
         />
       </div>
 

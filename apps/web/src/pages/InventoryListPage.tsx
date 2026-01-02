@@ -2,7 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { SaveViewButton } from "../components/SaveViewButton";
+import { ViewSelector } from "../components/ViewSelector";
 import { useAuth } from "../providers/AuthProvider";
+import { mapViewToInventoryFilters } from "../lib/viewFilterMappers";
+import type { ViewConfig } from "../hooks/useViewFilters";
 
 type InventoryItem = {
   id: string;
@@ -25,13 +28,16 @@ function formatError(err: unknown): string {
 export default function InventoryListPage() {
   const { token, tenantId } = useAuth();
   const [searchParams] = useSearchParams();
-  const productIdFilter = searchParams.get("productId") || "";
+  const initialProductId = searchParams.get("productId") || "";
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("");
+  const [productIdFilter, setProductIdFilter] = useState(initialProductId);
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [next, setNext] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [appliedView, setAppliedView] = useState<ViewConfig | null>(null);
+  const [activeViewId, setActiveViewId] = useState<string | null>(null);
 
   const fetchPage = useCallback(
     async (cursor?: string) => {
@@ -67,6 +73,65 @@ export default function InventoryListPage() {
     setFilter(search.trim());
   };
 
+  // Handle View application: apply mapped filters and refresh the list
+  const handleApplyView = useCallback(
+    (mappedState: Record<string, any>) => {
+      if (mappedState.q !== undefined) {
+        const newQ = mappedState.q ?? "";
+        setSearch(newQ);
+        setFilter(newQ);
+      }
+      if (mappedState.productId !== undefined) {
+        setProductIdFilter(mappedState.productId ?? "");
+      }
+    },
+    []
+  );
+
+  // Current filter state for View save/overwrite operations
+  const currentFilterState = {
+    q: filter,
+    productId: productIdFilter,
+  };
+
+  // Initialize from URL params: viewId and productId
+  useEffect(() => {
+    const urlViewId = searchParams.get("viewId") || "";
+    const urlProductId = searchParams.get("productId") || "";
+
+    if (urlProductId) {
+      setProductIdFilter(urlProductId);
+    }
+
+    if (urlViewId) {
+      setActiveViewId(urlViewId);
+      (async () => {
+        try {
+          const view = await apiFetch<ViewConfig>(`/views/${urlViewId}`, {
+            token: token || undefined,
+            tenantId,
+          });
+          if (view) {
+            setAppliedView(view);
+            const mapped = mapViewToInventoryFilters(view);
+            if (mapped.applied.q !== undefined) {
+              const newQ = mapped.applied.q ?? "";
+              setSearch(newQ);
+              setFilter(newQ);
+            }
+            if (mapped.applied.productId !== undefined) {
+              setProductIdFilter(mapped.applied.productId ?? "");
+            }
+          }
+        } catch {
+          // Silently ignore missing/unauthorized view
+        }
+      })();
+    } else {
+      setActiveViewId(null);
+    }
+  }, [searchParams, tenantId, token]);
+
   const currentViewFilters = [
     filter.trim() ? { field: "q", op: "contains", value: filter.trim() } : null,
     productIdFilter ? { field: "productId", op: "eq", value: productIdFilter } : null,
@@ -83,6 +148,13 @@ export default function InventoryListPage() {
         )}
       </div>
 
+      <ViewSelector
+        entityType="inventoryItem"
+        mapViewToFilterState={mapViewToInventoryFilters}
+        onApplyView={handleApplyView}
+        currentFilterState={currentFilterState}
+      />
+
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <input
           value={search}
@@ -97,6 +169,8 @@ export default function InventoryListPage() {
           entityType="inventoryItem"
           filters={currentViewFilters}
           buttonLabel="Save as View"
+          activeViewId={activeViewId || undefined}
+          activeViewName={appliedView?.name}
         />
       </div>
 

@@ -121,3 +121,77 @@ export function mapViewToProductFilters(view: ViewConfig): FilterMapResult {
 
   return { applied, unsupported };
 }
+
+/**
+ * Maps a saved View's filters to InventoryListPage filter state.
+ *
+ * Supported fields in Views:
+ * - q/search/name: contains, startsWith -> q
+ * - productId: eq -> productId
+ */
+export function mapViewToInventoryFilters(view: ViewConfig): FilterMapResult {
+  const applied: Record<string, any> = {};
+  const unsupported: Array<{ field: string; reason: string }> = [];
+
+  view.filters?.forEach((filter) => {
+    const { field, op, value } = filter;
+
+    if (field === "q" || field === "search" || field === "name") {
+      if (op === "contains" || op === "startsWith" || !op) {
+        applied.q = value || "";
+      } else {
+        unsupported.push({ field, reason: `operator '${op}' not supported` });
+      }
+    } else if (field === "productId") {
+      if (op === "eq" || !op) {
+        applied.productId = value || "";
+      } else {
+        unsupported.push({ field, reason: `operator '${op}' not supported` });
+      }
+    } else {
+      unsupported.push({ field, reason: "field not mapped for inventory list" });
+    }
+  });
+
+  if (view.sort?.field) {
+    unsupported.push({ field: view.sort.field, reason: "sort not supported in UI" });
+  }
+
+  return { applied, unsupported };
+}
+
+/**
+ * Maps a saved View's filters to PartiesListPage filter state.
+ *
+ * Supported fields in Views:
+ * - q/search/name: contains, startsWith -> q
+ *
+ * Notes:
+ * - role is not currently supported on the web party list endpoint; mark as unsupported.
+ */
+export function mapViewToPartyFilters(view: ViewConfig): FilterMapResult {
+  const applied: Record<string, any> = {};
+  const unsupported: Array<{ field: string; reason: string }> = [];
+
+  view.filters?.forEach((filter) => {
+    const { field, op, value } = filter;
+
+    if (field === "q" || field === "search" || field === "name") {
+      if (op === "contains" || op === "startsWith" || !op) {
+        applied.q = value || "";
+      } else {
+        unsupported.push({ field, reason: `operator '${op}' not supported` });
+      }
+    } else if (field === "role") {
+      unsupported.push({ field, reason: "role filter not supported on web party list" });
+    } else {
+      unsupported.push({ field, reason: "field not mapped for party list" });
+    }
+  });
+
+  if (view.sort?.field) {
+    unsupported.push({ field: view.sort.field, reason: "sort not supported in UI" });
+  }
+
+  return { applied, unsupported };
+}

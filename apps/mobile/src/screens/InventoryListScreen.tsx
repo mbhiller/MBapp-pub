@@ -6,6 +6,9 @@ import { useObjects } from "../features/_shared/useObjects";
 import { useTheme } from "../providers/ThemeProvider";
 import { useViewsApi } from "../features/views/hooks";
 import { mapViewToMobileState, type SavedView } from "../features/views/applyView";
+import ViewPickerModal from "../features/views/ViewPickerModal";
+import SaveViewModal from "../features/views/SaveViewModal";
+import { buildViewFromState } from "../features/views/buildViewFromState";
 import type { RootStackParamList } from "../navigation/types";
 
 export default function InventoryListScreen() {
@@ -16,6 +19,8 @@ export default function InventoryListScreen() {
   const defaultSort = React.useMemo(() => ({ by: "updatedAt", dir: "desc" as const }), []);
   const [q, setQ] = React.useState("");
   const [appliedView, setAppliedView] = React.useState<SavedView | null>(null);
+  const [showViewPicker, setShowViewPicker] = React.useState(false);
+  const [showSaveModal, setShowSaveModal] = React.useState(false);
   const [filters, setFilters] = React.useState<{ filter?: Record<string, any>; sort?: { by?: string; dir?: "asc" | "desc" } }>({
     filter: undefined,
     sort: defaultSort,
@@ -67,6 +72,23 @@ export default function InventoryListScreen() {
     setQ("");
     reset?.();
   };
+
+  const handleApplyView = (view: SavedView) => {
+    const result = mapViewToMobileState("inventoryItem", view);
+    setAppliedView(view);
+    if (result.applied.q !== undefined) setQ(result.applied.q ?? "");
+    setFilters({
+      filter: result.applied.filter,
+      sort: result.applied.sort ?? defaultSort,
+    });
+    setShowViewPicker(false);
+  };
+
+  const handleSaveView = (view: SavedView) => {
+    setAppliedView(view);
+    setShowSaveModal(false);
+  };
+
   const rawItems = data?.items ?? [];
   const items = [...rawItems].sort((a, b) => {
     const ta =
@@ -103,6 +125,43 @@ export default function InventoryListScreen() {
           </Pressable>
         </View>
       )}
+
+      {/* View Controls Row */}
+      <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+        <Pressable
+          onPress={() => setShowViewPicker(true)}
+          style={{
+            flex: 1,
+            padding: 10,
+            backgroundColor: t.colors.card,
+            borderWidth: 1,
+            borderColor: t.colors.border,
+            borderRadius: 8,
+            alignItems: "center",
+          }}
+        >
+          <Text style={{ color: t.colors.primary, fontWeight: "600" }}>
+            📋 Views
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setShowSaveModal(true)}
+          style={{
+            flex: 1,
+            padding: 10,
+            backgroundColor: t.colors.card,
+            borderWidth: 1,
+            borderColor: t.colors.border,
+            borderRadius: 8,
+            alignItems: "center",
+          }}
+        >
+          <Text style={{ color: t.colors.primary, fontWeight: "600" }}>
+            💾 Save
+          </Text>
+        </Pressable>
+      </View>
+
       <TextInput
         placeholder="Search inventory"
         value={q}
@@ -155,6 +214,24 @@ export default function InventoryListScreen() {
           }
         />
       )}
+
+      {/* View Picker Modal */}
+      <ViewPickerModal
+        visible={showViewPicker}
+        onClose={() => setShowViewPicker(false)}
+        onSelect={handleApplyView}
+        entityType="inventoryItem"
+      />
+
+      {/* Save View Modal */}
+      <SaveViewModal
+        visible={showSaveModal}
+        onClose={() => setShowSaveModal(false)}
+        onSaved={handleSaveView}
+        entityType="inventoryItem"
+        currentState={{ q, filter: filters.filter, sort: filters.sort }}
+        appliedView={appliedView}
+      />
     </View>
   );
 }
