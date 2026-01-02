@@ -17,14 +17,6 @@ const ENTITY_TYPES = [
   { label: "Product", value: "product" },
 ];
 
-const ROUTE_BY_ENTITY: Record<string, keyof RootStackParamList> = {
-  purchaseOrder: "PurchaseOrdersList",
-  salesOrder: "SalesOrdersList",
-  inventoryItem: "InventoryList",
-  party: "PartyList",
-  product: "ProductsList",
-};
-
 export default function WorkspaceHubScreen({ navigation }: { navigation: NavigationProp }) {
   const t = useColors();
   const [q, setQ] = useState("");
@@ -33,12 +25,7 @@ export default function WorkspaceHubScreen({ navigation }: { navigation: Navigat
   const { data, isLoading, error, refetch } = useWorkspaceItems({ q, entityType });
 
   const handleItemPress = (item: any) => {
-    const route = ROUTE_BY_ENTITY[item?.entityType];
-    if (!route) {
-      Alert.alert("Unsupported", `No list screen for entity type: ${item?.entityType ?? "unknown"}`);
-      return;
-    }
-    navigation.navigate(route as any, { viewId: item.id } as any);
+    navigation.navigate("WorkspaceDetail", { workspaceId: item.id } as any);
   };
 
   return (

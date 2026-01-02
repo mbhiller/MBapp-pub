@@ -112,7 +112,7 @@ See [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) for full OpenAPI defin
 
 **Workspaces / Views (alias model):**
 - Workspace-first storage with legacy fallback: list/get/read prefer true `type="workspace"` records, then fall back to legacy `type="view"` workspace-like records; results are deduped by id before counting toward limits.
-- Workspace membership is tracked via `views: string[]` (list of view IDs). Mobile WorkspaceDetail uses this to open member views into entity list screens via `viewId`.
+- Workspace membership is tracked via `views: string[]` (view IDs only; `workspace.id` is never a viewId). Workspace detail (web + mobile) opens member views into entity list screens using each view’s `entityType`; web falls back to `/views/{id}` when no list screen is mapped.
 - Name limits: View names validate to 1–120 chars; Workspace names validate to 1–200 chars. Stay within those limits to avoid 400 validation errors.
 - Dual-write flag: `MBAPP_WORKSPACES_DUALWRITE_LEGACY=true` writes both the workspace record and a legacy `type="view"` shadow (and deletes both). Use only during migration to keep legacy consumers aligned; default OFF.
 - Pagination + aliasing: `/workspaces` list accepts `cursor` **or** `next` (handled by `parsePagination`); responses return `cursor`. `/views` list uses `cursor`; only handlers wired through `parsePagination` honor `next` as an alias.
@@ -722,7 +722,7 @@ export async function smoke_module_flow(API_BASE, authToken) {
 - ✅ **Safety:** Delete guarded by confirm dialog; rename requires non-empty name; pagination via load-more button.
 - ✅ **Entry point:** WorkspaceHub exposes “Manage Views” button (passes entityType filter when selected).
 
-**Mobile gaps (post-v1):** Inventory/Parties/Products list save; workspaces hub apply/open views.  
+**Mobile gaps (post-v1):** Inventory/Parties/Products list save; workspace hub/detail routing now opens member views via `viewId` and per-view `entityType`.  
 **Web gaps:** Workspaces create/edit missing; view apply/save present for SO/PO/Inventory/Parties/Products, other modules pending.  
 **API complete:** ✅ (v1 aliasing behavior as above)
 
