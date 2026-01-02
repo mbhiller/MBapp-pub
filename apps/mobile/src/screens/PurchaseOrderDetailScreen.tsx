@@ -11,7 +11,7 @@ import { copyText } from "../features/_shared/copy";
 import { ReceiveHistorySheet } from "../features/purchasing/ReceiveHistorySheet";
 import { VendorGuardBanner } from "../features/_shared/VendorGuardBanner";
 import PartySelectorModal from "../features/parties/PartySelectorModal";
-import { updateObject } from "../api/client";
+import { updateObject, apiClient } from "../api/client";
 import { useTheme } from "../providers/ThemeProvider";
 import { ScannerPanel } from "../features/_shared/ScannerPanel";
 import { resolveScan } from "../lib/scanResolve";
@@ -23,6 +23,7 @@ export default function PurchaseOrderDetailScreen() {
   const navigation = useNavigation<any>();
   const id = route.params?.id as string | undefined;
   const insets = useSafeAreaInsets();
+  const theme = useTheme();
 
   const { data, isLoading, refetch } = useObjects<any>({ type: "purchaseOrder", id });
   const po = data;
@@ -40,6 +41,7 @@ export default function PurchaseOrderDetailScreen() {
 
   const [history, setHistory] = React.useState<{ open: boolean; itemId?: string; lineId?: string }>({ open: false });
   const [vendorModalOpen, setVendorModalOpen] = React.useState(false);
+  const [verification, setVerification] = React.useState<{ status: "idle" | "loading" | "success" | "error"; stocked?: number; openBackorders?: number; message?: string }>({ status: "idle" });
 
   // Track screen view on focus
   useFocusEffect(
@@ -65,6 +67,14 @@ export default function PurchaseOrderDetailScreen() {
   const lastRefetchAt = React.useRef<number>(0);
   const scanScrollRef = React.useRef<ScrollView>(null);
   const [lastScanMessage, setLastScanMessage] = React.useState<string | null>(null);
+
+  const itemIds = React.useMemo(() => {
+    const ids = new Set<string>();
+    (po?.lines ?? []).forEach((ln: any) => {
+      if (ln?.itemId) ids.add(String(ln.itemId));
+    });
+    return Array.from(ids);
+  }, [po?.lines]);
 
   // Refresh on focus after edit or when data missing, throttled to avoid repeat fetches
   useFocusEffect(
@@ -108,6 +118,53 @@ export default function PurchaseOrderDetailScreen() {
   // Deterministic idempotency key per (poId, lineId, qty, lot, location)
   const makeIdk = (poId: string, lineId: string, n: number, l?: string, loc?: string) =>
     `po:${poId}#ln:${lineId}#q:${n}#lot:${l || ""}#loc:${loc || ""}`;
+
+  const pickOnhandItems = (resp: any) => {
+    if (Array.isArray(resp?.items)) return resp.items;
+    if (Array.isArray(resp?.body?.items)) return resp.body.items;
+    return [];
+  };
+
+  const pickObjects = (resp: any) => {
+    if (Array.isArray(resp?.items)) return resp.items;
+    if (Array.isArray(resp?.body?.items)) return resp.body.items;
+    return [];
+  };
+
+  const verifyAfterReceive = React.useCallback(async () => {
+    if (!po?.id || itemIds.length === 0) {
+      setVerification({ status: "idle" });
+      return;
+    }
+
+    setVerification({ status: "loading" });
+    try {
+      const onhandResp = await apiClient.post(`/inventory/onhand:batch`, {
+        items: itemIds.map((id) => ({ itemId: id })),
+      });
+      const onhandItems = pickOnhandItems(onhandResp);
+      const stocked = onhandItems.filter((row: any) => Number(row?.qtyAvailable ?? row?.qtyOnHand ?? row?.qty ?? 0) > 0).length;
+
+      const backorderResp = await apiClient.post(`/objects/backorderRequest/search`, {
+        filter: { itemId: itemIds, status: "open" },
+        params: { limit: 50, sort: "desc", by: "updatedAt" },
+      });
+      const boItems = pickObjects(backorderResp);
+      const openBackorders = boItems.length;
+
+      setVerification({ status: "success", stocked, openBackorders });
+      if (openBackorders > 0) {
+        toast(`${openBackorders} open backorder(s) remain`, "info");
+      } else {
+        toast("Verified: stock and backorders updated", "success");
+      }
+    } catch (err: any) {
+      console.error(err);
+      const message = err?.message || "Verification failed";
+      setVerification({ status: "error", message });
+      toast(message, "error");
+    }
+  }, [itemIds, po?.id, toast]);
 
   // Helper: find all lines matching an itemId
   const findLinesForItem = (itemId: string) =>
@@ -276,6 +333,7 @@ export default function PurchaseOrderDetailScreen() {
       setScanHistory([]);
       setScanMode(false);
       await refetch();
+      await verifyAfterReceive();
 
       // Track success
       track("PO_ScanReceive_Submitted", {
@@ -328,6 +386,7 @@ export default function PurchaseOrderDetailScreen() {
       setQty("1"); setLot(""); setLocationId("");
       toast("Received", "success");
       await refetch();
+        await verifyAfterReceive();
     } catch (e: any) {
       console.error(e);
       toast(e?.message || "Receive failed", "error");
@@ -349,6 +408,12 @@ export default function PurchaseOrderDetailScreen() {
   const canApprove = po?.status === "submitted" && !vendorGuardActive;
   const canCancel = (po?.status === "draft" || po?.status === "submitted") && po?.status !== "cancelled" && po?.status !== "canceled" && po?.status !== "closed";
   const canClose = po?.status === "fulfilled";
+  const verificationSummary = (() => {
+    if (verification.status === "loading") return "Verifying recent receipts...";
+    if (verification.status === "success") return `${verification.stocked ?? 0} item(s) show stock · ${verification.openBackorders ?? 0} open backorder(s)`;
+    if (verification.status === "error") return verification.message || "Verification failed";
+    return "Pending verification";
+  })();
 
   return (
     <View style={{ flex: 1, padding: 12 }}>
@@ -526,6 +591,7 @@ export default function PurchaseOrderDetailScreen() {
                 await receiveLines(po.id, linesToReceive);
                 await refetch();
                 toast("All items received", "success");
+                await verifyAfterReceive();
               } catch (e) {
                 console.error(e);
                 toast("Receive All failed", "error");
@@ -569,6 +635,17 @@ export default function PurchaseOrderDetailScreen() {
           <Text>Close</Text>
         </Pressable>
       </View>
+
+      {/* Post-receive verification */}
+      {receivable && (
+        <View style={{ marginTop: 12, padding: 12, borderWidth: 1, borderColor: theme.colors.border, borderRadius: 8, backgroundColor: theme.colors.card }}>
+          <Text style={{ fontWeight: "700", marginBottom: 4 }}>Verification</Text>
+          <Text style={{ color: verification.status === "error" ? "#b00020" : theme.colors.textMuted }}>{verificationSummary}</Text>
+          <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+            <Btn label="Verify now" onPress={() => { void verifyAfterReceive(); }} />
+          </View>
+        </View>
+      )}
 
       {/* Scan ambiguity chooser */}
       <Modal visible={chooser.open} transparent animationType="slide" onRequestClose={() => setChooser({ open: false, candidates: [], itemId: undefined })}>

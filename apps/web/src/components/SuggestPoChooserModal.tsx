@@ -284,7 +284,7 @@ export default function SuggestPoChooserModal({
               <div key={`group-${idx}`} style={{ display: "grid", gap: 6 }}>
                 {!isSingleVendor && (
                   <div style={{ fontSize: 13, fontWeight: 600, color: "#444" }}>
-                    Vendor: {vendorName}
+                    Vendor: {vendorName} {draft.vendorId ? `(${draft.vendorId})` : ""}
                   </div>
                 )}
                 {draftButton}
@@ -296,6 +296,7 @@ export default function SuggestPoChooserModal({
                         const requested = ln.qtyRequested ?? ln.qty ?? 0;
                         const suggested = ln.qtySuggested ?? ln.qty ?? 0;
                         const bumped = suggested > requested;
+                        const note = (ln as any)?.note ?? (ln as any)?.notes ?? (ln as any)?.noteText;
                         return (
                           <div key={ln.id || ln.lineId || `${ln.itemId || ln.productId || "line"}-${lineIdx}`} style={{ fontSize: 13, display: "grid", gap: 4 }}>
                             <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
@@ -310,8 +311,25 @@ export default function SuggestPoChooserModal({
                                 {ln.adjustedFrom != null && ln.adjustedFrom !== requested ? ` from ${ln.adjustedFrom}` : ""}
                               </div>
                             )}
+                            {!bumped && ln.minOrderQtyApplied != null && (
+                              <div style={{ color: "#555" }}>
+                                MOQ applied: {ln.minOrderQtyApplied}
+                              </div>
+                            )}
+                            {note ? (
+                              <div style={{ color: "#555" }}>
+                                Note: {note}
+                              </div>
+                            ) : null}
                             {ln.backorderRequestIds?.length ? (
-                              <div style={{ color: "#555" }}>Backorders: {ln.backorderRequestIds.join(", ")}</div>
+                              <div style={{ color: "#555", display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                <span>Backorders ({ln.backorderRequestIds.length}):</span>
+                                {ln.backorderRequestIds.map((boId) => (
+                                  <a key={boId} href={`/backorders/${boId}`} style={{ color: "#1976d2" }}>
+                                    {boId} →
+                                  </a>
+                                ))}
+                              </div>
                             ) : null}
                           </div>
                         );
@@ -330,26 +348,33 @@ export default function SuggestPoChooserModal({
             <h3 style={{ margin: "0 0 12px 0", fontSize: 14, fontWeight: 600, color: "#d32f2f" }}>
               Skipped ({skipped.length})
             </h3>
-            <div style={{ display: "grid", gap: 8 }}>
-              {skipped.map((item, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    padding: 12,
-                    border: "1px solid #ffebee",
-                    borderRadius: 4,
-                    background: "#fff5f5",
-                    fontSize: 13,
-                  }}
-                >
-                  <div style={{ fontWeight: 500, color: "#c62828", marginBottom: 4 }}>
-                    {item.backorderRequestId}
-                  </div>
-                  <div style={{ color: "#666", fontSize: 12 }}>
-                    {humanizeReason(item.reason)}
-                  </div>
-                </div>
-              ))}
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: "#fff5f5" }}>
+                    <th style={{ padding: 8, border: "1px solid #ffcdd2", textAlign: "left" }}>Backorder ID</th>
+                    <th style={{ padding: 8, border: "1px solid #ffcdd2", textAlign: "left" }}>Reason (code)</th>
+                    <th style={{ padding: 8, border: "1px solid #ffcdd2", textAlign: "left" }}>Reason (friendly)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {skipped.map((item, idx) => (
+                    <tr key={idx}>
+                      <td style={{ padding: 8, border: "1px solid #ffcdd2" }}>
+                        {item.backorderRequestId ? (
+                          <a href={`/backorders/${item.backorderRequestId}`} style={{ color: "#d32f2f" }}>
+                            {item.backorderRequestId} →
+                          </a>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td style={{ padding: 8, border: "1px solid #ffcdd2" }}>{item.reason || "—"}</td>
+                      <td style={{ padding: 8, border: "1px solid #ffcdd2" }}>{humanizeReason(item.reason)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         )}

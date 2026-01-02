@@ -2,6 +2,7 @@
 // Purchasing API helpers using apiFetch for consistent error handling
 
 import { apiFetch } from "./http";
+import { createPurchaseOrdersFromSuggestion as createPurchaseOrdersFromSuggestionApi } from "./api";
 
 export type SuggestPoResponse = {
   draft?: any;
@@ -55,19 +56,22 @@ export async function suggestPo(
 
 /**
  * Create persisted PO(s) from suggestion draft(s).
- * Endpoint: POST /objects/purchaseOrder/create-from-suggestion
+ * Endpoint: POST /purchasing/po:create-from-suggestion (SSOT)
  */
-export async function createPurchaseOrderFromSuggestion(
+export async function createPurchaseOrdersFromSuggestion(
   payload: { draft?: any; drafts?: any[] },
-  opts: { token?: string; tenantId: string }
+  opts: { token?: string; tenantId: string; idempotencyKey?: string }
 ): Promise<PurchaseOrderCreateResponse> {
-  return apiFetch<PurchaseOrderCreateResponse>("/objects/purchaseOrder/create-from-suggestion", {
-    method: "POST",
-    body: payload,
+  const res = await createPurchaseOrdersFromSuggestionApi(payload.drafts ? payload.drafts : payload.draft ? payload.draft : [], {
     token: opts.token,
     tenantId: opts.tenantId,
+    idempotencyKey: opts.idempotencyKey,
   });
+  return { ids: res.ids ?? [], id: res.id };
 }
+
+// Back-compat alias (deprecated). Use createPurchaseOrdersFromSuggestion.
+export const createPurchaseOrderFromSuggestion = createPurchaseOrdersFromSuggestion;
 
 /**
  * Submit a draft PO (draft → submitted).

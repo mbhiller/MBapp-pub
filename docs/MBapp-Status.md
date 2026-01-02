@@ -8,6 +8,13 @@
 
 ## Current State Summary
 
+### Sprint I — Backorder → PO → Receive Parity Refresh — ✅ Complete (2026-01-02)
+
+- Fixed purchase-order receive drift by adding post-receive verification panels (on-hand batch + open backorders) across web/mobile; idempotent receive now surfaces success-even-on-replay states with a clear verification toast.
+- Backorders visibility improved: list rows show fulfilled/remaining quantities, detail shows progress bars and updatedAt, and vendor/backorder deep links are consistent across web and mobile.
+- Suggest PO UX clarity: MOQ/notes surfaced, skipped backorders show friendly reason + code (web/mobile), and multi-draft create-all flows navigate to the first PO with toasts.
+- Mobile parity: PO detail includes manual “Verify” panel plus auto-verification after receive (modal, receive-all, scan submit); backorders list renders fulfillment counts; suggest PO shows skipped reason codes.
+
 ### Workspaces & Views v1 — ✅ Complete (Sprint H, 2026-01-01)
 
 - Products web list now supports Views end-to-end: select/apply/save, `?viewId=` deep link param honored on load.

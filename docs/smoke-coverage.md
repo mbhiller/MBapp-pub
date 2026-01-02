@@ -9,6 +9,8 @@
 
 Smoke tests are integration tests for critical API flows. All tests use idempotency keys for safe retry and include party/vendor seeding. Run with `node ops/smoke/smoke.mjs <test-name>`.
 
+Sprint I (2026-01-02): No new smokes added; existing backorder → suggest-po → receive loops remain covered via `npm run smokes:run:ci`.
+
 **CI Smoke Manifest:** The definitive list of tests run in CI is maintained in [ops/ci-smokes.json](../ops/ci-smokes.json). Additional flows exist in `ops/smoke/smoke.mjs` but are opt-in only. CI includes `smoke:views:crud`, `smoke:workspaces:list`, `smoke:workspaces:mixed-dedupe`, `smoke:workspaces:get-fallback`, `smoke:views:apply-to-po-list`, and `smoke:views:apply-to-product-list`.
 
 **Scanner Actions Flows (Sprint S, E2):**
