@@ -10,6 +10,7 @@ import { createParty, addPartyRole } from "../features/parties/api";
 import { upsertInventoryItem } from "../features/inventory/api";
 import { useViewsApi } from "../features/views/hooks";
 import { mapViewToMobileState, type SavedView } from "../features/views/applyView";
+import ViewPickerModal from "../features/views/ViewPickerModal";
 import SaveViewModal from "../features/views/SaveViewModal";
 import type { RootStackParamList } from "../navigation/types";
 
@@ -24,6 +25,7 @@ export default function SalesOrdersListScreen() {
   const defaultSort = React.useMemo(() => ({ by: "updatedAt", dir: "desc" as const }), []);
   const [q, setQ] = React.useState("");
   const [appliedView, setAppliedView] = React.useState<SavedView | null>(null);
+  const [showViewPicker, setShowViewPicker] = React.useState(false);
   const [saveModalOpen, setSaveModalOpen] = React.useState(false);
   const [filters, setFilters] = React.useState<{ filter?: Record<string, any>; sort?: { by?: string; dir?: "asc" | "desc" } }>({
     filter: undefined,
@@ -92,6 +94,20 @@ export default function SalesOrdersListScreen() {
     setFilters({ filter: undefined, sort: defaultSort });
     setQ("");
     reset?.();
+  };
+
+  const handleApplyView = (view: SavedView) => {
+    const result = mapViewToMobileState("salesOrder", view);
+    setAppliedView(view);
+    if (result.applied.q !== undefined) {
+      setQ(result.applied.q ?? "");
+    }
+    setFilters({
+      filter: result.applied.filter,
+      sort: result.applied.sort ?? defaultSort,
+    });
+    reset?.();
+    setShowViewPicker(false);
   };
 
   const handleViewSaved = (view: SavedView) => {
@@ -185,6 +201,23 @@ export default function SalesOrdersListScreen() {
           <Text style={{ color: "#fff", fontWeight: "700" }}>+ New SO</Text>
         </Pressable>
         <Pressable
+          onPress={() => setShowViewPicker(true)}
+          style={{
+            paddingHorizontal: 14,
+            paddingVertical: 10,
+            borderRadius: 8,
+            borderWidth: 1,
+            borderColor: t.colors.border,
+            backgroundColor: t.colors.card,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Text style={{ color: t.colors.primary, fontWeight: "600" }}>
+            📋 Views
+          </Text>
+        </Pressable>
+        <Pressable
           onPress={() => setSaveModalOpen(true)}
           style={{
             paddingHorizontal: 14,
@@ -224,6 +257,12 @@ export default function SalesOrdersListScreen() {
           )}
         />
       )}
+      <ViewPickerModal
+        visible={showViewPicker}
+        onClose={() => setShowViewPicker(false)}
+        onSelect={handleApplyView}
+        entityType="salesOrder"
+      />
       <SaveViewModal
         visible={saveModalOpen}
         onClose={() => setSaveModalOpen(false)}
