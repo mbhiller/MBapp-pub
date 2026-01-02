@@ -125,6 +125,18 @@ See [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) for full OpenAPI defin
 - **Mixed hubs allowed:** Workspaces without `entityType` set can act as "mixed hubs" with views of any entity type; no validation applied. Navigation in WorkspaceDetail uses each view's `entityType` to route to appropriate list screen.
 - **Client-side guards:** Web and mobile clients validate entityType compatibility before sending PATCH; mismatched views are blocked with clear error messages. This prevents invalid payloads from reaching the API.
 
+**Workspace Default View Rules (Sprint M):**
+- **Field:** `workspace.defaultViewId?: string | null` — Optional field to designate a preferred default view for quick "Open" navigation.
+- **Validation rules (enforced in create/update/patch):**
+  1. **Type check:** Must be string, null, or undefined. Invalid types return 400 with `"defaultViewId must be a string if provided"`.
+  2. **Existence check:** If set, must be present in workspace's `views[]` array. Returns 400 with `"defaultViewId <id> not found in views array"`.
+  3. **EntityType compatibility:** If `workspace.entityType` is set, the default view must have matching `view.entityType` or no `entityType`. Returns 400 with `"View <id> has entityType X but workspace has Y"`.
+- **Auto-clearing:** When removing a view from `views[]` that is currently set as `defaultViewId`, the API automatically clears `defaultViewId` to null (or returns 400 if attempted via PATCH without clearing).
+- **Open precedence (web + mobile):** "Open" button uses `defaultViewId` if set → first pinned view in `views[]` if available → workspace detail page as fallback. Ensures users always have a valid navigation target.
+- **UX indicators:** Both web and mobile show blue background + "DEFAULT" badge on the default view card. Set/Unset controls provided in workspace detail pages.
+- **Error messages:** API returns specific error codes for each failure mode: `"Unknown viewId: <id>"`, `"not found in views array"`, `"has entityType X but workspace has Y"`.
+- **Smoke coverage:** `smoke:workspaces:default-view-validation` validates all 8 scenarios including creation, PATCH updates, unknown viewId rejection, entityType mismatches, and removal edge cases.
+
 **Status Lifecycles:**
 - Purchase Orders: `draft → submitted → approved → (partially-)received → fulfilled → closed` (also `cancelled`)
 - Sales Orders: `draft → submitted → approved → (partially-)fulfilled → completed` (also `cancelled`)

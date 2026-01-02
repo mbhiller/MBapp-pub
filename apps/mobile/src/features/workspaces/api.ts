@@ -11,6 +11,7 @@ export type WorkspaceItem = {
   filters?: any[];
   columns?: string[];
   views?: string[];
+  defaultViewId?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -31,6 +32,7 @@ export type CreateWorkspacePayload = {
   description?: string;
   shared?: boolean;
   views?: string[];
+  defaultViewId?: string | null;
 };
 
 export type PatchWorkspacePayload = Partial<CreateWorkspacePayload> & { ownerId?: string };
@@ -60,6 +62,7 @@ export function normalizeWorkspace(obj: any): WorkspaceItem {
     filters: obj?.filters,
     columns: obj?.columns,
     views: Array.isArray(obj?.views) ? obj.views : [],
+    defaultViewId: obj?.defaultViewId ?? null,
     createdAt: obj?.createdAt,
     updatedAt: obj?.updatedAt,
   } as WorkspaceItem;

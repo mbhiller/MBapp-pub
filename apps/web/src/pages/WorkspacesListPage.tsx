@@ -8,8 +8,16 @@ type Workspace = {
   name?: string;
   entityType?: string;
   description?: string;
+  views?: string[];
+  defaultViewId?: string | null;
   updatedAt?: string;
   createdAt?: string;
+};
+
+type ViewMetadata = {
+  id: string;
+  name?: string;
+  entityType?: string;
 };
 
 type WorkspacePage = { items?: Workspace[]; next?: string };
@@ -21,6 +29,20 @@ function formatError(err: unknown): string {
   if (e?.code) parts.push(`code ${e.code}`);
   if (e?.message) parts.push(e.message);
   return parts.join(" · ") || "Request failed";
+}
+
+// Helper: map entityType to list page route
+function getListPageRoute(entityType?: string): string | null {
+  const routes: Record<string, string> = {
+    purchaseOrder: "/purchase-orders",
+    salesOrder: "/sales-orders",
+    inventoryItem: "/inventory",
+    party: "/parties",
+    event: "/events",
+    product: "/products",
+    location: "/locations",
+  };
+  return routes[entityType || ""] || null;
 }
 
 const ENTITY_TYPES = [
@@ -42,6 +64,50 @@ export default function WorkspacesListPage() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("");
   const [entityTypeFilter, setEntityTypeFilter] = useState("");
+  const handleOpen = async (workspace: Workspace) => {
+    const viewId = workspace.defaultViewId ?? workspace.views?.[0];
+
+    // No views pinned — navigate to detail
+    if (!viewId) {
+      window.location.href = `/workspaces/${workspace.id}`;
+      return;
+    }
+
+    // If workspace.entityType is set, use it directly
+    if (workspace.entityType) {
+      const listRoute = getListPageRoute(workspace.entityType);
+      if (listRoute) {
+        window.location.href = `${listRoute}?viewId=${encodeURIComponent(viewId)}`;
+      } else {
+        window.location.href = `/views/${encodeURIComponent(viewId)}`;
+      }
+      return;
+    }
+
+    // No entityType on workspace — fetch view to determine entityType
+    try {
+      const view = await apiFetch<ViewMetadata>(`/views/${encodeURIComponent(viewId)}`, {
+        token: token || undefined,
+        tenantId,
+      });
+
+      if (view.entityType) {
+        const listRoute = getListPageRoute(view.entityType);
+        if (listRoute) {
+          window.location.href = `${listRoute}?viewId=${encodeURIComponent(viewId)}`;
+          return;
+        }
+      }
+
+      // Fallback: navigate to view detail or workspace detail
+      window.location.href = `/views/${encodeURIComponent(viewId)}`;
+    } catch (err) {
+      console.error("Failed to fetch view:", err);
+      // Fallback to workspace detail
+      window.location.href = `/workspaces/${workspace.id}`;
+    }
+  };
+
   const [items, setItems] = useState<Workspace[]>([]);
   const [next, setNext] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);

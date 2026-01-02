@@ -3170,6 +3170,8 @@ export interface components {
              * @default []
              */
             views: string[];
+            /** @description Optional ID of default view to open when workspace is selected. Must be in views[] and entityType-compatible (if workspace.entityType set). */
+            defaultViewId?: string | null;
             /** @description User/party who owns this workspace */
             ownerId?: string | null;
             /**

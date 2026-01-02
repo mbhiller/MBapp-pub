@@ -8,6 +8,18 @@
 
 ## Current State Summary
 
+### Workspace Default View — ✅ Complete (Sprint M, 2026-01-02)
+
+**Epic Summary:** Add `defaultViewId` to workspaces with smart "Open" precedence (defaultViewId → first pinned view → workspace detail) and comprehensive validation across spec, API, web, mobile, and integration tests.
+
+- **E1 (Spec):** [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) Workspace schema extended with `defaultViewId?: string | null`. Types regenerated for API ([apps/api/src/generated/openapi-types.ts](../apps/api/src/generated/openapi-types.ts)) and mobile ([apps/mobile/src/api/generated-types.ts](../apps/mobile/src/api/generated-types.ts)). ✅ spec:lint, spec:bundle, all typechecks passed.
+- **E2 (API Validation):** [apps/api/src/workspaces/create.ts](../apps/api/src/workspaces/create.ts), [update.ts](../apps/api/src/workspaces/update.ts), [patch.ts](../apps/api/src/workspaces/patch.ts) now enforce three validation rules: (1) type check (must be string, null, or undefined), (2) existence check (if set, must be in views[] array), (3) entityType compatibility (if workspace.entityType set, view must match or be untyped). Returns 400 with specific error messages for each failure mode. Auto-clears defaultViewId when removing default view from views[]. ✅ API typecheck + smoke tests passed.
+- **E3 (Web UX):** [apps/web/src/pages/WorkspacesListPage.tsx](../apps/web/src/pages/WorkspacesListPage.tsx) added "Open" button using defaultViewId precedence (defaultViewId → first pinned view → workspace detail). [apps/web/src/pages/WorkspaceDetailPage.tsx](../apps/web/src/pages/WorkspaceDetailPage.tsx) shows blue background + "DEFAULT" badge on default view card; added "Set Default"/"Unset Default" buttons per view; automatically clears defaultViewId when removing default view. ✅ Web typecheck passed.
+- **E4 (Mobile UX):** [apps/mobile/src/screens/WorkspaceHubScreen.tsx](../apps/mobile/src/screens/WorkspaceHubScreen.tsx) added "Open" button with smart navigation to entity list or workspace detail using defaultViewId precedence. [apps/mobile/src/screens/WorkspaceDetailScreen.tsx](../apps/mobile/src/screens/WorkspaceDetailScreen.tsx) shows light blue background + "DEFAULT" badge on default view; added "Set as Default"/"Unset Default" toggle buttons in edit modal; auto-clears defaultViewId if not in selectedViews on save. Updated workspace types in [apps/mobile/src/features/workspaces/api.ts](../apps/mobile/src/features/workspaces/api.ts) with `defaultViewId?: string | null`. ✅ Mobile typecheck passed.
+- **E5 (Smokes + Docs):** [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) added comprehensive smoke test `smoke:workspaces:default-view-validation` covering 8 scenarios: create with defaultViewId, PATCH to change default, unknown viewId rejection, entityType mismatch in views[], entityType mismatch as defaultViewId, removing default view while keeping defaultViewId. Registered in [ops/ci-smokes.json](../ops/ci-smokes.json). Updated [MBapp-Status.md](MBapp-Status.md) and [MBapp-Foundations.md](MBapp-Foundations.md).
+- **Verification:** ✅ All typechecks passed (API, web, mobile); smoke suite includes full defaultViewId validation coverage; no regressions.
+- **Rule:** `workspace.defaultViewId` must be in `views[]` and match `workspace.entityType` (if set). Open precedence: defaultViewId → first pinned view → workspace detail page. UX shows badges and set/unset controls on both web and mobile.
+
 ### Workspace View Pinning Polish — ✅ Complete (Sprint L, 2026-01-02)
 
 **Epic Summary:** Enforce workspace–view entityType compatibility; prevent duplicate/unknown view IDs in pinned lists; surface mismatches with clear error handling across API, web, and mobile.

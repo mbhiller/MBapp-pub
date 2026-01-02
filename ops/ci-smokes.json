@@ -10,6 +10,7 @@
   "smoke:workspaces:list",
   "smoke:workspaces:mixed-dedupe",
   "smoke:workspaces:get-fallback",
+  "smoke:workspaces:default-view-validation",
   "smoke:views:apply-to-po-list",
   "smoke:views:apply-to-product-list",
   "smoke:views:apply-to-inventory-list",
