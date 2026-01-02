@@ -521,6 +521,39 @@ This section documents flags used across the backend (AWS Lambda) and mobile (Ex
 - Reservations mobile flag: `__DEV__ ? true : (env === "true" || env === "1")`
 - Registrations mobile flag: `env === "true" || env === "1"` (no __DEV__ override)
 
+### Auth Policy Role-Based Derivation — ✅ Complete (Sprint O, 2026-01-02)
+
+**Epic Summary:** Implement production-ready role-based permission derivation for JWT tokens without explicit policy claims, eliminating dev-only wildcard grants.
+
+- **E1 (Spec Alignment):** [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) Policy schema updated from complex object with `permissions: string[]` and `roles: string[]` (required) to simple `additionalProperties: { type: boolean }` matching actual runtime behavior (`Record<string, boolean>`). Added description documenting wildcard patterns (`*`, `*:*`, `*:read`, `type:*`). Ran full spec pipeline (lint/bundle/types); generated types updated in [apps/api/src/generated/openapi-types.ts](../apps/api/src/generated/openapi-types.ts) and [apps/mobile/src/api/generated-types.ts](../apps/mobile/src/api/generated-types.ts).
+
+- **E2 (Role Derivation Implementation):** Created [apps/api/src/auth/derivePolicyFromRoles.ts](../apps/api/src/auth/derivePolicyFromRoles.ts) implementing role-to-permission mapping with 4 standard roles:
+  - **admin:** `{ "*": true }` — Superuser with all permissions
+  - **operator:** `{ "*:read": true, "sales:*": true, "purchase:*": true, "inventory:*": true, "view:*": true, "workspace:*": true, "scanner:use": true }` — Read all + write operations
+  - **viewer:** `{ "*:read": true }` — Read-only access to all modules
+  - **warehouse:** `{ "*:read": true, "inventory:*": true, "purchase:receive": true, "scanner:use": true }` — Inventory-focused with receive capability
+  
+  Updated [apps/api/src/auth/middleware.ts](../apps/api/src/auth/middleware.ts) `getAuth()` with fallback/override logic:
+  - **If JWT has explicit non-empty `mbapp.policy`:** Use it unchanged (explicit override)
+  - **Else:** Derive permissions from `mbapp.roles` via `derivePolicyFromRoles()`
+  - Backward compatible with existing tokens containing explicit policy claims
+
+- **E3 (Dev-Login Policy Change):** [apps/api/src/auth/dev-login.ts](../apps/api/src/auth/dev-login.ts) updated to stop auto-granting wildcard permissions. Now only includes `mbapp.policy` in JWT if explicitly provided in request body; default behavior mints token with `roles: ["admin"]` but no policy field, triggering role derivation fallback. Makes role derivation the default path for development testing.
+
+- **E4 (Smoke Coverage):** [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) added comprehensive test `smoke:auth:policy-derivation` validating:
+  - Mint token with `roles: ["viewer"]` (no explicit policy)
+  - `/auth/policy` returns derived permissions: `{ "*:read": true }` (no `"*"` or `"*:*"`)
+  - Read permission works: `GET /objects/product` → 200
+  - Write permission denied: `POST /objects/product` → 403 with "Forbidden" message
+  
+  Registered in [ops/ci-smokes.json](../ops/ci-smokes.json); full CI smoke suite (48 tests) passes.
+
+- **E5 (Documentation):** Updated this section in MBapp-Status.md and [MBapp-Backend-Guide.md](MBapp-Backend-Guide.md) § 2 with role derivation logic, role mappings table, and wildcard semantics reference.
+
+- **Verification:** ✅ All typechecks passed (API, mobile); ✅ spec pipeline clean (lint/bundle/types); ✅ smoke suite green (48/48 including new auth test).
+
+- **Guarantee:** JWT tokens with `roles` but no explicit `policy` now derive permissions automatically. Dev-login defaults to role derivation (no more auto-wildcard grants). Production-ready role-based access control foundation in place.
+
 ### Auth Policy & Module Visibility
 
 The mobile ModuleHub fetches `GET /auth/policy` to determine which modules are visible and enabled:
@@ -545,7 +578,6 @@ The mobile ModuleHub fetches `GET /auth/policy` to determine which modules are v
 - **Recurring reservations:** Out-of-scope for v1 (Sprint V notes)
 - **Availability patterns:** "Closed Sundays" style patterns deferred (Sprint V notes)
 - **Capacity/multi-resource reservations:** Design-only in v1 (Sprint V notes)
-- **Auth policy derivation:** `/auth/policy` endpoint uses dev stub; production should derive scopes from JWT roles (see TODO in apps/api/src/auth/policy.ts line 9)
 
 ---
 

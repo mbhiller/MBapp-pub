@@ -6046,6 +6046,166 @@ const tests = {
     };
   },
 
+  "smoke:auth:policy-derivation": async () => {
+    // Test: JWT with roles but no explicit policy should derive permissions correctly
+    // Flow:
+    //   1) Mint token with roles:["viewer"] (no explicit policy)
+    //   2) Verify /auth/policy returns derived permissions
+    //   3) Verify read permissions work (200)
+    //   4) Verify write permissions fail (403)
+
+    // Step 1: POST /auth/dev-login with roles:["viewer"], NO policy field
+    const loginPayload = {
+      tenantId: TENANT,
+      roles: ["viewer"]
+      // IMPORTANT: no 'policy' field - let derivation handle it
+    };
+    const loginRes = await fetch(`${API}/auth/dev-login`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify(loginPayload)
+    });
+
+    if (!loginRes.ok) {
+      const errText = await loginRes.text().catch(() => "");
+      return {
+        test: "auth:policy-derivation",
+        result: "FAIL",
+        step: "dev-login",
+        status: loginRes.status,
+        error: errText
+      };
+    }
+
+    const loginData = await loginRes.json();
+    const viewerToken = loginData.token;
+    if (!viewerToken) {
+      return {
+        test: "auth:policy-derivation",
+        result: "FAIL",
+        step: "extract-token",
+        loginData
+      };
+    }
+
+    // Step 2: GET /auth/policy using viewer token
+    const policyRes = await fetch(`${API}/auth/policy`, {
+      headers: {
+        "authorization": `Bearer ${viewerToken}`,
+        "x-tenant-id": TENANT
+      }
+    });
+
+    if (!policyRes.ok) {
+      return {
+        test: "auth:policy-derivation",
+        result: "FAIL",
+        step: "get-policy",
+        status: policyRes.status,
+        body: await policyRes.json().catch(() => ({}))
+      };
+    }
+
+    const policyData = await policyRes.json();
+    
+    // Assert policy is an object with expected viewer permissions
+    const isObject = policyData && typeof policyData === "object" && !Array.isArray(policyData);
+    const hasReadAll = policyData["*:read"] === true;
+    const noSuperuser = policyData["*"] !== true;
+    const noWildcardAll = policyData["*:*"] !== true;
+
+    if (!isObject || !hasReadAll || !noSuperuser || !noWildcardAll) {
+      return {
+        test: "auth:policy-derivation",
+        result: "FAIL",
+        step: "assert-policy-shape",
+        policyData,
+        assertions: {
+          isObject,
+          hasReadAll,
+          noSuperuser,
+          noWildcardAll
+        }
+      };
+    }
+
+    // Step 3: Allow check - verify read permissions work (GET /objects/product?limit=1)
+    const readRes = await fetch(`${API}/objects/product?limit=1`, {
+      headers: {
+        "authorization": `Bearer ${viewerToken}`,
+        "x-tenant-id": TENANT
+      }
+    });
+
+    const readOk = readRes.ok;
+    if (!readOk) {
+      return {
+        test: "auth:policy-derivation",
+        result: "FAIL",
+        step: "read-permission-check",
+        expectedStatus: 200,
+        actualStatus: readRes.status,
+        body: await readRes.json().catch(() => ({}))
+      };
+    }
+
+    // Step 4: Deny check - verify write permissions fail (POST /objects/product)
+    const writePayload = {
+      type: "product",
+      name: smokeTag(`PolicyDenyTest-${Date.now()}`),
+      sku: `TEST-${Date.now()}`
+    };
+    const writeRes = await fetch(`${API}/objects/product`, {
+      method: "POST",
+      headers: {
+        "authorization": `Bearer ${viewerToken}`,
+        "x-tenant-id": TENANT,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(writePayload)
+    });
+
+    const writeStatus = writeRes.status;
+    const writeBody = await writeRes.json().catch(() => ({}));
+    const writeDenied = writeStatus === 403;
+    const hasForbiddenMessage = writeBody?.message && 
+      (writeBody.message.toLowerCase().includes("forbidden") || 
+       writeBody.message.toLowerCase().includes("missing permission"));
+
+    if (!writeDenied || !hasForbiddenMessage) {
+      return {
+        test: "auth:policy-derivation",
+        result: "FAIL",
+        step: "write-permission-deny-check",
+        expectedStatus: 403,
+        actualStatus: writeStatus,
+        expectedMessagePattern: "forbidden | missing permission",
+        actualMessage: writeBody?.message,
+        body: writeBody
+      };
+    }
+
+    // All checks passed
+    return {
+      test: "auth:policy-derivation",
+      result: "PASS",
+      summary: "Viewer role derives correct permissions: read allowed, write denied",
+      assertions: {
+        policyIsObject: isObject,
+        policyHasReadAll: hasReadAll,
+        policyNoSuperuser: noSuperuser,
+        policyNoWildcardAll: noWildcardAll,
+        readAllowed: readOk,
+        writeDenied: writeDenied,
+        forbiddenMessagePresent: hasForbiddenMessage
+      },
+      policySnapshot: policyData
+    };
+  },
+
   /* ===================== Sprint III: Views, Workspaces, Events ===================== */
   
   "smoke:views:crud": async ()=>{

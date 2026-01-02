@@ -33,37 +33,28 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
   const tenantId = String(body.tenantId ?? "DemoTenant");  // <- default to DemoTenant
   const roles: string[] = Array.isArray(body.roles) && body.roles.length ? body.roles : ["admin"];
 
-  // Use caller policy if provided; otherwise a full dev policy (boolean map only)
-  const policy: Record<string, boolean> =
-    (body.policy && typeof body.policy === "object")
+  // Only include explicit policy if provided; otherwise let role derivation handle it
+  const policy: Record<string, boolean> | undefined =
+    (body.policy && typeof body.policy === "object" && !Array.isArray(body.policy))
       ? body.policy
-      : {
-          "*": true,                 // full access in dev
-          "*:read": true,
-          "*:write": true,
-          "*:approve": true,
-          "*:commit": true,
-          "*:receive": true,
-          "*:fulfill": true,
-          "tools:seed": true,
-          "admin:reset": true,
-        };
+      : undefined;
 
   const issuer   = env("JWT_ISSUER", "mbapp");
   const audience = env("JWT_AUDIENCE", "mbapp");
   const userId   = email;
+
+  // Build mbapp claim: always include userId, tenantId, roles; only include policy if explicitly provided
+  const mbappClaim: any = { userId, tenantId, roles };
+  if (policy !== undefined) {
+    mbappClaim.policy = policy;
+  }
 
   const token = jwt.sign(
     {
       sub: userId,
       iss: issuer,
       aud: audience,
-      mbapp: {
-        userId,
-        tenantId,
-        roles,
-        policy,
-      },
+      mbapp: mbappClaim,
     },
     JWT_SECRET,
     { algorithm: "HS256", expiresIn: "12h" }

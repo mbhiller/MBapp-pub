@@ -1153,47 +1153,9 @@ components:
             type: string
     Policy:
       type: object
-      properties:
-        tenantId:
-          type: string
-        userId:
-          type: string
-        roles:
-          type: array
-          items:
-            type: string
-        permissions:
-          type: array
-          items:
-            type: string
-        ui:
-          type: object
-          properties:
-            allowedModuleKeys:
-              type: array
-              items:
-                type: string
-            allowedViews:
-              type: array
-              items:
-                type: object
-                properties:
-                  id:
-                    type: string
-                  moduleKey:
-                    type: string
-            allowedWorkspaces:
-              type: array
-              items:
-                type: object
-                properties:
-                  id:
-                    type: string
-                  name:
-                    type: string
-      required:
-      - permissions
-      - roles
+      description: "Permission map; keys are permission strings (e.g., 'product:read', 'inventory:write'); values are boolean (true if granted). Supports wildcard patterns: '*' (superuser), '*:*' (all actions), '*:read' (read all), 'product:*' (all product actions)."
+      additionalProperties:
+        type: boolean
     Product:
       allOf:
       - $ref: '#/components/schemas/ObjectBase'
