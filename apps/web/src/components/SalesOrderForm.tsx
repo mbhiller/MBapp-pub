@@ -34,9 +34,10 @@ type Props = {
   initialValue?: Partial<SalesOrderFormValue>;
   submitLabel?: string;
   onSubmit: (value: SalesOrderFormValue) => Promise<void> | void;
+  disabled?: boolean;
 };
 
-export function SalesOrderForm({ initialValue, submitLabel = "Save", onSubmit }: Props) {
+export function SalesOrderForm({ initialValue, submitLabel = "Save", onSubmit, disabled = false }: Props) {
   const [partyId, setPartyId] = useState(initialValue?.partyId ?? "");
   const [customerId, setCustomerId] = useState(initialValue?.customerId ?? "");
   const [notes, setNotes] = useState(initialValue?.notes ?? "");
@@ -53,6 +54,8 @@ export function SalesOrderForm({ initialValue, submitLabel = "Save", onSubmit }:
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const effectiveDisabled = disabled || submitting;
 
   useEffect(() => {
     if (initialValue) {
@@ -74,6 +77,10 @@ export function SalesOrderForm({ initialValue, submitLabel = "Save", onSubmit }:
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (disabled) {
+      setError("Sales order can only be edited in draft status");
+      return;
+    }
     setError(null);
     setSubmitting(true);
     try {
@@ -120,30 +127,41 @@ export function SalesOrderForm({ initialValue, submitLabel = "Save", onSubmit }:
     <form onSubmit={handleSubmit} style={{ display: "grid", gap: 12, maxWidth: 720 }}>
       <label style={{ display: "grid", gap: 4 }}>
         <span>Party ID *</span>
-        <input value={partyId} onChange={(e) => setPartyId(e.target.value)} placeholder="customer party id" required />
+        <input
+          value={partyId}
+          onChange={(e) => setPartyId(e.target.value)}
+          placeholder="customer party id"
+          required
+          disabled={effectiveDisabled}
+        />
       </label>
 
       <label style={{ display: "grid", gap: 4 }}>
         <span>Customer ID (optional)</span>
-        <input value={customerId} onChange={(e) => setCustomerId(e.target.value)} placeholder="legacy customerId" />
+        <input
+          value={customerId}
+          onChange={(e) => setCustomerId(e.target.value)}
+          placeholder="legacy customerId"
+          disabled={effectiveDisabled}
+        />
       </label>
 
       <label style={{ display: "grid", gap: 4 }}>
         <span>Notes</span>
-        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
+        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} disabled={effectiveDisabled} />
       </label>
 
       <LineArrayEditor
         lines={lines}
         onChange={setLines}
         fields={["itemId", "qty", "uom"]}
-        disabled={submitting}
+        disabled={effectiveDisabled}
         itemIdLabel="Item ID"
       />
 
       {error ? <div style={{ padding: 12, background: "#fee", color: "#b00020", borderRadius: 4 }}>{error}</div> : null}
 
-      <button type="submit" disabled={submitting}>
+      <button type="submit" disabled={effectiveDisabled}>
         {submitting ? "Saving..." : submitLabel}
       </button>
     </form>

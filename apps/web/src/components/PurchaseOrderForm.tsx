@@ -33,9 +33,10 @@ type Props = {
   initialValue?: Partial<PurchaseOrderFormValue>;
   submitLabel?: string;
   onSubmit: (value: PurchaseOrderFormValue) => Promise<void> | void;
+  disabled?: boolean;
 };
 
-export function PurchaseOrderForm({ initialValue, submitLabel = "Save", onSubmit }: Props) {
+export function PurchaseOrderForm({ initialValue, submitLabel = "Save", onSubmit, disabled = false }: Props) {
   const [vendorId, setVendorId] = useState(initialValue?.vendorId ?? "");
   const [notes, setNotes] = useState(initialValue?.notes ?? "");
   const [lines, setLines] = useState<LineInput[]>(() => {
@@ -51,6 +52,8 @@ export function PurchaseOrderForm({ initialValue, submitLabel = "Save", onSubmit
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const effectiveDisabled = disabled || submitting;
 
   useEffect(() => {
     if (initialValue) {
@@ -71,6 +74,10 @@ export function PurchaseOrderForm({ initialValue, submitLabel = "Save", onSubmit
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (disabled) {
+      setError("Purchase order can only be edited in draft status");
+      return;
+    }
     setError(null);
     setSubmitting(true);
     try {
@@ -116,25 +123,31 @@ export function PurchaseOrderForm({ initialValue, submitLabel = "Save", onSubmit
     <form onSubmit={handleSubmit} style={{ display: "grid", gap: 12, maxWidth: 720 }}>
       <label style={{ display: "grid", gap: 4 }}>
         <span>Vendor ID *</span>
-        <input value={vendorId} onChange={(e) => setVendorId(e.target.value)} placeholder="vendor party id" required />
+        <input
+          value={vendorId}
+          onChange={(e) => setVendorId(e.target.value)}
+          placeholder="vendor party id"
+          required
+          disabled={effectiveDisabled}
+        />
       </label>
 
       <label style={{ display: "grid", gap: 4 }}>
         <span>Notes</span>
-        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
+        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} disabled={effectiveDisabled} />
       </label>
 
       <LineArrayEditor
         lines={lines}
         onChange={setLines}
         fields={["itemId", "qty", "uom"]}
-        disabled={submitting}
+        disabled={effectiveDisabled}
         itemIdLabel="Item ID"
       />
 
       {error ? <div style={{ padding: 12, background: "#fee", color: "#b00020", borderRadius: 4 }}>{error}</div> : null}
 
-      <button type="submit" disabled={submitting}>
+      <button type="submit" disabled={effectiveDisabled}>
         {submitting ? "Saving..." : submitLabel}
       </button>
     </form>

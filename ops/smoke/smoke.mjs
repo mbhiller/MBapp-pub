@@ -3899,6 +3899,7 @@ const tests = {
     const keepLine = createLines[0] || {};
     const keepLineId = keepLine.id ?? keepLine.lineId;
     const removeLineId = (createLines[1]?.id ?? createLines[1]?.lineId) || "";
+    const newCid = `tmp-${Math.random().toString(36).slice(2, 10)}`;
 
     // 2) Patch-lines: update qty of first line, remove second line, add a new third line
     const patch = await post(
@@ -3907,7 +3908,7 @@ const tests = {
         ops: [
           { op: "upsert", id: keepLineId, patch: { qty: (Number(keepLine.qty) || 0) + 1 } },
           { op: "remove", id: removeLineId },
-          { op: "upsert", patch: { itemId, uom: "ea", qty: 5 } },
+          { op: "upsert", cid: newCid, patch: { itemId, uom: "ea", qty: 5 } },
         ],
       },
       { "Idempotency-Key": idem() }
@@ -3940,6 +3941,7 @@ const tests = {
       keepLineId,
       removeLineId,
       addedLineId,
+      newCid,
       idReused,
       addedLineIdIsValid,
       allIdsValid,
@@ -3985,6 +3987,7 @@ const tests = {
     const keepLine = createLines[0] || {};
     const keepLineId = keepLine.id ?? keepLine.lineId;
     const removeLineId = (createLines[1]?.id ?? createLines[1]?.lineId) || "";
+    const newCid = `tmp-${Math.random().toString(36).slice(2, 10)}`;
 
     // 2) Patch-lines: update qty of first line, remove second line, add a new third line
     const patch = await post(
@@ -3993,7 +3996,7 @@ const tests = {
         ops: [
           { op: "upsert", id: keepLineId, patch: { qty: (Number(keepLine.qty) || 0) + 2 } },
           { op: "remove", id: removeLineId },
-          { op: "upsert", patch: { itemId, uom: "ea", qty: 7 } },
+          { op: "upsert", cid: newCid, patch: { itemId, uom: "ea", qty: 7 } },
         ],
       },
       { "Idempotency-Key": idem() }
@@ -4026,6 +4029,7 @@ const tests = {
       keepLineId,
       removeLineId,
       addedLineId,
+      newCid,
       idReused,
       addedLineIdIsValid,
       allIdsValid,
@@ -4037,6 +4041,64 @@ const tests = {
       create,
       patch,
       got,
+    };
+  },
+
+  // Negative validation: patch-lines must reject tmp-* in id (cid-only) and keep lines unchanged
+  "smoke:salesOrders:patch-lines:validation": async () => {
+    await ensureBearer();
+
+    const { partyId } = await seedParties(api);
+
+    // Create draft SO with no lines to isolate side effects
+    const create = await post(
+      `/objects/salesOrder`,
+      {
+        type: "salesOrder",
+        status: "draft",
+        partyId,
+        lines: [],
+      },
+      { "Idempotency-Key": idem() }
+    );
+    if (!create.ok) return { test: "salesOrders:patch-lines:validation", result: "FAIL", reason: "so-create-failed", create };
+
+    const soId = create.body?.id;
+
+    // Invalid op: id uses tmp-* prefix (reserved for cid) -> must 400 with PATCH_LINES_INVALID_ID
+    const invalid = await post(
+      `/sales/so/${encodeURIComponent(soId)}:patch-lines`,
+      {
+        ops: [
+          { op: "upsert", id: "tmp-should-be-cid", patch: { itemId: "ValidationItem", qty: 1, uom: "ea" } },
+        ],
+      },
+      { "Idempotency-Key": idem() }
+    );
+
+    const blocked = !invalid.ok && invalid.status === 400;
+    const code = invalid.body?.details?.code;
+    const messageHasTmp = typeof invalid.body?.message === "string" && invalid.body.message.toLowerCase().includes("tmp");
+
+    // Ensure no lines were added despite invalid request
+    const fetch = await get(`/objects/salesOrder/${encodeURIComponent(soId)}`);
+    const lineCount = Array.isArray(fetch.body?.lines) ? fetch.body.lines.length : 0;
+    const noLinesCreated = fetch.ok && lineCount === 0;
+
+    const pass = blocked && code === "PATCH_LINES_INVALID_ID" && noLinesCreated;
+
+    return {
+      test: "salesOrders:patch-lines:validation",
+      result: pass ? "PASS" : "FAIL",
+      assertions: {
+        blocked,
+        codeIsPatchLinesInvalidId: code === "PATCH_LINES_INVALID_ID",
+        messageHasTmp,
+        noLinesCreated,
+      },
+      create,
+      invalid,
+      fetch,
     };
   },
 
@@ -8643,6 +8705,148 @@ const tests = {
         patch2_ok: patch2.ok,
         qtyUpdated
       }
+    };
+  },
+
+  // Alias + parity: ensure SO CID flow matches PO (tmp-* cid -> server L{n} id, stable across updates)
+  "smoke:salesOrders:patch-lines:cid": async () => {
+    await ensureBearer();
+
+    const { customerId } = await seedCustomer(api);
+
+    // Step 1: Create SO draft with no lines
+    const create = await post(`/objects/salesOrder`, {
+      type: "salesOrder",
+      status: "draft",
+      customerId,
+      lines: [],
+    });
+
+    if (!create.ok || !create.body?.id) {
+      return { test: "salesOrders:patch-lines:cid", result: "FAIL", reason: "so-create-failed", create };
+    }
+
+    const soId = create.body.id;
+
+    // Step 2: Seed product + inventory for line
+    const prod = await createProduct({ name: "SoCidParity" });
+    if (!prod.ok) return { test: "salesOrders:patch-lines:cid", result: "FAIL", reason: "product-create-failed", prod };
+
+    const inv = await createInventoryForProduct(prod.body.id, "SoCidParityItem");
+    if (!inv.ok) return { test: "salesOrders:patch-lines:cid", result: "FAIL", reason: "inventory-create-failed", inv };
+
+    const itemId = inv.body?.id;
+
+    // Step 3: Add line via cid (tmp-*)
+    const clientId = `tmp-${Math.random().toString(36).slice(2, 11)}`;
+
+    const patch1 = await post(
+      `/sales/so/${encodeURIComponent(soId)}:patch-lines`,
+      {
+        ops: [
+          {
+            op: "upsert",
+            cid: clientId,
+            patch: { itemId, qty: 4, uom: "ea" },
+          },
+        ],
+      },
+      { "Idempotency-Key": idem() }
+    );
+
+    if (!patch1.ok) {
+      return { test: "salesOrders:patch-lines:cid", result: "FAIL", reason: "patch1-failed", patch1 };
+    }
+
+    // Step 4: Fetch and capture server-assigned id (must be L{n})
+    const fetch1 = await get(`/objects/salesOrder/${encodeURIComponent(soId)}`);
+
+    if (!fetch1.ok || !fetch1.body) {
+      return { test: "salesOrders:patch-lines:cid", result: "FAIL", reason: "so-fetch1-failed", fetch1 };
+    }
+
+    const lines1 = Array.isArray(fetch1.body.lines) ? fetch1.body.lines : [];
+    if (lines1.length === 0) {
+      return { test: "salesOrders:patch-lines:cid", result: "FAIL", reason: "no-lines-after-patch1", fetch1: fetch1.body };
+    }
+
+    const newLine = lines1.find((ln) => ln.itemId === itemId);
+    if (!newLine || !newLine.id) {
+      return {
+        test: "salesOrders:patch-lines:cid",
+        result: "FAIL",
+        reason: "new-line-not-found-or-no-id",
+        lines1: lines1.map((ln) => ({ id: ln.id, itemId: ln.itemId })),
+      };
+    }
+
+    const serverId = String(newLine.id).trim();
+    const lineIdPattern = /^L\d+$/;
+    const serverIdValid = lineIdPattern.test(serverId);
+
+    if (!serverIdValid) {
+      return {
+        test: "salesOrders:patch-lines:cid",
+        result: "FAIL",
+        reason: "server-id-invalid-pattern",
+        serverId,
+        expectedPattern: "L{n}",
+      };
+    }
+
+    // Step 5: Update same line via id and ensure id stability (no reuse/flip)
+    const patch2 = await post(
+      `/sales/so/${encodeURIComponent(soId)}:patch-lines`,
+      {
+        ops: [
+          {
+            op: "upsert",
+            id: serverId,
+            patch: { qty: 9 },
+          },
+        ],
+      },
+      { "Idempotency-Key": idem() }
+    );
+
+    if (!patch2.ok) {
+      return { test: "salesOrders:patch-lines:cid", result: "FAIL", reason: "patch2-failed", patch2 };
+    }
+
+    // Step 6: Fetch again and assert id unchanged + qty updated
+    const fetch2 = await get(`/objects/salesOrder/${encodeURIComponent(soId)}`);
+
+    if (!fetch2.ok || !fetch2.body) {
+      return { test: "salesOrders:patch-lines:cid", result: "FAIL", reason: "so-fetch2-failed", fetch2 };
+    }
+
+    const lines2 = Array.isArray(fetch2.body.lines) ? fetch2.body.lines : [];
+    const updatedLine = lines2.find((ln) => ln.id === serverId);
+
+    if (!updatedLine) {
+      return { test: "salesOrders:patch-lines:cid", result: "FAIL", reason: "updated-line-not-found", serverId, lines2 };
+    }
+
+    const qtyUpdated = updatedLine.qty === 9;
+    const idStable = updatedLine.id === serverId;
+
+    const pass = serverIdValid && qtyUpdated && idStable;
+
+    return {
+      test: "salesOrders:patch-lines:cid",
+      result: pass ? "PASS" : "FAIL",
+      soId,
+      clientId,
+      serverId,
+      serverIdValid,
+      qtyUpdated,
+      idStable,
+      assertions: {
+        clientCidIsTmp: /^tmp-/.test(clientId),
+        serverIdMatchesPattern: serverIdValid,
+        idStableAcrossPatches: idStable,
+        qtyUpdated,
+      },
     };
   },
 
