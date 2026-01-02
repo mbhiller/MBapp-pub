@@ -16,6 +16,7 @@ import { friendlyPurchasingError } from "../lib/purchasingErrors";
 import LocationPicker from "../components/LocationPicker";
 import { resolveScan } from "@mbapp/scan";
 import { resolveEpc } from "../lib/epc";
+import { type BackorderRequest } from "../lib/backorders";
 
 const RECEIVE_DEFAULTS_PREFIX = "mbapp_receive_defaults_";
 
@@ -146,6 +147,12 @@ export default function PurchaseOrderDetailPage() {
     candidates?: Array<{ lineId: string; itemId?: string; remaining: number; label?: string }>;
     pendingScan?: string;
   }>({ open: false });
+  const [postReceiveOnhand, setPostReceiveOnhand] = useState<
+    Array<{ itemId: string; onHand?: number; reserved?: number; available?: number; asOf?: string }>
+  >([]);
+  const [postReceiveBackorders, setPostReceiveBackorders] = useState<BackorderRequest[]>([]);
+  const [verificationCollapsed, setVerificationCollapsed] = useState(true);
+  const [verificationLoading, setVerificationLoading] = useState(false);
 
   useEffect(() => {
     const defaults = loadReceiveDefaults(tenantId);
@@ -192,6 +199,125 @@ export default function PurchaseOrderDetailPage() {
   useEffect(() => {
     fetchPo();
   }, [fetchPo]);
+
+  const collectItemIdsForLines = useCallback(
+    (lineIds: string[]) => {
+      const ids = new Set<string>();
+      (po?.lines ?? []).forEach((line) => {
+        const key = line.id ?? line.lineId;
+        if (key && lineIds.includes(key) && line.itemId) {
+          ids.add(String(line.itemId));
+        }
+      });
+      return Array.from(ids);
+    },
+    [po?.lines]
+  );
+
+  const collectBackorderIdsForLines = useCallback(
+    (lineIds: string[]) => {
+      const ids = new Set<string>();
+      (po?.lines ?? []).forEach((line) => {
+        const key = line.id ?? line.lineId;
+        if (!key || !line.backorderRequestIds || line.backorderRequestIds.length === 0) return;
+        if (!lineIds.includes(key)) return;
+        line.backorderRequestIds.forEach((boId) => {
+          if (boId) ids.add(String(boId));
+        });
+      });
+      return Array.from(ids);
+    },
+    [po?.lines]
+  );
+
+  const fetchOnhandBatch = useCallback(
+    async (itemIds: string[]) => {
+      if (!itemIds || itemIds.length === 0) return [] as Array<{ itemId: string; onHand?: number; reserved?: number; available?: number; asOf?: string }>;
+      try {
+        const res = await apiFetch<{ items?: Array<{ itemId: string; onHand?: number; reserved?: number; available?: number; asOf?: string }> }>(
+          "/inventory/onhand:batch",
+          {
+            method: "POST",
+            token: token || undefined,
+            tenantId,
+            body: { itemIds },
+          }
+        );
+        return res.items ?? [];
+      } catch (err) {
+        console.warn("Onhand batch fetch failed", err);
+        return [];
+      }
+    },
+    [tenantId, token]
+  );
+
+  const fetchBackordersForVerification = useCallback(
+    async (backorderIds: string[], itemIds: string[]) => {
+      if (!backorderIds || backorderIds.length === 0) return [] as BackorderRequest[];
+      try {
+        const res = await apiFetch<{ items?: BackorderRequest[] }>("/objects/backorderRequest/search", {
+          method: "POST",
+          token: token || undefined,
+          tenantId,
+          body: { ids: backorderIds },
+        });
+        if (res.items && res.items.length > 0) return res.items;
+      } catch (err) {
+        console.warn("Backorder search by ids failed", err);
+      }
+
+      // Fallback: query fulfilled backorders by itemId to confirm closure
+      const collected: BackorderRequest[] = [];
+      for (const itemId of itemIds) {
+        try {
+          const res = await apiFetch<{ items?: BackorderRequest[] }>("/objects/backorderRequest/search", {
+            method: "POST",
+            token: token || undefined,
+            tenantId,
+            body: { itemId, status: "fulfilled" },
+          });
+          if (res.items) collected.push(...res.items);
+        } catch (err) {
+          console.warn("Backorder search by itemId failed", err);
+        }
+      }
+      // Deduplicate
+      const seen = new Set<string>();
+      return collected.filter((bo) => {
+        const key = bo?.id ?? bo?.soLineId ?? bo?.itemId;
+        if (!key) return true;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    },
+    [tenantId, token]
+  );
+
+  const runPostReceiveVerification = useCallback(
+    async (receivedLineIds: string[]) => {
+      const normalizedLineIds = receivedLineIds.filter(Boolean);
+      if (normalizedLineIds.length === 0) return;
+      setVerificationLoading(true);
+      setVerificationCollapsed(false);
+      try {
+        const itemIds = collectItemIdsForLines(normalizedLineIds);
+        const backorderIds = collectBackorderIdsForLines(normalizedLineIds);
+        const [onhandItems, backorders] = await Promise.all([
+          fetchOnhandBatch(itemIds),
+          backorderIds.length > 0 ? fetchBackordersForVerification(backorderIds, itemIds) : Promise.resolve([] as BackorderRequest[]),
+        ]);
+        setPostReceiveOnhand(onhandItems);
+        setPostReceiveBackorders(backorders);
+      } catch (err) {
+        console.warn("Post-receive verification failed", err);
+      } finally {
+        setVerificationLoading(false);
+      }
+    },
+    [collectBackorderIdsForLines, collectItemIdsForLines, fetchBackordersForVerification, fetchOnhandBatch]
+  );
 
   // Prefill deltaQty with remaining by default without overriding user inputs
   useEffect(() => {
@@ -375,6 +501,7 @@ export default function PurchaseOrderDetailPage() {
       // Generate idempotency key
       const uuid = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       const idempotencyKey = `web-receive-${id}-${uuid}`;
+      const receivedLineIds = linesToReceive.map((l) => l.id).filter(Boolean);
 
       await receivePurchaseOrder(
         id,
@@ -397,6 +524,7 @@ export default function PurchaseOrderDetailPage() {
       setLineState({});
       setLineErrors({});
       await fetchPo();
+      await runPostReceiveVerification(receivedLineIds);
       setActionInfo(`Received ${linesToReceive.length} line(s).`);
 
       // Track success
@@ -407,6 +535,25 @@ export default function PurchaseOrderDetailPage() {
         lineCount: linesToReceive.length,
       });
     } catch (err: any) {
+      const code = err?.code ?? err?.details?.code;
+      const message = (err?.message ?? err?.details?.message ?? "").toString().toLowerCase();
+      const receivedLineIds = linesToReceive.map((l) => l.id).filter(Boolean);
+      const idempotentReplay = err?.status === 409 && (String(code || "").toLowerCase().includes("idempot") || message.includes("idempot"));
+
+      if (idempotentReplay) {
+        setActionError(null);
+        setActionInfo("Receive already applied (idempotent).");
+        await fetchPo();
+        await runPostReceiveVerification(receivedLineIds);
+        track("PO_Receive_Clicked", {
+          objectType: "purchaseOrder",
+          objectId: id,
+          result: "idempotent",
+          lineCount: linesToReceive.length,
+        });
+        return;
+      }
+
       setActionError(renderFriendly(err));
 
       // Track failure
@@ -488,6 +635,7 @@ export default function PurchaseOrderDetailPage() {
           ? crypto.randomUUID()
           : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       const idempotencyKey = `web-bulk-receive-${id}-${uuid}`;
+      const receivedLineIds = linesToReceive.map((l) => l.id).filter(Boolean);
 
       await receivePurchaseOrder(
         id,
@@ -508,8 +656,22 @@ export default function PurchaseOrderDetailPage() {
       }
 
       await fetchPo();
+      await runPostReceiveVerification(receivedLineIds);
       setActionInfo(`Received ${linesToReceive.length} line(s).`);
     } catch (err: any) {
+      const code = err?.code ?? err?.details?.code;
+      const message = (err?.message ?? err?.details?.message ?? "").toString().toLowerCase();
+      const receivedLineIds = linesToReceive.map((l) => l.id).filter(Boolean);
+      const idempotentReplay = err?.status === 409 && (String(code || "").toLowerCase().includes("idempot") || message.includes("idempot"));
+
+      if (idempotentReplay) {
+        setActionError(null);
+        setActionInfo("Receive already applied (idempotent).");
+        await fetchPo();
+        await runPostReceiveVerification(receivedLineIds);
+        return;
+      }
+
       setActionError(renderFriendly(err));
     } finally {
       setActionLoading(false);
@@ -739,6 +901,7 @@ export default function PurchaseOrderDetailPage() {
           ? crypto.randomUUID()
           : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       const idempotencyKey = `web-scan-receive-${id}-${uuid}`;
+      const receivedLineIds = linesToReceive.map((l) => l.lineId).filter(Boolean);
 
       await receivePurchaseOrder(id, { lines: linesToReceive }, { token: token || undefined, tenantId, idempotencyKey });
 
@@ -746,8 +909,22 @@ export default function PurchaseOrderDetailPage() {
       setScanInput("");
       setScanMessage(null);
       await fetchPo();
+      await runPostReceiveVerification(receivedLineIds);
       setActionInfo(`Received ${linesToReceive.length} line(s) via scan.`);
     } catch (err: any) {
+      const code = err?.code ?? err?.details?.code;
+      const message = (err?.message ?? err?.details?.message ?? "").toString().toLowerCase();
+      const receivedLineIds = linesToReceive.map((l) => l.lineId).filter(Boolean);
+      const idempotentReplay = err?.status === 409 && (String(code || "").toLowerCase().includes("idempot") || message.includes("idempot"));
+
+      if (idempotentReplay) {
+        setActionError(null);
+        setActionInfo("Receive already applied (idempotent).");
+        await fetchPo();
+        await runPostReceiveVerification(receivedLineIds);
+        return;
+      }
+
       setActionError(renderFriendly(err));
     } finally {
       setActionLoading(false);
@@ -868,6 +1045,94 @@ export default function PurchaseOrderDetailPage() {
       {actionInfo && (
         <div style={{ padding: 12, background: "#e8f5e9", color: "#1b5e20", borderRadius: 4 }}>
           {actionInfo}
+        </div>
+      )}
+
+      {(verificationLoading || postReceiveOnhand.length > 0 || postReceiveBackorders.length > 0) && (
+        <div style={{ border: "1px solid #ddd", borderRadius: 6, padding: 12, background: "#f7f9fb" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <div style={{ fontWeight: 700 }}>Post-receive verification</div>
+            <button
+              onClick={() => setVerificationCollapsed((v) => !v)}
+              style={{ border: "1px solid #ccc", background: "#fff", borderRadius: 4, padding: "4px 8px", cursor: "pointer" }}
+            >
+              {verificationCollapsed ? "Expand" : "Collapse"}
+            </button>
+          </div>
+          {verificationLoading && <div style={{ fontSize: 13, color: "#666" }}>Refreshing verification…</div>}
+          {!verificationCollapsed && (
+            <div style={{ display: "grid", gap: 12 }}>
+              <div>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>Onhand after receive</div>
+                {postReceiveOnhand.length === 0 ? (
+                  <div style={{ fontSize: 13, color: "#666" }}>No onhand data available.</div>
+                ) : (
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                      <thead>
+                        <tr style={{ background: "#eef3f8" }}>
+                          <th style={{ padding: 6, border: "1px solid #dfe4ea", textAlign: "left" }}>Item</th>
+                          <th style={{ padding: 6, border: "1px solid #dfe4ea", textAlign: "left" }}>On Hand</th>
+                          <th style={{ padding: 6, border: "1px solid #dfe4ea", textAlign: "left" }}>Reserved</th>
+                          <th style={{ padding: 6, border: "1px solid #dfe4ea", textAlign: "left" }}>Available</th>
+                          <th style={{ padding: 6, border: "1px solid #dfe4ea", textAlign: "left" }}>As Of</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {postReceiveOnhand.map((row) => (
+                          <tr key={row.itemId}>
+                            <td style={{ padding: 6, border: "1px solid #dfe4ea" }}>{row.itemId}</td>
+                            <td style={{ padding: 6, border: "1px solid #dfe4ea" }}>{row.onHand ?? "—"}</td>
+                            <td style={{ padding: 6, border: "1px solid #dfe4ea" }}>{row.reserved ?? "—"}</td>
+                            <td style={{ padding: 6, border: "1px solid #dfe4ea" }}>{row.available ?? "—"}</td>
+                            <td style={{ padding: 6, border: "1px solid #dfe4ea" }}>
+                              {row.asOf ? new Date(row.asOf).toLocaleString() : "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>Backorders fulfilled</div>
+                {postReceiveBackorders.length === 0 ? (
+                  <div style={{ fontSize: 13, color: "#666" }}>No linked backorders detected.</div>
+                ) : (
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                      <thead>
+                        <tr style={{ background: "#eef3f8" }}>
+                          <th style={{ padding: 6, border: "1px solid #dfe4ea", textAlign: "left" }}>Backorder</th>
+                          <th style={{ padding: 6, border: "1px solid #dfe4ea", textAlign: "left" }}>Status</th>
+                          <th style={{ padding: 6, border: "1px solid #dfe4ea", textAlign: "left" }}>Remaining Qty</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {postReceiveBackorders.map((bo) => (
+                          <tr key={bo.id}>
+                            <td style={{ padding: 6, border: "1px solid #dfe4ea" }}>
+                              {bo.id ? (
+                                <Link to={`/backorders/${bo.id}`} style={{ color: "#1976d2" }}>
+                                  {bo.id} →
+                                </Link>
+                              ) : (
+                                "—"
+                              )}
+                            </td>
+                            <td style={{ padding: 6, border: "1px solid #dfe4ea" }}>{bo.status ?? "—"}</td>
+                            <td style={{ padding: 6, border: "1px solid #dfe4ea" }}>{bo.remainingQty ?? "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

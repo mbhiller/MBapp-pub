@@ -37,10 +37,11 @@ function humanizeReason(reason?: string): string {
 function DraftCard({ draft }: { draft: PurchaseOrderDraft }) {
   const lines = draft.lines || [];
   const vendorLabel = draft.vendorName || draft.vendorId || "(unknown)";
+  const vendorIdLabel = draft.vendorId ? ` · ${draft.vendorId}` : "";
   return (
     <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12, background: "#fff" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <div style={{ fontWeight: 700 }}>Vendor: {vendorLabel}</div>
+        <div style={{ fontWeight: 700 }}>Vendor: {vendorLabel}{vendorIdLabel}</div>
         {draft.status && <div style={{ fontSize: 12, color: "#666" }}>Status: {draft.status}</div>}
       </div>
       <div style={{ display: "grid", gap: 8 }}>
@@ -50,26 +51,48 @@ function DraftCard({ draft }: { draft: PurchaseOrderDraft }) {
             key={ln.id || ln.lineId || `${ln.itemId || "line"}-${idx}`}
             style={{ padding: 8, border: "1px solid #eee", borderRadius: 6, background: "#fafafa" }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-              <div style={{ fontWeight: 600 }}>Item: {ln.itemId || "(unknown)"}</div>
-              <div>
-                Qty: {(ln.qtySuggested ?? ln.qty) ?? "—"}{ln.uom ? ` ${ln.uom}` : ""}
-                {ln.qtyRequested != null && (ln.qtySuggested ?? ln.qty) !== ln.qtyRequested
-                  ? ` (requested ${ln.qtyRequested})`
-                  : ""}
+            {/** Use best-effort fields to highlight MOQ bumps and notes */}
+            {(() => {
+              const requested = ln.qtyRequested ?? ln.qty ?? 0;
+              const suggested = ln.qtySuggested ?? ln.qty ?? 0;
+              const lineNote = (ln as any)?.note ?? (ln as any)?.notes ?? (ln as any)?.noteText;
+              return (
+            <div style={{ display: "grid", gap: 4 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                <div style={{ fontWeight: 600 }}>{ln.itemId || ln.productId || "(unknown item)"}</div>
+                <div>
+                  <span style={{ fontWeight: 600 }}>{suggested || "—"}</span>
+                  {ln.uom ? ` ${ln.uom}` : ""}
+                  {ln.qtyRequested != null && suggested !== requested ? (
+                    <span style={{ marginLeft: 6, color: "#d32f2f" }}>
+                      (requested {requested})
+                    </span>
+                  ) : null}
+                </div>
               </div>
+              {(ln.minOrderQtyApplied != null || ln.adjustedFrom != null || (ln.qtyRequested != null && suggested !== requested)) && (
+                <div style={{ fontSize: 12, color: "#555" }}>
+                  MOQ applied: {ln.minOrderQtyApplied ?? "—"}
+                  {ln.adjustedFrom != null ? ` · adjusted from ${ln.adjustedFrom}` : ""}
+                  {ln.qtyRequested != null && suggested !== requested ? " · bumped due to MOQ" : ""}
+                </div>
+              )}
+              {lineNote ? (
+                <div style={{ fontSize: 12, color: "#555" }}>Note: {lineNote}</div>
+              ) : null}
+              {ln.backorderRequestIds?.length ? (
+                <div style={{ fontSize: 12, color: "#555", marginTop: 4, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <span>Backorders ({ln.backorderRequestIds.length}):</span>
+                  {ln.backorderRequestIds.map((boId) => (
+                    <Link key={boId} to={`/backorders/${boId}`} style={{ color: "#1976d2" }}>
+                      {boId} →
+                    </Link>
+                  ))}
+                </div>
+              ) : null}
             </div>
-            {(ln.minOrderQtyApplied != null || ln.adjustedFrom != null) && (
-              <div style={{ fontSize: 12, color: "#555" }}>
-                {ln.minOrderQtyApplied != null && <span>MOQ Applied: {ln.minOrderQtyApplied} </span>}
-                {ln.adjustedFrom != null && <span>(from {ln.adjustedFrom})</span>}
-              </div>
-            )}
-            {ln.backorderRequestIds?.length ? (
-              <div style={{ fontSize: 12, color: "#555", marginTop: 4 }}>
-                Backorders: {ln.backorderRequestIds.join(", ")}
-              </div>
-            ) : null}
+              );
+            })()}
           </div>
         ))}
       </div>
@@ -127,10 +150,20 @@ export default function SuggestPurchaseOrdersPage() {
     setCreating(true);
     setActionError(null);
     try {
-      const res = await createPurchaseOrdersFromSuggestion(drafts.length === 1 ? drafts[0] : drafts, { token, tenantId });
-      const ids = res?.ids ?? (res?.id ? [res.id] : []);
+      const results = await Promise.all(
+        drafts.map((draft) => createPurchaseOrdersFromSuggestion(draft, { token, tenantId }))
+      );
+      const ids: string[] = [];
+      results.forEach((res) => {
+        const created = Array.isArray(res?.ids) ? res?.ids : res?.id ? [res.id] : [];
+        ids.push(...created);
+      });
       setCreatedIds(ids);
-      if (ids.length > 0) navigate(`/purchase-orders/${encodeURIComponent(ids[0])}`);
+      if (ids.length === 0) {
+        setActionError("No purchase orders were created.");
+      } else {
+        navigate(`/purchase-orders/${encodeURIComponent(ids[0])}`);
+      }
     } catch (err) {
       setActionError(formatError(err));
     } finally {
@@ -204,19 +237,51 @@ export default function SuggestPurchaseOrdersPage() {
         <h3 style={{ margin: "8px 0" }}>Drafts</h3>
         {drafts.length === 0 && <div style={{ color: "#666" }}>No drafts returned for this backorder.</div>}
         {drafts.map((draft, idx) => (
-          <DraftCard key={draft.vendorId || idx} draft={draft} />
+          <div key={draft.vendorId || idx} style={{ display: "grid", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ fontSize: 15, fontWeight: 700 }}>{draft.vendorName || draft.vendorId || "Vendor"}</div>
+              {draft.vendorId && (
+                <span style={{ fontSize: 12, color: "#555" }}>({draft.vendorId})</span>
+              )}
+            </div>
+            <DraftCard draft={draft} />
+          </div>
         ))}
       </div>
 
       <div style={{ display: "grid", gap: 8, marginBottom: 16 }}>
         <h3 style={{ margin: "8px 0" }}>Skipped</h3>
         {skipped.length === 0 && <div style={{ color: "#666" }}>No skipped backorders.</div>}
-        {skipped.map((s, idx) => (
-          <div key={s.backorderRequestId || idx} style={{ padding: 8, background: "#f9f9f9", borderRadius: 6, border: "1px solid #eee" }}>
-            <div style={{ fontWeight: 600 }}>Backorder: {s.backorderRequestId}</div>
-            <div style={{ color: "#555" }}>{humanizeReason(s.reason)}</div>
+        {skipped.length > 0 && (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: "#fff5f5" }}>
+                  <th style={{ padding: 8, border: "1px solid #ffcdd2", textAlign: "left" }}>Backorder ID</th>
+                  <th style={{ padding: 8, border: "1px solid #ffcdd2", textAlign: "left" }}>Reason (code)</th>
+                  <th style={{ padding: 8, border: "1px solid #ffcdd2", textAlign: "left" }}>Reason (friendly)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {skipped.map((s, idx) => (
+                  <tr key={s.backorderRequestId || idx}>
+                    <td style={{ padding: 8, border: "1px solid #ffcdd2" }}>
+                      {s.backorderRequestId ? (
+                        <Link to={`/backorders/${s.backorderRequestId}`} style={{ color: "#d32f2f" }}>
+                          {s.backorderRequestId} →
+                        </Link>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td style={{ padding: 8, border: "1px solid #ffcdd2" }}>{s.reason || "—"}</td>
+                    <td style={{ padding: 8, border: "1px solid #ffcdd2" }}>{humanizeReason(s.reason)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        ))}
+        )}
       </div>
 
       <div style={{ display: "flex", gap: 12, alignItems: "center" }}>

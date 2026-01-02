@@ -1,12 +1,27 @@
 # MBapp Status / Working
 
 **Navigation:** [Roadmap](MBapp-Roadmap-Master-v10.0.md) · [Foundations](SPRINT_XXVI_FOUNDATIONS_REPORT.md) · [Cadence](cadence.md) · [Verification](smoke-coverage.md)  
-**Last Updated:** 2025-12-28  
+**Last Updated:** 2026-01-02  
 **Workflow & DoD:** See [cadence.md](cadence.md) for canonical workflow, Definition of Done, and testing rules.
 
 ---
 
 ## Sprint C — Web Backorders Vertical Slice (2025-12-27)
+
+### Sprint I — Backorder → PO → Receive Parity Refresh (2026-01-02)
+
+**Theme:** Close drift on receive verification and clarify backorder/suggest-PO UX across web and mobile.
+
+**Deliverables:**
+- Added post-receive verification panel to PO detail (web + mobile): batches on-hand for received itemIds and queries open backorders; auto-runs after receive modal, receive-all, and scan submit; exposes manual “Verify now” trigger.
+- Backorders visibility: list rows show fulfilled/remaining quantities; detail shows fulfillment progress and updatedAt; links to vendor/item/SO remain intact.
+- Suggest PO clarity: MOQ/notes surfaced in draft cards; skipped table includes friendly reason text and reason code (web/mobile); create-all flow navigates to first created PO with success toast.
+- Mobile parity polish: PO receive flows call verification; backorders list renders fulfillment counts; SuggestPurchaseOrdersScreen renders reason codes.
+
+**Verification & Tests:**
+- `npm -w apps/web run typecheck` (prior work)
+- `npm -w apps/mobile run typecheck` (post-parity)
+- CI smokes remain unchanged; full suite: `npm run smokes:run:ci`
 
 **Theme:** Complete operator workflow from backorder detection → vendor selection → multi-PO creation → receive with guardrails.
 

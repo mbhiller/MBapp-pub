@@ -11,7 +11,17 @@ import { useToast } from "../features/_shared/Toast";
 import { copyText } from "../features/_shared/copy";
 import { VendorPicker } from "../features/_shared/fields";
 
-type Row = { id: string; itemId: string; qty: number; status: string; preferredVendorId?: string | null };
+type Row = {
+  id: string;
+  itemId: string;
+  qty: number;
+  status: string;
+  preferredVendorId?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  fulfilledQty?: number | null;
+  remainingQty?: number | null;
+};
 
 export default function BackordersListScreen() {
   const nav = useNavigation<any>();
@@ -288,6 +298,11 @@ export default function BackordersListScreen() {
               )}
             </View>
             <Text style={{ color: t.colors.textMuted, fontSize: 12, marginBottom: 2 }}>Qty: {item.qty} • Status: {item.status}</Text>
+            {("fulfilledQty" in item || "remainingQty" in item) && (
+              <Text style={{ color: t.colors.textMuted, fontSize: 12, marginBottom: 2 }}>
+                Fulfilled: {(item as any).fulfilledQty ?? "—"} • Remaining: {(item as any).remainingQty ?? "—"}
+              </Text>
+            )}
             {"preferredVendorId" in item && item.preferredVendorId ? (
               <Text style={{ color: t.colors.textMuted, fontSize: 12, marginBottom: 2 }}>Vendor: {String((item as any).preferredVendorId)}</Text>
             ) : null}

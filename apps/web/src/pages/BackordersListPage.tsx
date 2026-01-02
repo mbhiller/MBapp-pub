@@ -216,11 +216,14 @@ export default function BackordersListPage() {
   const handleIgnore = async (id: string) => {
     setActionLoading(true);
     setActionError(null);
+    setActionInfo(null);
     try {
       await ignoreBackorderRequest(id, { token: token || undefined, tenantId });
       updateSearchParams({ next: null });
       setItems([]);
+      setSelected({});
       await fetchPage();
+      setActionInfo(`Ignored backorder ${id}.`);
     } catch (err) {
       setActionError(formatError(err));
     } finally {
@@ -231,12 +234,14 @@ export default function BackordersListPage() {
   const handleConvert = async (id: string) => {
     setActionLoading(true);
     setActionError(null);
+    setActionInfo(null);
     try {
       await convertBackorderRequest(id, { token: token || undefined, tenantId });
       updateSearchParams({ next: null });
       setItems([]);
+      setSelected({});
       await fetchPage();
-      setActionInfo("Converted backorder to PO-ready state.");
+      setActionInfo(`Converted backorder ${id} to PO-ready state.`);
     } catch (err) {
       setActionError(formatError(err));
     } finally {
@@ -250,20 +255,14 @@ export default function BackordersListPage() {
     setActionError(null);
     setActionInfo(null);
 
-    // Optimistically remove selected items from the list
-    const itemsBeforeAction = items;
-    setItems((prev) => prev.filter((item) => !selectedIds.includes(item.id)));
-    setSelected({});
-
     try {
-      // Call ignore for all selected items in parallel
-      await Promise.all(
-        selectedIds.map((id) => ignoreBackorderRequest(id, { token: token || undefined, tenantId }))
-      );
+      await Promise.all(selectedIds.map((id) => ignoreBackorderRequest(id, { token: token || undefined, tenantId })));
+      updateSearchParams({ next: null });
+      setItems([]);
+      setSelected({});
+      await fetchPage();
       setActionInfo(`Ignored ${selectedIds.length} backorder request(s).`);
     } catch (err) {
-      // Restore items on error
-      setItems(itemsBeforeAction);
       setActionError(`Failed to ignore: ${formatError(err)}`);
     } finally {
       setActionLoading(false);
@@ -281,17 +280,14 @@ export default function BackordersListPage() {
     setActionError(null);
     setActionInfo(null);
     const idsToConvert = openSelected.map((bo) => bo.id);
-    const itemsBeforeAction = items;
-    setItems((prev) => prev.filter((item) => !idsToConvert.includes(item.id)));
-    setSelected({});
     try {
       await Promise.all(idsToConvert.map((id) => convertBackorderRequest(id, { token: token || undefined, tenantId })));
-      setActionInfo(`Converted ${idsToConvert.length} backorder request(s).`);
       updateSearchParams({ next: null });
       setItems([]);
+      setSelected({});
       await fetchPage();
+      setActionInfo(`Converted ${idsToConvert.length} backorder request(s).`);
     } catch (err) {
-      setItems(itemsBeforeAction);
       setActionError(`Failed to convert: ${formatError(err)}`);
     } finally {
       setActionLoading(false);
@@ -477,8 +473,12 @@ export default function BackordersListPage() {
         </div>
       )}
 
-      {loading && items.length === 0 ? <div>Loading...</div> : null}
-      {!loading && items.length === 0 ? <div>No backorders found.</div> : null}
+      {loading && items.length === 0 ? <div>Loading backorders…</div> : null}
+      {!loading && items.length === 0 && !error ? (
+        <div style={{ padding: 12, background: "#f5f5f5", borderRadius: 4 }}>
+          No backorders match the current filters.
+        </div>
+      ) : null}
 
       {items.length > 0 ? (
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -492,7 +492,10 @@ export default function BackordersListPage() {
               <th style={{ padding: 8, border: "1px solid #ccc" }}>SO</th>
               <th style={{ padding: 8, border: "1px solid #ccc" }}>Status</th>
               <th style={{ padding: 8, border: "1px solid #ccc" }}>Vendor</th>
+              <th style={{ padding: 8, border: "1px solid #ccc" }}>Fulfilled</th>
+              <th style={{ padding: 8, border: "1px solid #ccc" }}>Remaining</th>
               <th style={{ padding: 8, border: "1px solid #ccc" }}>Created</th>
+              <th style={{ padding: 8, border: "1px solid #ccc" }}>Updated</th>
               <th style={{ padding: 8, border: "1px solid #ccc" }}>Actions</th>
             </tr>
           </thead>
@@ -510,7 +513,7 @@ export default function BackordersListPage() {
                   return (
                     <>
                       <tr key={`h-${vendorId}`} style={{ background: "#f5f5f5" }}>
-                        <td colSpan={7} style={{ padding: 8, border: "1px solid #ccc", fontWeight: 600 }}>
+                        <td colSpan={11} style={{ padding: 8, border: "1px solid #ccc", fontWeight: 600 }}>
                           {headerName} — {rows.length} backorder(s), total qty {totalQty}
                         </td>
                       </tr>
@@ -540,12 +543,25 @@ export default function BackordersListPage() {
                           </td>
                           <td style={{ padding: 8, border: "1px solid #ccc" }}>{bo.status ?? "—"}</td>
                           <td style={{ padding: 8, border: "1px solid #ccc" }}>
-                            {bo.preferredVendorId
-                              ? vendorNameById[bo.preferredVendorId] ?? bo.preferredVendorId
-                              : "Unassigned"}
+                            {bo.preferredVendorId ? (
+                              <Link to={`/parties/${bo.preferredVendorId}`}>
+                                {vendorNameById[bo.preferredVendorId] ?? bo.preferredVendorId}
+                              </Link>
+                            ) : (
+                              "Unassigned"
+                            )}
+                          </td>
+                          <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                            {bo.fulfilledQty != null ? bo.fulfilledQty : "—"}
+                          </td>
+                          <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                            {bo.remainingQty != null ? bo.remainingQty : "—"}
                           </td>
                           <td style={{ padding: 8, border: "1px solid #ccc" }}>
                             {bo.createdAt ? new Date(bo.createdAt).toLocaleDateString() : "—"}
+                          </td>
+                          <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                            {bo.updatedAt ? new Date(bo.updatedAt).toLocaleDateString() : "—"}
                           </td>
                           <td style={{ padding: 8, border: "1px solid #ccc" }}>
                             {bo.status === "open" && (
@@ -598,13 +614,26 @@ export default function BackordersListPage() {
                     </td>
                     <td style={{ padding: 8, border: "1px solid #ccc" }}>{bo.status ?? "—"}</td>
                     <td style={{ padding: 8, border: "1px solid #ccc" }}>
-                      {bo.preferredVendorId
-                        ? vendorNameById[bo.preferredVendorId] ?? bo.preferredVendorId
-                        : "Unassigned"}
+                      {bo.preferredVendorId ? (
+                        <Link to={`/parties/${bo.preferredVendorId}`} onClick={(e) => e.stopPropagation()}>
+                          {vendorNameById[bo.preferredVendorId] ?? bo.preferredVendorId}
+                        </Link>
+                      ) : (
+                        "Unassigned"
+                      )}
                     </td>
-                          <td style={{ padding: 8, border: "1px solid #ccc" }}>
-                            {bo.createdAt ? new Date(bo.createdAt).toLocaleDateString() : "—"}
-                          </td>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                      {bo.fulfilledQty != null ? bo.fulfilledQty : "—"}
+                    </td>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                      {bo.remainingQty != null ? bo.remainingQty : "—"}
+                    </td>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                      {bo.createdAt ? new Date(bo.createdAt).toLocaleDateString() : "—"}
+                    </td>
+                    <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                      {bo.updatedAt ? new Date(bo.updatedAt).toLocaleDateString() : "—"}
+                    </td>
                     <td style={{ padding: 8, border: "1px solid #ccc" }} onClick={(e) => e.stopPropagation()}>
                       {bo.status === "open" && (
                         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>

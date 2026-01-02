@@ -54,12 +54,13 @@ function DraftCard({ draft }: { draft: PurchaseOrderDraft }) {
   );
 }
 
-function SkippedCard({ id, reason }: { id?: string; reason?: string }) {
+function SkippedCard({ id, reason, reasonCode }: { id?: string; reason?: string; reasonCode?: string }) {
   const t = useColors();
   return (
     <View style={{ padding: 8, borderWidth: 1, borderColor: t.colors.border, borderRadius: 8, backgroundColor: t.colors.card }}>
       <Text style={{ fontWeight: "600", color: t.colors.text }}>Backorder: {id || "(unknown)"}</Text>
       <Text style={{ color: t.colors.textMuted, marginTop: 2 }}>{reason || "No reason provided"}</Text>
+      {reasonCode ? <Text style={{ color: t.colors.textMuted, fontSize: 11, marginTop: 2 }}>Code: {reasonCode}</Text> : null}
     </View>
   );
 }
@@ -214,11 +215,15 @@ export default function SuggestPurchaseOrdersScreen() {
       <View style={{ marginBottom: 12 }}>
         <Text style={{ fontSize: 16, fontWeight: "700", color: t.colors.text, marginBottom: 6 }}>Skipped</Text>
         {skipped.length === 0 && <Text style={{ color: t.colors.textMuted }}>No skipped backorders.</Text>}
-        {skipped.map((s, idx) => (
-          <View key={s.backorderRequestId || `skip-${idx}`} style={{ marginBottom: 8 }}>
-            <SkippedCard id={s.backorderRequestId} reason={s.reason} />
-          </View>
-        ))}
+        {skipped.map((s, idx) => {
+          const friendlyReason = (s as any)?.reasonFriendly;
+          const reasonCode = (s as any)?.reasonCode;
+          return (
+            <View key={s.backorderRequestId || `skip-${idx}`} style={{ marginBottom: 8 }}>
+              <SkippedCard id={s.backorderRequestId} reason={friendlyReason ?? s.reason} reasonCode={reasonCode} />
+            </View>
+          );
+        })}
       </View>
 
       <View style={{ flexDirection: "row", alignItems: "center", marginTop: 8 }}>

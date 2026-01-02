@@ -126,7 +126,15 @@ export function createPurchaseOrdersFromSuggestion(
     method: "POST",
     body: JSON.stringify(body),
     headers,
-  }, { token: opts.token ?? undefined, tenantId: opts.tenantId ?? undefined });
+  }, { token: opts.token ?? undefined, tenantId: opts.tenantId ?? undefined })
+    .then((res: any) => {
+      const ids = Array.isArray(res?.ids)
+        ? res.ids.filter(Boolean)
+        : res?.id
+        ? [res.id]
+        : [];
+      return { ...res, ids, id: res?.id ?? ids[0] } as CreateFromSuggestionResponse;
+    });
 }
 
 /** ---------- Legacy helpers kept for existing demo UI ---------- **/

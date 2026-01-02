@@ -14,6 +14,8 @@ export type BackorderRequest = {
   uom?: string;
   status?: "open" | "ignored" | "converted" | "fulfilled";
   preferredVendorId?: string;
+  fulfilledQty?: number | null;
+  remainingQty?: number | null;
   createdAt?: string;
   updatedAt?: string;
 };

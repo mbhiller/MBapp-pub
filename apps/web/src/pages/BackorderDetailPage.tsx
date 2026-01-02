@@ -70,6 +70,7 @@ export default function BackorderDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionInfo, setActionInfo] = useState<string | null>(null);
   const [convertLoading, setConvertLoading] = useState(false);
 
   const fetchDetail = async () => {
@@ -132,11 +133,13 @@ export default function BackorderDetailPage() {
     if (!id || backorder?.status !== "open" || !token) return;
     setActionLoading(true);
     setActionError(null);
+    setActionInfo(null);
     try {
       await ignoreBackorderRequest(id, { token, tenantId });
       // UX event: ignore clicked (success)
       track("BO_Ignore_Clicked", { objectType: "backorderRequest", objectId: id, result: "success" });
       await fetchDetail(); // Refetch to get updated status
+      setActionInfo("Backorder ignored and refreshed.");
     } catch (err) {
       setActionError(formatError(err));
       // UX event: ignore clicked (fail)
@@ -157,10 +160,12 @@ export default function BackorderDetailPage() {
     if (!id || backorder?.status !== "open" || !token) return;
     setConvertLoading(true);
     setActionError(null);
+    setActionInfo(null);
     try {
       await convertBackorderRequest(id, { token, tenantId });
       track("BO_Convert_Clicked", { objectType: "backorderRequest", objectId: id, result: "success" });
       await fetchDetail();
+      setActionInfo("Backorder converted and refreshed.");
     } catch (err) {
       setActionError(formatError(err));
       const code = (err as any)?.code || (err as any)?.status || undefined;
@@ -208,8 +213,7 @@ export default function BackorderDetailPage() {
     );
   }
 
-  const remainingQty = (backorder as any).remainingQty;
-  const fulfilledQty = (backorder as any).fulfilledQty;
+  const { remainingQty, fulfilledQty } = backorder;
   const hasProgressFields = remainingQty != null || fulfilledQty != null;
 
   return (
@@ -274,6 +278,12 @@ export default function BackorderDetailPage() {
       {actionError && (
         <div style={{ padding: 12, marginBottom: 16, background: "#fee", color: "#b00020", borderRadius: 4 }}>
           Action Error: {actionError}
+        </div>
+      )}
+
+      {actionInfo && (
+        <div style={{ padding: 12, marginBottom: 16, background: "#e8f5e9", color: "#1b5e20", borderRadius: 4 }}>
+          {actionInfo}
         </div>
       )}
 
@@ -343,6 +353,10 @@ export default function BackorderDetailPage() {
           <div style={{ fontWeight: 600 }}>Created:</div>
           <div>{backorder.createdAt ? new Date(backorder.createdAt).toLocaleString() : "—"}</div>
         </div>
+        <div style={{ display: "grid", gridTemplateColumns: "150px 1fr", gap: 8, alignItems: "center" }}>
+          <div style={{ fontWeight: 600 }}>Updated:</div>
+          <div>{backorder.updatedAt ? new Date(backorder.updatedAt).toLocaleString() : "—"}</div>
+        </div>
       </div>
 
       {/* Related Context */}
@@ -354,12 +368,12 @@ export default function BackorderDetailPage() {
             <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8 }}>
               <div style={{ fontWeight: 600 }}>SO ID:</div>
               <div>
-                {salesOrder ? (
+                {backorder.soId ? (
                   <Link to={`/sales-orders/${backorder.soId}`} style={{ color: "#1976d2", textDecoration: "none" }}>
                     {backorder.soId} →
                   </Link>
                 ) : (
-                  backorder.soId || "—"
+                  "—"
                 )}
               </div>
             </div>
@@ -371,7 +385,15 @@ export default function BackorderDetailPage() {
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8 }}>
                   <div style={{ fontWeight: 600 }}>Customer:</div>
-                  <div>{salesOrder.partyId || "—"}</div>
+                  <div>
+                    {salesOrder.partyId ? (
+                      <Link to={`/parties/${salesOrder.partyId}`} style={{ color: "#1976d2", textDecoration: "none" }}>
+                        {salesOrder.partyId} →
+                      </Link>
+                    ) : (
+                      "—"
+                    )}
+                  </div>
                 </div>
               </>
             )}
@@ -389,12 +411,12 @@ export default function BackorderDetailPage() {
             <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8 }}>
               <div style={{ fontWeight: 600 }}>Item ID:</div>
               <div>
-                {item ? (
+                {backorder.itemId ? (
                   <Link to={`/inventory/${backorder.itemId}`} style={{ color: "#1976d2", textDecoration: "none" }}>
                     {backorder.itemId} →
                   </Link>
                 ) : (
-                  backorder.itemId || "—"
+                  "—"
                 )}
               </div>
             </div>
@@ -435,12 +457,12 @@ export default function BackorderDetailPage() {
               <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8 }}>
                 <div style={{ fontWeight: 600 }}>Vendor ID:</div>
                 <div>
-                  {vendor ? (
+                  {backorder.preferredVendorId ? (
                     <Link to={`/parties/${backorder.preferredVendorId}`} style={{ color: "#1976d2", textDecoration: "none" }}>
                       {backorder.preferredVendorId} →
                     </Link>
                   ) : (
-                    backorder.preferredVendorId
+                    "—"
                   )}
                 </div>
               </div>
