@@ -15,12 +15,32 @@ function formatError(err: unknown): string {
   return "Request failed";
 }
 
+function humanizeReason(reason?: string): string {
+  const map: Record<string, string> = {
+    no_preferred_vendor: "No preferred vendor set",
+    no_vendor: "No vendor available",
+    missing_vendor: "No vendor available",
+    already_converted: "Already converted to PO",
+    already_fulfilled: "Already fulfilled",
+    invalid_backorder: "Invalid backorder request",
+    unsupported_item: "Item not eligible for purchase",
+    not_found: "Backorder not found",
+    ignored: "Backorder is ignored",
+    zero_qty: "Quantity is zero",
+    missing_item: "Backorder missing item",
+  };
+  if (!reason) return "No reason provided";
+  const key = reason.toString().toLowerCase();
+  return map[key] || reason.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
 function DraftCard({ draft }: { draft: PurchaseOrderDraft }) {
   const lines = draft.lines || [];
+  const vendorLabel = draft.vendorName || draft.vendorId || "(unknown)";
   return (
     <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12, background: "#fff" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <div style={{ fontWeight: 700 }}>Vendor: {draft.vendorId || "(unknown)"}</div>
+        <div style={{ fontWeight: 700 }}>Vendor: {vendorLabel}</div>
         {draft.status && <div style={{ fontSize: 12, color: "#666" }}>Status: {draft.status}</div>}
       </div>
       <div style={{ display: "grid", gap: 8 }}>
@@ -32,7 +52,12 @@ function DraftCard({ draft }: { draft: PurchaseOrderDraft }) {
           >
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
               <div style={{ fontWeight: 600 }}>Item: {ln.itemId || "(unknown)"}</div>
-              <div>Qty: {ln.qty ?? "—"}</div>
+              <div>
+                Qty: {(ln.qtySuggested ?? ln.qty) ?? "—"}{ln.uom ? ` ${ln.uom}` : ""}
+                {ln.qtyRequested != null && (ln.qtySuggested ?? ln.qty) !== ln.qtyRequested
+                  ? ` (requested ${ln.qtyRequested})`
+                  : ""}
+              </div>
             </div>
             {(ln.minOrderQtyApplied != null || ln.adjustedFrom != null) && (
               <div style={{ fontSize: 12, color: "#555" }}>
@@ -189,7 +214,7 @@ export default function SuggestPurchaseOrdersPage() {
         {skipped.map((s, idx) => (
           <div key={s.backorderRequestId || idx} style={{ padding: 8, background: "#f9f9f9", borderRadius: 6, border: "1px solid #eee" }}>
             <div style={{ fontWeight: 600 }}>Backorder: {s.backorderRequestId}</div>
-            <div style={{ color: "#555" }}>{s.reason || "No reason provided"}</div>
+            <div style={{ color: "#555" }}>{humanizeReason(s.reason)}</div>
           </div>
         ))}
       </div>

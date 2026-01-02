@@ -1,7 +1,7 @@
 # Smoke Test Coverage (Sprint S, 2025-12-31)
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Status/Working](MBapp-Status.md) · [Foundations](MBapp-Foundations.md) · [Cadence](MBapp-Cadence.md)  
-**Last Updated:** 2025-12-31
+**Last Updated:** 2026-01-01
 
 ---
 
@@ -509,7 +509,7 @@ npm run smokes:cleanup
 - Preview mode:
   - `DRY_RUN=1 npm run smokes:cleanup`
 
-**Close-the-loop flow:** SO shortage → BO open (with preferredVendorId derived from product) → suggest-po (returns drafts with vendorId) → save draft PO → receive → onhand increases → BO fulfilled → idempotency replay (no double-apply). Vendor party is seeded at flow start; product.preferredVendorId set so so:commit populates backorderRequest.preferredVendorId and suggest-po avoids MISSING_VENDOR errors.
+**Close-the-loop flow:** Deterministic vendor/customer seeding → item onhand reset to 0 → SO submit+commit (forces BO) → convert BOs → suggest-po with explicit vendorId → create-from-suggestion → submit + approve → receive with Idempotency-Key (replay validated) → onhand delta >= expected → BOs fulfilled. Runs in CI via [ops/ci-smokes.json](../ops/ci-smokes.json).
 
 **Feature flag testing:** Tests explicitly set feature flag headers (e.g., `X-Feature-Registrations-Enabled: 0`) to ensure deterministic behavior regardless of AWS environment defaults.
 

@@ -5,7 +5,7 @@ import { useAuth } from "../providers/AuthProvider";
 import { getObject } from "../lib/api";
 import { track } from "../lib/telemetry";
 import * as Sentry from "@sentry/browser";
-import { ignoreBackorderRequest, type BackorderRequest } from "../lib/backorders";
+import { ignoreBackorderRequest, convertBackorderRequest, type BackorderRequest } from "../lib/backorders";
 
 type SalesOrder = {
   id: string;
@@ -70,6 +70,7 @@ export default function BackorderDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [convertLoading, setConvertLoading] = useState(false);
 
   const fetchDetail = async () => {
     if (!id) return;
@@ -152,6 +153,28 @@ export default function BackorderDetailPage() {
     }
   };
 
+  const handleConvert = async () => {
+    if (!id || backorder?.status !== "open" || !token) return;
+    setConvertLoading(true);
+    setActionError(null);
+    try {
+      await convertBackorderRequest(id, { token, tenantId });
+      track("BO_Convert_Clicked", { objectType: "backorderRequest", objectId: id, result: "success" });
+      await fetchDetail();
+    } catch (err) {
+      setActionError(formatError(err));
+      const code = (err as any)?.code || (err as any)?.status || undefined;
+      track("BO_Convert_Clicked", { objectType: "backorderRequest", objectId: id, result: "fail", errorCode: code });
+      try {
+        Sentry.captureException(err as any, {
+          tags: { tenantId, route: window.location.pathname, objectType: "backorderRequest", objectId: id },
+        });
+      } catch {}
+    } finally {
+      setConvertLoading(false);
+    }
+  };
+
   const handleSuggestPo = () => {
     if (!id) return;
     navigate(`/backorders/${encodeURIComponent(id)}/suggest-po`, {
@@ -211,6 +234,22 @@ export default function BackorderDetailPage() {
               }}
             >
               Suggest PO
+            </button>
+          )}
+          {backorder.status === "open" && (
+            <button
+              onClick={handleConvert}
+              disabled={convertLoading}
+              style={{
+                backgroundColor: "#2e7d32",
+                color: "#fff",
+                border: "none",
+                padding: "8px 16px",
+                cursor: convertLoading ? "not-allowed" : "pointer",
+                borderRadius: 4,
+              }}
+            >
+              {convertLoading ? "Converting..." : "Convert"}
             </button>
           )}
           {backorder.status === "open" && (

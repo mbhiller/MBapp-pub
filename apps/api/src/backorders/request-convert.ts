@@ -7,16 +7,26 @@ const SK = process.env.MBAPP_TABLE_SK || "sk";
 const json = (s:number,b:unknown):APIGatewayProxyResultV2=>({statusCode:s,headers:{"content-type":"application/json"},body:JSON.stringify(b)});
 
 export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
-  const tenantId = (event as any)?.requestContext?.authorizer?.mbapp?.tenantId as string;
-  const id = event.pathParameters?.id as string;
+  const tenantId = (event as any)?.requestContext?.authorizer?.mbapp?.tenantId as string | undefined;
+  const id = event.pathParameters?.id as string | undefined;
+  if (!tenantId) return json(400, { message: "Missing tenant" });
+  if (!id) return json(400, { message: "Missing id" });
   const now = new Date().toISOString();
-  const res = await ddb.send(new UpdateCommand({
-    TableName: tableObjects,
-    Key: { [PK]: tenantId, [SK]: `backorderRequest#${id}` },
-    UpdateExpression: "SET #s = :s, updatedAt = :u",
-    ExpressionAttributeNames: { "#s": "status" },
-    ExpressionAttributeValues: { ":s": "converted", ":u": now },
-    ReturnValues: "ALL_NEW",
-  }));
-  return json(200, res.Attributes);
+  try {
+    const res = await ddb.send(new UpdateCommand({
+      TableName: tableObjects,
+      Key: { [PK]: tenantId, [SK]: `backorderRequest#${id}` },
+      UpdateExpression: "SET #s = :s, updatedAt = :u",
+      ExpressionAttributeNames: { "#s": "status" },
+      ExpressionAttributeValues: { ":s": "converted", ":u": now },
+      ConditionExpression: "attribute_exists(pk) AND attribute_exists(sk)",
+      ReturnValues: "ALL_NEW",
+    }));
+    return json(200, res.Attributes);
+  } catch (err: any) {
+    if (err?.name === "ConditionalCheckFailedException") {
+      return json(404, { message: "BackorderRequest not found" });
+    }
+    return json(400, { message: err?.message || "Unable to convert backorder" });
+  }
 }

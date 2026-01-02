@@ -1,7 +1,7 @@
 # MBapp Status / Working
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Foundations](MBapp-Foundations.md) · [Cadence](MBapp-Cadence.md) · [Verification](smoke-coverage.md)  
-**Last Updated:** 2025-12-30  
+**Last Updated:** 2026-01-01  
 **Workflow & DoD:** See [MBapp-Cadence.md](MBapp-Cadence.md) for canonical workflow, Definition of Done, and testing rules.
 
 ---
@@ -321,6 +321,7 @@
 **Recent Deliveries (Sprint I, 2025-12-28):**
 - ✅ **Backend MOQ loading fix:** suggest-po applies minOrderQty after vendor determined (from override, backorder, or product).
 - ✅ **Two new smoke tests:** smoke:backorders:partial-fulfill (partial receive → partial backorder fulfillment) and smoke:suggest-po:moq (MOQ bump verification).
+- ✅ **Close-the-loop smoke hardened:** deterministic vendor/customer seeding, onhand reset to zero, SO commit → convert BOs → suggest-po with vendor → create-from-suggestion → submit+approve → receive with idempotent replay; asserts onhand delta and BO fulfillment. Remains in CI manifest.
 - ✅ **Web PO detail backorder linkage:** Per-line backorder IDs with filtered deep-link to backorders list.
 - ✅ **Web SO detail backorder breakdown:** Status badges (open/converted/fulfilled/ignored) show lifecycle per SO.
 - ✅ **Mobile SO detail backorder breakdown:** Fetches all statuses, displays count breakdown with status chips.
@@ -328,6 +329,7 @@
 
 **CI Posture:**
 - 31/31 smoke tests passing in CI (Sprint I added smoke:backorders:partial-fulfill, smoke:suggest-po:moq; Sprint J added smoke:backorders:ignore; Sprint M added smoke:po:create-from-suggestion:line-ids, smoke:so:patch-lines:cid; Sprint E added smoke:line-identity:id-canonical; E4+E5 confirmed web+mobile payloads use canonical id)
+- smoke:close-the-loop hardened to submit+approve before receive and uses idempotent receive replay; remains in [ops/ci-smokes.json](../ops/ci-smokes.json) CI set.
 - Latest additions: smoke:line-identity:id-canonical (Sprint E, E3) — validates all action endpoints accept `id` (canonical) and emit `id` in responses; existing action smokes (receive/reserve/fulfill/release) updated to use `id` instead of `lineId`; web (E4) and mobile (E5) clients now send canonical `id` in all action payloads
 - smoke:views:apply-to-po-list now deletes its temp view after assertions to reduce tenant clutter and avoid downstream flakiness.
 - smoke:workspaces:list now paginates with retries to find created items across pages and handle eventual consistency before asserting filters.

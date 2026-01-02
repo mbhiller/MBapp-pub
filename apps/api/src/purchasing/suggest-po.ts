@@ -3,6 +3,7 @@ import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda
 import { GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 import { ddb, tableObjects } from "../common/ddb";
 import { getObjectById } from "../objects/repo";
+import { ensureLineIds } from "../shared/ensureLineIds";
 
 /**
  * Request body shape
@@ -26,7 +27,10 @@ type SkippedEntry = {
 type PurchaseOrderLine = {
   id?: string;
   itemId: string;
-  qty: number;
+  productId?: string;
+  qty: number;               // qtySuggested (kept for backward compatibility)
+  qtySuggested?: number;     // UI-friendly alias
+  qtyRequested?: number;     // original requested qty before MOQ bump
   uom?: string;
   /** Annotation for UI when MOQ bumps the quantity */
   minOrderQtyApplied?: number;
@@ -43,6 +47,7 @@ type PurchaseOrderDraft = {
   status: "draft";
   /** This is Party.id with PartyRole=vendor */
   vendorId: string;
+  vendorName?: string;
   currency: string;
   lines: PurchaseOrderLine[];
   createdAt: string;
@@ -160,25 +165,62 @@ async function loadMinOrderQtyFromProduct(
   return moq;
 }
 
+async function loadVendorName(tenantId: string, vendorId: string, cache: Map<string, string | null>) {
+  if (cache.has(vendorId)) return cache.get(vendorId) || undefined;
+  try {
+    const party = (await getObjectById({ tenantId, type: "party", id: vendorId, fields: ["name", "displayName", "legalName"] })) as any;
+    const name = party?.name || party?.displayName || party?.legalName || null;
+    cache.set(vendorId, name);
+    return name || undefined;
+  } catch {
+    cache.set(vendorId, null);
+    return undefined;
+  }
+}
+
+function parseBody(event: APIGatewayProxyEventV2): SuggestPoReq | null {
+  try {
+    const parsed = event.body ? JSON.parse(event.body) : {};
+    return parsed as SuggestPoReq;
+  } catch {
+    return null;
+  }
+}
+
 export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   const auth: any = (event as any).requestContext?.authorizer?.mbapp || {};
   const tenantId: string = auth.tenantId;
-  const body: SuggestPoReq = event.body ? JSON.parse(event.body) : { requests: [] };
+  if (!tenantId) {
+    return json(400, { message: "Missing tenant" });
+  }
+
+  const body = parseBody(event);
+  if (!body) return json(400, { message: "Invalid JSON body" });
 
   if (!Array.isArray(body.requests) || body.requests.length === 0) {
     return json(400, { message: "requests[] required" });
   }
 
+  for (const r of body.requests) {
+    if (!r || typeof r.backorderRequestId !== "string" || !r.backorderRequestId.trim()) {
+      return json(400, { message: "Each request must include backorderRequestId" });
+    }
+  }
+
   const overrideVendorId =
     typeof body.vendorId === "string" && body.vendorId.trim() ? body.vendorId.trim() : null;
+
+  const vendorNameCache = new Map<string, string | null>();
 
   // Gather BO items with derived vendor + MOQ
   const gathered: {
     boId: string;
     itemId: string;
-    qty: number;
+    productId: string | null;
+    qtyRequested: number;
     vendorId: string;
     minOrderQty: number | null;
+    uom?: string;
   }[] = [];
   const skipped: SkippedEntry[] = [];
 
@@ -203,14 +245,17 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
 
     let vendorId: string | null = overrideVendorId ?? (bo?.preferredVendorId ? String(bo.preferredVendorId).trim() : null);
     let minOrderQty: number | null = null;
+    const boItemId = bo.itemId ? String(bo.itemId) : null;
+    let boProductId: string | null = bo.productId ? String(bo.productId) : null;
 
     // Derive vendor & MOQ if not present on BO and no override
     if (!vendorId) {
-      const itemId = bo.itemId ? String(bo.itemId) : null;
-      let productId: string | null = bo.productId ?? null;
+      const itemId = boItemId;
+      let productId: string | null = boProductId;
 
       if (!productId && itemId) {
         productId = await loadInventoryForProductId(tenantId, itemId);
+        boProductId = productId;
       }
 
       if (productId) {
@@ -222,11 +267,12 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
 
     // If vendorId is now set (from override or BO), but MOQ not yet loaded, load it now
     if (vendorId && minOrderQty === null) {
-      const itemId = bo.itemId ? String(bo.itemId) : null;
-      let productId: string | null = bo.productId ?? null;
+      const itemId = boItemId;
+      let productId: string | null = boProductId;
 
       if (!productId && itemId) {
         productId = await loadInventoryForProductId(tenantId, itemId);
+        boProductId = productId;
       }
 
       if (productId) {
@@ -241,10 +287,12 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
 
     gathered.push({
       boId: bo.id,
-      itemId: String(bo.itemId ?? bo.productId ?? ""),
-      qty,
+      itemId: String(boItemId ?? boProductId ?? ""),
+      productId: boProductId,
+      qtyRequested: qty,
       vendorId,
       minOrderQty,
+      uom: bo.uom ? String(bo.uom) : "ea",
     });
   }
 
@@ -253,7 +301,7 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
 
   for (const it of gathered) {
     const key = it.vendorId;
-    const baseQty = Math.max(0, Number(it.qty || 0));
+    const baseQty = Math.max(0, Number(it.qtyRequested || 0));
     const bumpedQty =
       it.minOrderQty && baseQty > 0 && baseQty < it.minOrderQty ? it.minOrderQty : baseQty;
 
@@ -280,7 +328,11 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
 
     const line: PurchaseOrderLine = {
       itemId: it.itemId,
+      productId: it.productId ?? undefined,
       qty: bumpedQty,
+      qtySuggested: bumpedQty,
+      qtyRequested: baseQty,
+      uom: it.uom ?? "ea",
       backorderRequestIds,
     };
     if (it.minOrderQty && baseQty < it.minOrderQty) {
@@ -289,11 +341,15 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     }
 
     const arr = groups.get(key) ?? [];
-    const existing = arr.find((l) => l.itemId === line.itemId);
+    const existing = arr.find((l) => l.itemId === line.itemId && l.productId === line.productId);
     if (existing) {
       existing.qty += line.qty;
-      // Merge backorderRequestIds
+      existing.qtySuggested = (existing.qtySuggested ?? 0) + line.qty;
+      existing.qtyRequested = (existing.qtyRequested ?? 0) + baseQty;
       existing.backorderRequestIds = Array.from(new Set([...(existing.backorderRequestIds ?? []), ...backorderRequestIds]));
+      if (!existing.uom) existing.uom = line.uom;
+      if (line.minOrderQtyApplied && !existing.minOrderQtyApplied) existing.minOrderQtyApplied = line.minOrderQtyApplied;
+      if (line.adjustedFrom && !existing.adjustedFrom) existing.adjustedFrom = line.adjustedFrom;
     } else {
       arr.push(line);
     }
@@ -305,17 +361,16 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
   const drafts: PurchaseOrderDraft[] = [];
 
   for (const [key, lines] of groups.entries()) {
-    // Assign sequential line ids to any line missing one
-    lines.forEach((ln, idx) => {
-      if (!ln.id) ln.id = `L${idx + 1}`;
-    });
+    const withIds = ensureLineIds<PurchaseOrderLine>(lines) as PurchaseOrderLine[];
+    const vendorName = await loadVendorName(tenantId, key, vendorNameCache);
     drafts.push({
       id: poDraftId(),
       type: "purchaseOrder",
       status: "draft",
       vendorId: key,
+      vendorName: vendorName ?? undefined,
       currency: "USD",
-      lines,
+      lines: withIds,
       createdAt: now,
       updatedAt: now,
     });

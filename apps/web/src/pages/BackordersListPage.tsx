@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../providers/AuthProvider";
 import { apiFetch } from "../lib/http";
@@ -46,12 +46,13 @@ export default function BackordersListPage() {
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [actionInfo, setActionInfo] = useState<string | React.ReactNode | null>(null);
+  const [actionInfo, setActionInfo] = useState<string | ReactNode | null>(null);
+  const [suggestLoading, setSuggestLoading] = useState(false);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [suggestResult, setSuggestResult] = useState<SuggestPoResponse | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalDrafts, setModalDrafts] = useState<PurchaseOrderDraft[]>([]);
-  const [modalSkipped, setModalSkipped] = useState<Array<{ backorderRequestId: string; reason: string }> | undefined>();
+  const [modalSkipped, setModalSkipped] = useState<Array<{ backorderRequestId: string; reason?: string }> | undefined>();
   const [groupedView, setGroupedView] = useState(false);
 
   // Helper to update URL search params
@@ -210,6 +211,7 @@ export default function BackordersListPage() {
   };
 
   const selectedIds = Object.keys(selected).filter((id) => selected[id]);
+  const selectedOpenIds = items.filter((bo) => selected[bo.id] && bo.status === "open").map((bo) => bo.id);
 
   const handleIgnore = async (id: string) => {
     setActionLoading(true);
@@ -219,6 +221,22 @@ export default function BackordersListPage() {
       updateSearchParams({ next: null });
       setItems([]);
       await fetchPage();
+    } catch (err) {
+      setActionError(formatError(err));
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleConvert = async (id: string) => {
+    setActionLoading(true);
+    setActionError(null);
+    try {
+      await convertBackorderRequest(id, { token: token || undefined, tenantId });
+      updateSearchParams({ next: null });
+      setItems([]);
+      await fetchPage();
+      setActionInfo("Converted backorder to PO-ready state.");
     } catch (err) {
       setActionError(formatError(err));
     } finally {
@@ -252,18 +270,74 @@ export default function BackordersListPage() {
     }
   };
 
-  const handleSuggestPo = () => {
+  const handleBulkConvert = async () => {
     if (selectedIds.length === 0) return;
-    // For now, support single backorder select to reuse SuggestPurchaseOrdersPage flow
-    if (selectedIds.length === 1) {
-      // Navigate to the detail suggest-po page
-      navigate(`/backorders/${encodeURIComponent(selectedIds[0])}/suggest-po`, {
-        state: { vendorId: vendorFilter.trim() || undefined },
-      });
+    const openSelected = items.filter((bo) => selected[bo.id] && bo.status === "open");
+    if (openSelected.length === 0) {
+      setActionError("Select at least one open backorder to convert.");
       return;
     }
-    // Multi-select not yet supported; prompt user
-    setActionError("Please select a single backorder to suggest PO. Multi-select coming soon.");
+    setActionLoading(true);
+    setActionError(null);
+    setActionInfo(null);
+    const idsToConvert = openSelected.map((bo) => bo.id);
+    const itemsBeforeAction = items;
+    setItems((prev) => prev.filter((item) => !idsToConvert.includes(item.id)));
+    setSelected({});
+    try {
+      await Promise.all(idsToConvert.map((id) => convertBackorderRequest(id, { token: token || undefined, tenantId })));
+      setActionInfo(`Converted ${idsToConvert.length} backorder request(s).`);
+      updateSearchParams({ next: null });
+      setItems([]);
+      await fetchPage();
+    } catch (err) {
+      setItems(itemsBeforeAction);
+      setActionError(`Failed to convert: ${formatError(err)}`);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleSuggestPo = () => {
+    if (selectedIds.length === 0) return;
+    setSuggestLoading(true);
+    setActionError(null);
+    setActionInfo(null);
+    setSuggestResult(null);
+    setModalDrafts([]);
+    setModalSkipped(undefined);
+    (async () => {
+      try {
+        const res = await suggestPurchaseOrders(selectedIds, {
+          vendorId: vendorFilter.trim() || undefined,
+          token: token || undefined,
+          tenantId,
+        });
+        const drafts = res?.drafts ?? (res?.draft ? [res.draft] : []);
+        setSuggestResult(res ?? null);
+        setModalDrafts(drafts);
+        setModalSkipped(res?.skipped);
+        // Seed vendor names from response
+        if (drafts.length > 0) {
+          setVendorNameById((prev) => {
+            const next = { ...prev } as Record<string, string>;
+            drafts.forEach((d) => {
+              if (d.vendorId && d.vendorName) next[d.vendorId] = d.vendorName;
+            });
+            return next;
+          });
+        }
+        if (drafts.length > 0) {
+          setModalOpen(true);
+        } else {
+          setActionInfo("No drafts returned. Check skipped reasons below.");
+        }
+      } catch (err) {
+        setActionError(formatError(err));
+      } finally {
+        setSuggestLoading(false);
+      }
+    })();
   };
 
   const allSelected = items.length > 0 && items.every((bo) => selected[bo.id]);
@@ -334,8 +408,11 @@ export default function BackordersListPage() {
             <button onClick={handleBulkIgnore} disabled={actionLoading || selectedIds.length === 0}>
               {actionLoading ? "Ignoring..." : "Bulk Ignore"}
             </button>
-            <button onClick={handleSuggestPo} disabled={selectedIds.length === 0}>
-              Suggest PO
+            <button onClick={handleBulkConvert} disabled={actionLoading || selectedOpenIds.length === 0}>
+              {actionLoading ? "Converting..." : "Bulk Convert"}
+            </button>
+            <button onClick={handleSuggestPo} disabled={selectedIds.length === 0 || suggestLoading || actionLoading}>
+              {suggestLoading ? "Suggesting..." : "Suggest PO"}
             </button>
           </div>
         )}
@@ -382,8 +459,13 @@ export default function BackordersListPage() {
                           already_fulfilled: "Already fulfilled",
                           invalid_backorder: "Invalid backorder request",
                           unsupported_item: "Item not eligible for purchase",
+                          missing_vendor: "No vendor available",
+                          not_found: "Backorder not found",
+                          ignored: "Backorder is ignored",
+                          zero_qty: "Quantity is zero",
+                          missing_item: "Backorder missing item",
                         };
-                        const r = s.reason || "unknown";
+                        const r = (s.reason || "unknown").toString().toLowerCase();
                         return map[r] || r.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
                       })()}
                     </td>
@@ -410,6 +492,7 @@ export default function BackordersListPage() {
               <th style={{ padding: 8, border: "1px solid #ccc" }}>SO</th>
               <th style={{ padding: 8, border: "1px solid #ccc" }}>Status</th>
               <th style={{ padding: 8, border: "1px solid #ccc" }}>Vendor</th>
+              <th style={{ padding: 8, border: "1px solid #ccc" }}>Created</th>
               <th style={{ padding: 8, border: "1px solid #ccc" }}>Actions</th>
             </tr>
           </thead>
@@ -462,14 +545,26 @@ export default function BackordersListPage() {
                               : "Unassigned"}
                           </td>
                           <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                            {bo.createdAt ? new Date(bo.createdAt).toLocaleDateString() : "—"}
+                          </td>
+                          <td style={{ padding: 8, border: "1px solid #ccc" }}>
                             {bo.status === "open" && (
-                              <button
-                                onClick={() => handleIgnore(bo.id)}
-                                disabled={actionLoading}
-                                style={{ fontSize: 12, padding: "4px 8px" }}
-                              >
-                                Ignore
-                              </button>
+                              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                <button
+                                  onClick={() => handleIgnore(bo.id)}
+                                  disabled={actionLoading}
+                                  style={{ fontSize: 12, padding: "4px 8px" }}
+                                >
+                                  Ignore
+                                </button>
+                                <button
+                                  onClick={() => handleConvert(bo.id)}
+                                  disabled={actionLoading}
+                                  style={{ fontSize: 12, padding: "4px 8px" }}
+                                >
+                                  Convert
+                                </button>
+                              </div>
                             )}
                           </td>
                         </tr>
@@ -507,15 +602,27 @@ export default function BackordersListPage() {
                         ? vendorNameById[bo.preferredVendorId] ?? bo.preferredVendorId
                         : "Unassigned"}
                     </td>
+                          <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                            {bo.createdAt ? new Date(bo.createdAt).toLocaleDateString() : "—"}
+                          </td>
                     <td style={{ padding: 8, border: "1px solid #ccc" }} onClick={(e) => e.stopPropagation()}>
                       {bo.status === "open" && (
-                        <button
-                          onClick={() => handleIgnore(bo.id)}
-                          disabled={actionLoading}
-                          style={{ fontSize: 12, padding: "4px 8px" }}
-                        >
-                          Ignore
-                        </button>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          <button
+                            onClick={() => handleIgnore(bo.id)}
+                            disabled={actionLoading}
+                            style={{ fontSize: 12, padding: "4px 8px" }}
+                          >
+                            Ignore
+                          </button>
+                          <button
+                            onClick={() => handleConvert(bo.id)}
+                            disabled={actionLoading}
+                            style={{ fontSize: 12, padding: "4px 8px" }}
+                          >
+                            Convert
+                          </button>
+                        </div>
                       )}
                     </td>
                   </tr>

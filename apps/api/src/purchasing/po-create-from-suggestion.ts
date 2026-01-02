@@ -65,17 +65,25 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
 
   for (let i = 0; i < drafts.length; i++) {
     const draft = drafts[i];
-    if (!draft?.vendorId) return json(400, { message: "vendorId is required on each draft" });
+    if (!draft || typeof draft !== "object") return json(400, { message: "Each draft must be an object" });
+    if (!draft?.vendorId || typeof draft.vendorId !== "string") return json(400, { message: "vendorId is required on each draft" });
+    if (draft.lines && !Array.isArray(draft.lines)) return json(400, { message: "lines must be an array when provided" });
 
     const id = newPoId(idemKey ? `${tenantId}#po-create-from-suggestion#${idemKey}` : undefined, i);
 
     // Preserve existing line ids (id or lineId), normalize with ensureLineIds to get stable L{n} pattern
     const rawLines = (draft.lines ?? []).map((ln: any) => {
+      if (!ln || typeof ln !== "object") return ln;
+      if (!ln.itemId || typeof ln.itemId !== "string") return { ...ln, _invalid: true };
+      if (typeof ln.qty !== "number") return { ...ln, _invalid: true };
       // Keep existing id if present, else fallback to lineId if present
       if (ln?.id && String(ln.id).trim()) return { ...ln, id: String(ln.id).trim() };
       if (ln?.lineId && String(ln.lineId).trim()) return { ...ln, id: String(ln.lineId).trim() };
       return { ...ln }; // no id yet; ensureLineIds will assign
     });
+    if (rawLines.some((ln: any) => ln?._invalid)) {
+      return json(400, { message: "Each line requires itemId (string) and qty (number)" });
+    }
 
     const lines = ensureLineIds<PurchaseOrderLine>(rawLines) as PurchaseOrderLine[];
 

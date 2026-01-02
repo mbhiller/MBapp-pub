@@ -631,128 +631,186 @@ const PARTY_TYPE="party";
 const tests = {
     "smoke:close-the-loop": async () => {
       await ensureBearer();
-      // Seed vendor first so product/inventory can reference it
+      const receiveIdk = idem();
+      // Seed vendor and customer up-front so drafts inherit vendor and SO can be linked deterministically
       const { vendorId, vendorParty } = await seedVendor(api);
-      // Immediate debug: GET vendor party and capture roles
       const vendCheck = await get(`/objects/party/${encodeURIComponent(vendorId)}`);
       const vendorDebug = { vendorId, roles: vendCheck.body?.roles ?? vendorParty?.roles ?? [], party: vendCheck.body ?? vendorParty };
-      // 1) Create item with low/zero onHand
-      const prod = await createProduct({ name: "LoopTest", preferredVendorId: vendorId });
-      if (!prod.ok) return { test: "close-the-loop", result: "FAIL", step: "createProduct", prod };
-      const item = await createInventoryForProduct(prod.body?.id, "LoopTestItem");
-      if (!item.ok) return { test: "close-the-loop", result: "FAIL", step: "createInventory", item };
-      const itemId = item.body?.id;
-      // Create a customer party for the SO
+
       const { customerId, customerParty } = await seedCustomer(api);
-      // Immediate debug: GET customer party and capture roles
       const custCheck = await get(`/objects/party/${encodeURIComponent(customerId)}`);
       const customerDebug = { customerId, roles: custCheck.body?.roles ?? customerParty?.roles ?? [], party: custCheck.body ?? customerParty };
-      // Ensure onHand is 0 by adjusting based on current onHand
+
+      // 1) Create item with vendor linkage and zeroed onhand
+      const prod = await createProduct({ name: `LoopTest-${SMOKE_RUN_ID}`, preferredVendorId: vendorId, vendorId });
+      if (!prod.ok) return { test: "close-the-loop", result: "FAIL", step: "createProduct", prod };
+      const item = await createInventoryForProduct(prod.body?.id, `LoopTestItem-${SMOKE_RUN_ID}`);
+      if (!item.ok) return { test: "close-the-loop", result: "FAIL", step: "createInventory", item };
+      const itemId = item.body?.id;
+
       const onhandPre = await onhand(itemId);
-      const currentOnHand = onhandPre.body?.items?.[0]?.onHand ?? 0;
-      if (currentOnHand !== 0) {
-        await post(`/objects/inventoryMovement`, { itemId, type: "adjust", qty: -currentOnHand });
+      if (!onhandPre.ok) return { test: "close-the-loop", result: "FAIL", step: "onhand-pre", onhandPre };
+      const onHandPre = Number(onhandPre.body?.items?.[0]?.onHand ?? 0);
+      if (onHandPre !== 0) {
+        const adjust = await post(`/objects/inventoryMovement`, { itemId, type: "adjust", qty: -onHandPre }, { "Idempotency-Key": idem() });
+        if (!adjust.ok) return { test: "close-the-loop", result: "FAIL", step: "reset-onhand", adjust };
       }
       const onhand0 = await onhand(itemId);
-      // 2) Create Sales Order where qty > available
+      if (!onhand0.ok) return { test: "close-the-loop", result: "FAIL", step: "onhand-0", onhand0 };
+      const onHandBefore = Number(onhand0.body?.items?.[0]?.onHand ?? 0);
+
+      // 2) Create SO that forces backorder
       const so = await post(`/objects/salesOrder`, {
-        type: "salesOrder", status: "draft", partyId: customerId, lines: [{ itemId, qty: 5, uom: "ea" }]
+        type: "salesOrder",
+        status: "draft",
+        partyId: customerId,
+        lines: [{ itemId, qty: 4, uom: "ea" }]
       });
       if (!so.ok) return { test: "close-the-loop", result: "FAIL", step: "createSO", so };
       const soId = so.body?.id;
-      // 3) Commit SO
       await post(`/sales/so/${encodeURIComponent(soId)}:submit`, {}, { "Idempotency-Key": idem() });
       await post(`/sales/so/${encodeURIComponent(soId)}:commit`, {}, { "Idempotency-Key": idem() });
-      // Assert backorderRequests exist with status="open"
+
+      // 3) Verify backorder(s) exist then convert them to mirror UI flow
       const boRes = await post(`/objects/backorderRequest/search`, { soId, itemId, status: "open" });
       if (!boRes.ok || !Array.isArray(boRes.body?.items) || boRes.body.items.length === 0)
         return { test: "close-the-loop", result: "FAIL", step: "backorderRequest-open", boRes };
       const boIds = boRes.body.items.map(b => b.id);
-      // Record discovered backorderRequests
       recordFromListResult(boRes.body.items, "backorderRequest", `/objects/backorderRequest/search`);
-      // 4) Call /purchasing/suggest-po
-      const suggest = await post(`/purchasing/suggest-po`, { requests: boIds.map(id => ({ backorderRequestId: id })) });
-      // Debug: if suggest skipped entries, fetch vendor fields from BO/inventory/product
-      if (suggest.ok && Array.isArray(suggest.body?.skipped) && suggest.body.skipped.length > 0) {
-        for (const skip of suggest.body.skipped) {
-          const debugBo = await get(`/objects/backorderRequest/${encodeURIComponent(skip.backorderRequestId)}`);
-          const boData = debugBo.body;
-          const debugInv = boData?.itemId ? await get(`/objects/inventory/${encodeURIComponent(boData.itemId)}`) : { ok: false };
-          const invData = debugInv.body;
-          const debugProd = invData?.productId ? await get(`/objects/product/${encodeURIComponent(invData.productId)}`) : { ok: false };
-          const prodData = debugProd.body;
-          console.log("[DEBUG close-the-loop] Skipped BO vendor trace:", {
-            skip,
-            bo: { id: boData?.id, preferredVendorId: boData?.preferredVendorId, vendorId: boData?.vendorId, itemId: boData?.itemId },
-            inv: { id: invData?.id, preferredVendorId: invData?.preferredVendorId, vendorId: invData?.vendorId, productId: invData?.productId },
-            prod: { id: prodData?.id, preferredVendorId: prodData?.preferredVendorId, vendorId: prodData?.vendorId, defaultVendorId: prodData?.defaultVendorId }
-          });
-        }
+
+      for (const boId of boIds) {
+        const convert = await post(`/objects/backorderRequest/${encodeURIComponent(boId)}:convert`, {}, { "Idempotency-Key": idem() });
+        if (!convert.ok) return { test: "close-the-loop", result: "FAIL", step: "backorder-convert", convert };
       }
-      if (!suggest.ok || !Array.isArray(suggest.body?.drafts) || suggest.body.drafts.length === 0)
+      const boConverted = await post(`/objects/backorderRequest/search`, { soId, itemId, status: "converted" });
+      if (!boConverted.ok || !Array.isArray(boConverted.body?.items) || boConverted.body.items.length !== boIds.length)
+        return { test: "close-the-loop", result: "FAIL", step: "backorder-converted", boConverted };
+
+      // 4) suggest-po using explicit vendor to avoid skips
+      const suggest = await post(`/purchasing/suggest-po`, { requests: boIds.map(id => ({ backorderRequestId: id })), vendorId }, { "Idempotency-Key": idem() });
+      const drafts = Array.isArray(suggest.body?.drafts) ? suggest.body.drafts : suggest.body?.draft ? [suggest.body.draft] : [];
+      if (!suggest.ok || drafts.length === 0)
         return { test: "close-the-loop", result: "FAIL", step: "suggest-po", suggest };
-      const draft = suggest.body.drafts[0];
-      // Ensure vendor present and PO lines include backorderRequestIds
+      const draft = drafts[0];
+      const draftLines = draft.lines ?? [];
       const hasVendor = !!draft.vendorId;
-      const hasBackorderIds = draft.lines.every(l => Array.isArray(l.backorderRequestIds) && l.backorderRequestIds.length > 0);
+      const hasBackorderIds = draftLines.every(l => Array.isArray(l.backorderRequestIds) && l.backorderRequestIds.length > 0);
       if (!hasVendor || !hasBackorderIds)
         return { test: "close-the-loop", result: "FAIL", step: "draft-check", hasVendor, hasBackorderIds, draft };
-      // 5) Save/create the draft PO
-      const poSave = await post(`/objects/purchaseOrder`, { ...draft, status: "approved" });
-      if (!poSave.ok) return { test: "close-the-loop", result: "FAIL", step: "po-save", poSave };
-      const poId = poSave.body?.id;
-      // 6) Receive PO: POST /purchasing/po/{id}:receive with lines deltaQty
-      const lines = (poSave.body?.lines ?? []).map(ln => ({ id: ln.id ?? ln.lineId, deltaQty: (ln.qty - (ln.receivedQty ?? 0)) })).filter(l => l.deltaQty > 0);
-      const idk = idem();
-      const receive = await post(`/purchasing/po/${encodeURIComponent(poId)}:receive`, { lines }, { "Idempotency-Key": idk });
-      if (!receive.ok) return { test: "close-the-loop", result: "FAIL", step: "po-receive", receive };
-      // 7) Assert inventory onHand increased
-      const onhandAfter = await onhand(itemId);
-      const expectedReceived = lines.reduce((sum, l) => sum + Number(l.deltaQty ?? 0), 0);
-      const afterItem = onhandAfter.body?.items?.[0] ?? {};
-      const onHandAfter = Number(afterItem.onHand ?? 0);
-      const availableAfter = Number(afterItem.available ?? (onHandAfter - Number(afterItem.reserved ?? 0)));
-      if (!(onHandAfter >= expectedReceived && availableAfter >= 0)) {
-        throw new Error(JSON.stringify({
-          message: "onhand check after receive failed",
-          itemId,
-          expectedReceived,
-          onHandAfter,
-          availableAfter,
-          onhandResponse: onhandAfter.body
-        }, null, 2));
-      }
-      // Assert backorderRequests status becomes "fulfilled"
-      const boFulfilled = await post(`/objects/backorderRequest/search`, { soId, itemId, status: "fulfilled" });
-      recordFromListResult(boFulfilled.body?.items, "backorderRequest", `/objects/backorderRequest/search`);
-      // Assert no backorderRequests with status="open"
-      const boOpen = await post(`/objects/backorderRequest/search`, { soId, itemId, status: "open" });
-      recordFromListResult(boOpen.body?.items, "backorderRequest", `/objects/backorderRequest/search`);
-      // Idempotency check: call receive again with SAME Idempotency-Key
-      const receiveAgain = await post(`/purchasing/po/${encodeURIComponent(poId)}:receive`, { lines }, { "Idempotency-Key": idk });
-      const onhandFinal = await onhand(itemId);
-      const boFulfilledFinal = await post(`/objects/backorderRequest/search`, { soId, itemId, status: "fulfilled" });
-      const boOpenFinal = await post(`/objects/backorderRequest/search`, { soId, itemId, status: "open" });
-      // Checks
-      const oh0 = (onhand0.body?.items?.[0]?.onHand ?? 0);
-      const ohAfter = (onhandAfter.body?.items?.[0]?.onHand ?? 0);
-      const ohFinal = (onhandFinal.body?.items?.[0]?.onHand ?? 0);
 
-      // NOTE: Some environments allocate received qty directly to backorders/SOs (net onHand may remain unchanged).
-      // So: assert BO transitions + idempotency, and only require onHand to remain stable on replay.
+      // 5) Create PO via create-from-suggestion to exercise validation
+      const poCreate = await post(`/purchasing/po:create-from-suggestion`, { draft }, { "Idempotency-Key": idem() });
+      if (!poCreate.ok) return { test: "close-the-loop", result: "FAIL", step: "po-create-from-suggestion", poCreate };
+      const poId = poCreate.body?.id ?? (Array.isArray(poCreate.body?.ids) ? poCreate.body.ids[0] : undefined);
+      if (!poId) return { test: "close-the-loop", result: "FAIL", step: "po-id", poCreate };
+      const poGet = await get(`/objects/purchaseOrder/${encodeURIComponent(poId)}`);
+      if (!poGet.ok) return { test: "close-the-loop", result: "FAIL", step: "po-get", poGet };
+      await post(`/purchasing/po/${encodeURIComponent(poId)}:submit`, {}, { "Idempotency-Key": idem() });
+      await post(`/purchasing/po/${encodeURIComponent(poId)}:approve`, {}, { "Idempotency-Key": idem() });
+      const approved = await waitForStatus("purchaseOrder", poId, ["approved", "open"]);
+      if (!approved.ok) return { test: "close-the-loop", result: "FAIL", step: "po-approved", approved };
+      const poLinesRaw = poGet.body?.lines ?? draftLines;
+      const lines = poLinesRaw
+        .map(ln => ({ id: ln.id ?? ln.lineId, deltaQty: Math.max(0, Number(ln.qty ?? ln.qtySuggested ?? 0) - Number(ln.receivedQty ?? 0)) }))
+        .filter(l => l.id && l.deltaQty > 0);
+      if (lines.length === 0) return { test: "close-the-loop", result: "FAIL", step: "po-lines", poLinesRaw };
+      const expectedReceived = lines.reduce((sum, l) => sum + Number(l.deltaQty ?? 0), 0);
+
+      // 6) Receive with idempotency and assert onhand delta
+      const receive = await post(`/purchasing/po/${encodeURIComponent(poId)}:receive`, { lines }, { "Idempotency-Key": receiveIdk });
+      if (!receive.ok) return { test: "close-the-loop", result: "FAIL", step: "po-receive", receive };
+
+      const readOnhandDelta = async (retries = 2, delayMs = 150) => {
+        let last = null;
+        for (let i = 0; i <= retries; i++) {
+          last = await onhand(itemId);
+          if (!last.ok) return { ok: false, resp: last };
+          const val = Number(last.body?.items?.[0]?.onHand ?? 0);
+          const delta = val - onHandBefore;
+          if (delta === expectedReceived) return { ok: true, resp: last, val, delta };
+          if (i < retries) await new Promise(r => setTimeout(r, delayMs));
+        }
+        const val = Number(last?.body?.items?.[0]?.onHand ?? 0);
+        const delta = val - onHandBefore;
+        return { ok: delta === expectedReceived, resp: last, val, delta };
+      };
+
+      const onhandAfterRes = await readOnhandDelta();
+      if (!onhandAfterRes.ok) {
+        return {
+          test: "close-the-loop",
+          result: "FAIL",
+          step: "onhand-after",
+          onHandBefore,
+          onHandAfter: onhandAfterRes.val,
+          expectedReceived,
+          lines,
+          onhandAfter: onhandAfterRes.resp
+        };
+      }
+      const onhandAfter = onhandAfterRes.resp;
+      const onHandAfter = onhandAfterRes.val;
+      const deltaOnHand = onhandAfterRes.delta;
+
+      // 7) Backorders fulfilled + idempotent receive replay
+      const boFulfilled = await post(`/objects/backorderRequest/search`, { soId, itemId, status: "fulfilled" });
+      if (!boFulfilled.ok) return { test: "close-the-loop", result: "FAIL", step: "backorder-fulfilled", boFulfilled };
+      recordFromListResult(boFulfilled.body?.items, "backorderRequest", `/objects/backorderRequest/search`);
+      const boItems = Array.isArray(boFulfilled.body?.items) ? boFulfilled.body.items : [];
+      const boAllFound = boIds.every(id => boItems.some(b => b.id === id && b.status === "fulfilled" && Number(b.remainingQty ?? 0) === 0));
+      if (!boAllFound || boItems.length !== boIds.length) {
+        return { test: "close-the-loop", result: "FAIL", step: "backorder-fulfilled-assert", boIds, boItems };
+      }
+
+      const receiveAgain = await post(`/purchasing/po/${encodeURIComponent(poId)}:receive`, { lines }, { "Idempotency-Key": receiveIdk });
+      if (!receiveAgain.ok) return { test: "close-the-loop", result: "FAIL", step: "po-receive-again", receiveAgain };
+      const receiveAgainPoId = receiveAgain.body?.id ?? receiveAgain.body?.poId ?? receiveAgain.body?.purchaseOrderId;
+      if (receiveAgainPoId && receiveAgainPoId !== poId) {
+        return { test: "close-the-loop", result: "FAIL", step: "po-receive-again-po-id", poId, receiveAgainPoId, receiveAgain };
+      }
+      const receiveLines = Array.isArray(receive.body?.lines) ? receive.body.lines : [];
+      const receiveAgainLines = Array.isArray(receiveAgain.body?.lines) ? receiveAgain.body.lines : [];
+      const receivedQtyUnchanged = receiveLines.every(l => {
+        const lid = l.id ?? l.lineId;
+        const beforeQty = Number(l.receivedQty ?? 0);
+        const afterQty = Number((receiveAgainLines.find(x => (x.id ?? x.lineId) === lid) ?? {}).receivedQty ?? beforeQty);
+        return afterQty === beforeQty;
+      });
+      const onhandFinal = await onhand(itemId);
+      const onHandFinal = Number(onhandFinal.body?.items?.[0]?.onHand ?? 0);
+
       const pass =
-        Array.isArray(boFulfilled.body?.items) && boFulfilled.body.items.length > 0
-        && Array.isArray(boOpen.body?.items) && boOpen.body.items.length === 0
-        && receiveAgain.ok
-        && ohFinal === ohAfter
-        && JSON.stringify(boFulfilledFinal.body?.items) === JSON.stringify(boFulfilled.body?.items)
-        && Array.isArray(boOpenFinal.body?.items) && boOpenFinal.body.items.length === 0;
+        deltaOnHand === expectedReceived &&
+        Array.isArray(boFulfilled.body?.items) && boFulfilled.body.items.length === boIds.length &&
+        receiveAgain.ok &&
+        receivedQtyUnchanged &&
+        onHandFinal === onHandAfter;
+
       return {
         test: "close-the-loop",
         result: pass ? "PASS" : "FAIL",
         steps: {
-          prod, item, onhand0, so, boRes, suggest, draft, poSave, receive, onhandAfter, boFulfilled, boOpen, receiveAgain, onhandFinal, boFulfilledFinal, boOpenFinal
-          , vendorDebug, customerDebug
+          prod,
+          item,
+          onhand0,
+          so,
+          boRes,
+          boConverted,
+          suggest,
+          draft,
+          poCreate,
+          poGet,
+          receive,
+          onhandAfter,
+          boFulfilled,
+          receiveAgain,
+          onhandFinal,
+          vendorDebug,
+          customerDebug,
+          onHandBefore,
+          onHandAfter,
+          deltaOnHand,
+          expectedReceived
         }
       };
     },
