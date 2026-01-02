@@ -9,7 +9,21 @@ This doc explains how our **router**, **auth**, and **module endpoints** are str
 
 ## 2) Auth & permissions
 - `getAuth(event)` → `{ userId, tenantId, roles, policy }` (Bearer required).
-  - **policy**: `Record<string, boolean>` from JWT `mbapp.policy` claim (runtime enforcement).
+  - **policy**: `Record<string, boolean>` from JWT `mbapp.policy` claim or derived from `mbapp.roles`.
+  - **Policy source priority:**
+    1. **Explicit JWT policy (if non-empty):** Uses `mbapp.policy` from JWT unchanged (explicit override)
+    2. **Role derivation (fallback):** If JWT has no `mbapp.policy` or empty object, derives permissions from `mbapp.roles` via `derivePolicyFromRoles()`
+  - **Role mappings** ([apps/api/src/auth/derivePolicyFromRoles.ts](../apps/api/src/auth/derivePolicyFromRoles.ts)):
+    - `admin` → `{ "*": true }` (superuser)
+    - `operator` → `{ "*:read": true, "sales:*": true, "purchase:*": true, "inventory:*": true, "view:*": true, "workspace:*": true, "scanner:use": true }`
+    - `viewer` → `{ "*:read": true }` (read-only)
+    - `warehouse` → `{ "*:read": true, "inventory:*": true, "purchase:receive": true, "scanner:use": true }`
+  - **Wildcard semantics:**
+    - `"*"` → superuser (all permissions)
+    - `"*:*"` → all actions on all types
+    - `"*:read"` → read action on all types
+    - `"product:*"` → all actions on product type
+    - `"product:read"` → exact permission match
 - `injectPreAuth(event, auth)` → stores auth into `event.requestContext.authorizer.mbapp`.
 - `requirePerm(auth, "<type>:<action>")` guards routes with wildcard support: `type:*`, `*:action`, `*:*`, `*`.
 - **Tenant header**: send both `X-Tenant-Id` and `x-tenant-id`.
@@ -32,7 +46,7 @@ Backend flags (from `apps/api/src/flags.ts`):
 
 ## 4) Router map (high level)
 **Public**: `GET /` or `/health`, `POST /auth/dev-login` (dev)  
-**Auth**: `GET /auth/policy` (dev stub returns `{ scopes: ["*:*"], user, roles, tenants, version, issuedAt }`)  
+**Auth**: `GET /auth/policy` (returns `Record<string, boolean>` — explicit JWT policy or role-derived permissions)  
 **Views**: `GET/POST /views`, `GET/PUT/DELETE /views/{id}`  
 **Workspaces**: `GET/POST /workspaces`, `GET/PUT/DELETE /workspaces/{id}`  
 **Objects**: `GET/POST /objects/{type}`, `GET/PUT/DELETE /objects/{type}/{id}`, `POST /objects/{type}/search`  

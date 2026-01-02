@@ -1,6 +1,7 @@
 // apps/src/api/auth/middleware.ts
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import jwt from "jsonwebtoken";
+import { derivePolicyFromRoles } from "./derivePolicyFromRoles";
 
 export type AuthContext = {
   userId: string;
@@ -32,7 +33,15 @@ export async function getAuth(event: APIGatewayProxyEventV2): Promise<AuthContex
   const userId: string = mb.userId || decoded?.sub || "unknown";
   const tenantId: string = mb.tenantId || "unknown";
   const roles: string[] = Array.isArray(mb.roles) ? mb.roles : [];
-  const policy: Record<string, boolean> = isObject(mb.policy) ? mb.policy : {};
+  const explicitPolicy: Record<string, boolean> = isObject(mb.policy) ? mb.policy : {};
+
+  // Determine if JWT has explicit policy (non-empty)
+  const hasExplicitPolicy = explicitPolicy && Object.keys(explicitPolicy).length > 0;
+
+  // Use explicit policy if present, otherwise derive from roles
+  const policy: Record<string, boolean> = hasExplicitPolicy
+    ? explicitPolicy
+    : derivePolicyFromRoles(roles);
 
   return { userId, tenantId, roles, policy };
 }

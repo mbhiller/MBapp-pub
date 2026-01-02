@@ -2605,22 +2605,9 @@ export interface components {
             endsAt?: string;
             notes?: string;
         };
+        /** @description Permission map; keys are permission strings (e.g., 'product:read', 'inventory:write'); values are boolean (true if granted). Supports wildcard patterns: '*' (superuser), '*:*' (all actions), '*:read' (read all), 'product:*' (all product actions). */
         Policy: {
-            tenantId?: string;
-            userId?: string;
-            roles: string[];
-            permissions: string[];
-            ui?: {
-                allowedModuleKeys?: string[];
-                allowedViews?: {
-                    id?: string;
-                    moduleKey?: string;
-                }[];
-                allowedWorkspaces?: {
-                    id?: string;
-                    name?: string;
-                }[];
-            };
+            [key: string]: boolean;
         };
         Product: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
