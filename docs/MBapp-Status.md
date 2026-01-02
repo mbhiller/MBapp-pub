@@ -8,6 +8,16 @@
 
 ## Current State Summary
 
+### Mobile Views Parity (SO/PO) — ✅ Complete (Sprint N, 2026-01-02)
+
+**Epic Summary:** Add ViewPicker modal to mobile Sales Orders and Purchase Orders list screens for operator speed parity with Products/Inventory/Parties screens.
+
+- **E1 (SO List Screen):** [apps/mobile/src/screens/SalesOrdersListScreen.tsx](../apps/mobile/src/screens/SalesOrdersListScreen.tsx) added ViewPickerModal import, `showViewPicker` state, "📋 Views" button in toolbar, and `handleApplyView` handler. Modal filters to `entityType="salesOrder"`, applies view filters/sort/search on select, preserves existing route.params.viewId deep-link support and Active View banner with Clear.
+- **E2 (PO List Screen):** [apps/mobile/src/screens/PurchaseOrdersListScreen.tsx](../apps/mobile/src/screens/PurchaseOrdersListScreen.tsx) mirrored E1 changes with `entityType="purchaseOrder"`. Pattern matches Products/Inventory/Parties screens exactly.
+- **E3 (Docs):** Updated [MBapp-Status.md](MBapp-Status.md) and [MBapp-Foundations.md](MBapp-Foundations.md) to reflect SO/PO ViewPicker parity achievement.
+- **Verification:** ✅ `npm -w apps/mobile run typecheck` passed; no regressions in route-based view application or SaveViewModal.
+- **Outcome:** Mobile operators can now switch views in-screen on SO/PO lists without exiting to workspace/deep links. All 5 major list screens (Products, Inventory, Parties, SO, PO) now have consistent ViewPicker + SaveViewModal + route.params.viewId support.
+
 ### Workspace Default View — ✅ Complete (Sprint M, 2026-01-02)
 
 **Epic Summary:** Add `defaultViewId` to workspaces with smart "Open" precedence (defaultViewId → first pinned view → workspace detail) and comprehensive validation across spec, API, web, mobile, and integration tests.
