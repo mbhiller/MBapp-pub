@@ -8,6 +8,13 @@
 
 ## Current State Summary
 
+### Workspaces & Views v1 — ✅ Complete (Sprint H, 2026-01-01)
+
+- Products web list now supports Views end-to-end: select/apply/save, `?viewId=` deep link param honored on load.
+- Workspaces web gains create/delete plus views[] management (add/remove views, delete workspace) with API-backed PATCH/DELETE flows.
+- Mobile list screens now ship a ViewPicker (no longer param-only); applies product views via mapped filters and SaveViewModal.
+- Added smoke `smoke:views:apply-to-product-list` and wired into CI manifest (guards product view apply path alongside PO flow).
+
 ### Sprint N1 — Sales Orders Foundation Lock-in — ✅ Complete (2026-01-01)
 
 - so-fulfill dual-ledger idempotency hardened (early key + payload signature; replay-safe, first-write-wins on key reuse).

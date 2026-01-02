@@ -9,7 +9,7 @@
 
 Smoke tests are integration tests for critical API flows. All tests use idempotency keys for safe retry and include party/vendor seeding. Run with `node ops/smoke/smoke.mjs <test-name>`.
 
-**CI Smoke Manifest:** The definitive list of tests run in CI is maintained in [ops/ci-smokes.json](../ops/ci-smokes.json). Additional flows exist in `ops/smoke/smoke.mjs` but are opt-in only. CI includes `smoke:views:crud`, `smoke:workspaces:list`, `smoke:workspaces:mixed-dedupe`, and `smoke:workspaces:get-fallback`.
+**CI Smoke Manifest:** The definitive list of tests run in CI is maintained in [ops/ci-smokes.json](../ops/ci-smokes.json). Additional flows exist in `ops/smoke/smoke.mjs` but are opt-in only. CI includes `smoke:views:crud`, `smoke:workspaces:list`, `smoke:workspaces:mixed-dedupe`, `smoke:workspaces:get-fallback`, `smoke:views:apply-to-po-list`, and `smoke:views:apply-to-product-list`.
 
 **Scanner Actions Flows (Sprint S, E2):**
 - `smoke:scanner:actions:record` — **NEW** (E2). Validates POST /scanner/actions endpoint:
@@ -50,6 +50,7 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 - `smoke:views:crud` — Creates view with unique timestamped name, validates CRUD operations (create, list with `q=<exact name>`, get, update, delete). Uses 5-attempt retry with 300ms delay for eventual consistency. **Deterministic:** filters by exact unique name instead of paginating through all views.
 - `smoke:workspaces:list` — Creates 2 temp views with unique smokeTag names and different entityTypes, validates filtering by `q=<tag>` and `entityType=<type>`. **Pollution-resistant:** uses unique run timestamp in names and filters by created view IDs, not generic patterns.
 - `smoke:views:apply-to-po-list` (Sprint Q) — Creates 2 POs with different statuses (draft, submitted), creates View with `status="draft"` filter, queries `/purchasing/purchase-orders?viewId={id}`, asserts draft PO present and submitted PO absent. Validates that applying a view with filters constrains list results as expected.
+- `smoke:views:apply-to-product-list` (Sprint H) — Creates product with unique SKU, verifies list search finds it, creates View entityType="product" (empty filters), fetches it back, and confirms product list remains healthy under view application. Cleanup retries DELETE to avoid residue.
 - `smoke:views:validate-filters` (Sprint Q) — Validates server-side filter validation: rejects views with (1) missing field, (2) invalid operator (badOp), (3) "in" operator with non-array value, (4) object value for eq operator. Accepts valid filters (eq/in/ge with proper types). Returns 400 bad_request with clear error messages for invalid filters.
 - `smoke:workspaces:mixed-dedupe` (Sprint Q) — Forces mixed-source pagination across true workspaces and legacy view-backed workspaces, asserting duplicates are deduped before counting toward `limit`, multi-page cursors stay stable, and IDs remain unique across pages.
 - `smoke:workspaces:get-fallback` (Sprint Q) — Verifies legacy view-backed workspaces still resolve via workspace GET when no dedicated workspace record exists (ensures migration fallback safety).

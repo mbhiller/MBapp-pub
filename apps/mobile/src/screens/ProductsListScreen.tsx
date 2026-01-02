@@ -10,6 +10,9 @@ import type { RootStackParamList } from "../navigation/types";
 import { useTheme } from "../providers/ThemeProvider";
 import { useViewsApi } from "../features/views/hooks";
 import { mapViewToMobileState, type SavedView } from "../features/views/applyView";
+import ViewPickerModal from "../features/views/ViewPickerModal";
+import SaveViewModal from "../features/views/SaveViewModal";
+import { buildViewFromState } from "../features/views/buildViewFromState";
 
 const PAGE_SIZE = __DEV__ ? 200 : 20;
 
@@ -27,6 +30,8 @@ export default function ProductsListScreen() {
   const [isLoadingMore, setIsLoadingMore] = React.useState(false);
   const [lastError, setLastError] = React.useState<string | null>(null);
   const [appliedView, setAppliedView] = React.useState<SavedView | null>(null);
+  const [showViewPicker, setShowViewPicker] = React.useState(false);
+  const [showSaveModal, setShowSaveModal] = React.useState(false);
 
   React.useEffect(() => {
     setItems([]);
@@ -66,6 +71,19 @@ export default function ProductsListScreen() {
   const clearView = () => {
     setAppliedView(null);
     setQ("");
+  };
+
+  const handleApplyView = (view: SavedView) => {
+    const result = mapViewToMobileState("product", view);
+    setAppliedView(view);
+    if (result.applied.q !== undefined) {
+      setQ(result.applied.q ?? "");
+    }
+  };
+
+  const handleSaveView = (view: SavedView) => {
+    setAppliedView(view);
+    setShowSaveModal(false);
   };
 
   const loadProducts = async () => {
@@ -251,6 +269,42 @@ export default function ProductsListScreen() {
         <Text style={{ color: "#fff", fontSize: 16, fontWeight: "700" }}>Create Product</Text>
       </Pressable>
 
+      {/* View Controls Row */}
+      <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+        <Pressable
+          onPress={() => setShowViewPicker(true)}
+          style={{
+            flex: 1,
+            padding: 10,
+            backgroundColor: t.colors.card,
+            borderWidth: 1,
+            borderColor: t.colors.border,
+            borderRadius: 8,
+            alignItems: "center",
+          }}
+        >
+          <Text style={{ color: t.colors.primary, fontWeight: "600" }}>
+            📋 Views
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setShowSaveModal(true)}
+          style={{
+            flex: 1,
+            padding: 10,
+            backgroundColor: t.colors.card,
+            borderWidth: 1,
+            borderColor: t.colors.border,
+            borderRadius: 8,
+            alignItems: "center",
+          }}
+        >
+          <Text style={{ color: t.colors.primary, fontWeight: "600" }}>
+            💾 Save
+          </Text>
+        </Pressable>
+      </View>
+
       {/* Search Input */}
       <TextInput
         placeholder="Search products (name, sku)"
@@ -289,6 +343,24 @@ export default function ProductsListScreen() {
           }
         />
       )}
+      
+      {/* View Picker Modal */}
+      <ViewPickerModal
+        visible={showViewPicker}
+        onClose={() => setShowViewPicker(false)}
+        onSelect={handleApplyView}
+        entityType="product"
+      />
+
+      {/* Save View Modal */}
+      <SaveViewModal
+        visible={showSaveModal}
+        onClose={() => setShowSaveModal(false)}
+        onSaved={handleSaveView}
+        entityType="product"
+        currentState={{ q }}
+        appliedView={appliedView}
+      />
     </View>
   );
 }
