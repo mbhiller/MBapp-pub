@@ -113,24 +113,6 @@ export default function PurchaseOrderDetailScreen() {
     return () => clearTimeout(t);
   }, [lastScanMessage]);
 
-  if (isLoading) return <ActivityIndicator />;
-
-  // Deterministic idempotency key per (poId, lineId, qty, lot, location)
-  const makeIdk = (poId: string, lineId: string, n: number, l?: string, loc?: string) =>
-    `po:${poId}#ln:${lineId}#q:${n}#lot:${l || ""}#loc:${loc || ""}`;
-
-  const pickOnhandItems = (resp: any) => {
-    if (Array.isArray(resp?.items)) return resp.items;
-    if (Array.isArray(resp?.body?.items)) return resp.body.items;
-    return [];
-  };
-
-  const pickObjects = (resp: any) => {
-    if (Array.isArray(resp?.items)) return resp.items;
-    if (Array.isArray(resp?.body?.items)) return resp.body.items;
-    return [];
-  };
-
   const verifyAfterReceive = React.useCallback(async () => {
     if (!po?.id || itemIds.length === 0) {
       setVerification({ status: "idle" });
@@ -165,6 +147,24 @@ export default function PurchaseOrderDetailScreen() {
       toast(message, "error");
     }
   }, [itemIds, po?.id, toast]);
+
+  if (isLoading) return <ActivityIndicator />;
+
+  // Deterministic idempotency key per (poId, lineId, qty, lot, location)
+  const makeIdk = (poId: string, lineId: string, n: number, l?: string, loc?: string) =>
+    `po:${poId}#ln:${lineId}#q:${n}#lot:${l || ""}#loc:${loc || ""}`;
+
+  const pickOnhandItems = (resp: any) => {
+    if (Array.isArray(resp?.items)) return resp.items;
+    if (Array.isArray(resp?.body?.items)) return resp.body.items;
+    return [];
+  };
+
+  const pickObjects = (resp: any) => {
+    if (Array.isArray(resp?.items)) return resp.items;
+    if (Array.isArray(resp?.body?.items)) return resp.body.items;
+    return [];
+  };
 
   // Helper: find all lines matching an itemId
   const findLinesForItem = (itemId: string) =>
