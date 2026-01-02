@@ -37,10 +37,12 @@ export default function WorkspaceDetailScreen() {
 
   const { data: workspace, isLoading, error, refetch } = useWorkspaceItem(workspaceId);
   const { patch } = useWorkspacesApi();
-  const { list: listViews } = useViewsApi();
+  const { list: listViews, get: getView } = useViewsApi();
 
   const [views, setViews] = React.useState<SavedView[]>([]);
   const [loadingViews, setLoadingViews] = React.useState(false);
+  const [viewMetadata, setViewMetadata] = React.useState<Record<string, SavedView | null>>({});
+  const [viewErrors, setViewErrors] = React.useState<Record<string, string>>({});
 
   const [editVisible, setEditVisible] = React.useState(false);
   const [selectedViews, setSelectedViews] = React.useState<string[]>([]);
@@ -68,6 +70,44 @@ export default function WorkspaceDetailScreen() {
     };
   }, [listViews, toast, workspace?.entityType]);
 
+  // Hydrate metadata for workspace.views[] (independent of workspace.entityType)
+  React.useEffect(() => {
+    const ids = (workspace?.views ?? []).filter((v): v is string => typeof v === "string");
+    const missing = ids.filter((id) => !(id in viewMetadata));
+    if (missing.length === 0) return;
+
+    let cancelled = false;
+    async function load() {
+      const results = await Promise.allSettled(
+        missing.map((id) => getView(id).then((data) => ({ id, data })))
+      );
+      if (cancelled) return;
+      setViewMetadata((prev) => {
+        const next = { ...prev } as Record<string, SavedView | null>;
+        results.forEach((res, idx) => {
+          const id = res.status === "fulfilled" ? res.value.id : missing[idx];
+          next[id] = res.status === "fulfilled" ? res.value.data : null;
+        });
+        return next;
+      });
+      setViewErrors((prev) => {
+        const next = { ...prev } as Record<string, string>;
+        results.forEach((res, idx) => {
+          const id = res.status === "fulfilled" ? res.value.id : missing[idx];
+          if (res.status === "rejected") {
+            next[id] = String(res.reason?.message || res.reason || "Failed to load view");
+          }
+        });
+        return next;
+      });
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [getView, viewMetadata, workspace?.views]);
+
   // Sync selected views when workspace changes
   React.useEffect(() => {
     if (workspace?.views) {
@@ -81,16 +121,22 @@ export default function WorkspaceDetailScreen() {
 
   const openView = React.useCallback(
     (viewId: string) => {
-      const entityType = workspace?.entityType;
-      if (!entityType) return;
-      const routeName = ROUTE_BY_ENTITY[entityType];
-      if (!routeName) {
-        toast("Unsupported entity type for navigation", "warning");
+      const meta = viewMetadata[viewId] || views.find((v) => v.id === viewId) || null;
+      const resolvedEntity = meta?.entityType || workspace?.entityType;
+      if (resolvedEntity) {
+        const routeName = ROUTE_BY_ENTITY[resolvedEntity];
+        if (routeName) {
+          navigation.navigate(routeName as any, { viewId } as any);
+          return;
+        }
+      }
+      if (meta?.id) {
+        toast("No list screen for this view entity type", "warning");
         return;
       }
-      navigation.navigate(routeName as any, { viewId } as any);
+      toast("Unable to open view: missing entity type", "warning");
     },
-    [navigation, toast, workspace?.entityType]
+    [navigation, toast, viewMetadata, views, workspace?.entityType]
   );
 
   const openEdit = React.useCallback(() => {
@@ -125,8 +171,11 @@ export default function WorkspaceDetailScreen() {
   }, [closeEdit, patch, refetch, selectedViews, toast, workspace?.id]);
 
   const renderMember = (viewId: string) => {
-    const v = views.find((vv) => vv.id === viewId);
-    const name = v?.name || viewId;
+    const meta = viewMetadata[viewId] || views.find((vv) => vv.id === viewId) || null;
+    const name = meta?.name || viewId;
+    const description = meta?.description;
+    const entityType = meta?.entityType || workspace?.entityType;
+    const err = viewErrors[viewId];
     return (
       <Pressable
         key={viewId}
@@ -141,7 +190,21 @@ export default function WorkspaceDetailScreen() {
         }}
       >
         <Text style={{ color: t.colors.text, fontWeight: "600" }}>{name}</Text>
-        <Text style={{ color: t.colors.textMuted, fontSize: 12, marginTop: 4 }}>Tap to open</Text>
+        {description ? (
+          <Text style={{ color: t.colors.textMuted, fontSize: 12, marginTop: 4 }} numberOfLines={2}>
+            {description}
+          </Text>
+        ) : null}
+        <Text style={{ color: t.colors.textMuted, fontSize: 12, marginTop: 4 }}>
+          {entityType ? `Entity: ${entityType}` : "Entity: (unknown)"}
+        </Text>
+        {err ? (
+          <Text style={{ color: t.colors.danger ?? "#c00", fontSize: 12, marginTop: 4 }}>
+            {err}
+          </Text>
+        ) : (
+          <Text style={{ color: t.colors.textMuted, fontSize: 12, marginTop: 4 }}>Tap to open</Text>
+        )}
       </Pressable>
     );
   };

@@ -1,12 +1,19 @@
 # MBapp Status / Working
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Foundations](MBapp-Foundations.md) · [Cadence](MBapp-Cadence.md) · [Verification](smoke-coverage.md)  
-**Last Updated:** 2026-01-01  
+**Last Updated:** 2026-01-02  
 **Workflow & DoD:** See [MBapp-Cadence.md](MBapp-Cadence.md) for canonical workflow, Definition of Done, and testing rules.
 
 ---
 
 ## Current State Summary
+
+### Workspace View Routing — ✅ Complete (Sprint K, 2026-01-02)
+
+- Web WorkspaceDetail launches entity list pages with `?viewId=` using each view’s `entityType`, falling back to `/views/:id` when the entity type has no mapped list screen.
+- Mobile WorkspaceHub now routes into WorkspaceDetail (no longer misuses `workspace.id` as a viewId).
+- Mobile WorkspaceDetail opens entity list screens with the selected `viewId`, using the view’s `entityType`; `workspace.entityType` is optional.
+- Rule: `workspace.id` is never a viewId; `workspace.views[]` contains view IDs only.
 
 ### Sprint I — Backorder → PO → Receive Parity Refresh — ✅ Complete (2026-01-02)
 

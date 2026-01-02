@@ -18,6 +18,7 @@ type ViewMetadata = {
   id: string;
   name?: string;
   entityType?: string;
+  description?: string;
 };
 
 function formatError(err: unknown): string {
@@ -43,95 +44,6 @@ function getListPageRoute(entityType?: string): string | null {
   return routes[entityType || ""] || null;
 }
 
-// Component: render a single view link with metadata + error handling
-function ViewLink({
-  viewId,
-  token,
-  tenantId,
-}: {
-  viewId: string;
-  token?: string;
-  tenantId?: string;
-}) {
-  const [view, setView] = useState<ViewMetadata | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const fetchViewMetadata = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const result = await apiFetch<ViewMetadata>(`/views/${encodeURIComponent(viewId)}`, {
-          token: token || undefined,
-          tenantId,
-        });
-        if (result) {
-          setView(result);
-        }
-      } catch (err) {
-        setError(formatError(err));
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchViewMetadata();
-  }, [viewId, token, tenantId]);
-
-  // If we have view metadata and a valid entityType, render as deep link
-  if (view?.entityType && !loading) {
-    const listPageRoute = getListPageRoute(view.entityType);
-    if (listPageRoute) {
-      return (
-        <span>
-          <Link
-            to={`${listPageRoute}?viewId=${encodeURIComponent(viewId)}`}
-            style={{ color: "#08a", textDecoration: "none", fontWeight: 500 }}
-            title={`Open ${view.name || viewId} in ${view.entityType} list`}
-          >
-            {view.name || viewId}
-          </Link>
-          <span style={{ fontSize: 12, color: "#666", marginLeft: 8 }}>
-            ({view.entityType})
-          </span>
-        </span>
-      );
-    }
-  }
-
-  // If loading, show placeholder
-  if (loading) {
-    return (
-      <span style={{ color: "#999" }}>
-        {viewId} (loading...)
-      </span>
-    );
-  }
-
-  // If error, show non-blocking error with fallback link to Views page
-  if (error) {
-    return (
-      <span>
-        <Link to={`/views/${encodeURIComponent(viewId)}`} style={{ color: "#08a", textDecoration: "none" }}>
-          {viewId}
-        </Link>
-        <span style={{ fontSize: 12, color: "#f77", marginLeft: 8 }}>
-          (metadata error: {error})
-        </span>
-      </span>
-    );
-  }
-
-  // If no view metadata, render fallback link to Views detail page
-  return (
-    <span>
-      <Link to={`/views/${encodeURIComponent(viewId)}`} style={{ color: "#08a", textDecoration: "none" }}>
-        {viewId}
-      </Link>
-    </span>
-  );
-}
-
 export default function WorkspaceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { token, tenantId } = useAuth();
@@ -143,6 +55,8 @@ export default function WorkspaceDetailPage() {
   const [newViewId, setNewViewId] = useState("");
   const [availableViews, setAvailableViews] = useState<ViewMetadata[]>([]);
   const [viewsLoading, setViewsLoading] = useState(false);
+  const [viewMetadataMap, setViewMetadataMap] = useState<Record<string, ViewMetadata | null>>({});
+  const [viewMetadataErrors, setViewMetadataErrors] = useState<Record<string, string>>({});
   const [updateLoading, setUpdateLoading] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
 
@@ -166,6 +80,54 @@ export default function WorkspaceDetailPage() {
   useEffect(() => {
     fetchWorkspace();
   }, [fetchWorkspace]);
+
+  // Hydrate metadata for workspace.views[] (tolerate partial failures)
+  useEffect(() => {
+    const viewIds = (workspace?.views || []).filter((v): v is string => typeof v === "string");
+    if (viewIds.length === 0) return;
+
+    const missingIds = viewIds.filter((id) => !(id in viewMetadataMap));
+    if (missingIds.length === 0) return;
+
+    let cancelled = false;
+    async function loadMetadata() {
+      const results = await Promise.allSettled(
+        missingIds.map((viewId) =>
+          apiFetch<ViewMetadata>(`/views/${encodeURIComponent(viewId)}`, {
+            token: token || undefined,
+            tenantId,
+          }).then((data) => ({ viewId, data }))
+        )
+      );
+
+      if (cancelled) return;
+
+      setViewMetadataMap((prev) => {
+        const next = { ...prev } as Record<string, ViewMetadata | null>;
+        results.forEach((res, idx) => {
+          const viewId = res.status === "fulfilled" ? res.value.viewId : missingIds[idx];
+          next[viewId] = res.status === "fulfilled" ? res.value.data : null;
+        });
+        return next;
+      });
+
+      setViewMetadataErrors((prev) => {
+        const next = { ...prev } as Record<string, string>;
+        results.forEach((res, idx) => {
+          const viewId = res.status === "fulfilled" ? res.value.viewId : missingIds[idx];
+          if (res.status === "rejected") {
+            next[viewId] = formatError(res.reason);
+          }
+        });
+        return next;
+      });
+    }
+
+    loadMetadata();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, token, workspace?.views]);
 
   // Load available views when workspace entityType is known
   useEffect(() => {
@@ -326,38 +288,89 @@ export default function WorkspaceDetailPage() {
             {workspace.views.length === 0 ? (
               <div style={{ marginTop: 4, color: "#666" }}>(none)</div>
             ) : (
-              <ul style={{ marginTop: 4, paddingLeft: 20, listStyle: "none" }}>
-                {workspace.views.map((viewId) => (
-                  typeof viewId === "string" ? (
-                    <li key={viewId} style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
-                      <ViewLink
-                        viewId={viewId}
-                        token={token || undefined}
-                        tenantId={tenantId}
-                      />
-                      <button
-                        onClick={() => handleRemoveView(viewId)}
-                        disabled={updateLoading}
-                        style={{
-                          padding: "4px 8px",
-                          fontSize: 12,
-                          background: "#fee",
-                          color: "#c00",
-                          border: "1px solid #fcc",
-                          borderRadius: 4,
-                          cursor: "pointer",
-                        }}
-                      >
-                        Remove
-                      </button>
-                    </li>
-                  ) : (
-                    <li key={JSON.stringify(viewId)} style={{ marginBottom: 8, color: "#999" }}>
-                      {JSON.stringify(viewId)} (invalid format)
-                    </li>
-                  )
-                ))}
-              </ul>
+              <div style={{ marginTop: 8, display: "grid", gap: 12 }}>
+                {workspace.views.map((viewId) => {
+                  if (typeof viewId !== "string") {
+                    return (
+                      <div key={JSON.stringify(viewId)} style={{ color: "#999" }}>
+                        {JSON.stringify(viewId)} (invalid format)
+                      </div>
+                    );
+                  }
+
+                  const meta = viewMetadataMap[viewId];
+                  const viewEntityType = meta?.entityType || workspace.entityType || null;
+                  const listRoute = viewEntityType ? getListPageRoute(viewEntityType) : null;
+                  const openHref = listRoute
+                    ? `${listRoute}?viewId=${encodeURIComponent(viewId)}`
+                    : `/views/${encodeURIComponent(viewId)}`;
+                  const name = meta?.name || viewId;
+                  const description = meta?.description;
+                  const error = viewMetadataErrors[viewId];
+
+                  return (
+                    <div
+                      key={viewId}
+                      style={{
+                        border: "1px solid #ddd",
+                        borderRadius: 8,
+                        padding: 12,
+                        display: "grid",
+                        gap: 6,
+                        background: "#fafafa",
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                        <div style={{ display: "flex", flexDirection: "column" }}>
+                          <span style={{ fontWeight: 600 }}>{name}</span>
+                          <span style={{ fontSize: 12, color: "#666" }}>{viewId}</span>
+                        </div>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                          <Link
+                            to={openHref}
+                            style={{
+                              padding: "6px 12px",
+                              background: "#08a",
+                              color: "#fff",
+                              borderRadius: 4,
+                              textDecoration: "none",
+                              fontWeight: 600,
+                            }}
+                          >
+                            Open
+                          </Link>
+                          <button
+                            onClick={() => handleRemoveView(viewId)}
+                            disabled={updateLoading}
+                            style={{
+                              padding: "4px 8px",
+                              fontSize: 12,
+                              background: "#fee",
+                              color: "#c00",
+                              border: "1px solid #fcc",
+                              borderRadius: 4,
+                              cursor: "pointer",
+                            }}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                      {description ? (
+                        <div style={{ fontSize: 13, color: "#444" }}>{description}</div>
+                      ) : null}
+                      <div style={{ fontSize: 12, color: "#666" }}>
+                        Entity Type: {viewEntityType || "(unknown)"}
+                      </div>
+                      {error ? (
+                        <div style={{ fontSize: 12, color: "#c00" }}>
+                          Metadata error: {error}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
             )}
 
             <div style={{ marginTop: 16, padding: 12, background: "#f9f9f9", borderRadius: 4 }}>
