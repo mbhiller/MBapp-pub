@@ -4,8 +4,8 @@ import { resolveTenantId } from "../common/tenant";
 import { badRequest, conflictError, internalError, notFound } from "../common/responses";
 import { logger } from "../common/logger";
 import { getPurchaseOrder, updatePurchaseOrder, type PurchaseOrder } from "../shared/db";
-import { applyPatchLines, type PatchLineOp } from "../shared/patchLines";
-import { ensureLineIds } from "../shared/ensureLineIds";
+import { type PatchLineOp } from "../shared/patchLines";
+import { runPatchLinesEngine, PatchLinesValidationError } from "../shared/patchLinesEngine";
 
 // Lightweight types for PO lines
 type POLine = { id?: string; itemId?: string; qty?: number; uom?: string; [k: string]: any };
@@ -32,20 +32,22 @@ function parseOps(event: APIGatewayProxyEventV2): PatchLineOp[] | null {
   }
 }
 
-function isEditable(status: string): boolean {
-  // Strict default: only allow editing in 'draft'. Adjust if needed.
-  const s = String(status || "").toLowerCase();
-  return s === "draft";
-}
+const PATCH_OPTIONS = {
+  entityLabel: "purchaseOrder",
+  editableStatuses: ["draft"],
+  patchableFields: ["itemId", "qty", "uom"],
+} as const;
 
 export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   const requestId = reqIdOf(event);
   const baseCtx = { requestId };
+  let logCtx: Record<string, unknown> = baseCtx;
+  let po: PurchaseOrder | null = null;
   try {
     const tenantId = resolveTenantId(event);
     const id = event.pathParameters?.id;
     if (!tenantId || !id) return badRequest("Missing tenant or id", undefined, requestId);
-    const logCtx = { ...baseCtx, tenantId, route: event.rawPath ?? (event.requestContext as any)?.http?.path, method: (event.requestContext as any)?.http?.method };
+    logCtx = { ...baseCtx, tenantId, route: event.rawPath ?? (event.requestContext as any)?.http?.path, method: (event.requestContext as any)?.http?.method };
 
     const ops = parseOps(event);
     if (!ops) {
@@ -53,7 +55,6 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
       return badRequest("Body must include ops[]", undefined, requestId);
     }
 
-    let po: PurchaseOrder;
     try {
       po = await getPurchaseOrder(tenantId, id);
     } catch (err: any) {
@@ -61,38 +62,21 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
       return internalError(err, requestId);
     }
 
-    if (!isEditable(po.status as any)) {
-      logger.warn(logCtx, "po-patch-lines.guard", { status: po.status });
-      return conflictError("PO not editable in current status", { code: "PO_NOT_EDITABLE", status: po.status }, requestId);
-    }
+    const { nextLines } = runPatchLinesEngine<POLine>({ currentDoc: po, ops, options: PATCH_OPTIONS });
 
-    const beforeLines: POLine[] = Array.isArray(po.lines) ? (po.lines as POLine[]) : [];
-    const beforeIds = new Set<string>(beforeLines.map(l => String(l.id || "").trim()).filter(Boolean));
+    const updated = await updatePurchaseOrder(id, tenantId, { lines: nextLines, updatedAt: new Date().toISOString() } as any);
 
-    const { lines: patchedLines, summary } = applyPatchLines<POLine>(beforeLines, ops);
-
-    // Reserve removed ids so ensureLineIds does not reuse them
-    const afterIds = new Set<string>(patchedLines.map(l => String(l.id || "").trim()).filter(Boolean));
-    const removedIds: string[] = Array.from(beforeIds).filter(id => !afterIds.has(id));
-
-    // Determine next L{n} counter start from existing ids
-    let maxNum = 0;
-    for (const idStr of Array.from(beforeIds)) {
-      const m = idStr.match(/^L(\d+)$/);
-      if (m) {
-        const n = parseInt(m[1], 10);
-        if (!isNaN(n)) maxNum = Math.max(maxNum, n);
-      }
-    }
-
-    const withIds = ensureLineIds<POLine>(patchedLines, { reserveIds: removedIds, startAt: maxNum + 1 }) as POLine[];
-
-    const updated = await updatePurchaseOrder(id, tenantId, { lines: withIds, updatedAt: new Date().toISOString() } as any);
-
-    logger.info(logCtx, "po-patch-lines.saved", { poId: updated.id, added: summary.added, updated: summary.updated, removed: summary.removed, lineCount: (updated.lines || []).length });
+    logger.info(logCtx, "po-patch-lines.saved", { poId: updated.id, lineCount: (updated.lines || []).length });
 
     return json(200, updated);
   } catch (err: any) {
+    if (err instanceof PatchLinesValidationError) {
+      if (err.statusCode === 409) {
+        logger.warn(logCtx, "po-patch-lines.guard", { status: po?.status });
+        return conflictError(err.message, { code: err.code, status: po?.status }, requestId);
+      }
+      return badRequest(err.message, { code: err.code, details: err.details }, requestId);
+    }
     logger.error({ requestId: reqIdOf(event) }, "po-patch-lines.error", { message: err?.message });
     return internalError(err, requestId);
   }

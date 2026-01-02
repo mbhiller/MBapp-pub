@@ -5,8 +5,8 @@ import { ddb, tableObjects, type OrderStatus } from "../common/ddb";
 import { resolveTenantId } from "../common/tenant";
 import { badRequest, conflictError, internalError, notFound } from "../common/responses";
 import { logger } from "../common/logger";
-import { applyPatchLines, type PatchLineOp } from "../shared/patchLines";
-import { ensureLineIds } from "../shared/ensureLineIds";
+import { type PatchLineOp } from "../shared/patchLines";
+import { runPatchLinesEngine, PatchLinesValidationError } from "../shared/patchLinesEngine";
 
 // Types aligned with existing sales order handlers
 type SOLine = {
@@ -61,21 +61,22 @@ function parseOps(event: APIGatewayProxyEventV2): PatchLineOp[] | null {
   }
 }
 
-function allowedToPatch(status: OrderStatus): boolean {
-  // Align with PO: only allow editing in draft (pre-submission).
-  // Once submitted, SO enters workflow; disallow edits to prevent state inconsistency.
-  const s = String(status || "").toLowerCase();
-  return s === "draft";
-}
+const PATCH_OPTIONS = {
+  entityLabel: "salesOrder",
+  editableStatuses: ["draft"],
+  patchableFields: ["itemId", "qty", "uom"],
+} as const;
 
 export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   const requestId = reqIdOf(event);
   const baseCtx = { requestId };
+  let logCtx: Record<string, unknown> = baseCtx;
+  let so: SalesOrder | null = null;
   try {
     const tenantId = resolveTenantId(event);
     const id = event.pathParameters?.id;
     if (!tenantId || !id) return badRequest("Missing tenant or id", undefined, requestId);
-    const logCtx = { ...baseCtx, tenantId, route: event.rawPath ?? (event.requestContext as any)?.http?.path, method: (event.requestContext as any)?.http?.method };
+    logCtx = { ...baseCtx, tenantId, route: event.rawPath ?? (event.requestContext as any)?.http?.path, method: (event.requestContext as any)?.http?.method };
 
     const ops = parseOps(event);
     if (!ops) {
@@ -83,42 +84,25 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
       return badRequest("Body must include ops[]", undefined, requestId);
     }
 
-    const so = await loadSO(tenantId, id);
+    so = await loadSO(tenantId, id);
     if (!so) return notFound("Sales order not found", requestId);
 
-    if (!allowedToPatch(so.status)) {
-      logger.warn(logCtx, "so-patch-lines.guard", { status: so.status });
-      return conflictError("SO not editable in current status", { code: "SO_NOT_EDITABLE", status: so.status }, requestId);
-    }
+    const { nextLines } = runPatchLinesEngine<SOLine>({ currentDoc: so, ops, options: PATCH_OPTIONS });
 
-    const beforeLines: SOLine[] = Array.isArray(so.lines) ? (so.lines as SOLine[]) : [];
-    const beforeIds = new Set<string>(beforeLines.map(l => String(l.id || "").trim()).filter(Boolean));
-
-    const { lines: patchedLines, summary } = applyPatchLines<SOLine>(beforeLines, ops);
-
-    // Reserve removed ids so they are not reused by ensureLineIds
-    const afterIds = new Set<string>(patchedLines.map(l => String(l.id || "").trim()).filter(Boolean));
-    const removedIds: string[] = Array.from(beforeIds).filter(id => !afterIds.has(id));
-
-    // Determine next counter start based on existing L{n} ids
-    let maxNum = 0;
-    for (const idStr of Array.from(beforeIds)) {
-      const m = idStr.match(/^L(\d+)$/);
-      if (m) {
-        const n = parseInt(m[1], 10);
-        if (!isNaN(n)) maxNum = Math.max(maxNum, n);
-      }
-    }
-
-    const withIds = ensureLineIds<SOLine>(patchedLines, { reserveIds: removedIds, startAt: maxNum + 1 }) as SOLine[];
-
-    so.lines = withIds;
+    so.lines = nextLines;
     await saveSO(so);
 
-    logger.info(logCtx, "so-patch-lines.saved", { soId: so.id, added: summary.added, updated: summary.updated, removed: summary.removed, lineCount: (so.lines || []).length });
+    logger.info(logCtx, "so-patch-lines.saved", { soId: so.id, lineCount: (so.lines || []).length });
 
     return json(200, so);
   } catch (err: any) {
+    if (err instanceof PatchLinesValidationError) {
+      if (err.statusCode === 409) {
+        logger.warn(logCtx, "so-patch-lines.guard", { status: so?.status });
+        return conflictError(err.message, { code: err.code, status: so?.status }, requestId);
+      }
+      return badRequest(err.message, { code: err.code, details: err.details }, requestId);
+    }
     logger.error({ requestId: reqIdOf(event) }, "so-patch-lines.error", { message: err?.message });
     return internalError(err, requestId);
   }

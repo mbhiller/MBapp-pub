@@ -57,6 +57,13 @@ export default function EditPurchaseOrderPage() {
 
   const handleSubmit = async (payload: PurchaseOrderFormValue) => {
     if (!id) throw new Error("Missing purchase order id");
+    const statusLower = String(order?.status || "").toLowerCase();
+    const canEdit = statusLower === "draft";
+
+    if (!canEdit) {
+      setError("Purchase order can only be edited in draft status");
+      return;
+    }
 
     // CRITICAL: Use computePatchLinesDiff (NEVER send full line arrays to API)
     // This helper correctly separates id (server) vs cid (client) in patch ops
@@ -85,6 +92,9 @@ export default function EditPurchaseOrderPage() {
 
   if (!id) return <div>Missing purchase order id</div>;
 
+  const statusLower = String(order?.status || "").toLowerCase();
+  const canEdit = statusLower === "draft";
+
   return (
     <div style={{ display: "grid", gap: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -97,9 +107,14 @@ export default function EditPurchaseOrderPage() {
 
       {loading ? <div>Loading...</div> : null}
       {error ? <div style={{ color: "#b00020" }}>{error}</div> : null}
+      {!loading && order && !canEdit ? (
+        <div style={{ padding: 12, background: "#fff3cd", color: "#7c5a00", borderRadius: 4 }}>
+          Purchase order can only be edited while in draft status.
+        </div>
+      ) : null}
 
       {order ? (
-        <PurchaseOrderForm initialValue={order} submitLabel="Save" onSubmit={handleSubmit} />
+        <PurchaseOrderForm initialValue={order} submitLabel="Save" onSubmit={handleSubmit} disabled={!canEdit} />
       ) : null}
     </div>
   );

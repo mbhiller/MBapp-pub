@@ -35,6 +35,7 @@ $smokes = @(
   'smoke:outbound:reserve-fulfill-release-cycle',
   'smoke:salesOrders:draft-lines-server-assign-ids',
   'smoke:salesOrders:patch-lines',
+  'smoke:salesOrders:patch-lines:validation',
   'smoke:purchaseOrders:patch-lines',
   'smoke:po:patch-lines:cid',
   'smoke:salesOrders:commit-strict-shortage',
@@ -73,6 +74,7 @@ $smokes = @(
   'smoke:workspaces:mixed-dedupe',
   'smoke:workspaces:get-fallback',
   'smoke:views:apply-to-po-list',
+  'smoke:views:apply-to-product-list',
   'smoke:events:enabled-noop',
   'smoke:registrations:crud',
   'smoke:registrations:filters',
@@ -85,6 +87,7 @@ $smokes = @(
   'smoke:suggest-po-with-vendor',
   'smoke:webish:purchaseOrders:list-detail-join',
   'smoke:po:create-from-suggestion:line-ids',
+  'smoke:salesOrders:patch-lines:cid',
   'smoke:so:patch-lines:cid',
   'smoke:line-identity:id-canonical'
 )

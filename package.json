@@ -114,7 +114,8 @@
     "smoke:views:apply-to-po-list": "node ops/smoke/smoke.mjs smoke:views:apply-to-po-list",
     "smoke:views:validate-filters": "node ops/smoke/smoke.mjs smoke:views:validate-filters",
     "smoke:workspaces:get-fallback": "node ops/smoke/smoke.mjs smoke:workspaces:get-fallback",
-    "smoke:workspaces:mixed-dedupe": "node ops/smoke/smoke.mjs smoke:workspaces:mixed-dedupe"
+    "smoke:workspaces:mixed-dedupe": "node ops/smoke/smoke.mjs smoke:workspaces:mixed-dedupe",
+    "smoke:views:apply-to-product-list": "node ops/smoke/smoke.mjs smoke:views:apply-to-product-list"
   },
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "^3.882.0",

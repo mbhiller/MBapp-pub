@@ -17,8 +17,6 @@ type SalesOrder = {
   lines?: EditableLine[];
 };
 
-const ALLOWED_STATUSES = new Set(["draft", "submitted", "approved"]);
-
 export default function EditSalesOrderScreen() {
   const route = useRoute<RouteProp<RootStackParamList, "EditSalesOrder">>();
   const nav = useNavigation<any>();
@@ -58,12 +56,13 @@ export default function EditSalesOrderScreen() {
     };
   }, [soId]);
 
-  const canEdit = ALLOWED_STATUSES.has((status || "").toLowerCase());
+  const statusLower = (status || "").toLowerCase();
+  const canEdit = statusLower === "draft";
 
   const save = async () => {
     if (!soId || saving) return;
     if (!canEdit) {
-      toast("Order not editable in this status", "warning");
+      toast("Sales order can only be edited in draft status", "warning");
       return;
     }
 
@@ -130,7 +129,7 @@ export default function EditSalesOrderScreen() {
         <Text>Status: {status || ""}</Text>
         {!canEdit && (
           <Text style={{ color: "#b00020", marginTop: 6 }}>
-            Order cannot be edited in this status.
+            Sales order can only be edited in draft status.
           </Text>
         )}
       </View>
