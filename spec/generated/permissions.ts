@@ -33,3 +33,27 @@ export const ENDPOINTS_BY_PERMISSION = Object.entries(
 // Export types for stricter TypeScript usage
 export type PermissionKey = typeof PERMISSIONS_BY_ENDPOINT[keyof typeof PERMISSIONS_BY_ENDPOINT];
 export type EndpointKey = keyof typeof PERMISSIONS_BY_ENDPOINT;
+
+/**
+ * Ergonomic permission alias constants.
+ * Use these for cleaner permission checks in UI code.
+ * Example: hasPerm(policy, PERM_OBJECTS_WRITE)
+ */
+export const PERM_OBJECTS_WRITE = "objects:write" as const;
+export const PERM_PURCHASE_APPROVE = "purchase:approve" as const;
+export const PERM_PURCHASE_CANCEL = "purchase:cancel" as const;
+export const PERM_PURCHASE_CLOSE = "purchase:close" as const;
+export const PERM_PURCHASE_RECEIVE = "purchase:receive" as const;
+export const PERM_PURCHASE_WRITE = "purchase:write" as const;
+
+/**
+ * Array of all unique permission keys (sorted).
+ */
+export const PERMISSION_KEYS = [
+  "objects:write",
+  "purchase:approve",
+  "purchase:cancel",
+  "purchase:close",
+  "purchase:receive",
+  "purchase:write"
+] as const;

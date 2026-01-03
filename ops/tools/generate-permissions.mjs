@@ -158,6 +158,22 @@ function generateTsExport(permissionsObj) {
     .map(([key, perm]) => `  "${key}": "${perm}"`)
     .join(",\n");
 
+  // Extract unique permission values and generate alias constants
+  const uniquePermissions = [...new Set(Object.values(permissionsObj))].sort();
+  
+  // Generate alias constant name from permission key
+  const getAliasName = (permKey) => {
+    return "PERM_" + permKey.toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+  };
+
+  const aliasConstants = uniquePermissions
+    .map(perm => `export const ${getAliasName(perm)} = "${perm}" as const;`)
+    .join("\n");
+
+  const permissionKeysArray = uniquePermissions
+    .map(perm => `  "${perm}"`)
+    .join(",\n");
+
   return `/**
  * Auto-generated permissions mapping from spec/openapi.yaml.
  * DO NOT EDIT MANUALLY. Regenerate with: npm run spec:permissions
@@ -186,6 +202,20 @@ export const ENDPOINTS_BY_PERMISSION = Object.entries(
 // Export types for stricter TypeScript usage
 export type PermissionKey = typeof PERMISSIONS_BY_ENDPOINT[keyof typeof PERMISSIONS_BY_ENDPOINT];
 export type EndpointKey = keyof typeof PERMISSIONS_BY_ENDPOINT;
+
+/**
+ * Ergonomic permission alias constants.
+ * Use these for cleaner permission checks in UI code.
+ * Example: hasPerm(policy, PERM_OBJECTS_WRITE)
+ */
+${aliasConstants}
+
+/**
+ * Array of all unique permission keys (sorted).
+ */
+export const PERMISSION_KEYS = [
+${permissionKeysArray}
+] as const;
 `;
 }
 

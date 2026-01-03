@@ -544,6 +544,19 @@ const requiredPerm = PERMISSIONS_BY_ENDPOINT['POST /purchasing/suggest-po']; // 
 // Example: Find all endpoints requiring a specific permission
 const purchaseEndpoints = ENDPOINTS_BY_PERMISSION['purchase:write'];
 // ["POST /purchasing/po:create-from-suggestion", "POST /purchasing/suggest-po"]
+
+// Ergonomic aliases (Sprint X E4): Use these for cleaner permission checks
+import { PERM_OBJECTS_WRITE, PERM_PURCHASE_WRITE } from '../generated/permissions';
+
+const canWrite = hasPerm(policy, PERM_OBJECTS_WRITE);  // cleaner than string literals
+const canPurchase = hasPerm(policy, PERM_PURCHASE_WRITE);
+
+// All available exports:
+// - PERMISSIONS_BY_ENDPOINT (endpoint → permission map)
+// - ENDPOINTS_BY_PERMISSION (permission → endpoints array)
+// - PERM_OBJECTS_WRITE, PERM_PURCHASE_WRITE, etc. (ergonomic aliases)
+// - PERMISSION_KEYS (array of all unique permission strings)
+// - PermissionKey, EndpointKey (TypeScript types)
 ```
 
 **Pipeline:**
