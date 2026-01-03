@@ -44,6 +44,48 @@ This doc explains how our **router**, **auth**, and **module endpoints** are str
 - **Tenant header**: send both `X-Tenant-Id` and `x-tenant-id`.
 - **Idempotency**: `"Idempotency-Key"` header for retriable actions.
 
+### Authorization: Permission Prefix Normalization
+
+**Context:** `/objects/:type` routes accept camelCase object types in URLs (e.g., `/objects/salesOrder`, `/objects/purchaseOrder`) but canonical permission keys use lowercase module prefixes (`sales`, `purchase`, `inventory`).
+
+**Implementation:**
+- **Type-to-prefix mapping** ([apps/api/src/index.ts](../apps/api/src/index.ts#L193)):
+  ```typescript
+  function typeToPermissionPrefix(typeRaw: string): string {
+    const type = (typeRaw || "").toLowerCase();
+    const moduleMap: Record<string, string> = {
+      "salesorder": "sales",
+      "purchaseorder": "purchase",
+      "inventoryitem": "inventory",
+    };
+    return moduleMap[type] || type;
+  }
+  ```
+  Router calls `requireObjectPerm(auth, method, type)` which internally maps `type` to canonical prefix before checking permissions.
+
+- **Server-side policy alias expansion** ([apps/api/src/auth/middleware.ts](../apps/api/src/auth/middleware.ts#L17-L56)):
+  ```typescript
+  function expandPolicyWithAliases(policy: Record<string, boolean>): Record<string, boolean> {
+    // Bidirectional mappings: sales↔salesorder, purchase↔purchaseorder, inventory↔inventoryitem
+    // Expands both canonical→legacy and legacy→canonical to support backward compatibility
+  }
+  ```
+  Applied in `getAuth()` to policy object BEFORE returning auth context; ensures both `purchase:write` and `purchaseorder:write` grant the same access.
+
+- **Single source of truth for permission checks:**
+  - Router (index.ts) enforces permissions via `requireObjectPerm()` for ALL `/objects/:type` routes (GET, POST, PUT, DELETE, search).
+  - Object handlers (create.ts, update.ts, get.ts, list.ts, search.ts, delete.ts) do NOT perform additional permission checks; router is authoritative.
+  - This avoids case-sensitivity conflicts (permission checks are case-sensitive by default; normalization happens at router entrypoint).
+
+- **Fallback behavior:**
+  - If specific permission check fails (e.g., `purchase:write`), router attempts generic fallback `objects:write` before rejecting request.
+  - This allows new object types (e.g., `location`) to work with generic `objects:*` permissions without requiring new module-specific permission keys.
+
+**Example flows:**
+- `POST /objects/purchaseOrder` with operator role (derives `purchase:*`) → Router checks `purchase:write` → SUCCESS
+- `POST /objects/purchaseOrder` with explicit policy `{"purchaseorder:write": true}` → Expansion adds `purchase:write` → Router checks `purchase:write` → SUCCESS
+- `POST /objects/purchaseOrder` with viewer role (derives `*:read`) → Router checks `purchase:write` → FAIL → Fallback checks `objects:write` → FAIL → 403 Forbidden
+
 ## 3) Feature Flags
 
 Backend flags (from `apps/api/src/flags.ts`):

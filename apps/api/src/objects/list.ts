@@ -10,7 +10,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const type = event.pathParameters?.type;
     if (!type) return bad("Missing type");
 
-    requirePerm(auth, `${type}:read`);
+    // Permission already checked by router via requireObjectPerm()
 
     const qsp = event.queryStringParameters || {};
     const limit  = Number(qsp.limit ?? 20);
