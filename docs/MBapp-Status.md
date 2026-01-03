@@ -8,6 +8,16 @@
 
 ## Current State Summary
 
+### Web RBAC Bootstrap — ✅ Complete (Sprint S, 2026-01-02)
+
+**Epic Summary:** Web now fetches `/auth/policy` on startup and gates top navigation links based on canonical permission keys.
+
+- **E1 (AuthProvider enhancement):** [apps/web/src/providers/AuthProvider.tsx](../apps/web/src/providers/AuthProvider.tsx) extended to fetch `/auth/policy` whenever token changes. Added state: `policy: Record<string, boolean> | null`, `policyLoading: boolean`, `policyError: string | null`. Implements fail-closed behavior: no token → policy is null; fetch fails → policy is empty object. Exposed in AuthContextValue.
+- **E2 (Navigation gating):** [apps/web/src/lib/permissions.ts](../apps/web/src/lib/permissions.ts) adds `hasPerm(policy, perm)` helper supporting wildcard resolution (exact match → `{type}:*` → `*:{action}` → `*:*` → `*`). [apps/web/src/components/Layout.tsx](../apps/web/src/components/Layout.tsx) gates top nav links for Parties, Products, Inventory, Sales Orders, Purchase Orders using `party:read`, `product:read`, `inventory:read`, `sales:read`, `purchase:read`. Home, Backorders, Locations, Views, Workspaces, Docs remain always visible. Added loading/error indicator in header.
+- **Fail-closed design:** Links hidden while `policyLoading: true`; hidden if `policy: null` (no token). Empty policy on error causes all gated links to hide.
+- **Verification:** ✅ Web typecheck clean; uses existing API auth smokes for policy fetch validation; manual testing with operator/viewer roles.
+- **Outcome:** Web now enforces UI visibility gates aligned with server permission model; canonical lowercase keys; no route protection yet (server 403 handles unauthorized access).
+
 ### Auth Policy Alias Expansion + Lowercase Contract — ✅ Complete (Sprint R, 2026-01-02)
 
 **Epic Summary:** Documented JWT `mbapp.*` claims contract and extended server-side policy alias expansion to include party/parties and product/products for legacy compatibility.

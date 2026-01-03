@@ -33,6 +33,7 @@ This doc explains how our **router**, **auth**, and **module endpoints** are str
 - **Permission keys:** Lowercase-only. Mixed-case keys are denied and not expanded.
 - **Wildcards:** Supported values `*`, `*:*`, `*:read`, `{type}:*` (same semantics as `hasPerm`).
 - **Legacy aliases:** Server expands aliases bidirectionally for party/parties, product/products, sales/salesorder, purchase/purchaseorder, inventory/inventoryitem before evaluating permissions.
+- **Web client consumption:** Web fetches `/auth/policy` on token change to gate UI navigation links. Uses canonical lowercase permission keys and same wildcard semantics; fails closed (no policy → all links hidden). See [apps/web/src/lib/permissions.ts](../apps/web/src/lib/permissions.ts) for `hasPerm()` helper.
 
 ### Permission key semantics & derived policy (canonical)
 
