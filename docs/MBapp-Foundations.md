@@ -108,10 +108,14 @@ const TENANT = process.env.MBAPP_TENANT_ID ?? "DemoTenant";
 - Navigation gating in [Layout.tsx](../apps/web/src/components/Layout.tsx): Hides module links for Parties, Products, Sales Orders, Purchase Orders, Inventory based on `:read` permissions.
 - Route protection in [App.tsx](../apps/web/src/App.tsx): Create/edit routes (`/parties/new`, `/products/:id/edit`, etc.) wrapped with [ProtectedRoute.tsx](../apps/web/src/components/ProtectedRoute.tsx) requiring `:write` permission; redirects to `/not-authorized` if denied (Sprint T E1).
 - Action gating in list pages: Create buttons hidden when user lacks write permission (Sprint T E2).
-- Detail page action gating (Sprint U E1): [SalesOrderDetailPage.tsx](../apps/web/src/pages/SalesOrderDetailPage.tsx) and [PurchaseOrderDetailPage.tsx](../apps/web/src/pages/PurchaseOrderDetailPage.tsx) gate action buttons by granular permissions:
+- Detail page action gating (Sprint U): [SalesOrderDetailPage.tsx](../apps/web/src/pages/SalesOrderDetailPage.tsx) and [PurchaseOrderDetailPage.tsx](../apps/web/src/pages/PurchaseOrderDetailPage.tsx) gate action buttons by granular permissions:
   - **Sales Orders:** submit/edit (sales:write), commit (sales:commit), reserve/release (sales:reserve), fulfill (sales:fulfill), close (sales:close), cancel (sales:cancel).
   - **Purchase Orders:** submit/edit (purchase:write), approve (purchase:approve), receive (purchase:receive), close (purchase:close), cancel (purchase:cancel).
   - All action buttons hidden during `policyLoading` (fail-closed); handlers detect 403 responses and display permission-denied messages before generic error handling.
+- Views/Workspaces write action gating (Sprint V): [ViewsListPage.tsx](../apps/web/src/pages/ViewsListPage.tsx), [ViewDetailPage.tsx](../apps/web/src/pages/ViewDetailPage.tsx), [WorkspacesListPage.tsx](../apps/web/src/pages/WorkspacesListPage.tsx), [WorkspaceDetailPage.tsx](../apps/web/src/pages/WorkspaceDetailPage.tsx) gate all write actions:
+  - **Views:** Edit/delete links/buttons require `view:write` (list + detail pages).
+  - **Workspaces:** Create button (list), delete workspace, add/remove views, set/unset default view require `workspace:write` (list + detail pages).
+  - All write actions hidden during `policyLoading` (fail-closed); existing error handling preserved (alert/inline errors).
 - Fail-closed: no token → all gated links/buttons hidden; policy error → all gated features hidden.
 
 **Consistency Across Platforms:**

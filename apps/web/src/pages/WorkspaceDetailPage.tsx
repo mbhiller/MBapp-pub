@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
+import { hasPerm } from "../lib/permissions";
 
 type Workspace = {
   id: string;
@@ -47,7 +48,8 @@ function getListPageRoute(entityType?: string): string | null {
 
 export default function WorkspaceDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { token, tenantId } = useAuth();
+  const { token, tenantId, policy, policyLoading } = useAuth();
+  const canEditWorkspace = hasPerm(policy, "workspace:write") && !policyLoading;
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -337,19 +339,21 @@ export default function WorkspaceDetailPage() {
     <div style={{ display: "grid", gap: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h1>{workspace.name || "Workspace"}</h1>
-        <button
-          onClick={handleDelete}
-          style={{
-            padding: "8px 16px",
-            background: "#c00",
-            color: "#fff",
-            border: "none",
-            borderRadius: 4,
-            cursor: "pointer",
-          }}
-        >
-          Delete Workspace
-        </button>
+        {canEditWorkspace && (
+          <button
+            onClick={handleDelete}
+            style={{
+              padding: "8px 16px",
+              background: "#c00",
+              color: "#fff",
+              border: "none",
+              borderRadius: 4,
+              cursor: "pointer",
+            }}
+          >
+            Delete Workspace
+          </button>
+        )}
       </div>
 
       <div style={{ display: "grid", gap: 12, maxWidth: 600 }}>
@@ -446,54 +450,58 @@ export default function WorkspaceDetailPage() {
                           >
                             Open
                           </Link>
-                          {isDefault ? (
-                            <button
-                              onClick={handleUnsetDefault}
-                              disabled={updateLoading}
-                              style={{
-                                padding: "4px 8px",
-                                fontSize: 12,
-                                background: "#fff",
-                                color: "#666",
-                                border: "1px solid #ddd",
-                                borderRadius: 4,
-                                cursor: "pointer",
-                              }}
-                            >
-                              Unset Default
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => handleSetDefault(viewId)}
-                              disabled={updateLoading}
-                              style={{
-                                padding: "4px 8px",
-                                fontSize: 12,
-                                background: "#e0f0ff",
-                                color: "#08a",
-                                border: "1px solid #08a",
-                                borderRadius: 4,
-                                cursor: "pointer",
-                              }}
-                            >
-                              Set Default
-                            </button>
+                          {canEditWorkspace && (
+                            <>
+                              {isDefault ? (
+                                <button
+                                  onClick={handleUnsetDefault}
+                                  disabled={updateLoading}
+                                  style={{
+                                    padding: "4px 8px",
+                                    fontSize: 12,
+                                    background: "#fff",
+                                    color: "#666",
+                                    border: "1px solid #ddd",
+                                    borderRadius: 4,
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  Unset Default
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => handleSetDefault(viewId)}
+                                  disabled={updateLoading}
+                                  style={{
+                                    padding: "4px 8px",
+                                    fontSize: 12,
+                                    background: "#e0f0ff",
+                                    color: "#08a",
+                                    border: "1px solid #08a",
+                                    borderRadius: 4,
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  Set Default
+                                </button>
+                              )}
+                              <button
+                                onClick={() => handleRemoveView(viewId)}
+                                disabled={updateLoading}
+                                style={{
+                                  padding: "4px 8px",
+                                  fontSize: 12,
+                                  background: "#fee",
+                                  color: "#c00",
+                                  border: "1px solid #fcc",
+                                  borderRadius: 4,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                Remove
+                              </button>
+                            </>
                           )}
-                          <button
-                            onClick={() => handleRemoveView(viewId)}
-                            disabled={updateLoading}
-                            style={{
-                              padding: "4px 8px",
-                              fontSize: 12,
-                              background: "#fee",
-                              color: "#c00",
-                              border: "1px solid #fcc",
-                              borderRadius: 4,
-                              cursor: "pointer",
-                            }}
-                          >
-                            Remove
-                          </button>
                         </div>
                       </div>
                       {description ? (
@@ -513,62 +521,64 @@ export default function WorkspaceDetailPage() {
               </div>
             )}
 
-            <div style={{ marginTop: 16, padding: 12, background: "#f9f9f9", borderRadius: 4 }}>
-              <strong style={{ display: "block", marginBottom: 8 }}>Add View:</strong>
-              {workspace.entityType ? (
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <select
-                    value={newViewId}
-                    onChange={(e) => setNewViewId(e.target.value)}
-                    style={{ flex: 1, minWidth: 200, padding: 8 }}
-                    disabled={updateLoading || viewsLoading}
-                  >
-                    <option value="">-- Select a view --</option>
-                    {availableViews
-                      .filter((v) => !workspace.views?.includes(v.id))
-                      .map((v) => (
-                        <option key={v.id} value={v.id}>
-                          {v.name || v.id}
-                        </option>
-                      ))}
-                  </select>
-                  <button
-                    onClick={handleAddView}
-                    disabled={!newViewId || updateLoading}
-                    style={{ padding: "8px 16px" }}
-                  >
-                    {updateLoading ? "Adding..." : "Add"}
-                  </button>
+            {canEditWorkspace && (
+              <div style={{ marginTop: 16, padding: 12, background: "#f9f9f9", borderRadius: 4 }}>
+                <strong style={{ display: "block", marginBottom: 8 }}>Add View:</strong>
+                {workspace.entityType ? (
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <select
+                      value={newViewId}
+                      onChange={(e) => setNewViewId(e.target.value)}
+                      style={{ flex: 1, minWidth: 200, padding: 8 }}
+                      disabled={updateLoading || viewsLoading}
+                    >
+                      <option value="">-- Select a view --</option>
+                      {availableViews
+                        .filter((v) => !workspace.views?.includes(v.id))
+                        .map((v) => (
+                          <option key={v.id} value={v.id}>
+                            {v.name || v.id}
+                          </option>
+                        ))}
+                    </select>
+                    <button
+                      onClick={handleAddView}
+                      disabled={!newViewId || updateLoading}
+                      style={{ padding: "8px 16px" }}
+                    >
+                      {updateLoading ? "Adding..." : "Add"}
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <input
+                      value={newViewId}
+                      onChange={(e) => setNewViewId(e.target.value)}
+                      placeholder="Enter view ID"
+                      style={{ flex: 1, minWidth: 200, padding: 8 }}
+                      disabled={updateLoading}
+                    />
+                    <button
+                      onClick={handleAddView}
+                      disabled={!newViewId || updateLoading}
+                      style={{ padding: "8px 16px" }}
+                    >
+                      {updateLoading ? "Adding..." : "Add"}
+                    </button>
+                  </div>
+                )}
+                <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
+                  {workspace.entityType
+                    ? `Showing views for entityType: ${workspace.entityType}`
+                    : "No entityType set — enter view ID manually"}
                 </div>
-              ) : (
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <input
-                    value={newViewId}
-                    onChange={(e) => setNewViewId(e.target.value)}
-                    placeholder="Enter view ID"
-                    style={{ flex: 1, minWidth: 200, padding: 8 }}
-                    disabled={updateLoading}
-                  />
-                  <button
-                    onClick={handleAddView}
-                    disabled={!newViewId || updateLoading}
-                    style={{ padding: "8px 16px" }}
-                  >
-                    {updateLoading ? "Adding..." : "Add"}
-                  </button>
-                </div>
-              )}
-              <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
-                {workspace.entityType
-                  ? `Showing views for entityType: ${workspace.entityType}`
-                  : "No entityType set — enter view ID manually"}
+                {updateError && (
+                  <div style={{ marginTop: 8, padding: 8, background: "#fee", color: "#c00", borderRadius: 4, fontSize: 14 }}>
+                    {updateError}
+                  </div>
+                )}
               </div>
-              {updateError && (
-                <div style={{ marginTop: 8, padding: 8, background: "#fee", color: "#c00", borderRadius: 4, fontSize: 14 }}>
-                  {updateError}
-                </div>
-              )}
-            </div>
+            )}
           </div>
         )}
         <div>

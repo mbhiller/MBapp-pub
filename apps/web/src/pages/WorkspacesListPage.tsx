@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
+import { hasPerm } from "../lib/permissions";
 
 type Workspace = {
   id: string;
@@ -60,7 +61,8 @@ const ENTITY_TYPES = [
 ];
 
 export default function WorkspacesListPage() {
-  const { token, tenantId } = useAuth();
+  const { token, tenantId, policy, policyLoading } = useAuth();
+  const canCreateWorkspace = hasPerm(policy, "workspace:write") && !policyLoading;
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("");
   const [entityTypeFilter, setEntityTypeFilter] = useState("");
@@ -205,9 +207,11 @@ export default function WorkspacesListPage() {
     <div style={{ display: "grid", gap: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h1>Workspaces</h1>
-        <button onClick={() => setShowCreateModal(true)} style={{ padding: "8px 16px" }}>
-          + Create Workspace
-        </button>
+        {canCreateWorkspace && (
+          <button onClick={() => setShowCreateModal(true)} style={{ padding: "8px 16px" }}>
+            + Create Workspace
+          </button>
+        )}
       </div>
 
       <div style={{ display: "grid", gap: 8 }}>
