@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
+import { hasPerm } from "../lib/permissions";
 
 type View = {
   id: string;
@@ -26,7 +27,8 @@ function formatError(err: unknown): string {
 export default function ViewDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { token, tenantId } = useAuth();
+  const { token, tenantId, policy, policyLoading } = useAuth();
+  const canEditView = hasPerm(policy, "view:write") && !policyLoading;
   const [view, setView] = useState<View | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -97,20 +99,22 @@ export default function ViewDetailPage() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h1>{view.name || "View"}</h1>
         <div style={{ display: "flex", gap: 8 }}>
-          <Link to={`/views/${id}/edit`}>Edit</Link>
-          <button
-            onClick={handleDelete}
-            style={{
-              padding: "4px 12px",
-              cursor: "pointer",
-              background: "#fee",
-              border: "1px solid #c00",
-              color: "#c00",
-              borderRadius: 2,
-            }}
-          >
-            Delete
-          </button>
+          {canEditView && <Link to={`/views/${id}/edit`}>Edit</Link>}
+          {canEditView && (
+            <button
+              onClick={handleDelete}
+              style={{
+                padding: "4px 12px",
+                cursor: "pointer",
+                background: "#fee",
+                border: "1px solid #c00",
+                color: "#c00",
+                borderRadius: 2,
+              }}
+            >
+              Delete
+            </button>
+          )}
         </div>
       </div>
 

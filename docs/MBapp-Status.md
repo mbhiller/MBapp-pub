@@ -8,6 +8,25 @@
 
 ## Current State Summary
 
+### Web RBAC Views/Workspaces Write Action Gating — ✅ Complete (Sprint V, 2026-01-02)
+
+**Epic Summary:** Gate Views edit/delete actions and Workspaces create/edit/delete actions with permission checks to prevent unauthorized modifications.
+
+- **E1 (Views list/detail + Workspaces list):** [apps/web/src/pages/ViewsListPage.tsx](../apps/web/src/pages/ViewsListPage.tsx), [ViewDetailPage.tsx](../apps/web/src/pages/ViewDetailPage.tsx), and [WorkspacesListPage.tsx](../apps/web/src/pages/WorkspacesListPage.tsx) now gate write actions with permission checks.
+  - **ViewsListPage:** Added `canEditView = hasPerm(policy, "view:write") && !policyLoading`. Edit link and Delete button in table actions column now conditionally render only when `canEditView` is true (lines 187-199). Reuses existing `canCreateView` pattern from Sprint T E2.
+  - **ViewDetailPage:** Added `hasPerm` import, extended `useAuth()` to include `policy, policyLoading`, added `canEditView` boolean. Edit link and Delete button in header now conditionally render only when `canEditView` is true. Fail-closed: actions hidden during policy load and if user lacks `view:write` permission.
+  - **WorkspacesListPage:** Added `hasPerm` import, extended `useAuth()` to include `policy, policyLoading`, added `canCreateWorkspace = hasPerm(policy, "workspace:write") && !policyLoading`. "Create Workspace" button now conditionally renders only when `canCreateWorkspace` is true, preventing modal from opening without permission.
+- **E2 (Workspace detail page):** [apps/web/src/pages/WorkspaceDetailPage.tsx](../apps/web/src/pages/WorkspaceDetailPage.tsx) now gates all workspace modification actions.
+  - Added `hasPerm` import, extended `useAuth()` to include `policy, policyLoading`, added `canEditWorkspace = hasPerm(policy, "workspace:write") && !policyLoading`.
+  - Gated 5 write actions: Delete Workspace button, Add View section (input/select + Add button + validation UI), Remove View buttons (per view in list), Set Default buttons, Unset Default buttons.
+  - All write actions conditionally render only when `canEditWorkspace` is true. Read-only "Open" links remain visible for all users.
+  - Fail-closed: write actions hidden during `policyLoading` and if user lacks `workspace:write` permission. Existing error handling (setUpdateError, alert) preserved; no 403-specific detection needed.
+- **Permission mapping:** Edit/delete views require `view:write`; create/edit/delete workspace + manage workspace views require `workspace:write`. Aligns with canonical lowercase permission keys and wildcard resolution from Sprint S.
+- **Routes already protected:** `/views/new` and `/views/:id/edit` wrapped with `ProtectedRoute requiredPerm="view:write"` (Sprint T E1). Deep links fail with redirect to `/not-authorized`.
+- **Fail-closed design:** All write actions hidden during `policyLoading` and if user lacks required permission. No refactor of existing error handling (alert/formatError patterns preserved). If user bypasses client-side check, server 403 is caught generically.
+- **Verification:** ✅ Web typecheck clean (apps/web); manual testing with read-only roles shows Edit/Delete/Create buttons hidden appropriately.
+- **Outcome:** Views and Workspaces write surfaces now fully gated (list + detail pages); combined with Sprint T route protection and Sprint U detail page gating, web RBAC coverage extends to all major entity types (Parties, Products, Sales Orders, Purchase Orders, Views, Workspaces, Inventory).
+
 ### Web RBAC Route Protection + Create Action Gating — ✅ Complete (Sprint T, 2026-01-02)
 
 **Epic Summary:** Add ProtectedRoute component to prevent deep-link access to create/edit pages without required write permissions. Gate Create buttons in list pages for UX feedback.

@@ -46,6 +46,7 @@ export default function ViewsListPage() {
   const [items, setItems] = useState<View[]>([]);
   const [next, setNext] = useState<string | null>(null);
   const canCreateView = hasPerm(policy, "view:write") && !policyLoading;
+  const canEditView = hasPerm(policy, "view:write") && !policyLoading;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -177,21 +178,23 @@ export default function ViewsListPage() {
                 <td style={{ padding: 8, border: "1px solid #ccc" }}>
                   <div style={{ display: "flex", gap: 8 }}>
                     <Link to={`/views/${item.id}`}>View</Link>
-                    <Link to={`/views/${item.id}/edit`}>Edit</Link>
-                    <button
-                      onClick={() => handleDelete(item.id, item.name || item.id)}
-                      style={{
-                        padding: "2px 8px",
-                        fontSize: 12,
-                        cursor: "pointer",
-                        background: "#fee",
-                        border: "1px solid #c00",
-                        color: "#c00",
-                        borderRadius: 2,
-                      }}
-                    >
-                      Delete
-                    </button>
+                    {canEditView && <Link to={`/views/${item.id}/edit`}>Edit</Link>}
+                    {canEditView && (
+                      <button
+                        onClick={() => handleDelete(item.id, item.name || item.id)}
+                        style={{
+                          padding: "2px 8px",
+                          fontSize: 12,
+                          cursor: "pointer",
+                          background: "#fee",
+                          border: "1px solid #c00",
+                          color: "#c00",
+                          borderRadius: 2,
+                        }}
+                      >
+                        Delete
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
