@@ -12,7 +12,21 @@ tags:
 - name: Objects
   description: Generic object CRUD, list, search, and actions by type.
 - name: Auth
-  description: Authentication and policy.
+  description: |
+    Authentication and policy.
+    JWT includes `mbapp` claim object with:
+      - `mbapp.userId` (string)
+      - `mbapp.tenantId` (string)
+      - `mbapp.roles` (string array)
+      - `mbapp.policy` (Record<string, boolean>)
+    Policy precedence:
+      - if `mbapp.policy` is present and non-empty, use it as-is
+      - else derive permissions from `mbapp.roles`
+      - else policy is empty
+    Permission keys:
+      - keys are lowercase
+      - wildcard semantics supported: `*`, `*:*`, `*:read`, `{type}:*`
+    Compatibility: server expands legacy aliases for party/parties, product/products, sales/salesorder, purchase/purchaseorder, and inventory/inventoryitem.
 - name: Views
   description: Saved per-module user views (filters/sorts/columns).
 - name: Workspaces

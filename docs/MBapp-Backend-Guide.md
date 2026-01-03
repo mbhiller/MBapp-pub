@@ -26,6 +26,14 @@ This doc explains how our **router**, **auth**, and **module endpoints** are str
     - `"product:read"` → exact permission match
   - **Canonical permission keys:** Use singular module prefixes (`party`, `product`, `inventory`, `purchase`, `sales`, `view`, `workspace`, `scanner`, etc.) in `<resource>:<action>` form. `/auth/policy` returns these canonical keys. Clients may honor legacy aliases for backward compatibility, but canonical keys are the contract.
 
+### JWT Claims Contract
+
+- **Claims:** JWT `mbapp` object contains `mbapp.userId` (string), `mbapp.tenantId` (string), `mbapp.roles` (string[]), and `mbapp.policy` (Record<string, boolean>).
+- **Precedence:** Non-empty `mbapp.policy` is used as-is; otherwise derive from `mbapp.roles`; otherwise policy is empty.
+- **Permission keys:** Lowercase-only. Mixed-case keys are denied and not expanded.
+- **Wildcards:** Supported values `*`, `*:*`, `*:read`, `{type}:*` (same semantics as `hasPerm`).
+- **Legacy aliases:** Server expands aliases bidirectionally for party/parties, product/products, sales/salesorder, purchase/purchaseorder, inventory/inventoryitem before evaluating permissions.
+
 ### Permission key semantics & derived policy (canonical)
 
 - **hasPerm wildcard resolution:** Checks exact match first, then `resource:*`, `*:action`, `*:read`, `*:*`, `*` (superuser). Same semantics apply across modules.

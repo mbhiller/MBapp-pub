@@ -8,6 +8,17 @@
 
 ## Current State Summary
 
+### Auth Policy Alias Expansion + Lowercase Contract — ✅ Complete (Sprint R, 2026-01-02)
+
+**Epic Summary:** Documented JWT `mbapp.*` claims contract and extended server-side policy alias expansion to include party/parties and product/products for legacy compatibility.
+
+- **Server alias expansion:** [apps/api/src/auth/middleware.ts](../apps/api/src/auth/middleware.ts) `expandPolicyWithAliases()` now expands party↔parties and product↔products bidirectionally in addition to existing sales/purchase/inventory aliases.
+- **New smokes:** Added `smoke:auth:legacy-plural-policy-products-read` (validates legacy `products:read` grants product list access) and `smoke:auth:perm-keys-are-lowercase` (validates mixed-case `Purchase:write` is denied while lowercase `purchase:write` is allowed). Both wired into CI flows.
+- **Spec documentation:** [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) Auth tag description now documents JWT `mbapp.*` claims (userId, tenantId, roles, policy), precedence rules (explicit policy → role derivation → empty), lowercase-only permission keys, wildcard semantics, and legacy alias expansion list.
+- **Backend Guide:** [docs/MBapp-Backend-Guide.md](../docs/MBapp-Backend-Guide.md) added JWT Claims Contract subsection with claim keys, precedence, lowercase-only rule, wildcards, and alias expansion list.
+- **Verification:** ✅ CI smokes green (18 flows including new lowercase/plural tests); spec pipeline clean (spec:lint, spec:bundle, spec:types:api, spec:types:mobile).
+- **Outcome:** Permission contract is now fully documented and enforced; mixed-case keys fail fast; legacy plural/alias keys work via server expansion; backward compatibility preserved.
+
 ### Objects Permission Prefix Normalization — ✅ Complete (Sprint Q, 2026-01-02)
 
 - **Permission prefix mapping:** `/objects/:type` routes now map compound object types to canonical module prefixes (salesOrder→sales, purchaseOrder→purchase, inventoryItem→inventory) via `typeToPermissionPrefix()` helper in [apps/api/src/index.ts](../apps/api/src/index.ts#L193).
