@@ -47,6 +47,8 @@
   "smoke:epc:resolve",
   "smoke:scanner:actions:record",
   "smoke:auth:policy-derivation",
+  "smoke:auth:legacy-plural-policy-products-read",
+  "smoke:auth:perm-keys-are-lowercase",
   "smoke:auth:warehouse-receive-deny-approve",
   "smoke:objects:perm-prefix-normalization"
   ]

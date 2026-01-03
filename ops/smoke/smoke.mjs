@@ -6206,6 +6206,274 @@ const tests = {
     };
   },
 
+  "smoke:auth:legacy-plural-policy-products-read": async () => {
+    // Test: Legacy plural permission key products:read works via server alias expansion
+
+    // Step 1: Mint token with explicit policy { "products:read": true } (no roles)
+    const loginPayload = {
+      tenantId: TENANT,
+      policy: {
+        "products:read": true
+      }
+    };
+    const loginRes = await fetch(`${API}/auth/dev-login`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify(loginPayload)
+    });
+
+    if (!loginRes.ok) {
+      const errText = await loginRes.text().catch(() => "");
+      return {
+        test: "auth:legacy-plural-policy-products-read",
+        result: "FAIL",
+        step: "dev-login",
+        status: loginRes.status,
+        error: errText
+      };
+    }
+
+    const loginData = await loginRes.json();
+    const token = loginData.token;
+    if (!token) {
+      return {
+        test: "auth:legacy-plural-policy-products-read",
+        result: "FAIL",
+        step: "extract-token",
+        loginData
+      };
+    }
+
+    // Step 2: GET /objects/product?limit=1 (should succeed via alias expansion products→product)
+    const listRes = await fetch(`${API}/objects/product?limit=1`, {
+      headers: {
+        "authorization": `Bearer ${token}`,
+        "x-tenant-id": TENANT
+      }
+    });
+
+    if (!listRes.ok) {
+      return {
+        test: "auth:legacy-plural-policy-products-read",
+        result: "FAIL",
+        step: "list-products",
+        expectedStatus: 200,
+        actualStatus: listRes.status,
+        body: await listRes.json().catch(() => ({}))
+      };
+    }
+
+    // Step 4 (optional negative): POST /objects/product should fail (read-only policy)
+    const createPayload = {
+      type: "product",
+      name: smokeTag(`LegacyPlural-${Date.now()}`),
+      sku: `LEG-${Date.now()}`
+    };
+    const createRes = await fetch(`${API}/objects/product`, {
+      method: "POST",
+      headers: {
+        "authorization": `Bearer ${token}`,
+        "x-tenant-id": TENANT,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(createPayload)
+    });
+
+    const createDenied = createRes.status === 403;
+    const createBody = await createRes.json().catch(() => ({}));
+    const hasForbiddenMessage = createBody?.message &&
+      (createBody.message.toLowerCase().includes("forbidden") ||
+       createBody.message.toLowerCase().includes("missing permission"));
+
+    if (!createDenied || !hasForbiddenMessage) {
+      return {
+        test: "auth:legacy-plural-policy-products-read",
+        result: "FAIL",
+        step: "create-denied-check",
+        expectedStatus: 403,
+        actualStatus: createRes.status,
+        expectedMessagePattern: "forbidden | missing permission",
+        actualMessage: createBody?.message,
+        body: createBody
+      };
+    }
+
+    return {
+      test: "auth:legacy-plural-policy-products-read",
+      result: "PASS",
+      summary: "Legacy products:read policy grants product list; write still denied",
+      assertions: {
+        listAllowed: true,
+        createDenied,
+        createForbiddenMessage: hasForbiddenMessage
+      }
+    };
+  },
+
+  "smoke:auth:perm-keys-are-lowercase": async () => {
+    // Contract test: permission keys are lowercase; mixed-case policy should NOT authorize.
+
+    await ensureBearer(); // admin token for setup helpers
+
+    // Setup: create vendor + product
+    const { vendorId } = await seedVendor(api);
+    const prod = await createProduct({ name: `LowercasePerm-${Date.now()}` });
+    if (!prod.ok) {
+      return {
+        test: "auth:perm-keys-are-lowercase",
+        result: "FAIL",
+        step: "setup-product",
+        prod
+      };
+    }
+    const productId = prod.body?.id;
+
+    // Step 1: Mint token with mixed-case policy key (should NOT authorize)
+    const badPolicyPayload = {
+      tenantId: TENANT,
+      policy: {
+        "Purchase:write": true
+      }
+    };
+    const badLoginRes = await fetch(`${API}/auth/dev-login`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify(badPolicyPayload)
+    });
+    if (!badLoginRes.ok) {
+      return {
+        test: "auth:perm-keys-are-lowercase",
+        result: "FAIL",
+        step: "bad-login",
+        status: badLoginRes.status,
+        error: await badLoginRes.text().catch(() => "")
+      };
+    }
+    const badLoginData = await badLoginRes.json();
+    const badToken = badLoginData.token;
+    if (!badToken) {
+      return {
+        test: "auth:perm-keys-are-lowercase",
+        result: "FAIL",
+        step: "bad-extract-token",
+        badLoginData
+      };
+    }
+
+    // Attempt POST /objects/purchaseOrder with mixed-case policy token (expect 403)
+    const badPoRes = await fetch(`${API}/objects/purchaseOrder`, {
+      method: "POST",
+      headers: {
+        "authorization": `Bearer ${badToken}`,
+        "x-tenant-id": TENANT,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        type: "purchaseOrder",
+        vendorId,
+        status: "draft",
+        lines: [{ id: "L1", itemId: productId, qty: 1, uom: "ea" }]
+      })
+    });
+
+    const badDenied = badPoRes.status === 403;
+    const badBody = await badPoRes.json().catch(() => ({}));
+    const badForbidden = badBody?.message &&
+      (badBody.message.toLowerCase().includes("forbidden") ||
+       badBody.message.toLowerCase().includes("missing permission"));
+
+    if (!badDenied || !badForbidden) {
+      return {
+        test: "auth:perm-keys-are-lowercase",
+        result: "FAIL",
+        step: "bad-perm-deny",
+        expectedStatus: 403,
+        actualStatus: badPoRes.status,
+        expectedMessagePattern: "forbidden | missing permission",
+        actualMessage: badBody?.message,
+        body: badBody
+      };
+    }
+
+    // Step 2: Mint token with correct lowercase policy key (should authorize)
+    const goodPolicyPayload = {
+      tenantId: TENANT,
+      policy: {
+        "purchase:write": true
+      }
+    };
+    const goodLoginRes = await fetch(`${API}/auth/dev-login`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify(goodPolicyPayload)
+    });
+    if (!goodLoginRes.ok) {
+      return {
+        test: "auth:perm-keys-are-lowercase",
+        result: "FAIL",
+        step: "good-login",
+        status: goodLoginRes.status,
+        error: await goodLoginRes.text().catch(() => "")
+      };
+    }
+    const goodLoginData = await goodLoginRes.json();
+    const goodToken = goodLoginData.token;
+    if (!goodToken) {
+      return {
+        test: "auth:perm-keys-are-lowercase",
+        result: "FAIL",
+        step: "good-extract-token",
+        goodLoginData
+      };
+    }
+
+    const goodPoRes = await fetch(`${API}/objects/purchaseOrder`, {
+      method: "POST",
+      headers: {
+        "authorization": `Bearer ${goodToken}`,
+        "x-tenant-id": TENANT,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        type: "purchaseOrder",
+        vendorId,
+        status: "draft",
+        lines: [{ id: "L1", itemId: productId, qty: 1, uom: "ea" }]
+      })
+    });
+
+    if (!goodPoRes.ok) {
+      return {
+        test: "auth:perm-keys-are-lowercase",
+        result: "FAIL",
+        step: "good-perm-allow",
+        expectedStatus: "200 or 201",
+        actualStatus: goodPoRes.status,
+        body: await goodPoRes.json().catch(() => ({}))
+      };
+    }
+
+    return {
+      test: "auth:perm-keys-are-lowercase",
+      result: "PASS",
+      summary: "Mixed-case policy key denied; lowercase key allowed",
+      assertions: {
+        badDenied: badDenied,
+        badForbiddenMessage: badForbidden,
+        goodAllowed: goodPoRes.ok
+      }
+    };
+  },
+
   "smoke:auth:warehouse-receive-deny-approve": async () => {
     // Test: warehouse role can receive POs but cannot approve them
     // Flow:

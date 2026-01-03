@@ -29,6 +29,8 @@ function expandPolicyWithAliases(policy: Record<string, boolean>): Record<string
     ["sales", "salesorder"],
     ["purchase", "purchaseorder"],
     ["inventory", "inventoryitem"],
+    ["party", "parties"],
+    ["product", "products"],
   ];
 
   // For each key in the original policy, add mirrored aliases
