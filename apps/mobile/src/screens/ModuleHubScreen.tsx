@@ -3,36 +3,11 @@ import React from "react";
 import { ScrollView, View, Text, Pressable, RefreshControl } from "react-native";
 import MODULES, { visibleModules } from "../features/_shared/modules";
 import { useColors } from "../features/_shared/useColors";
-import { apiClient } from "../api/client";
+import { usePolicy } from "../providers/PolicyProvider";
 
 export default function ModuleHubScreen({ navigation }: any) {
   const t = useColors();
-  const [policy, setPolicy] = React.useState<Record<string, boolean> | null>(null);
-  const [policyError, setPolicyError] = React.useState(false);
-  const [loading, setLoading] = React.useState(true); // Start as loading (true) until first fetch
-
-  const loadPolicy = React.useCallback(async () => {
-    setLoading(true);
-    setPolicyError(false);
-    try {
-      const p = await apiClient.get<Record<string, boolean>>("/auth/policy");
-      if (p) {
-        setPolicy(p);
-      } else {
-        setPolicy({});  // Empty policy if API returns null/undefined
-        setPolicyError(true);
-      }
-    } catch {
-      setPolicy({});  // Empty policy on error
-      setPolicyError(true);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  React.useEffect(() => {
-    loadPolicy();
-  }, [loadPolicy]);
+  const { policy, policyLoading, policyError, refetchPolicy } = usePolicy();
 
   const modules = React.useMemo(() => visibleModules(policy), [policy]);
 
@@ -41,7 +16,7 @@ export default function ModuleHubScreen({ navigation }: any) {
       style={{ flex: 1, backgroundColor: t.colors.background }}
       contentContainerStyle={{ padding: 16 }}
       keyboardShouldPersistTaps="handled"
-      refreshControl={<RefreshControl refreshing={loading} onRefresh={loadPolicy} />}
+      refreshControl={<RefreshControl refreshing={policyLoading} onRefresh={refetchPolicy} />}
     >
       {policyError && (
         <View
@@ -82,13 +57,13 @@ export default function ModuleHubScreen({ navigation }: any) {
         ))}
       </View>
 
-      {!loading && modules.length === 0 && !policyError && (
+      {!policyLoading && modules.length === 0 && !policyError && (
         <Text style={{ color: t.colors.muted, textAlign: "center", marginTop: 24 }}>
           No modules available for your role.
         </Text>
       )}
 
-      {loading && modules.length === 0 && (
+      {policyLoading && modules.length === 0 && (
         <Text style={{ color: t.colors.muted, textAlign: "center", marginTop: 24 }}>
           Loading permissions...
         </Text>

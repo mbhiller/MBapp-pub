@@ -1,5 +1,5 @@
 import * as React from "react";
-import { View, Text, ActivityIndicator, FlatList, Pressable, Modal, TextInput, ScrollView, KeyboardAvoidingView, Platform } from "react-native";
+import { View, Text, ActivityIndicator, FlatList, Pressable, Modal, TextInput, ScrollView, KeyboardAvoidingView, Platform, Alert } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavigation, useRoute, useFocusEffect } from "@react-navigation/native";
 import { useObjects } from "../features/_shared/useObjects";
@@ -17,6 +17,9 @@ import { ScannerPanel } from "../features/_shared/ScannerPanel";
 import { resolveScan } from "../lib/scanResolve";
 import { pickBestMatchingLineId, incrementCapped } from "../features/_shared/scanLineSelect";
 import { track, trackScreenView } from "../lib/telemetry";
+import { usePolicy } from "../providers/PolicyProvider";
+import { hasPerm } from "../lib/permissions";
+import { PERM_PURCHASE_WRITE, PERM_PURCHASE_APPROVE, PERM_PURCHASE_CANCEL, PERM_PURCHASE_CLOSE, PERM_PURCHASE_RECEIVE } from "../generated/permissions";
 
 export default function PurchaseOrderDetailScreen() {
   const route = useRoute<any>();
@@ -30,6 +33,7 @@ export default function PurchaseOrderDetailScreen() {
   const { data: vendorParty } = useObjects<any>({ type: "party", id: po?.vendorId });
   const lines = (po?.lines ?? []) as any[];
   const toast = useToast();
+  const { policy, policyLoading } = usePolicy();
 
   const [modal, setModal] = React.useState<{ open: boolean; lineId?: string; itemId?: string }>({ open: false });
   const [qty, setQty] = React.useState<string>("1");
@@ -408,6 +412,28 @@ export default function PurchaseOrderDetailScreen() {
   const canApprove = po?.status === "submitted" && !vendorGuardActive;
   const canCancel = (po?.status === "draft" || po?.status === "submitted") && po?.status !== "cancelled" && po?.status !== "canceled" && po?.status !== "closed";
   const canClose = po?.status === "fulfilled";
+
+  // Permission gating (Sprint AA E3)
+  const hasSubmitPerm = !policyLoading && hasPerm(policy, PERM_PURCHASE_WRITE);
+  const hasApprovePerm = !policyLoading && hasPerm(policy, PERM_PURCHASE_APPROVE);
+  const hasReceivePerm = !policyLoading && hasPerm(policy, PERM_PURCHASE_RECEIVE);
+  const hasCancelPerm = !policyLoading && hasPerm(policy, PERM_PURCHASE_CANCEL);
+  const hasClosePerm = !policyLoading && hasPerm(policy, PERM_PURCHASE_CLOSE);
+
+  // Combined gating (status + permission)
+  const canSubmitFinal = canSubmit && hasSubmitPerm;
+  const canApproveFinal = canApprove && hasApprovePerm;
+  const canReceiveFinal = receivable && hasReceivePerm && !vendorGuardActive;
+  const canCancelFinal = canCancel && hasCancelPerm;
+  const canCloseFinal = canClose && hasClosePerm;
+
+  // Helper for consistent 403 messaging
+  const showNotAuthorized = React.useCallback((requiredPerm: string) => {
+    Alert.alert(
+      "Access Denied",
+      `You lack permission to perform this action.\n\nRequired: ${requiredPerm}`
+    );
+  }, []);
   const verificationSummary = (() => {
     if (verification.status === "loading") return "Verifying recent receipts...";
     if (verification.status === "success") return `${verification.stocked ?? 0} item(s) show stock · ${verification.openBackorders ?? 0} open backorder(s)`;
@@ -488,7 +514,7 @@ export default function PurchaseOrderDetailScreen() {
           </Pressable>
         )}
         <Pressable
-          disabled={!canSubmit}
+          disabled={!canSubmitFinal}
           onPress={async () => {
             try {
               await submit(po?.id);
@@ -496,15 +522,20 @@ export default function PurchaseOrderDetailScreen() {
               await refetch();
             } catch (e: any) {
               console.error(e);
-              toast(e?.message || "Submit failed", "error");
+              // 403-specific error handling (Sprint AA E3)
+              if (e?.status === 403) {
+                showNotAuthorized(PERM_PURCHASE_WRITE);
+              } else {
+                toast(e?.message || "Submit failed", "error");
+              }
             }
           }}
-          style={{ paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 8, opacity: canSubmit ? 1 : 0.5 }}
+          style={{ paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 8, opacity: canSubmitFinal ? 1 : 0.5 }}
         >
           <Text>Submit</Text>
         </Pressable>
         <Pressable
-          disabled={!canApprove}
+          disabled={!canApproveFinal}
           onPress={async () => {
             // Track attempt
             if (po?.id) {
@@ -530,7 +561,12 @@ export default function PurchaseOrderDetailScreen() {
               }
             } catch (e: any) {
               console.error(e);
-              toast(e?.message || "Approve failed", "error");
+              // 403-specific error handling (Sprint AA E3)
+              if (e?.status === 403) {
+                showNotAuthorized(PERM_PURCHASE_APPROVE);
+              } else {
+                toast(e?.message || "Approve failed", "error");
+              }
 
               // Track failure
               if (po?.id) {
@@ -558,13 +594,13 @@ export default function PurchaseOrderDetailScreen() {
               }
             }
           }}
-          style={{ paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 8, opacity: canApprove ? 1 : 0.5 }}
+          style={{ paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 8, opacity: canApproveFinal ? 1 : 0.5 }}
         >
           <Text>Approve</Text>
         </Pressable>
         {FEATURE_PO_QUICK_RECEIVE && po?.id && receivable && (
           <Pressable
-            disabled={vendorGuardActive}
+            disabled={!canReceiveFinal}
             onPress={async () => {
               try {
                 const linesToReceive = (po?.lines ?? [])
@@ -592,18 +628,23 @@ export default function PurchaseOrderDetailScreen() {
                 await refetch();
                 toast("All items received", "success");
                 await verifyAfterReceive();
-              } catch (e) {
+              } catch (e: any) {
                 console.error(e);
-                toast("Receive All failed", "error");
+                // 403-specific error handling (Sprint AA E3)
+                if (e?.status === 403) {
+                  showNotAuthorized(PERM_PURCHASE_RECEIVE);
+                } else {
+                  toast(e?.message || "Receive All failed", "error");
+                }
               }
             }}
-            style={{ paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 8, opacity: vendorGuardActive ? 0.5 : 1 }}
+            style={{ paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 8, opacity: canReceiveFinal ? 1 : 0.5 }}
           >
             <Text>Receive All</Text>
           </Pressable>
         )}
         <Pressable
-          disabled={!canCancel}
+          disabled={!canCancelFinal}
           onPress={async () => {
             try {
               await cancel(po?.id);
@@ -611,15 +652,20 @@ export default function PurchaseOrderDetailScreen() {
               await refetch();
             } catch (e: any) {
               console.error(e);
-              toast(e?.message || "Cancel failed", "error");
+              // 403-specific error handling (Sprint AA E3)
+              if (e?.status === 403) {
+                showNotAuthorized(PERM_PURCHASE_CANCEL);
+              } else {
+                toast(e?.message || "Cancel failed", "error");
+              }
             }
           }}
-          style={{ paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 8, opacity: canCancel ? 1 : 0.5 }}
+          style={{ paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 8, opacity: canCancelFinal ? 1 : 0.5 }}
         >
           <Text>Cancel</Text>
         </Pressable>
         <Pressable
-          disabled={!canClose}
+          disabled={!canCloseFinal}
           onPress={async () => {
             try {
               await close(po?.id);
@@ -627,10 +673,15 @@ export default function PurchaseOrderDetailScreen() {
               await refetch();
             } catch (e: any) {
               console.error(e);
-              toast(e?.message || "Close failed", "error");
+              // 403-specific error handling (Sprint AA E3)
+              if (e?.status === 403) {
+                showNotAuthorized(PERM_PURCHASE_CLOSE);
+              } else {
+                toast(e?.message || "Close failed", "error");
+              }
             }
           }}
-          style={{ paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 8, opacity: canClose ? 1 : 0.5 }}
+          style={{ paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 8, opacity: canCloseFinal ? 1 : 0.5 }}
         >
           <Text>Close</Text>
         </Pressable>

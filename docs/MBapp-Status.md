@@ -1,12 +1,76 @@
 # MBapp Status / Working
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Foundations](MBapp-Foundations.md) · [Cadence](MBapp-Cadence.md) · [Verification](smoke-coverage.md)  
-**Last Updated:** 2026-01-02  
+**Last Updated:** 2026-01-03  
 **Workflow & DoD:** See [MBapp-Cadence.md](MBapp-Cadence.md) for canonical workflow, Definition of Done, and testing rules.
 
 ---
 
 ## Current State Summary
+
+### Web Permission Literals → PERM_* Migration — ✅ Complete (Sprint AA E4, 2026-01-03)
+
+**Epic Summary:** Reduce drift by migrating web permission string literals to generated PERM_* aliases.
+
+- **Files Updated:**
+  - [apps/web/src/pages/BackordersListPage.tsx](../apps/web/src/pages/BackordersListPage.tsx): `"objects:write"` → `PERM_OBJECTS_WRITE`, `"purchase:write"` → `PERM_PURCHASE_WRITE`
+  - [apps/web/src/pages/PurchaseOrderDetailPage.tsx](../apps/web/src/pages/PurchaseOrderDetailPage.tsx): All 5 permission literals replaced with `PERM_PURCHASE_WRITE`, `PERM_PURCHASE_APPROVE`, `PERM_PURCHASE_RECEIVE`, `PERM_PURCHASE_CANCEL`, `PERM_PURCHASE_CLOSE`
+- **Imports Added:** Both files now import permission constants from `../generated/permissions` (compile-time-checked, no typos)
+- **Behavior:** No changes; string literal replacement only
+- **Verification:** ✅ `cd apps/web && npm run typecheck` passes; no behavior drift
+- **Outcome:** Web now uses generated aliases for all covered permissions, matching mobile's pattern. Single source of truth (spec) confirmed across web/mobile.
+
+### Mobile PurchaseOrderDetailScreen: Action Gating + 403 UX — ✅ Complete (Sprint AA E3, 2026-01-03)
+
+**Epic Summary:** Apply permission gating and 403 error handling to PurchaseOrderDetailScreen action buttons (Submit, Approve, Receive, Cancel, Close).
+
+- **Screen Updated:** [apps/mobile/src/screens/PurchaseOrderDetailScreen.tsx](../apps/mobile/src/screens/PurchaseOrderDetailScreen.tsx)
+  - Imports `usePolicy()`, `hasPerm()`, and 5 permission constants (`PERM_PURCHASE_WRITE`, `PERM_PURCHASE_APPROVE`, `PERM_PURCHASE_RECEIVE`, `PERM_PURCHASE_CANCEL`, `PERM_PURCHASE_CLOSE`)
+  - Permission checks: `hasSubmitPerm`, `hasApprovePerm`, `hasReceivePerm`, `hasCancelPerm`, `hasClosePerm` (all checked via `hasPerm(policy, perm)`)
+  - Combined gating: `canSubmitFinal = canSubmit && hasSubmitPerm` (status + permission gates)
+  - Buttons disabled when `!(canSubmit|Approve|Receive|Cancel|Close)Final || policyLoading` (fail-closed)
+  - Visual feedback: opacity 0.5 when disabled
+- **403 Error Handling:** All 5 action handlers catch `err?.status === 403` and show permission-specific Alert
+  - Helper `showNotAuthorized(perm)` shows: "Access Denied — You lack permission to perform this action. Required: {perm}"
+  - Generic error fallback preserved for non-403 errors
+- **Parity with BackorderDetailScreen:** Applies same pattern proven in E2 to full PO action set
+- **Verification:** ✅ `npm run typecheck` passes; ✅ `npm run smoke:purchasing:happy` passes (all PO actions work end-to-end)
+- **Outcome:** PO actions now fail-closed and provide permission-specific error messages. Pattern fully tested and replicable to other screens (SO, inventory, etc.).
+
+### Mobile BackorderDetailScreen: Action Gating + 403 UX — ✅ Complete (Sprint AA E2, 2026-01-03)
+
+**Epic Summary:** Apply mobile RBAC foundation to BackorderDetailScreen with permission-specific 403 error handling (vertical slice proof).
+
+- **Screen Updated:** [apps/mobile/src/screens/BackorderDetailScreen.tsx](../apps/mobile/src/screens/BackorderDetailScreen.tsx)
+  - Imports `usePolicy()`, `hasPerm()`, `PERM_OBJECTS_WRITE`, `PERM_PURCHASE_WRITE` (no string literals)
+  - Permission checks: `canWriteBackorders` (objects:write + status=open), `canSuggestPO` (purchase:write + status=open)
+  - Buttons disabled when `!canWriteBackorders` or `!canSuggestPO` or `policyLoading` (fail-closed)
+  - Visual feedback: opacity 0.5 + gray background when disabled
+- **403 Error Handling:** Detect `err?.status === 403` in `handleIgnore` and `handleConvert` catch blocks
+  - Shows permission-specific Alert: "Access Denied — You lack permission to perform this action. Required: {perm}"
+  - Uses `showNotAuthorized(PERM_OBJECTS_WRITE)` helper for consistency
+  - Generic error fallback preserved for non-403 errors
+- **Parity with Web:** Mobile now matches web's BackorderDetailPage UX (permission pre-gating + 403 messaging)
+- **Verification:** ✅ `npm run typecheck` passes in apps/mobile
+- **Outcome:** Backorder actions now fail-closed and provide permission-specific error messages. Foundation proven; pattern replicable to other mobile screens (PO approve/receive, SO actions).
+
+### Mobile RBAC Foundation: hasPerm + Policy Provider — ✅ Complete (Sprint AA E1, 2026-01-03)
+
+**Epic Summary:** Establish reusable permission-checking pattern on mobile (mirrors web); create centralized policy provider for screens.
+
+- **Permission Helper Created:** [apps/mobile/src/lib/permissions.ts](../apps/mobile/src/lib/permissions.ts)
+  - Exports `hasPerm(policy, perm)` with wildcard resolution (exact → type:* → *:action → *:* → *)
+  - Matches web's [apps/web/src/lib/permissions.ts](../apps/web/src/lib/permissions.ts) semantics exactly
+  - Fail-closed: null/undefined policy returns false
+  - Type: `Policy = Record<string, boolean>`
+- **Policy Provider Created:** [apps/mobile/src/providers/PolicyProvider.tsx](../apps/mobile/src/providers/PolicyProvider.tsx)
+  - Centralized `/auth/policy` fetch on mount (mirrors web's AuthProvider pattern)
+  - Exposes `usePolicy()` hook returning `{ policy, policyLoading, policyError, refetchPolicy }`
+  - Wrapped in App.tsx after DevAuthBootstrap, before NavigationContainer
+  - Replaces per-screen policy fetching (ModuleHubScreen now uses shared provider)
+- **ModuleHubScreen Migrated:** Updated to use `usePolicy()` instead of local state; cleaner, single source of truth
+- **Verification:** ✅ `npm run typecheck` passes in apps/mobile
+- **Outcome:** Screens can now call `hasPerm(policy, perm)` with consistent semantics. Foundation for action-level permission gating (backorder ignore/convert, PO approve/receive, etc.) in next sprint phase.
 
 ### API Spec Permission Annotations (SSOT) — ✅ Complete (Sprint X E1, 2026-01-02)
 

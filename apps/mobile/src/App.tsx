@@ -7,6 +7,7 @@ import { setPostHogClient, setScreen } from "./lib/telemetry";
 import RootStack from "./navigation/RootStack"
 import { ThemeProvider } from "./providers/ThemeProvider";
 import { RolesProvider } from "./providers/RolesProvider";
+import { PolicyProvider } from "./providers/PolicyProvider";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { DevAuthBootstrap } from "./providers/DevAuthBootstrap";
 import { ToastProvider } from "./features/_shared/Toast";
@@ -52,19 +53,21 @@ export default function App() {
           <RolesProvider initialRoles={initialRoles}>
             <QueryClientProvider client={queryClient}>
               <DevAuthBootstrap>
-                <NavigationContainer
-                ref={navRef}
-                onReady={() => {
-                  const route = navRef.getCurrentRoute();
-                  setScreen(route?.name);
-                }}
-                onStateChange={() => {
-                  const route = navRef.getCurrentRoute();
-                  setScreen(route?.name);
-                }}
-              >
-                <RootStack />
-              </NavigationContainer>
+                <PolicyProvider>
+                  <NavigationContainer
+                    ref={navRef}
+                    onReady={() => {
+                      const route = navRef.getCurrentRoute();
+                      setScreen(route?.name);
+                    }}
+                    onStateChange={() => {
+                      const route = navRef.getCurrentRoute();
+                      setScreen(route?.name);
+                    }}
+                  >
+                    <RootStack />
+                  </NavigationContainer>
+                </PolicyProvider>
               </DevAuthBootstrap>
             </QueryClientProvider>
           </RolesProvider>

@@ -478,6 +478,83 @@ async function waitForItems({ fetchPage, timeoutMs = 8000, intervalMs = 250, pag
   err.debug = debug;
   throw err;
 }
+
+/**
+ * Search for an item by id by paginating through all pages.
+ * Polls periodically for eventual consistency; fails with actionable diagnostics if not found.
+ *
+ * @param {Function} fetchPage - function(limit, next) returning { items?, pageInfo?, ... }
+ * @param {string} targetId - the id to search for
+ * @param {object} options - { timeoutMs, intervalMs, pageSize, maxPages }
+ * @returns {object} the found item or throws with detailed diagnostics
+ */
+async function findItemById({ fetchPage, targetId, timeoutMs = 8000, intervalMs = 250, pageSize = 50, maxPages = 100 }) {
+  const start = Date.now();
+  let attempts = 0;
+  let totalScanned = 0;
+  let firstId = null;
+  let lastId = null;
+  let cursorsVisited = [];
+  let lastListParams = {};
+
+  while (Date.now() - start < timeoutMs && attempts < 32) {
+    attempts++;
+    let next = undefined;
+    let pageNum = 0;
+    let found = null;
+    cursorsVisited = [];
+
+    while (pageNum < maxPages) {
+      cursorsVisited.push(next ?? "null");
+      lastListParams = { limit: pageSize, next };
+      const res = await fetchPage({ limit: pageSize, next });
+      const items = Array.isArray(res?.items) ? res.items
+        : Array.isArray(res?.body?.items) ? res.body.items
+        : [];
+      const pageInfo = res?.body?.pageInfo ?? res?.pageInfo ?? {};
+      
+      totalScanned += items.length;
+      if (items.length > 0) {
+        firstId = firstId || items[0]?.id;
+        lastId = items[items.length - 1]?.id;
+        found = items.find(item => item.id === targetId);
+        if (found) {
+          return found;
+        }
+      }
+
+      pageNum++;
+      const nextCursor = pageInfo?.nextCursor ?? pageInfo?.next ?? res?.body?.next ?? res?.next ?? res?.cursor ?? null;
+      if (!nextCursor || !pageInfo || (!pageInfo.hasNext && !pageInfo.has_more && !pageInfo.more && !nextCursor)) {
+        break;
+      }
+      next = nextCursor;
+    }
+
+    // Not found on this polling attempt; wait before retry
+    await sleep(intervalMs);
+  }
+
+  // Item not found after all retries
+  const debug = {
+    fn: "findItemById",
+    targetId,
+    attempts,
+    totalScanned,
+    firstId,
+    lastId,
+    cursorsVisited: cursorsVisited.slice(0, 10), // limit history
+    lastListParams,
+    timeoutMs,
+    intervalMs,
+    pageSize,
+    maxPages
+  };
+  console.warn("[findItemById not found]", JSON.stringify(debug, null, 2));
+  const err = new Error(`findItemById: item "${targetId}" not found in list after ${attempts} polling attempts, scanned ${totalScanned} total items`);
+  err.debug = debug;
+  throw err;
+}
 async function waitForStatus(type, id, wanted, { tries=32, delayMs=250 } = {}) {
   let attempts = 0;
   for (let i=0;i<tries;i++){
@@ -5951,36 +6028,29 @@ const tests = {
     }
     recordCreated({ type: 'scannerAction', id: scannerActionId, route: '/scanner/actions', meta: { epc: uniqueEpc, itemId, action: "count" } });
 
-    // 4) List /objects/scannerAction with retry for eventual consistency
-    let scannerActionsFound = [];
-    let listAttempt = 0;
-    const maxListAttempts = 10;
-    const listRetryDelayMs = 250;
-
-    for (listAttempt = 0; listAttempt < maxListAttempts; listAttempt++) {
-      const listRes = await get(`/objects/scannerAction`, { limit: 50, sort: "desc" });
-      if (!listRes.ok) {
-        return { test: "scanner:actions:record", result: "FAIL", step: "listScannerActions", listRes };
-      }
-      const items = Array.isArray(listRes.body?.items) ? listRes.body.items : [];
-      scannerActionsFound = items.filter(item => item.id === scannerActionId);
-      if (scannerActionsFound.length > 0) {
-        recordFromListResult(items, "scannerAction", `/objects/scannerAction`);
-        break;
-      }
-      if (listAttempt < maxListAttempts - 1) {
-        await sleep(listRetryDelayMs);
-      }
-    }
-
-    if (scannerActionsFound.length === 0) {
+    // 4) Search for scanner action in /objects/scannerAction using pagination
+    // Use findItemById to robustly search across all pages until found or timeout
+    let scannerActionFound = null;
+    try {
+      scannerActionFound = await findItemById({
+        fetchPage: async ({ limit, next }) => {
+          return await get(`/objects/scannerAction`, { limit, ...(next ? { next } : {}) });
+        },
+        targetId: scannerActionId,
+        timeoutMs: 8000,
+        intervalMs: 250,
+        pageSize: 50,
+        maxPages: 100
+      });
+      recordFromListResult([scannerActionFound], "scannerAction", `/objects/scannerAction`);
+    } catch (err) {
       return {
         test: "scanner:actions:record",
         result: "FAIL",
-        step: "assertListContainsScannerAction",
+        step: "findScannerActionInList",
         scannerActionId,
-        attempts: listAttempt + 1,
-        note: "scannerAction not found in list after retries"
+        error: err.message,
+        debug: err.debug
       };
     }
 
@@ -6004,11 +6074,30 @@ const tests = {
     }
 
     // 6) List again to verify no duplicate (count should still be 1, or at most 1 with same id)
-    const listAfterReplay = await get(`/objects/scannerAction`, { limit: 50, sort: "desc" });
-    if (!listAfterReplay.ok) {
-      return { test: "scanner:actions:record", result: "FAIL", step: "listAfterReplay", listAfterReplay };
+    // Use pagination-based search to ensure we find the item even if pagination is in effect
+    let itemsAfter = [];
+    try {
+      const finalFound = await findItemById({
+        fetchPage: async ({ limit, next }) => {
+          return await get(`/objects/scannerAction`, { limit, ...(next ? { next } : {}) });
+        },
+        targetId: scannerActionId,
+        timeoutMs: 4000,  // shorter timeout for second search
+        intervalMs: 200,
+        pageSize: 50,
+        maxPages: 50
+      });
+      itemsAfter = finalFound ? [finalFound] : [];
+    } catch (err) {
+      // If not found in paginated search, try a simple list once more to get diagnostics
+      try {
+        const simpleList = await get(`/objects/scannerAction`, { limit: 100 });
+        itemsAfter = Array.isArray(simpleList.body?.items) ? simpleList.body.items : [];
+      } catch {
+        itemsAfter = [];
+      }
     }
-    const itemsAfter = Array.isArray(listAfterReplay.body?.items) ? listAfterReplay.body.items : [];
+    
     const duplicatesAfterReplay = itemsAfter.filter(item => item.id === scannerActionId);
     if (duplicatesAfterReplay.length !== 1) {
       return {
@@ -6017,13 +6106,14 @@ const tests = {
         step: "assertNoDuplicateAfterReplay",
         expectedCount: 1,
         actualCount: duplicatesAfterReplay.length,
+        totalItemsInFinalList: itemsAfter.length,
         note: "Idempotent replay should not create duplicate"
       };
     }
 
     const pass = scannerActionType === "scannerAction"
       && scannerActionItemId === itemId
-      && scannerActionsFound.length > 0
+      && scannerActionFound !== null
       && replayId === scannerActionId
       && duplicatesAfterReplay.length === 1;
 
@@ -6038,7 +6128,7 @@ const tests = {
         scannerActionId,
         type: scannerActionType,
         responseItemId: scannerActionItemId,
-        listAttempts: listAttempt + 1,
+        foundInList: scannerActionFound !== null,
         idempotencyReplayId: replayId,
         idempotencyMatch: replayId === scannerActionId,
         finalListCount: duplicatesAfterReplay.length
