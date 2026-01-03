@@ -495,6 +495,66 @@ export async function smoke_module_flow(API_BASE, authToken) {
 
 **Validation:** All API handlers should validate request bodies against spec schemas using generated types
 
+### 6.1 Permission Annotations
+
+Permissions are annotated in the spec as vendor extensions (`x-mbapp-permission`) on operation objects:
+
+```yaml
+/purchasing/suggest-po:
+  post:
+    x-mbapp-permission: purchase:write
+    summary: Build a PO draft from backorder requests
+    # ... rest of operation definition
+```
+
+**Convention:**
+- Vendor extension key: `x-mbapp-permission`
+- Value: canonical permission key (`{type}:{action}`, e.g., `objects:write`, `purchase:approve`)
+- Location: operation object (same level as `summary`, `parameters`, `responses`)
+- Purpose: Single source of truth for permission requirements; used by API handlers for permission checks and documentation
+
+**Permission keys in use:**
+- `objects:write` (generic fallback for object mutations: backorder ignore/convert, location CRUD)
+- `purchase:write` (purchase order creation and suggestion)
+- `purchase:approve`, `purchase:receive`, `purchase:cancel`, `purchase:close` (granular PO state transitions)
+- `inventory:write`, `inventory:adjust` (inventory mutations)
+- `party:write`, `product:write` (party/product mutations)
+
+**Generated artifacts (Sprint X E2):**
+
+The spec build pipeline automatically generates TypeScript and JSON permission artifacts from the annotations:
+
+1. **Source:** [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) (manual `x-mbapp-permission` annotations on operations)
+2. **Generator:** [ops/tools/generate-permissions.mjs](../ops/tools/generate-permissions.mjs) (runs as part of `npm run spec:bundle`)
+3. **Outputs:**
+   - [spec/generated/permissions.json](../spec/generated/permissions.json) — JSON map of `"METHOD /path"` → `"permission:key"`
+   - [spec/generated/permissions.ts](../spec/generated/permissions.ts) — TypeScript constants + types
+   - [apps/web/src/generated/permissions.ts](../apps/web/src/generated/permissions.ts) — Web convenience copy
+   - [apps/mobile/src/generated/permissions.ts](../apps/mobile/src/generated/permissions.ts) — Mobile convenience copy
+
+**Usage:**
+
+```typescript
+// Import from generated artifacts
+import { PERMISSIONS_BY_ENDPOINT, ENDPOINTS_BY_PERMISSION } from '../generated/permissions';
+
+// Example: Look up permission required for an endpoint
+const requiredPerm = PERMISSIONS_BY_ENDPOINT['POST /purchasing/suggest-po']; // "purchase:write"
+
+// Example: Find all endpoints requiring a specific permission
+const purchaseEndpoints = ENDPOINTS_BY_PERMISSION['purchase:write'];
+// ["POST /purchasing/po:create-from-suggestion", "POST /purchasing/suggest-po"]
+```
+
+**Pipeline:**
+
+```bash
+npm run spec:bundle      # bundles spec AND generates permission artifacts
+npm run spec:permissions # standalone permissions generation (if needed)
+```
+
+Artifacts are committed to the repo and should be regenerated whenever spec annotations change.
+
 ---
 
 ## 7. Archive: Sprint XXVI+ Report Notes (Historical)
