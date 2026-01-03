@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
+import { hasPerm } from "../lib/permissions";
 import { track, trackScreenView } from "../lib/telemetry";
 import * as Sentry from "@sentry/browser";
 import {
@@ -118,7 +119,7 @@ function getPoLineId(line: any): string {
 
 export default function PurchaseOrderDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { token, tenantId } = useAuth();
+  const { token, tenantId, policy, policyLoading } = useAuth();
   const [po, setPo] = useState<PurchaseOrder | null>(null);
   const [vendorName, setVendorName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -406,8 +407,13 @@ export default function PurchaseOrderDetailPage() {
       setActionInfo("Submitted purchase order.");
     } catch (err) {
       const e = err as any;
-      if (e?.status === 409) setActionError(renderFriendly(e));
-      else setActionError(renderFriendly(e));
+      if (e?.status === 403) {
+        setActionError("Access denied: you lack permission to submit this order.");
+      } else if (e?.status === 409) {
+        setActionError(renderFriendly(e));
+      } else {
+        setActionError(renderFriendly(e));
+      }
     } finally {
       setActionLoading(false);
     }
@@ -423,7 +429,12 @@ export default function PurchaseOrderDetailPage() {
       await fetchPo();
       setActionInfo("Approved purchase order.");
     } catch (err) {
-      setActionError(renderFriendly(err));
+      const e = err as any;
+      if (e?.status === 403) {
+        setActionError("Access denied: you lack permission to approve this order.");
+      } else {
+        setActionError(renderFriendly(err));
+      }
     } finally {
       setActionLoading(false);
     }
@@ -535,10 +546,25 @@ export default function PurchaseOrderDetailPage() {
         lineCount: linesToReceive.length,
       });
     } catch (err: any) {
+      const e = err as any;
       const code = err?.code ?? err?.details?.code;
       const message = (err?.message ?? err?.details?.message ?? "").toString().toLowerCase();
       const receivedLineIds = linesToReceive.map((l) => l.id).filter(Boolean);
       const idempotentReplay = err?.status === 409 && (String(code || "").toLowerCase().includes("idempot") || message.includes("idempot"));
+
+      // Handle 403 Forbidden (missing permission)
+      if (e?.status === 403) {
+        setActionError("Access denied: you lack permission to receive this order.");
+        setActionLoading(false);
+        track("PO_Receive_Clicked", {
+          objectType: "purchaseOrder",
+          objectId: id,
+          result: "fail",
+          lineCount: linesToReceive.length,
+          errorCode: "403",
+        });
+        return;
+      }
 
       if (idempotentReplay) {
         setActionError(null);
@@ -686,7 +712,12 @@ export default function PurchaseOrderDetailPage() {
       await cancelPurchaseOrder(id, { token: token || undefined, tenantId });
       await fetchPo();
     } catch (err) {
-      setActionError(renderFriendly(err));
+      const e = err as any;
+      if (e?.status === 403) {
+        setActionError("Access denied: you lack permission to cancel this order.");
+      } else {
+        setActionError(renderFriendly(err));
+      }
     } finally {
       setActionLoading(false);
     }
@@ -700,7 +731,12 @@ export default function PurchaseOrderDetailPage() {
       await closePurchaseOrder(id, { token: token || undefined, tenantId });
       await fetchPo();
     } catch (err) {
-      setActionError(renderFriendly(err));
+      const e = err as any;
+      if (e?.status === 403) {
+        setActionError("Access denied: you lack permission to close this order.");
+      } else {
+        setActionError(renderFriendly(err));
+      }
     } finally {
       setActionLoading(false);
     }
@@ -950,14 +986,14 @@ export default function PurchaseOrderDetailPage() {
   // Status gates aligned with API handler rules:
   // - Receive handler allows: ["approved","partially-received"]
   // - Denies: ["cancelled","closed","canceled"]
-  const canSubmit = status === "draft";
-  const canApprove = status === "submitted";
-  const canReceive = status === "approved" || status === "partially-received";
+  const canSubmit = status === "draft" && hasPerm(policy, "purchase:write") && !policyLoading;
+  const canApprove = status === "submitted" && hasPerm(policy, "purchase:approve") && !policyLoading;
+  const canReceive = (status === "approved" || status === "partially-received") && hasPerm(policy, "purchase:receive") && !policyLoading;
   // Cancel only allowed for draft/submitted (API: po-cancel.ts)
-  const canCancel = ["draft", "submitted"].includes(status);
+  const canCancel = ["draft", "submitted"].includes(status) && hasPerm(policy, "purchase:cancel") && !policyLoading;
   // Close only allowed for fulfilled (API: po-close.ts)
-  const canClose = status === "fulfilled";
-  const canEditLines = ["draft", "open"].includes(status);
+  const canClose = status === "fulfilled" && hasPerm(policy, "purchase:close") && !policyLoading;
+  const canEditLines = ["draft", "open"].includes(status) && hasPerm(policy, "purchase:write") && !policyLoading;
 
   const hasEdits = Object.values(lineState).some((s) => typeof s.editQty === "number");
 
@@ -1004,7 +1040,12 @@ export default function PurchaseOrderDetailPage() {
       setLineErrors({});
       await fetchPo();
     } catch (err) {
-      setActionError(formatError(err));
+      const e = err as any;
+      if (e?.status === 403) {
+        setActionError("Access denied: you lack permission to edit these lines.");
+      } else {
+        setActionError(formatError(err));
+      }
     } finally {
       setActionLoading(false);
     }
