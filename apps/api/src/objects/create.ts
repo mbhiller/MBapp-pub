@@ -19,7 +19,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const auth = await getAuth(event);
     const type = event.pathParameters?.type;
     if (!type) return bad("Missing type");
-    requirePerm(auth, `${type}:write`);
+    // Permission already checked by router via requireObjectPerm()
 
     const body = event.body ? JSON.parse(event.body) : {};
 

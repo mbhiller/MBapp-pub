@@ -8,6 +8,14 @@
 
 ## Current State Summary
 
+### Objects Permission Prefix Normalization — ✅ Complete (Sprint Q, 2026-01-02)
+
+- **Permission prefix mapping:** `/objects/:type` routes now map compound object types to canonical module prefixes (salesOrder→sales, purchaseOrder→purchase, inventoryItem→inventory) via `typeToPermissionPrefix()` helper in [apps/api/src/index.ts](../apps/api/src/index.ts#L193).
+- **Server-side alias expansion:** Added bidirectional policy key expansion (sales↔salesorder, purchase↔purchaseorder, inventory↔inventoryitem) in [apps/api/src/auth/middleware.ts](../apps/api/src/auth/middleware.ts#L17-L56) via `expandPolicyWithAliases()` for backward compatibility with legacy permission keys.
+- **Removed duplicate permission checks:** Object handlers (create, update, get, list, search, delete) now rely on router-level `requireObjectPerm()` as single source of truth; removed redundant `requirePerm(auth, \`${type}:write\`)` calls from handlers to avoid case-sensitivity conflicts.
+- **CI smoke coverage:** Added `smoke:objects:perm-prefix-normalization` to CI flows (verifies operator role-derived canonical permissions work, legacy explicit policy keys still honored, read-only tokens correctly denied).
+- **Outcome:** `/objects/:type` permission enforcement now consistent across camelCase types and canonical prefixes; both `purchase:write` and `purchaseorder:write` grant access to `POST /objects/purchaseOrder` via alias expansion.
+
 ### RBAC Policy Cleanup + Mobile Permissions — ✅ Complete (Sprint P, 2026-01-02)
 
 - Removed unused/stale policy handler and confirmed `/auth/policy` returns the canonical `Record<string, boolean>` policy map.

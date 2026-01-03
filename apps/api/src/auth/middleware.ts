@@ -14,6 +14,52 @@ export function policyFromAuth(auth: AuthContext) {
   return auth.policy || {};
 }
 
+/**
+ * Expand policy map with backward-compatible alias keys.
+ * Bidirectional mapping: canonical ↔ legacy
+ * - sales ↔ salesorder
+ * - purchase ↔ purchaseorder
+ * - inventory ↔ inventoryitem
+ */
+function expandPolicyWithAliases(policy: Record<string, boolean>): Record<string, boolean> {
+  const expanded = { ...policy };
+  
+  // Alias mappings (bidirectional)
+  const aliases: Array<[string, string]> = [
+    ["sales", "salesorder"],
+    ["purchase", "purchaseorder"],
+    ["inventory", "inventoryitem"],
+  ];
+
+  // For each key in the original policy, add mirrored aliases
+  for (const [key, value] of Object.entries(policy)) {
+    if (!value) continue; // only expand truthy permissions
+    
+    const lowerKey = key.toLowerCase();
+    for (const [canonical, legacy] of aliases) {
+      // If key starts with canonical prefix, add legacy alias
+      if (lowerKey.startsWith(canonical + ":")) {
+        const suffix = key.slice(canonical.length); // preserves ":read", ":*", etc.
+        expanded[legacy + suffix] = value;
+      }
+      // If key starts with legacy prefix, add canonical alias
+      if (lowerKey.startsWith(legacy + ":")) {
+        const suffix = key.slice(legacy.length);
+        expanded[canonical + suffix] = value;
+      }
+      // Handle exact matches (no suffix)
+      if (lowerKey === canonical) {
+        expanded[legacy] = value;
+      }
+      if (lowerKey === legacy) {
+        expanded[canonical] = value;
+      }
+    }
+  }
+
+  return expanded;
+}
+
 export async function getAuth(event: APIGatewayProxyEventV2): Promise<AuthContext> {
   const authz = event.headers?.authorization || event.headers?.Authorization;
   if (!authz?.startsWith("Bearer ")) throw withStatus(401, "Missing bearer token");
@@ -39,9 +85,12 @@ export async function getAuth(event: APIGatewayProxyEventV2): Promise<AuthContex
   const hasExplicitPolicy = explicitPolicy && Object.keys(explicitPolicy).length > 0;
 
   // Use explicit policy if present, otherwise derive from roles
-  const policy: Record<string, boolean> = hasExplicitPolicy
+  const basePolicy: Record<string, boolean> = hasExplicitPolicy
     ? explicitPolicy
     : derivePolicyFromRoles(roles);
+
+  // Expand policy with backward-compatible aliases (legacy ↔ canonical)
+  const policy = expandPolicyWithAliases(basePolicy);
 
   return { userId, tenantId, roles, policy };
 }

@@ -22,7 +22,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const id   = event.pathParameters?.id;
     if (!type || !id) return bad("Missing type or id");
 
-    requirePerm(auth, `${type}:write`);
+    // Permission already checked by router via requireObjectPerm()
 
     const patch = event.body ? JSON.parse(event.body) : {};
     const existing = await getObjectById({ tenantId: auth.tenantId, type, id });

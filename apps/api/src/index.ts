@@ -189,11 +189,28 @@ function assertAllowedObjectType(typeRaw: string): APIGatewayProxyResultV2 | nul
   return null;
 }
 
+/**
+ * Map object type to canonical module permission prefix.
+ * Normalizes compound/camelCase types to match module-based permission keys.
+ */
+function typeToPermissionPrefix(typeRaw: string): string {
+  const type = (typeRaw || "").toLowerCase();
+  
+  // Map compound/camelCase object types to canonical module prefixes
+  const moduleMap: Record<string, string> = {
+    "salesorder": "sales",
+    "purchaseorder": "purchase",
+    "inventoryitem": "inventory",
+  };
+  
+  return moduleMap[type] || type;  // fallback to type as-is for party, product, etc.
+}
+
 /** Require object access, allowing generic objects:* as a fallback for new types (e.g., location) */
 function requireObjectPerm(auth: any, method: string, typeRaw: string) {
   const action = actionForObjectMethod(method);
-  const type = (typeRaw || "").toLowerCase();
-  const specific = action ? `${type}:${action}` : "";
+  const prefix = typeToPermissionPrefix(typeRaw);
+  const specific = action ? `${prefix}:${action}` : "";
   const generic = action ? `objects:${action}` : "";
 
   try {

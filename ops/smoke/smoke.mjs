@@ -6505,6 +6505,292 @@ const tests = {
     };
   },
 
+  "smoke:objects:perm-prefix-normalization": async () => {
+    // Test: /objects/:type permission prefix normalization (Sprint Q)
+    // Proves that:
+    //   A) Canonical role-derived perms (operator) now allow /objects CRUD for salesOrder/purchaseOrder
+    //   B) Legacy explicit policy keys (purchaseorder:write, salesorder:write) still work via alias expansion
+    //   C) Tokens without the required permission correctly return 403
+
+    await ensureBearer(); // Use admin token for setup
+
+    // Setup: create vendor, customer, and product
+    const { vendorId } = await seedVendor(api);
+    const { customerId } = await seedCustomer(api);
+    const prod = await createProduct({ name: `PermTest-${Date.now()}` });
+    if (!prod.ok) {
+      return {
+        test: "objects:perm-prefix-normalization",
+        result: "FAIL",
+        step: "setup-product",
+        prod
+      };
+    }
+    const productId = prod.body?.id;
+
+    // Test A: Operator role-derived permissions (canonical: purchase:write, sales:write)
+    const operatorLoginPayload = {
+      tenantId: TENANT,
+      roles: ["operator"]
+      // No explicit policy - derived from role
+    };
+    const operatorLoginRes = await fetch(`${API}/auth/dev-login`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify(operatorLoginPayload)
+    });
+
+    if (!operatorLoginRes.ok) {
+      const errText = await operatorLoginRes.text().catch(() => "");
+      return {
+        test: "objects:perm-prefix-normalization",
+        result: "FAIL",
+        step: "operator-login",
+        status: operatorLoginRes.status,
+        error: errText
+      };
+    }
+
+    const operatorData = await operatorLoginRes.json();
+    const operatorToken = operatorData.token;
+    if (!operatorToken) {
+      return {
+        test: "objects:perm-prefix-normalization",
+        result: "FAIL",
+        step: "operator-extract-token",
+        operatorData
+      };
+    }
+
+    // POST /objects/purchaseOrder with operator token (should succeed)
+    const poCreateRes = await fetch(`${API}/objects/purchaseOrder`, {
+      method: "POST",
+      headers: {
+        "authorization": `Bearer ${operatorToken}`,
+        "x-tenant-id": TENANT,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        type: "purchaseOrder",
+        vendorId,
+        status: "draft",
+        lines: [{ id: "L1", itemId: productId, qty: 5, uom: "ea" }]
+      })
+    });
+
+    const poCreateOk = poCreateRes.ok;
+    const poCreateStatus = poCreateRes.status;
+    if (!poCreateOk) {
+      return {
+        test: "objects:perm-prefix-normalization",
+        result: "FAIL",
+        step: "operator-create-po",
+        expectedStatus: "200 or 201",
+        actualStatus: poCreateStatus,
+        body: await poCreateRes.json().catch(() => ({}))
+      };
+    }
+
+    const poId = (await poCreateRes.json()).id;
+
+    // POST /objects/salesOrder with operator token (should succeed)
+    const soCreateRes = await fetch(`${API}/objects/salesOrder`, {
+      method: "POST",
+      headers: {
+        "authorization": `Bearer ${operatorToken}`,
+        "x-tenant-id": TENANT,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        type: "salesOrder",
+        customerId,
+        partyId: customerId,
+        status: "draft",
+        lines: [{ id: "L1", itemId: productId, qty: 3, uom: "ea" }]
+      })
+    });
+
+    const soCreateOk = soCreateRes.ok;
+    const soCreateStatus = soCreateRes.status;
+    if (!soCreateOk) {
+      return {
+        test: "objects:perm-prefix-normalization",
+        result: "FAIL",
+        step: "operator-create-so",
+        expectedStatus: "200 or 201",
+        actualStatus: soCreateStatus,
+        body: await soCreateRes.json().catch(() => ({}))
+      };
+    }
+
+    const soId = (await soCreateRes.json()).id;
+
+    // Test B: Legacy explicit policy key (purchaseorder:write) still works via alias expansion
+    const legacyLoginPayload = {
+      tenantId: TENANT,
+      policy: {
+        "*:read": true,
+        "purchaseorder:write": true
+      }
+    };
+    const legacyLoginRes = await fetch(`${API}/auth/dev-login`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify(legacyLoginPayload)
+    });
+
+    if (!legacyLoginRes.ok) {
+      const errText = await legacyLoginRes.text().catch(() => "");
+      return {
+        test: "objects:perm-prefix-normalization",
+        result: "FAIL",
+        step: "legacy-login",
+        status: legacyLoginRes.status,
+        error: errText
+      };
+    }
+
+    const legacyData = await legacyLoginRes.json();
+    const legacyToken = legacyData.token;
+    if (!legacyToken) {
+      return {
+        test: "objects:perm-prefix-normalization",
+        result: "FAIL",
+        step: "legacy-extract-token",
+        legacyData
+      };
+    }
+
+    // POST /objects/purchaseOrder with legacy token (should succeed due to alias expansion)
+    const poLegacyRes = await fetch(`${API}/objects/purchaseOrder`, {
+      method: "POST",
+      headers: {
+        "authorization": `Bearer ${legacyToken}`,
+        "x-tenant-id": TENANT,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        type: "purchaseOrder",
+        vendorId,
+        status: "draft",
+        lines: [{ id: "L1", itemId: productId, qty: 2, uom: "ea" }]
+      })
+    });
+
+    const poLegacyOk = poLegacyRes.ok;
+    const poLegacyStatus = poLegacyRes.status;
+    if (!poLegacyOk) {
+      return {
+        test: "objects:perm-prefix-normalization",
+        result: "FAIL",
+        step: "legacy-create-po",
+        expectedStatus: "200 or 201",
+        actualStatus: poLegacyStatus,
+        body: await poLegacyRes.json().catch(() => ({}))
+      };
+    }
+
+    const poLegacyId = (await poLegacyRes.json()).id;
+
+    // Test C: Negative test - token with only read permission should fail
+    const readOnlyLoginPayload = {
+      tenantId: TENANT,
+      policy: {
+        "*:read": true
+      }
+    };
+    const readOnlyLoginRes = await fetch(`${API}/auth/dev-login`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify(readOnlyLoginPayload)
+    });
+
+    if (!readOnlyLoginRes.ok) {
+      const errText = await readOnlyLoginRes.text().catch(() => "");
+      return {
+        test: "objects:perm-prefix-normalization",
+        result: "FAIL",
+        step: "readonly-login",
+        status: readOnlyLoginRes.status,
+        error: errText
+      };
+    }
+
+    const readOnlyData = await readOnlyLoginRes.json();
+    const readOnlyToken = readOnlyData.token;
+    if (!readOnlyToken) {
+      return {
+        test: "objects:perm-prefix-normalization",
+        result: "FAIL",
+        step: "readonly-extract-token",
+        readOnlyData
+      };
+    }
+
+    // POST /objects/purchaseOrder with read-only token (should fail with 403)
+    const poReadOnlyRes = await fetch(`${API}/objects/purchaseOrder`, {
+      method: "POST",
+      headers: {
+        "authorization": `Bearer ${readOnlyToken}`,
+        "x-tenant-id": TENANT,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        type: "purchaseOrder",
+        vendorId,
+        status: "draft",
+        lines: [{ id: "L1", itemId: productId, qty: 1, uom: "ea" }]
+      })
+    });
+
+    const poReadOnlyDenied = poReadOnlyRes.status === 403;
+    const poReadOnlyBody = await poReadOnlyRes.json().catch(() => ({}));
+    const hasForbiddenMessage = poReadOnlyBody?.message &&
+      (poReadOnlyBody.message.toLowerCase().includes("forbidden") ||
+       poReadOnlyBody.message.toLowerCase().includes("missing permission"));
+
+    if (!poReadOnlyDenied || !hasForbiddenMessage) {
+      return {
+        test: "objects:perm-prefix-normalization",
+        result: "FAIL",
+        step: "readonly-denied-check",
+        expectedStatus: 403,
+        actualStatus: poReadOnlyRes.status,
+        expectedMessagePattern: "forbidden | missing permission",
+        actualMessage: poReadOnlyBody?.message,
+        body: poReadOnlyBody
+      };
+    }
+
+    // All checks passed
+    return {
+      test: "objects:perm-prefix-normalization",
+      result: "PASS",
+      summary: "Canonical permission prefixes work for /objects/:type; legacy aliases still honored",
+      assertions: {
+        operatorCreatePO: poCreateOk,
+        operatorCreateSO: soCreateOk,
+        legacyCreatePO: poLegacyOk,
+        readOnlyDenied: poReadOnlyDenied,
+        readOnlyForbiddenMessage: hasForbiddenMessage
+      },
+      artifacts: {
+        operatorPO: poId,
+        operatorSO: soId,
+        legacyPO: poLegacyId
+      }
+    };
+  },
+
   /* ===================== Sprint III: Views, Workspaces, Events ===================== */
   
   "smoke:views:crud": async ()=>{
