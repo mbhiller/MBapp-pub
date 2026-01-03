@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
+import { hasPerm } from "../lib/permissions";
 import LocationPicker from "../components/LocationPicker";
 import { getOnHandByLocation, type InventoryOnHandByLocationItem } from "../lib/inventory";
 import { listLocations, type Location } from "../lib/locations";
@@ -71,7 +72,7 @@ function toLineQtys(lines?: SalesOrderLine[]): Record<string, number> {
 export default function SalesOrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { token, tenantId } = useAuth();
+  const { token, tenantId, policy, policyLoading } = useAuth();
   const [order, setOrder] = useState<SalesOrder | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -377,6 +378,13 @@ export default function SalesOrderDetailPage() {
       } catch (err) {
         const e = err as any;
         const details = e?.details || {};
+        
+        // Handle 403 Forbidden (missing permission)
+        if (e?.status === 403) {
+          setActionError("Access denied: you lack permission to perform this action.");
+          return;
+        }
+        
         const shortages = Array.isArray(details?.shortages) ? details.shortages : [];
 
         if (e?.status === 409 && shortages.length > 0) {
@@ -692,14 +700,14 @@ export default function SalesOrderDetailPage() {
   }, [backorders]);
 
   const status = order?.status ?? "";
-  const canEdit = status === "draft";
-  const canSubmit = status === "draft";
-  const canCommit = status === "submitted" || status === "committed" || status === "draft";
-  const canReserve = status === "submitted" || status === "committed";
-  const canRelease = status !== "cancelled" && status !== "closed" && status !== "draft";
-  const canFulfill = status === "committed" || status === "partially_fulfilled" || status === "submitted";
-  const canClose = status === "fulfilled" || status === "partially_fulfilled" || status === "committed";
-  const canCancel = status !== "cancelled" && status !== "closed" && status !== "fulfilled";
+  const canEdit = status === "draft" && hasPerm(policy, "sales:write") && !policyLoading;
+  const canSubmit = status === "draft" && hasPerm(policy, "sales:write") && !policyLoading;
+  const canCommit = (status === "submitted" || status === "committed" || status === "draft") && hasPerm(policy, "sales:commit") && !policyLoading;
+  const canReserve = (status === "submitted" || status === "committed") && hasPerm(policy, "sales:reserve") && !policyLoading;
+  const canRelease = status !== "cancelled" && status !== "closed" && status !== "draft" && hasPerm(policy, "sales:reserve") && !policyLoading;
+  const canFulfill = (status === "committed" || status === "partially_fulfilled" || status === "submitted") && hasPerm(policy, "sales:fulfill") && !policyLoading;
+  const canClose = (status === "fulfilled" || status === "partially_fulfilled" || status === "committed") && hasPerm(policy, "sales:close") && !policyLoading;
+  const canCancel = status !== "cancelled" && status !== "closed" && status !== "fulfilled" && hasPerm(policy, "sales:cancel") && !policyLoading;
   const showLocSelectors = canFulfill || canReserve;
 
   const lines = useMemo(() => order?.lines ?? [], [order?.lines]);

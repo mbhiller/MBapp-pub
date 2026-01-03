@@ -25,6 +25,19 @@
 - **Verification:** ✅ Web typecheck clean; route protection works with existing `/auth/policy` fetch; manual testing with tokens/without tokens/with limited roles.
 - **Outcome:** Web now prevents unauthorized route access and provides visual feedback (hidden buttons) for users lacking write permissions. Combined with Sprint S nav gating, web RBAC surface is minimal but complete: read permissions gate navigation, write permissions gate create/edit pages and action buttons.
 
+### Web RBAC Detail Page Action Gating — ✅ Complete (Sprint U, 2026-01-02)
+
+**Epic Summary:** Add permission-based action gating to Sales Order and Purchase Order detail pages, fail-closed design with 403 error feedback.
+
+- **E1 (SO/PO action gating):** [apps/web/src/pages/SalesOrderDetailPage.tsx](../apps/web/src/pages/SalesOrderDetailPage.tsx) and [apps/web/src/pages/PurchaseOrderDetailPage.tsx](../apps/web/src/pages/PurchaseOrderDetailPage.tsx) now import `hasPerm` helper and extend `useAuth()` to include `policy` and `policyLoading`.
+  - **SO action permissions (canonical keys):** `canEdit/canSubmit` require `sales:write`; `canCommit` requires `sales:commit`; `canReserve/canRelease` require `sales:reserve`; `canFulfill` requires `sales:fulfill`; `canClose` requires `sales:close`; `canCancel` requires `sales:cancel`. All canX booleans now include `&& hasPerm(policy, "{permission}") && !policyLoading`.
+  - **PO action permissions:** `canSubmit/canEditLines` require `purchase:write`; `canApprove` requires `purchase:approve`; `canReceive` requires `purchase:receive`; `canCancel` requires `purchase:cancel`; `canClose` requires `purchase:close`.
+  - **Status gates preserved:** SO/PO status-based gates remain (e.g., canSubmit still requires `status === "draft"`); permission gates layer on top with AND logic. Fail-closed: buttons hidden during `policyLoading` and if user lacks required permission.
+- **E2 (403 error handling):** Action handlers (performAction in SO; handleSubmit, handleApprove, handleCancel, handleClose, handleReceive, handleSaveEdits in PO) now detect `e?.status === 403` and display user-friendly error messages like "Access denied: you lack permission to submit this order." before calling `renderFriendly()` or `formatError()`. Early return prevents generic error propagation.
+- **Fail-closed design:** No refactor of button rendering logic needed; status-based hidden buttons combined with permission checks ensures unauthorized actions never reach UI. If user somehow bypasses client-side check (e.g., via DevTools), server handler returns 403, caught by client, and displays permission-denied message.
+- **Verification:** ✅ Web typecheck clean (apps/web); manual testing with operator/viewer roles shows detail page action buttons hidden for users lacking write permissions; 403 responses from test API show clear permission-denied messages instead of generic errors.
+- **Outcome:** Web detail pages now fully enforce action-level RBAC; combined with route protection (Sprint T E1) and list-level action gating (Sprint T E2), web RBAC coverage is comprehensive: nav gating (read perms), route protection (write perms), list button gating (write perms), detail page button gating (action-specific perms), with consistent 403 feedback.
+
 ### Web RBAC Bootstrap — ✅ Complete (Sprint S, 2026-01-02)
 
 **Epic Summary:** Web now fetches `/auth/policy` on startup and gates top navigation links based on canonical permission keys.
