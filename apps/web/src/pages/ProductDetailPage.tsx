@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
+import { hasPerm } from "../lib/permissions";
 
 type Product = {
   id: string;
@@ -26,7 +27,11 @@ function formatError(err: unknown): string {
 
 export default function ProductDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { token, tenantId } = useAuth();
+  const { token, tenantId, policy, policyLoading } = useAuth();
+
+  // Fail-closed permission check
+  const canEdit = hasPerm(policy, "product:write") && !policyLoading;
+
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -60,7 +65,7 @@ export default function ProductDetailPage() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h1>{product.name || "(no name)"}</h1>
         <div style={{ display: "flex", gap: 8 }}>
-          <Link to={`/products/${id}/edit`}>Edit</Link>
+          {canEdit && <Link to={`/products/${id}/edit`}>Edit</Link>}
           <Link to="/products">Back to List</Link>
         </div>
       </div>
