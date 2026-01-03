@@ -8,6 +8,65 @@
 
 ## Current State Summary
 
+### API Spec Permission Annotations (SSOT) — ✅ Complete (Sprint X E1, 2026-01-02)
+
+**Epic Summary:** Add vendor-extension permission annotations to API spec to make permissions single source of truth.
+
+- **Spec Annotations Added:** [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) now includes `x-mbapp-permission` vendor extension on 8 operations:
+  - POST `/objects/backorderRequest/{id}:ignore` → `objects:write`
+  - POST `/objects/backorderRequest/{id}:convert` → `objects:write`
+  - POST `/purchasing/suggest-po` → `purchase:write`
+  - POST `/purchasing/po:create-from-suggestion` → `purchase:write`
+  - POST `/purchasing/po/{id}:approve` → `purchase:approve`
+  - POST `/purchasing/po/{id}:receive` → `purchase:receive`
+  - POST `/purchasing/po/{id}:cancel` → `purchase:cancel`
+  - POST `/purchasing/po/{id}:close` → `purchase:close`
+- **Convention Documented:** [docs/MBapp-Foundations.md](MBapp-Foundations.md#61-permission-annotations) now documents the vendor extension convention, canonical permission keys, and locations in the spec.
+- **Type Generation:** Ran `npm run spec:lint`, `npm run spec:bundle`, `npm run spec:types:api`, `npm run spec:types:mobile` — all clean; no breaking changes to generated types.
+- **Outcome:** Permission requirements now documented at spec level; enables cross-cutting permissions documentation, code generation, and future permission-driven code gen if needed. Foundation for permission enforcement layers (API handlers, frontend guards).
+
+### API Spec Permission Generation (Artifacts from SSOT) — ✅ Complete (Sprint X E2, 2026-01-02)
+
+**Epic Summary:** Generate TypeScript and JSON permission artifacts from spec annotations to provide import-friendly constants for web/mobile.
+
+- **Generator Created:** [ops/tools/generate-permissions.mjs](../ops/tools/generate-permissions.mjs) reads bundled spec and extracts `x-mbapp-permission` annotations.
+  - Parses `spec/openapi.yaml` (bundled from `MBapp-Modules.yaml`), walks all paths and operations.
+  - Extracts permission annotations with stable key format: `"METHOD /path"` → `"permission:key"`.
+  - Outputs:
+    - [spec/generated/permissions.json](../spec/generated/permissions.json) — JSON map (8 endpoints)
+    - [spec/generated/permissions.ts](../spec/generated/permissions.ts) — TypeScript const export with reverse mapping helper and types
+    - [apps/web/src/generated/permissions.ts](../apps/web/src/generated/permissions.ts) — Web convenience copy
+    - [apps/mobile/src/generated/permissions.ts](../apps/mobile/src/generated/permissions.ts) — Mobile convenience copy
+- **Pipeline Integration:** Wired into spec build via `npm run spec:bundle` (runs bundling + permissions generation).
+  - Standalone script: `npm run spec:permissions` for manual invocation.
+  - Generated artifacts are committed (part of repo, not local-only).
+- **Generated Constants:** Exports `PERMISSIONS_BY_ENDPOINT` (endpoint → perm), `ENDPOINTS_BY_PERMISSION` (perm → endpoints array), and TS types (`PermissionKey`, `EndpointKey`).
+- **Documentation:** Updated [docs/MBapp-Foundations.md](MBapp-Foundations.md#61-permission-annotations) with artifact locations, usage examples, and pipeline commands.
+- **Verification:** ✅ All spec scripts pass (`spec:lint`, `spec:bundle`, `spec:types:api`, `spec:types:mobile`); all typecheck passes (api/web/mobile); generated files are clean and importable.
+- **Outcome:** Web and mobile can now import compile-time-checked permission constants from generated artifacts. Foundation for permission-driven UI logic (button rendering, route guards, etc.) with strong typing and single source of truth from spec.
+
+### API Spec Permission Coverage Guard + Web Consumption — ✅ Complete (Sprint X E3, 2026-01-02)
+
+**Epic Summary:** Add coverage guard to prevent drift on curated endpoints and prove web can consume generated permission constants.
+
+- **Coverage Guard:** [ops/tools/generate-permissions.mjs](../ops/tools/generate-permissions.mjs) now validates required endpoints.
+  - `REQUIRED_ENDPOINTS` array (8 endpoints) defines curated set that MUST have annotations.
+  - Generator throws error if any required endpoint is missing `x-mbapp-permission` annotation.
+  - Coverage guard runs automatically during `npm run spec:bundle` (fails fast on regression).
+  - Current required endpoints: backorder ignore/convert, suggest-po, create-from-suggestion, PO approve/receive/cancel/close.
+- **Web Proof-of-Consumption:** [apps/web/src/pages/BackorderDetailPage.tsx](../apps/web/src/pages/BackorderDetailPage.tsx) now imports and uses generated constants.
+  - Replaced string literals `"objects:write"` and `"purchase:write"` with `PERMISSIONS_BY_ENDPOINT["POST /objects/backorderRequest/{id}:ignore"]` and `PERMISSIONS_BY_ENDPOINT["POST /purchasing/suggest-po"]`.
+  - No behavior change; gating logic, status checks, and UI rendering unchanged.
+  - Demonstrates compile-time-checked permission references from spec SSOT.
+- **Verification:** ✅ Coverage guard passes (8/8 required endpoints annotated); web typecheck passes with imported constants; no behavior changes detected.
+- **Outcome:** Spec permission coverage is now protected against drift; web successfully consumes generated constants, proving the E2 artifacts are import-friendly and type-safe. Foundation complete for expanding coverage and broader consumption.
+
+**Sprint X Complete (E1 + E2 + E3):**
+- ✅ E1: Spec annotations added (8 operations annotated with `x-mbapp-permission`)
+- ✅ E2: Generator + artifacts (JSON + TS exports, web/mobile copies, pipeline integration)
+- ✅ E3: Coverage guard (REQUIRED_ENDPOINTS validation) + web consumption proof (BackorderDetailPage)
+- **Remaining work:** Expand coverage to additional endpoints (party/product/sales/inventory CRUD); broader web/mobile consumption (Sprint AA).
+
 ### Web RBAC Inventory + Locations Write Action Gating — ✅ Complete (Sprint W E1, 2026-01-02)
 
 **Epic Summary:** Gate Inventory write actions (Putaway, Cycle Count, Adjust) and Locations inline CRUD with permission checks to prevent unauthorized modifications.

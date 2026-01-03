@@ -1501,6 +1501,7 @@ paths:
                 $ref: '#/components/schemas/Error'
   /purchasing/po/{id}:approve:
     post:
+      x-mbapp-permission: purchase:approve
       summary: Approve purchase order
       parameters:
         - in: path
@@ -1555,6 +1556,7 @@ paths:
                 $ref: '#/components/schemas/Error'
   /purchasing/po/{id}:receive:
     post:
+      x-mbapp-permission: purchase:receive
       summary: Receive against purchase order lines
       description: Allowed from **approved** or **partially-received**. Over-receive returns 409. \ **Idempotency:** provide an `Idempotency-Key` header to safely retry the same receive request; \ duplicates with the same key will return the current PO state without double-applying movements. \ Requests may also be deduplicated by payload signature.
       parameters:
@@ -1585,6 +1587,7 @@ paths:
                 $ref: '#/components/schemas/Error'
   /purchasing/po/{id}:cancel:
     post:
+      x-mbapp-permission: purchase:cancel
       summary: Cancel purchase order
       description: Allowed from **draft**/**submitted**. Returns 409 otherwise.
       parameters:
@@ -1609,6 +1612,7 @@ paths:
                 $ref: '#/components/schemas/Error'
   /purchasing/po/{id}:close:
     post:
+      x-mbapp-permission: purchase:close
       summary: Close purchase order
       description: Allowed from **fulfilled**. Returns 409 otherwise.
       parameters:
@@ -1680,6 +1684,7 @@ paths:
                 $ref: '#/components/schemas/PurchaseOrder'
   /purchasing/suggest-po:
     post:
+      x-mbapp-permission: purchase:write
       tags:
         - Purchasing
       summary: Build a PO draft from backorder requests
@@ -1712,6 +1717,7 @@ paths:
                 $ref: '#/components/schemas/SuggestPoResponse'
   /purchasing/po:create-from-suggestion:
     post:
+      x-mbapp-permission: purchase:write
       summary: Persist purchase order draft(s) created from suggestion
       operationId: createPoFromSuggestion
       requestBody:
@@ -1751,6 +1757,7 @@ paths:
                       type: string
   /objects/backorderRequest/{id}:ignore:
     post:
+      x-mbapp-permission: objects:write
       tags:
         - Objects
       summary: Mark a BackorderRequest as ignored
@@ -1769,6 +1776,7 @@ paths:
                 $ref: '#/components/schemas/BackorderRequest'
   /objects/backorderRequest/{id}:convert:
     post:
+      x-mbapp-permission: objects:write
       tags:
         - Objects
       summary: Mark a BackorderRequest as converted (attached to a PO)

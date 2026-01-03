@@ -1,0 +1,10 @@
+{
+  "POST /objects/backorderRequest/{id}:convert": "objects:write",
+  "POST /objects/backorderRequest/{id}:ignore": "objects:write",
+  "POST /purchasing/po:create-from-suggestion": "purchase:write",
+  "POST /purchasing/po/{id}:approve": "purchase:approve",
+  "POST /purchasing/po/{id}:cancel": "purchase:cancel",
+  "POST /purchasing/po/{id}:close": "purchase:close",
+  "POST /purchasing/po/{id}:receive": "purchase:receive",
+  "POST /purchasing/suggest-po": "purchase:write"
+}

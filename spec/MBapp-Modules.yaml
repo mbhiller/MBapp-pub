@@ -3954,6 +3954,7 @@ paths:
 
   /purchasing/po/{id}:approve:
     post:
+      x-mbapp-permission: purchase:approve
       summary: Approve purchase order
       parameters:
         - in: path
@@ -3995,6 +3996,7 @@ paths:
 
   /purchasing/po/{id}:receive:
     post:
+      x-mbapp-permission: purchase:receive
       summary: Receive against purchase order lines
       description: Allowed from **approved** or **partially-received**. Over-receive returns 409. \
         **Idempotency:** provide an `Idempotency-Key` header to safely retry the same receive request; \
@@ -4021,6 +4023,7 @@ paths:
 
   /purchasing/po/{id}:cancel:
     post:
+      x-mbapp-permission: purchase:cancel
       summary: Cancel purchase order
       description: Allowed from **draft**/**submitted**. Returns 409 otherwise.
       parameters:
@@ -4039,6 +4042,7 @@ paths:
 
   /purchasing/po/{id}:close:
     post:
+      x-mbapp-permission: purchase:close
       summary: Close purchase order
       description: Allowed from **fulfilled**. Returns 409 otherwise.
       parameters:
@@ -4086,6 +4090,7 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/PurchaseOrder' } } }
   /purchasing/suggest-po:
     post:
+      x-mbapp-permission: purchase:write
       tags: [Purchasing]
       summary: Build a PO draft from backorder requests
       requestBody:
@@ -4114,6 +4119,7 @@ paths:
 
   /purchasing/po:create-from-suggestion:
     post:
+      x-mbapp-permission: purchase:write
       summary: Persist purchase order draft(s) created from suggestion
       operationId: createPoFromSuggestion
       requestBody:
@@ -4150,6 +4156,7 @@ paths:
 
   /objects/backorderRequest/{id}:ignore:
     post:
+      x-mbapp-permission: objects:write
       tags: [Objects]
       summary: Mark a BackorderRequest as ignored
       parameters:
@@ -4166,6 +4173,7 @@ paths:
 
   /objects/backorderRequest/{id}:convert:
     post:
+      x-mbapp-permission: objects:write
       tags: [Objects]
       summary: Mark a BackorderRequest as converted (attached to a PO)
       parameters:

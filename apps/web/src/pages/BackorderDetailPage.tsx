@@ -7,6 +7,7 @@ import { getObject } from "../lib/api";
 import { track } from "../lib/telemetry";
 import * as Sentry from "@sentry/browser";
 import { ignoreBackorderRequest, convertBackorderRequest, type BackorderRequest } from "../lib/backorders";
+import { PERM_OBJECTS_WRITE, PERM_PURCHASE_WRITE } from "../generated/permissions";
 
 type SalesOrder = {
   id: string;
@@ -63,9 +64,9 @@ export default function BackorderDetailPage() {
   const { token, tenantId, policy, policyLoading } = useAuth();
   const navigate = useNavigate();
 
-  // Fail-closed permission checks
-  const canWriteBackorders = hasPerm(policy, "objects:write") && !policyLoading;
-  const canSuggestPO = hasPerm(policy, "purchase:write") && !policyLoading;
+  // Fail-closed permission checks (using ergonomic permission aliases)
+  const canWriteBackorders = hasPerm(policy, PERM_OBJECTS_WRITE) && !policyLoading;
+  const canSuggestPO = hasPerm(policy, PERM_PURCHASE_WRITE) && !policyLoading;
 
   const [backorder, setBackorder] = useState<BackorderRequest | null>(null);
   const [salesOrder, setSalesOrder] = useState<SalesOrder | null>(null);
