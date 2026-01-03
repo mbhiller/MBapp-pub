@@ -53,6 +53,15 @@ This doc explains how our **router**, **auth**, and **module endpoints** are str
 - **Tenant header**: send both `X-Tenant-Id` and `x-tenant-id`.
 - **Idempotency**: `"Idempotency-Key"` header for retriable actions.
 
+### Web Client RBAC
+
+**Web policy consumption:** Web client ([apps/web](../apps/web)) fetches `/auth/policy` on token change via [AuthProvider.tsx](../apps/web/src/providers/AuthProvider.tsx) and uses the same canonical permission keys and wildcard semantics as backend.
+
+- **Navigation gating:** [Layout.tsx](../apps/web/src/components/Layout.tsx) hides module links (Parties, Products, Sales Orders, Purchase Orders, Inventory) when user lacks corresponding `:read` permissions (e.g., `product:read`).
+- **Route protection:** [ProtectedRoute.tsx](../apps/web/src/components/ProtectedRoute.tsx) component wraps create/edit routes and redirects to `/not-authorized` if user lacks required `:write` permission (e.g., `product:write`).
+- **Action gating:** Create buttons in list pages ([PartiesListPage](../apps/web/src/pages/PartiesListPage.tsx), [ProductsListPage](../apps/web/src/pages/ProductsListPage.tsx), etc.) are hidden when user lacks write permission.
+- **Fail-closed:** No token → all gated links/buttons hidden; policy fetch error → all gated features hidden; missing permission → feature hidden/route redirects. Web relies on `/auth/policy` for both UI visibility and route protection; server returns 403 if client-side check is bypassed.
+
 ### Authorization: Permission Prefix Normalization
 
 **Context:** `/objects/:type` routes accept camelCase object types in URLs (e.g., `/objects/salesOrder`, `/objects/purchaseOrder`) but canonical permission keys use lowercase module prefixes (`sales`, `purchase`, `inventory`).

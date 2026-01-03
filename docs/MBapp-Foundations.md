@@ -86,9 +86,35 @@ const TENANT = process.env.MBAPP_TENANT_ID ?? "DemoTenant";
 
 ---
 
----
+### 1.4 RBAC / Policy Consumption
 
-## 2. API Patterns
+**Canonical Permission Model:** 
+- API endpoint `/auth/policy` returns `Record<string, boolean>` with canonical lowercase permission keys (e.g., `party:read`, `product:write`, `sales:*`, `*:read`).
+- Keys format: `{type}:{action}` where type is singular module prefix (party, product, inventory, purchase, sales, view, workspace, scanner) and action is read/write/\* or custom actions.
+- Wildcard support: `*` (superuser), `*:*` (all actions), `*:read` (read all types), `{type}:*` (all actions on type).
+- Legacy alias expansion (server-side): party↔parties, product↔products, sales↔salesorder, purchase↔purchaseorder, inventory↔inventoryitem.
+
+**API & Backend:**
+- `/auth/policy` endpoint returns full permission map for authenticated user; fails closed (no token → empty policy).
+- Permission checks use `hasPerm(policy, permission)` wildcard resolver (exact → type:* → *:action → *:* → *).
+
+**Mobile:**
+- Fetches `/auth/policy` on app startup via `useAuthContext()` in [apps/mobile/src/features/_shared/AuthContext.tsx](../apps/mobile/src/features/_shared/AuthContext.tsx).
+- Hides module tabs/screens based on `{type}:read` permissions (e.g., PartiesTab visible only if user has `party:read`).
+- Fail-closed: no token → policy empty → all module tabs hidden.
+
+**Web:**
+- Fetches `/auth/policy` on token change via [AuthProvider.tsx](../apps/web/src/providers/AuthProvider.tsx#L95-L120) (Sprint S).
+- Navigation gating in [Layout.tsx](../apps/web/src/components/Layout.tsx): Hides module links for Parties, Products, Sales Orders, Purchase Orders, Inventory based on `:read` permissions.
+- Route protection in [App.tsx](../apps/web/src/App.tsx): Create/edit routes (`/parties/new`, `/products/:id/edit`, etc.) wrapped with [ProtectedRoute.tsx](../apps/web/src/components/ProtectedRoute.tsx) requiring `:write` permission; redirects to `/not-authorized` if denied (Sprint T E1).
+- Action gating in list pages: Create buttons hidden when user lacks write permission (Sprint T E2).
+- Fail-closed: no token → all gated links/buttons hidden; policy error → all gated features hidden.
+
+**Consistency Across Platforms:**
+- Canonical permission keys, fail-closed semantics, and wildcard resolution are identical across API, mobile, and web.
+- Server is source of truth for authorization; client-side gating is UX-only (server 403 enforces access control).
+
+
 
 ### 2.1 Idempotency & Error Handling
 - All mutating endpoints (`POST /purchase-orders`, `POST /purchase-orders/{id}/submit`, etc.) accept optional `idempotencyKey` header

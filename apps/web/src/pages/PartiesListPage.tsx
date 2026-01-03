@@ -4,6 +4,7 @@ import { apiFetch } from "../lib/http";
 import { SaveViewButton } from "../components/SaveViewButton";
 import { ViewSelector } from "../components/ViewSelector";
 import { useAuth } from "../providers/AuthProvider";
+import { hasPerm } from "../lib/permissions";
 import { mapViewToPartyFilters } from "../lib/viewFilterMappers";
 import type { ViewConfig } from "../hooks/useViewFilters";
 
@@ -26,7 +27,7 @@ function formatError(err: unknown): string {
 }
 
 export default function PartiesListPage() {
-  const { token, tenantId } = useAuth();
+  const { token, tenantId, policy, policyLoading } = useAuth();
   const [searchParams] = useSearchParams();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("");
@@ -36,6 +37,7 @@ export default function PartiesListPage() {
   const [error, setError] = useState<string | null>(null);
   const [appliedView, setAppliedView] = useState<ViewConfig | null>(null);
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
+  const canCreateParty = hasPerm(policy, "party:write") && !policyLoading;
 
   const fetchPage = useCallback(
     async (cursor?: string) => {
@@ -124,7 +126,7 @@ export default function PartiesListPage() {
     <div style={{ display: "grid", gap: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h1>Parties</h1>
-        <Link to="/parties/new">Create Party</Link>
+        {canCreateParty && <Link to="/parties/new">Create Party</Link>}
       </div>
 
       <ViewSelector

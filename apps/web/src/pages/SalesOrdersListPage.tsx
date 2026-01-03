@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
+import { hasPerm } from "../lib/permissions";
 import { ViewSelector } from "../components/ViewSelector";
 import { SaveViewButton } from "../components/SaveViewButton";
 import { mapViewToSOFilters } from "../lib/viewFilterMappers";
@@ -28,7 +29,7 @@ function formatError(err: unknown): string {
 
 export default function SalesOrdersListPage() {
   const [searchParams] = useSearchParams();
-  const { token, tenantId } = useAuth();
+  const { token, tenantId, policy, policyLoading } = useAuth();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
   const [filter, setFilter] = useState({ q: "", status: "all" });
@@ -38,6 +39,7 @@ export default function SalesOrdersListPage() {
   const [error, setError] = useState<string | null>(null);
   const [appliedView, setAppliedView] = useState<ViewConfig | null>(null);
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
+  const canCreateSalesOrder = hasPerm(policy, "sales:write") && !policyLoading;
 
   const queryParams = useMemo(() => {
     const q: Record<string, string | number | boolean | undefined> = {
@@ -147,7 +149,7 @@ export default function SalesOrdersListPage() {
     <div style={{ display: "grid", gap: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h1>Sales Orders</h1>
-        <Link to="/sales-orders/new">Create Sales Order</Link>
+        {canCreateSalesOrder && <Link to="/sales-orders/new">Create Sales Order</Link>}
       </div>
 
       <ViewSelector
