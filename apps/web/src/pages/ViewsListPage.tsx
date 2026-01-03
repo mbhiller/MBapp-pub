@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
+import { hasPerm } from "../lib/permissions";
 
 type View = {
   id: string;
@@ -38,12 +39,13 @@ const ENTITY_TYPES = [
 ];
 
 export default function ViewsListPage() {
-  const { token, tenantId } = useAuth();
+  const { token, tenantId, policy, policyLoading } = useAuth();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("");
   const [entityTypeFilter, setEntityTypeFilter] = useState("");
   const [items, setItems] = useState<View[]>([]);
   const [next, setNext] = useState<string | null>(null);
+  const canCreateView = hasPerm(policy, "view:write") && !policyLoading;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -103,7 +105,7 @@ export default function ViewsListPage() {
     <div style={{ display: "grid", gap: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h1>Views</h1>
-        <Link to="/views/new">Create View</Link>
+        {canCreateView && <Link to="/views/new">Create View</Link>}
       </div>
 
       <div style={{ display: "grid", gap: 8 }}>
@@ -142,7 +144,7 @@ export default function ViewsListPage() {
 
       {items.length === 0 && !loading && (
         <div style={{ padding: 32, textAlign: "center", color: "#666" }}>
-          No views found. <Link to="/views/new">Create one?</Link>
+          No views found. {canCreateView && <Link to="/views/new">Create one?</Link>}
         </div>
       )}
 

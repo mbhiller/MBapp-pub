@@ -4,6 +4,7 @@ import { apiFetch } from "../lib/http";
 import { SaveViewButton } from "../components/SaveViewButton";
 import { ViewSelector } from "../components/ViewSelector";
 import { useAuth } from "../providers/AuthProvider";
+import { hasPerm } from "../lib/permissions";
 import { mapViewToProductFilters } from "../lib/viewFilterMappers";
 import type { ViewConfig } from "../hooks/useViewFilters";
 
@@ -30,7 +31,7 @@ function formatError(err: unknown): string {
 
 export default function ProductsListPage() {
   const [searchParams] = useSearchParams();
-  const { token, tenantId } = useAuth();
+  const { token, tenantId, policy, policyLoading } = useAuth();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("");
   const [items, setItems] = useState<Product[]>([]);
@@ -39,6 +40,7 @@ export default function ProductsListPage() {
   const [error, setError] = useState<string | null>(null);
   const [appliedView, setAppliedView] = useState<ViewConfig | null>(null);
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
+  const canCreateProduct = hasPerm(policy, "product:write") && !policyLoading;
 
   const fetchPage = useCallback(
     async (cursor?: string) => {
@@ -127,7 +129,7 @@ export default function ProductsListPage() {
     <div style={{ display: "grid", gap: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h1>Products</h1>
-        <Link to="/products/new">Create Product</Link>
+        {canCreateProduct && <Link to="/products/new">Create Product</Link>}
       </div>
 
       <ViewSelector
@@ -166,7 +168,7 @@ export default function ProductsListPage() {
 
       {items.length === 0 && !loading && (
         <div style={{ padding: 32, textAlign: "center", color: "#666" }}>
-          No products found. <Link to="/products/new">Create one?</Link>
+          No products found. {canCreateProduct && <Link to="/products/new">Create one?</Link>}
         </div>
       )}
 

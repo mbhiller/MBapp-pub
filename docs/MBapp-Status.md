@@ -8,6 +8,23 @@
 
 ## Current State Summary
 
+### Web RBAC Route Protection + Create Action Gating — ✅ Complete (Sprint T, 2026-01-02)
+
+**Epic Summary:** Add ProtectedRoute component to prevent deep-link access to create/edit pages without required write permissions. Gate Create buttons in list pages for UX feedback.
+
+- **E1 (ProtectedRoute + NotAuthorized page):** Created [apps/web/src/components/ProtectedRoute.tsx](../apps/web/src/components/ProtectedRoute.tsx) to wrap protected routes. Behavior: if `policyLoading`, shows "Loading permissions..." UI; if `!token`, redirects to `/not-authorized` with `reason: "no-token"`; if `policyError`, redirects with `reason: "policy-error"`; if `!hasPerm(policy, requiredPerm)`, redirects with `reason: "missing-permission"` and required perm. Wraps child component with `<>` on permission grant. Created [apps/web/src/pages/NotAuthorizedPage.tsx](../apps/web/src/pages/NotAuthorizedPage.tsx) showing access denied message, required permission (if available), reason, Back and Home buttons.
+- **Route protections applied:** [apps/web/src/App.tsx](../apps/web/src/App.tsx) now protects create/edit routes with ProtectedRoute wrapper:
+  - `/parties/new`, `/parties/:id/edit` → require `party:write`
+  - `/products/new`, `/products/:id/edit` → require `product:write`
+  - `/sales-orders/new`, `/sales-orders/:id/edit` → require `sales:write`
+  - `/purchase-orders/new`, `/purchase-orders/:id/edit` → require `purchase:write`
+  - `/views/new`, `/views/:id/edit` → require `view:write`
+  - Added `/not-authorized` route
+- **E2 (Create button action gating):** [apps/web/src/pages/PartiesListPage.tsx](../apps/web/src/pages/PartiesListPage.tsx), [ProductsListPage.tsx](../apps/web/src/pages/ProductsListPage.tsx), [SalesOrdersListPage.tsx](../apps/web/src/pages/SalesOrdersListPage.tsx), [ViewsListPage.tsx](../apps/web/src/pages/ViewsListPage.tsx) now import `hasPerm` and check `canCreate{Type} = hasPerm(policy, "{type}:write") && !policyLoading`. Create links and empty-state CTAs conditionally render only when `canCreate{Type}` is true. Fail-closed: buttons hidden during `policyLoading` and if user lacks write permission.
+- **Fail-closed design:** Deep link to `/products/new` without `product:write` → ProtectedRoute redirects to `/not-authorized`. Create buttons hidden until policy loads and user has permission. All unauthorized routes return 403 from server if client-side check is bypassed.
+- **Verification:** ✅ Web typecheck clean; route protection works with existing `/auth/policy` fetch; manual testing with tokens/without tokens/with limited roles.
+- **Outcome:** Web now prevents unauthorized route access and provides visual feedback (hidden buttons) for users lacking write permissions. Combined with Sprint S nav gating, web RBAC surface is minimal but complete: read permissions gate navigation, write permissions gate create/edit pages and action buttons.
+
 ### Web RBAC Bootstrap — ✅ Complete (Sprint S, 2026-01-02)
 
 **Epic Summary:** Web now fetches `/auth/policy` on startup and gates top navigation links based on canonical permission keys.

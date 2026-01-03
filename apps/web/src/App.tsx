@@ -1,6 +1,7 @@
 import { Link, Route, Routes } from "react-router-dom";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Layout } from "./components/Layout";
+import { ProtectedRoute } from "./components/ProtectedRoute";
 import CreatePartyPage from "./pages/CreatePartyPage";
 import EditPartyPage from "./pages/EditPartyPage";
 import PartiesListPage from "./pages/PartiesListPage";
@@ -32,6 +33,7 @@ import LocationsListPage from "./pages/LocationsListPage";
 import LocationDetailPage from "./pages/LocationDetailPage";
 import InventoryMovementsPage from "./pages/InventoryMovementsPage";
 import DocsPage from "./pages/DocsPage";
+import NotAuthorizedPage from "./pages/NotAuthorizedPage";
 
 function HomePage() {
   return (
@@ -59,34 +61,35 @@ export default function App() {
       <Layout>
         <Routes>
           <Route path="/" element={<HomePage />} />
+          <Route path="/not-authorized" element={<NotAuthorizedPage />} />
           <Route path="/parties" element={<PartiesListPage />} />
-          <Route path="/parties/new" element={<CreatePartyPage />} />
+          <Route path="/parties/new" element={<ProtectedRoute requiredPerm="party:write"><CreatePartyPage /></ProtectedRoute>} />
           <Route path="/parties/:id" element={<PartyDetailPage />} />
-          <Route path="/parties/:id/edit" element={<EditPartyPage />} />
+          <Route path="/parties/:id/edit" element={<ProtectedRoute requiredPerm="party:write"><EditPartyPage /></ProtectedRoute>} />
           <Route path="/products" element={<ProductsListPage />} />
-          <Route path="/products/new" element={<CreateProductPage />} />
+          <Route path="/products/new" element={<ProtectedRoute requiredPerm="product:write"><CreateProductPage /></ProtectedRoute>} />
           <Route path="/products/:id" element={<ProductDetailPage />} />
-          <Route path="/products/:id/edit" element={<EditProductPage />} />
+          <Route path="/products/:id/edit" element={<ProtectedRoute requiredPerm="product:write"><EditProductPage /></ProtectedRoute>} />
           <Route path="/sales-orders" element={<SalesOrdersListPage />} />
-          <Route path="/sales-orders/new" element={<CreateSalesOrderPage />} />
+          <Route path="/sales-orders/new" element={<ProtectedRoute requiredPerm="sales:write"><CreateSalesOrderPage /></ProtectedRoute>} />
           <Route path="/sales-orders/:id" element={<SalesOrderDetailPage />} />
-          <Route path="/sales-orders/:id/edit" element={<EditSalesOrderPage />} />
+          <Route path="/sales-orders/:id/edit" element={<ProtectedRoute requiredPerm="sales:write"><EditSalesOrderPage /></ProtectedRoute>} />
           <Route path="/inventory" element={<InventoryListPage />} />
           <Route path="/inventory/:id" element={<InventoryDetailPage />} />
           <Route path="/inventory-movements" element={<InventoryMovementsPage />} />
           <Route path="/views" element={<ViewsListPage />} />
-          <Route path="/views/new" element={<CreateViewPage />} />
+          <Route path="/views/new" element={<ProtectedRoute requiredPerm="view:write"><CreateViewPage /></ProtectedRoute>} />
           <Route path="/views/:id" element={<ViewDetailPage />} />
-          <Route path="/views/:id/edit" element={<EditViewPage />} />
+          <Route path="/views/:id/edit" element={<ProtectedRoute requiredPerm="view:write"><EditViewPage /></ProtectedRoute>} />
           <Route path="/workspaces" element={<WorkspacesListPage />} />
           <Route path="/workspaces/:id" element={<WorkspaceDetailPage />} />
           <Route path="/backorders" element={<BackordersListPage />} />
           <Route path="/backorders/:id" element={<BackorderDetailPage />} />
           <Route path="/backorders/:id/suggest-po" element={<SuggestPurchaseOrdersPage />} />
           <Route path="/purchase-orders" element={<PurchaseOrdersListPage />} />
-          <Route path="/purchase-orders/new" element={<CreatePurchaseOrderPage />} />
+          <Route path="/purchase-orders/new" element={<ProtectedRoute requiredPerm="purchase:write"><CreatePurchaseOrderPage /></ProtectedRoute>} />
           <Route path="/purchase-orders/:id" element={<PurchaseOrderDetailPage />} />
-          <Route path="/purchase-orders/:id/edit" element={<EditPurchaseOrderPage />} />
+          <Route path="/purchase-orders/:id/edit" element={<ProtectedRoute requiredPerm="purchase:write"><EditPurchaseOrderPage /></ProtectedRoute>} />
           <Route path="/locations" element={<LocationsListPage />} />
           <Route path="/locations/:id" element={<LocationDetailPage />} />
           <Route path="/docs" element={<DocsPage />} />
