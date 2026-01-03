@@ -32,6 +32,9 @@ Note: Include documentation updates in each labeled edit prompt when behavior or
 - Each prompt includes its label in the prompt text (e.g., `E3 (EDIT MODE): ...`).
 - Each prompt includes the Definition of Done (below).
 - Prompts are scoped tightly (explicit files / minimal surface area).
+- deliver **EDIT MODE** prompts in the most efficient grouping for this sprint:
+  - If changes are **tightly coupled** (need to land together), I’ll give you **E1…En as a batch** so you can run them in succession.
+  - If changes are **independent / riskier**, I’ll give you **the next prompt only**, wait for results, then issue the next prompt (fast feedback loop).
 - **Docs updates are required when relevant:** Every E-prompt must include a docs line item (minimum: update `docs/MBapp-Status.md` if behavior/workflow changed; plus any feature-area docs touched).
 - **Foundations/contract changes must include docs:** If an EDIT modifies foundational patterns (shared utils, endpoint contracts, status guards), explicitly add docs updates to `docs/MBapp-Foundations.md` (preferred) and/or `docs/MBapp-Status.md` in the prompt.
 - All prompts must be in fenced code blocks for copy/paste into Copilot.

@@ -1,10 +1,14 @@
 import { createContext, useContext, useMemo, useState, type ReactNode, useEffect } from "react";
 import * as Sentry from "@sentry/browser";
+import { apiFetch } from "../lib/http";
 
 export type AuthContextValue = {
   token: string | null;
   tenantId: string;
   apiBase: string;
+  policy: Record<string, boolean> | null;
+  policyLoading: boolean;
+  policyError: string | null;
   setToken: (token: string | null) => void;
 };
 
@@ -66,6 +70,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const initialToken = readInitialToken();
   const [token, setTokenState] = useState<string | null>(initialToken);
   const [tenantId, setTenantId] = useState<string>(() => deriveTenantId(initialToken));
+  const [policy, setPolicy] = useState<Record<string, boolean> | null>(null);
+  const [policyLoading, setPolicyLoading] = useState(false);
+  const [policyError, setPolicyError] = useState<string | null>(null);
   const jwtTenant = useMemo(() => decodeJwtTenant(token), [token]);
 
   const setToken = (value: string | null) => {
@@ -84,9 +91,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {}
   };
 
+  // Fetch /auth/policy whenever token or tenantId changes
+  useEffect(() => {
+    if (!token) {
+      setPolicy(null);
+      setPolicyLoading(false);
+      setPolicyError(null);
+      return;
+    }
+
+    (async () => {
+      setPolicyLoading(true);
+      setPolicyError(null);
+      try {
+        const result = await apiFetch<Record<string, boolean>>("/auth/policy", {
+          token,
+          tenantId,
+        });
+        setPolicy(result);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        console.warn("Failed to fetch /auth/policy:", msg);
+        setPolicy({});
+        setPolicyError(msg);
+      } finally {
+        setPolicyLoading(false);
+      }
+    })();
+  }, [token, tenantId]);
+
   const value = useMemo<AuthContextValue>(
-    () => ({ token, tenantId, apiBase, setToken }),
-    [token, tenantId]
+    () => ({ token, tenantId, apiBase, policy, policyLoading, policyError, setToken }),
+    [token, tenantId, policy, policyLoading, policyError]
   );
 
   // Attach Sentry tags when auth context is available; safe if Sentry not initialized
