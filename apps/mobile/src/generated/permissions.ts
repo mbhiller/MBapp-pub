@@ -7,6 +7,9 @@
  */
 
 export const PERMISSIONS_BY_ENDPOINT = {
+  "POST /inventory/{id}:cycle-count": "inventory:adjust",
+  "POST /inventory/{id}:putaway": "inventory:write",
+  "POST /inventory/{id}/adjust": "inventory:write",
   "POST /objects/backorderRequest/{id}:convert": "objects:write",
   "POST /objects/backorderRequest/{id}:ignore": "objects:write",
   "POST /purchasing/po:create-from-suggestion": "purchase:write",
@@ -39,6 +42,8 @@ export type EndpointKey = keyof typeof PERMISSIONS_BY_ENDPOINT;
  * Use these for cleaner permission checks in UI code.
  * Example: hasPerm(policy, PERM_OBJECTS_WRITE)
  */
+export const PERM_INVENTORY_ADJUST = "inventory:adjust" as const;
+export const PERM_INVENTORY_WRITE = "inventory:write" as const;
 export const PERM_OBJECTS_WRITE = "objects:write" as const;
 export const PERM_PURCHASE_APPROVE = "purchase:approve" as const;
 export const PERM_PURCHASE_CANCEL = "purchase:cancel" as const;
@@ -50,6 +55,8 @@ export const PERM_PURCHASE_WRITE = "purchase:write" as const;
  * Array of all unique permission keys (sorted).
  */
 export const PERMISSION_KEYS = [
+  "inventory:adjust",
+  "inventory:write",
   "objects:write",
   "purchase:approve",
   "purchase:cancel",

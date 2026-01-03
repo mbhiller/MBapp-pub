@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
 import { hasPerm } from "../lib/permissions";
+import { PERM_INVENTORY_WRITE, PERM_INVENTORY_ADJUST } from "../generated/permissions";
 import LocationPicker from "../components/LocationPicker";
 import MovementsTable from "../components/MovementsTable";
 import { getOnHandByLocation, adjustInventory, type InventoryOnHandByLocationItem } from "../lib/inventory";
@@ -70,9 +71,9 @@ export default function InventoryDetailPage() {
   const { token, tenantId, policy, policyLoading } = useAuth();
 
   // Fail-closed permission checks
-  const canPutaway = hasPerm(policy, "inventory:write") && !policyLoading;
-  const canAdjust = hasPerm(policy, "inventory:write") && !policyLoading;
-  const canCycleCount = hasPerm(policy, "inventory:adjust") && !policyLoading;
+  const canPutaway = hasPerm(policy, PERM_INVENTORY_WRITE) && !policyLoading;
+  const canAdjust = hasPerm(policy, PERM_INVENTORY_WRITE) && !policyLoading;
+  const canCycleCount = hasPerm(policy, PERM_INVENTORY_ADJUST) && !policyLoading;
 
   const [item, setItem] = useState<InventoryItem | null>(null);
   const [onHand, setOnHand] = useState<OnHand | null>(null);
@@ -286,7 +287,11 @@ export default function InventoryDetailPage() {
       await reloadData();
       setTimeout(() => setSuccess(null), 3000);
     } catch (err: any) {
-      setPutawayError(formatError(err));
+      if (err?.status === 403) {
+        setPutawayError(`Access denied: missing permission ${PERM_INVENTORY_WRITE}`);
+      } else {
+        setPutawayError(formatError(err));
+      }
     } finally {
       setPutawayLoading(false);
     }
@@ -295,6 +300,10 @@ export default function InventoryDetailPage() {
   const handleCycleCountSubmit = async () => {
     setCycleCountError(null);
     if (!id) return;
+    if (!isFinite(cycleCountForm.countedQty)) {
+      setCycleCountError("Counted Qty is required and must be a valid number");
+      return;
+    }
     if (cycleCountForm.countedQty < 0) {
       setCycleCountError("Counted Qty must be non-negative");
       return;
@@ -321,7 +330,11 @@ export default function InventoryDetailPage() {
       await reloadData();
       setTimeout(() => setSuccess(null), 3000);
     } catch (err: any) {
-      setCycleCountError(formatError(err));
+      if (err?.status === 403) {
+        setCycleCountError(`Access denied: missing permission ${PERM_INVENTORY_ADJUST}`);
+      } else {
+        setCycleCountError(formatError(err));
+      }
     } finally {
       setCycleCountLoading(false);
     }
@@ -354,7 +367,11 @@ export default function InventoryDetailPage() {
       await reloadData();
       setTimeout(() => setSuccess(null), 3000);
     } catch (err: any) {
-      setAdjustError(formatError(err));
+      if (err?.status === 403) {
+        setAdjustError(`Access denied: missing permission ${PERM_INVENTORY_WRITE}`);
+      } else {
+        setAdjustError(formatError(err));
+      }
     } finally {
       setAdjustLoading(false);
     }
