@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../providers/AuthProvider";
+import { hasPerm } from "../lib/permissions";
 import {
   createPurchaseOrdersFromSuggestion,
   suggestPurchaseOrders,
@@ -104,7 +105,10 @@ export default function SuggestPurchaseOrdersPage() {
   const { id } = useParams<{ id: string }>();
   const location = useLocation();
   const navigate = useNavigate();
-  const { token, tenantId } = useAuth();
+  const { token, tenantId, policy, policyLoading } = useAuth();
+
+  // Fail-closed permission check
+  const canCreatePO = hasPerm(policy, "purchase:write") && !policyLoading;
 
   const vendorIdFromState = (location.state as any)?.vendorId as string | undefined;
   const vendorIdFromQuery = new URLSearchParams(location.search || "").get("vendorId") || undefined;
@@ -285,21 +289,23 @@ export default function SuggestPurchaseOrdersPage() {
       </div>
 
       <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-        <button
-          onClick={handleCreate}
-          disabled={creating || drafts.length === 0}
-          style={{
-            backgroundColor: creating || drafts.length === 0 ? "#ccc" : "#2e7d32",
-            color: "#fff",
-            border: "none",
-            padding: "10px 18px",
-            cursor: creating || drafts.length === 0 ? "not-allowed" : "pointer",
-            borderRadius: 6,
-            fontWeight: 600,
-          }}
-        >
-          {creating ? "Creating..." : "Create PO(s)"}
-        </button>
+        {canCreatePO && (
+          <button
+            onClick={handleCreate}
+            disabled={creating || drafts.length === 0}
+            style={{
+              backgroundColor: creating || drafts.length === 0 ? "#ccc" : "#2e7d32",
+              color: "#fff",
+              border: "none",
+              padding: "10px 18px",
+              cursor: creating || drafts.length === 0 ? "not-allowed" : "pointer",
+              borderRadius: 6,
+              fontWeight: 600,
+            }}
+          >
+            {creating ? "Creating..." : "Create PO(s)"}
+          </button>
+        )}
         {drafts.length === 0 && <div style={{ color: "#666" }}>No drafts available to create.</div>}
       </div>
     </div>

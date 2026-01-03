@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
+import { hasPerm } from "../lib/permissions";
 
 // Shape aligns with Location spec additions
 type Location = {
@@ -28,7 +29,10 @@ function formatError(err: unknown): string {
 }
 
 export default function LocationsListPage() {
-  const { token, tenantId } = useAuth();
+  const { token, tenantId, policy, policyLoading } = useAuth();
+
+  // Fail-closed permission check: allow write if user has location:write OR objects:write
+  const canEditLocations = (hasPerm(policy, "location:write") || hasPerm(policy, "objects:write")) && !policyLoading;
   const [items, setItems] = useState<Location[]>([]);
   const [next, setNext] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -155,33 +159,35 @@ export default function LocationsListPage() {
       </div>
 
       {/* Create form */}
-      <div style={{ padding: 12, background: "#eef4ff", border: "1px solid #cbd5e1", borderRadius: 4 }}>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <input
-            value={create.name}
-            onChange={(e) => setCreate((prev) => ({ ...prev, name: e.target.value }))}
-            placeholder="Name (required)"
-            style={{ flex: 2 }}
-          />
-          <input
-            value={create.code}
-            onChange={(e) => setCreate((prev) => ({ ...prev, code: e.target.value }))}
-            placeholder="Code (optional)"
-            style={{ flex: 1 }}
-          />
-          <select
-            value={create.status}
-            onChange={(e) => setCreate((prev) => ({ ...prev, status: e.target.value as any }))}
-            style={{ minWidth: 140 }}
-          >
-            <option value="active">active</option>
-            <option value="inactive">inactive</option>
-          </select>
-          <button onClick={createLocation} disabled={creating}>
-            {creating ? "Creating..." : "Create"}
-          </button>
+      {canEditLocations && (
+        <div style={{ padding: 12, background: "#eef4ff", border: "1px solid #cbd5e1", borderRadius: 4 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input
+              value={create.name}
+              onChange={(e) => setCreate((prev) => ({ ...prev, name: e.target.value }))}
+              placeholder="Name (required)"
+              style={{ flex: 2 }}
+            />
+            <input
+              value={create.code}
+              onChange={(e) => setCreate((prev) => ({ ...prev, code: e.target.value }))}
+              placeholder="Code (optional)"
+              style={{ flex: 1 }}
+            />
+            <select
+              value={create.status}
+              onChange={(e) => setCreate((prev) => ({ ...prev, status: e.target.value as any }))}
+              style={{ minWidth: 140 }}
+            >
+              <option value="active">active</option>
+              <option value="inactive">inactive</option>
+            </select>
+            <button onClick={createLocation} disabled={creating}>
+              {creating ? "Creating..." : "Create"}
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Filters */}
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -255,13 +261,15 @@ export default function LocationsListPage() {
                 </td>
                 <td style={{ padding: 8, border: "1px solid #ccc" }}>{loc.updatedAt || ""}</td>
                 <td style={{ padding: 8, border: "1px solid #ccc" }}>
-                  {editing?.id === loc.id ? (
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button onClick={saveEdit} disabled={saving}>{saving ? "Saving..." : "Save"}</button>
-                      <button onClick={cancelEdit} disabled={saving}>Cancel</button>
-                    </div>
-                  ) : (
-                    <button onClick={() => startEdit(loc)}>Edit</button>
+                  {canEditLocations && (
+                    editing?.id === loc.id ? (
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button onClick={saveEdit} disabled={saving}>{saving ? "Saving..." : "Save"}</button>
+                        <button onClick={cancelEdit} disabled={saving}>Cancel</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => startEdit(loc)}>Edit</button>
+                    )
                   )}
                 </td>
               </tr>

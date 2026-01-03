@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
+import { hasPerm } from "../lib/permissions";
 import { getObject } from "../lib/api";
 import { track } from "../lib/telemetry";
 import * as Sentry from "@sentry/browser";
@@ -59,8 +60,12 @@ function getStatusBgColor(status?: string): string {
 
 export default function BackorderDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { token, tenantId } = useAuth();
+  const { token, tenantId, policy, policyLoading } = useAuth();
   const navigate = useNavigate();
+
+  // Fail-closed permission checks
+  const canWriteBackorders = hasPerm(policy, "objects:write") && !policyLoading;
+  const canSuggestPO = hasPerm(policy, "purchase:write") && !policyLoading;
 
   const [backorder, setBackorder] = useState<BackorderRequest | null>(null);
   const [salesOrder, setSalesOrder] = useState<SalesOrder | null>(null);
@@ -225,7 +230,7 @@ export default function BackorderDetailPage() {
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button onClick={() => navigate("/backorders")}>← Back to List</button>
-          {backorder.status === "open" && (
+          {canSuggestPO && backorder.status === "open" && (
             <button
               onClick={handleSuggestPo}
               style={{
@@ -240,7 +245,7 @@ export default function BackorderDetailPage() {
               Suggest PO
             </button>
           )}
-          {backorder.status === "open" && (
+          {canWriteBackorders && backorder.status === "open" && (
             <button
               onClick={handleConvert}
               disabled={convertLoading}
@@ -256,7 +261,7 @@ export default function BackorderDetailPage() {
               {convertLoading ? "Converting..." : "Convert"}
             </button>
           )}
-          {backorder.status === "open" && (
+          {canWriteBackorders && backorder.status === "open" && (
             <button
               onClick={handleIgnore}
               disabled={actionLoading}

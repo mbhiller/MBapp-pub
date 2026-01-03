@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../providers/AuthProvider";
+import { hasPerm } from "../lib/permissions";
 import { apiFetch } from "../lib/http";
 import {
   searchBackorderRequests,
@@ -27,9 +28,13 @@ function formatError(err: unknown): string {
 }
 
 export default function BackordersListPage() {
-  const { token, tenantId } = useAuth();
+  const { token, tenantId, policy, policyLoading } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+
+  // Fail-closed permission checks
+  const canWriteBackorders = hasPerm(policy, "objects:write") && !policyLoading;
+  const canSuggestPO = hasPerm(policy, "purchase:write") && !policyLoading;
   
   // Read filter values from URL params
   const status = (searchParams.get("status") || "open") as "open" | "ignored" | "converted";
@@ -401,15 +406,21 @@ export default function BackordersListPage() {
         {selectedIds.length > 0 && (
           <div style={{ display: "flex", gap: 8, padding: 8, background: "#e3f2fd", borderRadius: 4 }}>
             <span style={{ fontWeight: 600 }}>{selectedIds.length} selected</span>
-            <button onClick={handleBulkIgnore} disabled={actionLoading || selectedIds.length === 0}>
-              {actionLoading ? "Ignoring..." : "Bulk Ignore"}
-            </button>
-            <button onClick={handleBulkConvert} disabled={actionLoading || selectedOpenIds.length === 0}>
-              {actionLoading ? "Converting..." : "Bulk Convert"}
-            </button>
-            <button onClick={handleSuggestPo} disabled={selectedIds.length === 0 || suggestLoading || actionLoading}>
-              {suggestLoading ? "Suggesting..." : "Suggest PO"}
-            </button>
+            {canWriteBackorders && (
+              <button onClick={handleBulkIgnore} disabled={actionLoading || selectedIds.length === 0}>
+                {actionLoading ? "Ignoring..." : "Bulk Ignore"}
+              </button>
+            )}
+            {canWriteBackorders && (
+              <button onClick={handleBulkConvert} disabled={actionLoading || selectedOpenIds.length === 0}>
+                {actionLoading ? "Converting..." : "Bulk Convert"}
+              </button>
+            )}
+            {canSuggestPO && (
+              <button onClick={handleSuggestPo} disabled={selectedIds.length === 0 || suggestLoading || actionLoading}>
+                {suggestLoading ? "Suggesting..." : "Suggest PO"}
+              </button>
+            )}
           </div>
         )}
       </div>

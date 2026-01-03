@@ -8,6 +8,63 @@
 
 ## Current State Summary
 
+### Web RBAC Inventory + Locations Write Action Gating — ✅ Complete (Sprint W E1, 2026-01-02)
+
+**Epic Summary:** Gate Inventory write actions (Putaway, Cycle Count, Adjust) and Locations inline CRUD with permission checks to prevent unauthorized modifications.
+
+- **Inventory Detail Page:** [apps/web/src/pages/InventoryDetailPage.tsx](../apps/web/src/pages/InventoryDetailPage.tsx) now gates all inventory write actions.
+  - Added `hasPerm` import from `../lib/permissions`, extended `useAuth()` to include `policy, policyLoading`.
+  - Added fail-closed booleans: `canPutaway = hasPerm(policy, "inventory:write") && !policyLoading`, `canAdjust = hasPerm(policy, "inventory:write") && !policyLoading`, `canCycleCount = hasPerm(policy, "inventory:adjust") && !policyLoading`.
+  - Gated Putaway, Cycle Count, and Adjust buttons (lines 378-380): buttons only render when respective permission is granted and policy is loaded.
+  - Permission mapping: Putaway and Adjust require `inventory:write`; Cycle Count requires `inventory:adjust` (aligns with API handlers).
+- **Locations List Page:** [apps/web/src/pages/LocationsListPage.tsx](../apps/web/src/pages/LocationsListPage.tsx) now gates inline create and edit forms.
+  - Added `hasPerm` import, extended `useAuth()` to include `policy, policyLoading`.
+  - Added fail-closed boolean: `canEditLocations = (hasPerm(policy, "location:write") || hasPerm(policy, "objects:write")) && !policyLoading` (supports API fallback to `objects:write` for unknown types per `requireObjectPerm` logic).
+  - Gated entire "Create location" form section (lines 162-184): entire form block conditionally renders only when `canEditLocations` is true.
+  - Gated inline edit controls (lines 264-274): Edit/Save/Cancel buttons only render when `canEditLocations` is true; preserves existing error handling.
+- **Fail-closed design:** All write actions hidden during `policyLoading` and if user lacks required permissions. Consistent with Sprint S/T/U/V patterns.
+- **Verification:** ✅ Web typecheck clean (apps/web); no API/contract changes, UI-only gating; manual testing with limited roles shows write buttons hidden appropriately.
+- **Outcome:** Inventory and Locations write surfaces now fully gated; combined with prior sprints (S/T/U/V), Web RBAC coverage extends to all major write surfaces (Parties, Products, Sales Orders, Purchase Orders, Views, Workspaces, Inventory, Locations).
+
+### Web RBAC Backorder Actions + Detail Edit Link Gating — ✅ Complete (Sprint W E2, 2026-01-02)
+
+**Epic Summary:** Gate Backorder write actions (Ignore, Convert, Suggest PO) and Party/Product detail page Edit links with permission checks.
+
+- **Backorder Detail Page:** [apps/web/src/pages/BackorderDetailPage.tsx](../apps/web/src/pages/BackorderDetailPage.tsx) now gates all backorder write actions.
+  - Added `hasPerm` import from `../lib/permissions`, extended `useAuth()` to include `policy, policyLoading`.
+  - Added fail-closed booleans: `canWriteBackorders = hasPerm(policy, "objects:write") && !policyLoading`, `canSuggestPO = hasPerm(policy, "purchase:write") && !policyLoading`.
+  - Gated Ignore, Convert, and Suggest PO buttons (lines 229-270): buttons only render when `status === "open"` AND user has required permission.
+  - Permission mapping: Ignore/Convert require `objects:write`; Suggest PO requires `purchase:write` (aligns with API handlers).
+- **Backorders List Page:** [apps/web/src/pages/BackordersListPage.tsx](../apps/web/src/pages/BackordersListPage.tsx) now gates bulk action buttons.
+  - Added `hasPerm` import, extended `useAuth()` to include `policy, policyLoading`.
+  - Added same fail-closed booleans: `canWriteBackorders` and `canSuggestPO`.
+  - Gated Bulk Ignore, Bulk Convert, and Suggest PO buttons (lines 405-415): buttons only render when user has required permission and selection conditions are met.
+- **Party Detail Page:** [apps/web/src/pages/PartyDetailPage.tsx](../apps/web/src/pages/PartyDetailPage.tsx) now gates Edit link.
+  - Added `hasPerm` import, extended `useAuth()` to include `policy, policyLoading`.
+  - Added fail-closed boolean: `canEdit = hasPerm(policy, "party:write") && !policyLoading`.
+  - Gated Edit link (line 62): link only renders when user has `party:write` permission. Edit form still route-protected (Sprint T).
+- **Product Detail Page:** [apps/web/src/pages/ProductDetailPage.tsx](../apps/web/src/pages/ProductDetailPage.tsx) now gates Edit link.
+  - Added `hasPerm` import, extended `useAuth()` to include `policy, policyLoading`.
+  - Added fail-closed boolean: `canEdit = hasPerm(policy, "product:write") && !policyLoading`.
+  - Gated Edit link (line 63): link only renders when user has `product:write` permission. Edit form still route-protected (Sprint T).
+- **Fail-closed design:** All write actions hidden during `policyLoading` and if user lacks required permissions. Layered with existing status gates (backorder status === "open"). Route protection (Sprint T) still enforces deep-link prevention for edit forms.
+- **Verification:** ✅ Web typecheck clean (apps/web); no API/contract changes, UI-only gating; manual testing with read-only roles shows Edit links and backorder action buttons hidden appropriately.
+- **Outcome:** Backorder write surfaces (detail + bulk actions) and detail page Edit links (Party/Product) now fully gated; combined with Sprint W E1 and prior sprints (S/T/U/V), Web RBAC coverage is comprehensive across all major entity types and write surfaces.
+
+### Web RBAC Suggest PO Page Gating — ✅ Complete (Sprint W E3, 2026-01-02)
+
+**Epic Summary:** Gate SuggestPurchaseOrdersPage create PO action with permission check (optional polish).
+
+- **Suggest PO Page:** [apps/web/src/pages/SuggestPurchaseOrdersPage.tsx](../apps/web/src/pages/SuggestPurchaseOrdersPage.tsx) now gates the Create PO(s) button.
+  - Added `hasPerm` import from `../lib/permissions`, extended `useAuth()` to include `policy, policyLoading`.
+  - Added fail-closed boolean: `canCreatePO = hasPerm(policy, "purchase:write") && !policyLoading`.
+  - Gated Create PO(s) button (line 290): button only renders when user has `purchase:write` permission.
+  - Permission mapping: Create PO(s) requires `purchase:write` (aligns with API `/purchasing/po:create-from-suggestion` handler).
+  - Page already contextually restricted (only reachable via backorder detail Suggest PO navigation), so this is defensive polish.
+- **Fail-closed design:** Create button hidden during `policyLoading` and if user lacks `purchase:write` permission. Consistent with all prior sprint patterns.
+- **Verification:** ✅ Web typecheck clean (apps/web); no API/contract changes, UI-only gating.
+- **Outcome:** SuggestPO page now has defensive RBAC gating; completes Sprint W (E1 + E2 + E3) comprehensive Web RBAC coverage.
+
 ### Web RBAC Views/Workspaces Write Action Gating — ✅ Complete (Sprint V, 2026-01-02)
 
 **Epic Summary:** Gate Views edit/delete actions and Workspaces create/edit/delete actions with permission checks to prevent unauthorized modifications.

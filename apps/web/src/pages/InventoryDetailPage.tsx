@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
+import { hasPerm } from "../lib/permissions";
 import LocationPicker from "../components/LocationPicker";
 import MovementsTable from "../components/MovementsTable";
 import { getOnHandByLocation, adjustInventory, type InventoryOnHandByLocationItem } from "../lib/inventory";
@@ -66,7 +67,13 @@ function saveDefaults(locationId?: string, lot?: string) {
 
 export default function InventoryDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { token, tenantId } = useAuth();
+  const { token, tenantId, policy, policyLoading } = useAuth();
+
+  // Fail-closed permission checks
+  const canPutaway = hasPerm(policy, "inventory:write") && !policyLoading;
+  const canAdjust = hasPerm(policy, "inventory:write") && !policyLoading;
+  const canCycleCount = hasPerm(policy, "inventory:adjust") && !policyLoading;
+
   const [item, setItem] = useState<InventoryItem | null>(null);
   const [onHand, setOnHand] = useState<OnHand | null>(null);
   const [onHandByLocation, setOnHandByLocation] = useState<InventoryOnHandByLocationItem[]>([]);
@@ -368,9 +375,9 @@ export default function InventoryDetailPage() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h1>{item.name || item.itemId || "(no name)"}</h1>
         <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={handleOpenPutawayModal}>Putaway</button>
-          <button onClick={handleOpenCycleCountModal}>Cycle Count</button>
-          <button onClick={handleOpenAdjustModal}>Adjust</button>
+          {canPutaway && <button onClick={handleOpenPutawayModal}>Putaway</button>}
+          {canCycleCount && <button onClick={handleOpenCycleCountModal}>Cycle Count</button>}
+          {canAdjust && <button onClick={handleOpenAdjustModal}>Adjust</button>}
           <Link to="/inventory">Back to List</Link>
         </div>
       </div>

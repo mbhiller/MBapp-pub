@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
+import { hasPerm } from "../lib/permissions";
 
 type Party = {
   id: string;
@@ -23,7 +24,11 @@ function formatError(err: unknown): string {
 
 export default function PartyDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { token, tenantId } = useAuth();
+  const { token, tenantId, policy, policyLoading } = useAuth();
+
+  // Fail-closed permission check
+  const canEdit = hasPerm(policy, "party:write") && !policyLoading;
+
   const [party, setParty] = useState<Party | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,7 +64,7 @@ export default function PartyDetailPage() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h1>Party Detail</h1>
         <div style={{ display: "flex", gap: 8 }}>
-          <Link to={`/parties/${id}/edit`}>Edit</Link>
+          {canEdit && <Link to={`/parties/${id}/edit`}>Edit</Link>}
           <Link to="/parties">Back to list</Link>
         </div>
       </div>

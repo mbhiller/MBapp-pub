@@ -116,6 +116,14 @@ const TENANT = process.env.MBAPP_TENANT_ID ?? "DemoTenant";
   - **Views:** Edit/delete links/buttons require `view:write` (list + detail pages).
   - **Workspaces:** Create button (list), delete workspace, add/remove views, set/unset default view require `workspace:write` (list + detail pages).
   - All write actions hidden during `policyLoading` (fail-closed); existing error handling preserved (alert/inline errors).
+- Inventory/Locations write action gating (Sprint W E1): [InventoryDetailPage.tsx](../apps/web/src/pages/InventoryDetailPage.tsx) and [LocationsListPage.tsx](../apps/web/src/pages/LocationsListPage.tsx) gate all write actions:
+  - **Inventory:** Putaway/Adjust buttons require `inventory:write`; Cycle Count button requires `inventory:adjust` (detail page only).
+  - **Locations:** Create form and inline Edit/Save/Cancel controls require `location:write` OR `objects:write` (list page; aligns with API fallback for unknown types).
+  - All write actions hidden during `policyLoading` (fail-closed); consistent with prior sprint patterns.
+- Backorder/Detail Edit link gating (Sprint W E2): [BackorderDetailPage.tsx](../apps/web/src/pages/BackorderDetailPage.tsx), [BackordersListPage.tsx](../apps/web/src/pages/BackordersListPage.tsx), [PartyDetailPage.tsx](../apps/web/src/pages/PartyDetailPage.tsx), [ProductDetailPage.tsx](../apps/web/src/pages/ProductDetailPage.tsx) gate write actions:
+  - **Backorders:** Ignore/Convert buttons require `objects:write`; Suggest PO requires `purchase:write` (detail page + bulk actions in list page).
+  - **Party/Product Detail:** Edit links require `party:write` / `product:write` respectively (detail pages; edit forms still route-protected from Sprint T).
+  - All write actions hidden during `policyLoading` (fail-closed); layered with existing status gates.
 - Fail-closed: no token → all gated links/buttons hidden; policy error → all gated features hidden.
 
 **Consistency Across Platforms:**
