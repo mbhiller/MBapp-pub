@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../providers/AuthProvider";
 import { hasPerm } from "../lib/permissions";
+import { PERM_OBJECTS_WRITE, PERM_PURCHASE_WRITE } from "../generated/permissions";
 import { apiFetch } from "../lib/http";
 import {
   searchBackorderRequests,
@@ -33,8 +34,8 @@ export default function BackordersListPage() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Fail-closed permission checks
-  const canWriteBackorders = hasPerm(policy, "objects:write") && !policyLoading;
-  const canSuggestPO = hasPerm(policy, "purchase:write") && !policyLoading;
+  const canWriteBackorders = hasPerm(policy, PERM_OBJECTS_WRITE) && !policyLoading;
+  const canSuggestPO = hasPerm(policy, PERM_PURCHASE_WRITE) && !policyLoading;
   
   // Read filter values from URL params
   const status = (searchParams.get("status") || "open") as "open" | "ignored" | "converted";

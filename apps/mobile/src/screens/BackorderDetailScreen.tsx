@@ -9,6 +9,9 @@ import { apiClient } from "../api/client";
 import { useToast } from "../features/_shared/Toast";
 import { copyText } from "../features/_shared/copy";
 import { suggestPurchaseOrders, saveFromSuggestion, type PurchaseOrderDraft } from "../features/purchasing/poActions";
+import { usePolicy } from "../providers/PolicyProvider";
+import { hasPerm } from "../lib/permissions";
+import { PERM_OBJECTS_WRITE, PERM_PURCHASE_WRITE } from "../generated/permissions";
 
 type BackorderRequest = {
   id: string;
@@ -49,6 +52,7 @@ export default function BackorderDetailScreen() {
   const id = route.params?.id as string | undefined;
   const t = useColors();
   const toast = useToast();
+  const { policy, policyLoading } = usePolicy();
 
   const { data: backorder, isLoading, error, refetch } = useObjects<BackorderRequest>({ 
     type: "backorderRequest", 
@@ -75,6 +79,19 @@ export default function BackorderDetailScreen() {
   });
 
   const [actionLoading, setActionLoading] = React.useState(false);
+
+  // Permission gating (Sprint AA E2)
+  const isOpen = backorder?.status === "open";
+  const canWriteBackorders = isOpen && !policyLoading && hasPerm(policy, PERM_OBJECTS_WRITE);
+  const canSuggestPO = isOpen && !policyLoading && hasPerm(policy, PERM_PURCHASE_WRITE);
+
+  // Helper for consistent 403 messaging
+  const showNotAuthorized = React.useCallback((requiredPerm: string) => {
+    Alert.alert(
+      "Access Denied",
+      `You lack permission to perform this action.\n\nRequired: ${requiredPerm}`
+    );
+  }, []);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -125,7 +142,12 @@ export default function BackorderDetailScreen() {
                   const Sentry = require("@sentry/react-native");
                   Sentry.captureException(err, { tags: { objectType: "backorderRequest", objectId: id } });
                 } catch {}
-              Alert.alert("Error", err?.message || "Failed to ignore backorder");
+              // 403-specific error handling (Sprint AA E2)
+              if (err?.status === 403) {
+                showNotAuthorized(PERM_OBJECTS_WRITE);
+              } else {
+                Alert.alert("Error", err?.message || "Failed to ignore backorder");
+              }
             } finally {
               setActionLoading(false);
             }
@@ -181,7 +203,12 @@ export default function BackorderDetailScreen() {
             } catch (err: any) {
               console.error(err);
               track("BO_Convert_Clicked", { objectType: "backorderRequest", objectId: id, result: "fail", errorCode: err?.code || err?.status });
-              Alert.alert("Error", err?.message || "Failed to convert backorder");
+              // 403-specific error handling (Sprint AA E2)
+              if (err?.status === 403) {
+                showNotAuthorized(PERM_OBJECTS_WRITE);
+              } else {
+                Alert.alert("Error", err?.message || "Failed to convert backorder");
+              }
             } finally {
               setActionLoading(false);
             }
@@ -260,12 +287,13 @@ export default function BackorderDetailScreen() {
             <View style={{ flexDirection: "row", gap: 8 }}>
               <Pressable
                 onPress={handleSuggestPo}
-                disabled={actionLoading}
+                disabled={actionLoading || !canSuggestPO}
                 style={{
                   paddingVertical: 8,
                   paddingHorizontal: 12,
-                  backgroundColor: actionLoading ? t.colors.border : t.colors.primary,
+                  backgroundColor: (actionLoading || !canSuggestPO) ? t.colors.border : t.colors.primary,
                   borderRadius: 8,
+                  opacity: (actionLoading || !canSuggestPO) ? 0.5 : 1,
                 }}
               >
                 <Text style={{ color: t.colors.buttonText || "#fff", fontWeight: "600", fontSize: 12 }}>
@@ -274,12 +302,13 @@ export default function BackorderDetailScreen() {
               </Pressable>
               <Pressable
                 onPress={handleConvert}
-                disabled={actionLoading}
+                disabled={actionLoading || !canWriteBackorders}
                 style={{
                   paddingVertical: 8,
                   paddingHorizontal: 12,
-                  backgroundColor: actionLoading ? t.colors.border : "#2e7d32",
+                  backgroundColor: (actionLoading || !canWriteBackorders) ? t.colors.border : "#2e7d32",
                   borderRadius: 8,
+                  opacity: (actionLoading || !canWriteBackorders) ? 0.5 : 1,
                 }}
               >
                 <Text style={{ color: "#fff", fontWeight: "600", fontSize: 12 }}>
@@ -288,12 +317,13 @@ export default function BackorderDetailScreen() {
               </Pressable>
               <Pressable
                 onPress={handleIgnore}
-                disabled={actionLoading}
+                disabled={actionLoading || !canWriteBackorders}
                 style={{
                   paddingVertical: 8,
                   paddingHorizontal: 12,
-                  backgroundColor: actionLoading ? t.colors.border : "#666",
+                  backgroundColor: (actionLoading || !canWriteBackorders) ? t.colors.border : "#666",
                   borderRadius: 8,
+                  opacity: (actionLoading || !canWriteBackorders) ? 0.5 : 1,
                 }}
               >
                 <Text style={{ color: "#fff", fontWeight: "600", fontSize: 12 }}>

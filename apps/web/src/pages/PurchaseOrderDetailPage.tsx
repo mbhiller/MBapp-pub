@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
 import { hasPerm } from "../lib/permissions";
+import { PERM_PURCHASE_WRITE, PERM_PURCHASE_APPROVE, PERM_PURCHASE_RECEIVE, PERM_PURCHASE_CANCEL, PERM_PURCHASE_CLOSE } from "../generated/permissions";
 import { track, trackScreenView } from "../lib/telemetry";
 import * as Sentry from "@sentry/browser";
 import {
@@ -986,14 +987,14 @@ export default function PurchaseOrderDetailPage() {
   // Status gates aligned with API handler rules:
   // - Receive handler allows: ["approved","partially-received"]
   // - Denies: ["cancelled","closed","canceled"]
-  const canSubmit = status === "draft" && hasPerm(policy, "purchase:write") && !policyLoading;
-  const canApprove = status === "submitted" && hasPerm(policy, "purchase:approve") && !policyLoading;
-  const canReceive = (status === "approved" || status === "partially-received") && hasPerm(policy, "purchase:receive") && !policyLoading;
+  const canSubmit = status === "draft" && hasPerm(policy, PERM_PURCHASE_WRITE) && !policyLoading;
+  const canApprove = status === "submitted" && hasPerm(policy, PERM_PURCHASE_APPROVE) && !policyLoading;
+  const canReceive = (status === "approved" || status === "partially-received") && hasPerm(policy, PERM_PURCHASE_RECEIVE) && !policyLoading;
   // Cancel only allowed for draft/submitted (API: po-cancel.ts)
-  const canCancel = ["draft", "submitted"].includes(status) && hasPerm(policy, "purchase:cancel") && !policyLoading;
+  const canCancel = ["draft", "submitted"].includes(status) && hasPerm(policy, PERM_PURCHASE_CANCEL) && !policyLoading;
   // Close only allowed for fulfilled (API: po-close.ts)
-  const canClose = status === "fulfilled" && hasPerm(policy, "purchase:close") && !policyLoading;
-  const canEditLines = ["draft", "open"].includes(status) && hasPerm(policy, "purchase:write") && !policyLoading;
+  const canClose = status === "fulfilled" && hasPerm(policy, PERM_PURCHASE_CLOSE) && !policyLoading;
+  const canEditLines = ["draft", "open"].includes(status) && hasPerm(policy, PERM_PURCHASE_WRITE) && !policyLoading;
 
   const hasEdits = Object.values(lineState).some((s) => typeof s.editQty === "number");
 
