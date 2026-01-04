@@ -30,6 +30,17 @@
 - **Verification:** ✅ `npm run spec:lint` (valid YAML); ✅ `npm run spec:bundle` (openapi.yaml generated); ✅ `npm run spec:permissions` (coverage guard passed); ✅ `cd apps/web && npm run typecheck` (0 errors)
 - **Outcome:** Sales and inventoryItem permissions now spec-annotated and generate constants; web SalesOrder pages migrated off string literals; backorder pages confirmed resilient to legacy inventory objects.
 
+### Backorders Integrity & Audit Tool — 🚧 In Progress (Sprint AD)
+
+- Server-side integrity rules:
+  - `validateBackorderRefsOrThrow` (apps/api/src/backorders/related-refs.ts) requires existing salesOrder, matching salesOrder line, and inventory resolution with inventoryItem→inventory fallback.
+  - Enforced during `so-commit` non-strict shortages and `backorderRequest:convert`; `backorderRequest:ignore` stays permissive but logs integrity snapshot for observability.
+- Ops audit tool (report + optional fix):
+  - Report-only: `node ops/tools/backorders-audit.mjs`
+  - Fix orphans: `node ops/tools/backorders-audit.mjs --fix=ignore-orphans`
+  - Outputs per-tenant counts (missing SO / line / inventory / valid) and auto-ignores open orphans in fix mode.
+- Verification: `cd apps/api && npm run typecheck` ✅
+
 ### Views/Workspaces v1 Foundation — ✅ Complete (Sprint AB, 2026-01-04)
 
 **Epic Summary:** Lock in Views/Workspaces foundation with comprehensive RBAC enforcement, permission gating across web/mobile, and CI smoke coverage.

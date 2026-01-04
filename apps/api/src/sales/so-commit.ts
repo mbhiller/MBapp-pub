@@ -8,6 +8,7 @@ import { resolveTenantId } from "../common/tenant";
 import { listMovementsByItem, createMovement } from "../inventory/movements";
 import { badRequest, conflictError, internalError, notFound } from "../common/responses";
 import { logger, emitDomainEvent } from "../common/logger";
+import { validateBackorderRefsOrThrow } from "../backorders/related-refs";
 
 type SOStatus =
   | "draft"
@@ -335,6 +336,27 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     if (!strict && shortages.length > 0) {
       const tenantId = tenantIdOf(event);
       const now = new Date().toISOString();
+
+      // First validate all references to avoid partial writes
+      try {
+        for (const s of shortages) {
+          const product = await productForItem(s.itemId);
+          const reorderEnabled = product == null ? true : (product as any).reorderEnabled !== false;
+          if (!reorderEnabled) continue;
+
+          await validateBackorderRefsOrThrow(
+            { tenantId, soId: so.id, soLineId: s.lineId, itemId: s.itemId },
+            { requestId, where: "so-commit", mode: "nonstrict-shortage" } as any
+          );
+        }
+      } catch (err: any) {
+        if (err?.statusCode && err?.body) {
+          return json(err.statusCode, err.body);
+        }
+        throw err;
+      }
+
+      // If all refs are valid, proceed to create backorders
       for (const s of shortages) {
         const product = await productForItem(s.itemId);
         const reorderEnabled = product == null ? true : (product as any).reorderEnabled !== false;

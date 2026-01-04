@@ -130,6 +130,10 @@ const TENANT = process.env.MBAPP_TENANT_ID ?? "DemoTenant";
 - Canonical permission keys, fail-closed semantics, and wildcard resolution are identical across API, mobile, and web.
 - Server is source of truth for authorization; client-side gating is UX-only (server 403 enforces access control).
 
+**Backorder integrity:**
+- Each backorderRequest must reference an existing salesOrder (`soId`), a line on that order (`soLineId` match against `lines`/`lineItems`), and an inventory record (try `inventoryItem`, fall back to `inventory`).
+- Validation runs at sales order commit (when creating backorders) and on convert; ignore remains permissive for cleanup but emits integrity context for observability.
+
 
 
 ### 2.1 Idempotency & Error Handling

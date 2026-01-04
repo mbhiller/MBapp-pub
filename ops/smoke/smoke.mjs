@@ -750,10 +750,71 @@ const tests = {
 
       // 3) Verify backorder(s) exist then convert them to mirror UI flow
       const boRes = await post(`/objects/backorderRequest/search`, { soId, itemId, status: "open" });
-      if (!boRes.ok || !Array.isArray(boRes.body?.items) || boRes.body.items.length === 0)
+      const boRecords = Array.isArray(boRes.body?.items) ? boRes.body.items : [];
+      if (!boRes.ok || boRecords.length === 0)
         return { test: "close-the-loop", result: "FAIL", step: "backorderRequest-open", boRes };
-      const boIds = boRes.body.items.map(b => b.id);
-      recordFromListResult(boRes.body.items, "backorderRequest", `/objects/backorderRequest/search`);
+      const boIds = boRecords.map(b => b.id);
+      recordFromListResult(boRecords, "backorderRequest", `/objects/backorderRequest/search`);
+
+      // Assert referential integrity for each backorderRequest before converting
+      const lineMatches = (lines, targetId) => {
+        if (!targetId) return false;
+        const t = String(targetId);
+        const arr = Array.isArray(lines) ? lines : [];
+        return arr.some(ln => {
+          if (!ln || typeof ln !== "object") return false;
+          const ids = [ln.id, ln.lineId, ln._key, ln.cid, ln.line?.id].filter(Boolean).map(String);
+          return ids.includes(t);
+        });
+      };
+
+      const soCache = new Map();
+      const inventoryCache = new Map();
+      const seededSoLines = Array.isArray(so.body?.lines) ? so.body.lines : Array.isArray(so.body?.lineItems) ? so.body.lineItems : [];
+
+      const fetchInventoryWithFallback = async (id) => {
+        let res = await get(`/objects/inventoryItem/${encodeURIComponent(id)}`);
+        if (!res.ok && res.status === 404) {
+          res = await get(`/objects/inventory/${encodeURIComponent(id)}`);
+        }
+        return res;
+      };
+
+      for (const bo of boRecords) {
+        const boId = bo?.id;
+        const boSoId = bo?.soId ?? bo?.salesOrderId ?? bo?.salesOrder?.id;
+        const boLineId = bo?.soLineId ?? bo?.lineId ?? bo?.salesOrderLineId ?? bo?.line?.id;
+        const boItemId = bo?.itemId ?? bo?.inventoryItemId ?? bo?.inventoryId ?? bo?.item?.id;
+
+        if (!boSoId) return { test: "close-the-loop", result: "FAIL", step: "backorder-soId-missing", boId, bo };
+        if (!boLineId) return { test: "close-the-loop", result: "FAIL", step: "backorder-lineId-missing", boId, soId: boSoId, bo };
+        if (!boItemId) return { test: "close-the-loop", result: "FAIL", step: "backorder-itemId-missing", boId, soId: boSoId, bo };
+
+        let soFetch = soCache.get(boSoId);
+        if (!soFetch) {
+          soFetch = await get(`/objects/salesOrder/${encodeURIComponent(boSoId)}`);
+          soCache.set(boSoId, soFetch);
+        }
+        if (!soFetch.ok) return { test: "close-the-loop", result: "FAIL", step: "backorder-so-fetch", boId, soId: boSoId, soFetch };
+
+        const soLines = [
+          ...(Array.isArray(soFetch.body?.lines) ? soFetch.body.lines : []),
+          ...(Array.isArray(soFetch.body?.lineItems) ? soFetch.body.lineItems : []),
+          ...seededSoLines
+        ];
+        if (!lineMatches(soLines, boLineId)) {
+          return { test: "close-the-loop", result: "FAIL", step: "backorder-line-missing", boId, soId: boSoId, lineId: boLineId, soLines: soLines.map(l => ({ id: l?.id ?? l?.lineId ?? l?._key ?? l?.cid, qty: l?.qty ?? l?.quantity })) };
+        }
+
+        let inventory = inventoryCache.get(boItemId);
+        if (!inventory) {
+          inventory = await fetchInventoryWithFallback(boItemId);
+          inventoryCache.set(boItemId, inventory);
+        }
+        if (!inventory.ok) {
+          return { test: "close-the-loop", result: "FAIL", step: "backorder-inventory-missing", boId, soId: boSoId, itemId: boItemId, inventory };
+        }
+      }
 
       for (const boId of boIds) {
         const convert = await post(`/objects/backorderRequest/${encodeURIComponent(boId)}:convert`, {}, { "Idempotency-Key": idem() });
