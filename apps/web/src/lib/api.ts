@@ -119,6 +119,87 @@ export function getObjectAuthed<T>(
   return reqAuthed<T>(`/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}`, opts);
 }
 
+/**
+ * Robust 404 detection: checks multiple error properties.
+ * Supports err.status, err.statusCode, and err.code / err.body.code.
+ */
+function isNotFound(err: any): boolean {
+  const status = err?.status ?? err?.statusCode;
+  const code = err?.code ?? err?.body?.code;
+  return status === 404 || code === "not_found";
+}
+
+/**
+ * Resilient inventory fetch: tries inventoryItem type first, falls back to inventory type on 404.
+ * 
+ * Context: Inventory records may be stored under either "inventoryItem" (canonical) or
+ * "inventory" (legacy) object type depending on when they were created. This helper ensures
+ * we can find them regardless of which type was used.
+ * 
+ * Returns the inventory object if found under either type, or null if both 404.
+ * Throws non-404 errors immediately (auth failures, network errors, etc.).
+ */
+export async function getInventoryByEitherType<T>(
+  id: string,
+  opts: { token: string; tenantId: string }
+): Promise<T | null> {
+  // Try inventoryItem first (canonical type)
+  try {
+    if (import.meta.env.DEV) {
+      console.debug("[getInventoryByEitherType] Trying inventoryItem type for id:", id);
+    }
+    return await getObjectAuthed<T>("inventoryItem", id, opts);
+  } catch (err) {
+    const notFound = isNotFound(err);
+    if (import.meta.env.DEV) {
+      console.debug("[getInventoryByEitherType] inventoryItem error:", {
+        id,
+        notFound,
+        status: (err as any)?.status,
+        statusCode: (err as any)?.statusCode,
+        code: (err as any)?.code,
+        message: (err as any)?.message,
+      });
+    }
+    
+    // If not a 404, re-throw the error (auth failure, network error, etc.)
+    if (!notFound) {
+      throw err;
+    }
+    
+    // Try inventory type (legacy) on 404
+    if (import.meta.env.DEV) {
+      console.debug("[getInventoryByEitherType] Falling back to inventory type for id:", id);
+    }
+    try {
+      return await getObjectAuthed<T>("inventory", id, opts);
+    } catch (fallbackErr) {
+      const fallbackNotFound = isNotFound(fallbackErr);
+      if (import.meta.env.DEV) {
+        console.debug("[getInventoryByEitherType] inventory fallback error:", {
+          id,
+          notFound: fallbackNotFound,
+          status: (fallbackErr as any)?.status,
+          statusCode: (fallbackErr as any)?.statusCode,
+          code: (fallbackErr as any)?.code,
+          message: (fallbackErr as any)?.message,
+        });
+      }
+      
+      // If second attempt is also 404, return null (not found under either type)
+      if (fallbackNotFound) {
+        if (import.meta.env.DEV) {
+          console.debug("[getInventoryByEitherType] Both types returned 404, returning null for id:", id);
+        }
+        return null;
+      }
+      
+      // If non-404 error on fallback, re-throw
+      throw fallbackErr;
+    }
+  }
+}
+
 /** Create supports BOTH canonical (body) and legacy (name, tag) overloads */
 export function createObject<T>(type: string, body: any): Promise<T>;
 export function createObject(type: string, name?: string, tag?: string): Promise<{ id?: string }>;

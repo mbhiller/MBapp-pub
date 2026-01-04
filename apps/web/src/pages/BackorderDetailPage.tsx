@@ -3,7 +3,7 @@ import { Link, useParams, useNavigate } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
 import { hasPerm } from "../lib/permissions";
-import { getObjectAuthed } from "../lib/api";
+import { getObjectAuthed, getInventoryByEitherType } from "../lib/api";
 import { track } from "../lib/telemetry";
 import * as Sentry from "@sentry/browser";
 import { ignoreBackorderRequest, convertBackorderRequest, type BackorderRequest } from "../lib/backorders";
@@ -150,17 +150,37 @@ export default function BackorderDetailPage() {
       }
     }
 
-    // Fetch related inventory item
+    // Fetch related inventory item (resilient: tries inventoryItem, falls back to inventory)
     if (bo.itemId) {
-      const { value: inv, notFound, error } = await safeGet<InventoryItem>("inventory", bo.itemId);
-      if (inv) {
-        setItem(inv);
-      } else if (notFound || error) {
+      try {
+        if (import.meta.env.DEV) {
+          console.debug("[BackorderDetailPage] Attempting to fetch inventory for itemId:", bo.itemId);
+        }
+        const inv = await getInventoryByEitherType<InventoryItem>(bo.itemId, { token: token!, tenantId: tenantId! });
+        if (import.meta.env.DEV) {
+          console.debug("[BackorderDetailPage] Inventory fetch result:", { itemId: bo.itemId, found: !!inv });
+        }
+        if (inv) {
+          setItem(inv);
+        } else {
+          // Both inventoryItem and inventory types returned 404
+          collectedWarnings.push({
+            type: "inventory",
+            id: bo.itemId,
+            notFound: true,
+            error: null,
+          });
+        }
+      } catch (err) {
+        // Non-404 error (auth, network, etc.)
+        if (import.meta.env.DEV) {
+          console.debug("[BackorderDetailPage] Inventory fetch error:", { itemId: bo.itemId, error: (err as any)?.message });
+        }
         collectedWarnings.push({
           type: "inventory",
           id: bo.itemId,
-          notFound: notFound,
-          error: error ? formatError(error) : null,
+          notFound: false,
+          error: formatError(err),
         });
       }
     }

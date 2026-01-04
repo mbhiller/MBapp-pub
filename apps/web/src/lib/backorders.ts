@@ -1,7 +1,7 @@
 // apps/web/src/lib/backorders.ts
 // Backorder request API helpers using apiFetch for consistent error handling
 
-import { apiFetch } from "./http";
+import { apiFetch, apiFetchAuthed } from "./http";
 
 export type BackorderRequest = {
   id: string;
@@ -35,16 +35,17 @@ export type BackorderSearchResponse = {
 /**
  * Search backorder requests with optional filters.
  * Endpoint: POST /objects/backorderRequest/search
+ * REQUIRES: token and tenantId (enforced via apiFetchAuthed)
  */
 export async function searchBackorderRequests(
   filter: BackorderSearchFilter,
-  opts: { token?: string; tenantId: string; limit?: number; next?: string }
+  opts: { token: string; tenantId: string; limit?: number; next?: string }
 ): Promise<BackorderSearchResponse> {
   const body: any = { ...filter };
   if (opts.limit) body.limit = opts.limit;
   if (opts.next) body.next = opts.next;
 
-  return apiFetch<BackorderSearchResponse>("/objects/backorderRequest/search", {
+  return apiFetchAuthed<BackorderSearchResponse>("/objects/backorderRequest/search", {
     method: "POST",
     body,
     token: opts.token,
