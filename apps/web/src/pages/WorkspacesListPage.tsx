@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
 import { hasPerm } from "../lib/permissions";
@@ -62,6 +62,7 @@ const ENTITY_TYPES = [
 ];
 
 export default function WorkspacesListPage() {
+  const navigate = useNavigate();
   const { token, tenantId, policy, policyLoading } = useAuth();
   const canCreateWorkspace = hasPerm(policy, PERM_WORKSPACE_WRITE) && !policyLoading;
   const [search, setSearch] = useState("");
@@ -72,7 +73,7 @@ export default function WorkspacesListPage() {
 
     // No views pinned — navigate to detail
     if (!viewId) {
-      window.location.href = `/workspaces/${workspace.id}`;
+      navigate(`/workspaces/${workspace.id}`);
       return;
     }
 
@@ -80,9 +81,9 @@ export default function WorkspacesListPage() {
     if (workspace.entityType) {
       const listRoute = getListPageRoute(workspace.entityType);
       if (listRoute) {
-        window.location.href = `${listRoute}?viewId=${encodeURIComponent(viewId)}`;
+        navigate(`${listRoute}?viewId=${encodeURIComponent(viewId)}`);
       } else {
-        window.location.href = `/views/${encodeURIComponent(viewId)}`;
+        navigate(`/views/${encodeURIComponent(viewId)}`);
       }
       return;
     }
@@ -97,17 +98,17 @@ export default function WorkspacesListPage() {
       if (view.entityType) {
         const listRoute = getListPageRoute(view.entityType);
         if (listRoute) {
-          window.location.href = `${listRoute}?viewId=${encodeURIComponent(viewId)}`;
+          navigate(`${listRoute}?viewId=${encodeURIComponent(viewId)}`);
           return;
         }
       }
 
       // Fallback: navigate to view detail or workspace detail
-      window.location.href = `/views/${encodeURIComponent(viewId)}`;
+      navigate(`/views/${encodeURIComponent(viewId)}`);
     } catch (err) {
       console.error("Failed to fetch view:", err);
       // Fallback to workspace detail
-      window.location.href = `/workspaces/${workspace.id}`;
+      navigate(`/workspaces/${workspace.id}`);
     }
   };
 
@@ -195,7 +196,7 @@ export default function WorkspacesListPage() {
 
       // Navigate to new workspace detail
       if (result?.id) {
-        window.location.href = `/workspaces/${result.id}`;
+        navigate(`/workspaces/${result.id}`);
       }
     } catch (err) {
       setCreateError(formatError(err));

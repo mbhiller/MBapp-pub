@@ -4,6 +4,7 @@ import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
 import { hasPerm } from "../lib/permissions";
 import { PERM_WORKSPACE_WRITE } from "../generated/permissions";
+import { permissionDeniedMessage } from "../lib/permissionMessages";
 
 type Workspace = {
   id: string;
@@ -168,7 +169,7 @@ export default function WorkspaceDetailPage() {
       window.location.href = "/workspaces";
     } catch (err: any) {
       if (err?.status === 403) {
-        alert("Access denied \u2014 You lack permission to perform this action. Required: workspace:write");
+        alert(permissionDeniedMessage(PERM_WORKSPACE_WRITE));
       } else {
         alert("Delete failed: " + formatError(err));
       }
@@ -238,7 +239,7 @@ export default function WorkspaceDetailPage() {
       await fetchWorkspace();
     } catch (err: any) {
       if (err?.status === 403) {
-        setUpdateError("Access denied \u2014 You lack permission to perform this action. Required: workspace:write");
+        setUpdateError(permissionDeniedMessage(PERM_WORKSPACE_WRITE));
       } else {
         setUpdateError(formatError(err));
       }
@@ -274,7 +275,7 @@ export default function WorkspaceDetailPage() {
       await fetchWorkspace();
     } catch (err: any) {
       if (err?.status === 403) {
-        setUpdateError("Access denied \u2014 You lack permission to perform this action. Required: workspace:write");
+        setUpdateError(permissionDeniedMessage(PERM_WORKSPACE_WRITE));
       } else {
         setUpdateError(formatError(err));
       }
@@ -298,7 +299,7 @@ export default function WorkspaceDetailPage() {
       await fetchWorkspace();
     } catch (err: any) {
       if (err?.status === 403) {
-        setUpdateError("Access denied \u2014 You lack permission to perform this action. Required: workspace:write");
+        setUpdateError(permissionDeniedMessage(PERM_WORKSPACE_WRITE));
       } else {
         setUpdateError(formatError(err));
       }
@@ -322,7 +323,7 @@ export default function WorkspaceDetailPage() {
       await fetchWorkspace();
     } catch (err: any) {
       if (err?.status === 403) {
-        setUpdateError("Access denied \u2014 You lack permission to perform this action. Required: workspace:write");
+        setUpdateError(permissionDeniedMessage(PERM_WORKSPACE_WRITE));
       } else {
         setUpdateError(formatError(err));
       }

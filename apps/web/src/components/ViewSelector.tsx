@@ -3,6 +3,7 @@ import { ViewConfig, useViewFilters, FilterMapResult } from "../hooks/useViewFil
 import { useAuth } from "../providers/AuthProvider";
 import { hasPerm } from "../lib/permissions";
 import { PERM_VIEW_WRITE } from "../generated/permissions";
+import { permissionRequiredTooltip } from "../lib/permissionMessages";
 
 type Props = {
   entityType: string;
@@ -143,7 +144,7 @@ export function ViewSelector({
         <button
           onClick={() => setShowSaveModal(true)}
           disabled={loading || !canWriteViews}
-          title={!canWriteViews ? "Requires view:write permission" : ""}
+          title={!canWriteViews ? permissionRequiredTooltip(PERM_VIEW_WRITE) : ""}
           style={{ padding: "6px 10px", opacity: !canWriteViews ? 0.5 : 1 }}
         >
           Save As View
@@ -153,7 +154,7 @@ export function ViewSelector({
           <button
             onClick={() => setShowOverwriteModal(true)}
             disabled={loading || !canWriteViews}
-            title={!canWriteViews ? "Requires view:write permission" : ""}
+            title={!canWriteViews ? permissionRequiredTooltip(PERM_VIEW_WRITE) : ""}
             style={{ padding: "6px 10px", opacity: !canWriteViews ? 0.5 : 1 }}
           >
             Overwrite

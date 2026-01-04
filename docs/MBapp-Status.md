@@ -36,6 +36,36 @@
 
 - **Guarantee:** SO and PO patch-lines now use consistent shared pattern; status gates match actual SO/PO enum values per spec; all line operations preserve id stability invariant; CI smoke coverage locks in both behaviors.
 
+### Views/Workspaces Hardening — ✅ Complete (Sprint AG, 2026-01-04)
+
+**Epic Summary:** Eliminate hardcoded permission strings; add mobile entity type parity; ensure SPA-safe navigation.
+
+- **Web Permission String Removal (E1):**
+  - Created [apps/web/src/lib/permissionMessages.ts](../apps/web/src/lib/permissionMessages.ts) with `permissionDeniedMessage()` and `permissionRequiredTooltip()` helpers
+  - Migrated 12 hardcoded strings across ViewsListPage, ViewDetailPage, WorkspacesListPage, WorkspaceDetailPage, SaveViewButton, ViewSelector to use helpers + `PERM_*` constants
+  - 403 handlers now derive messages from permission constants, preventing typos and enabling centralized message formatting
+
+- **Mobile Permission String Removal (E2):**
+  - Created [apps/mobile/src/lib/permissionMessages.ts](../apps/mobile/src/lib/permissionMessages.ts) with mobile-tone `permissionDeniedMessage()` helper
+  - Migrated 4 hardcoded strings in ViewsManageScreen.tsx (rename, delete, button pre-checks) to use helper + `PERM_VIEW_WRITE`
+
+- **Mobile Entity Type Parity (E3):**
+  - ViewsManageScreen.tsx: Replaced 3-item chip UI (All/PO/SO) with modal-based dropdown supporting all 11 spec entity types
+  - Modal preserves selected state with left-border highlight, consistent with existing rename modal pattern
+  - No new dependencies; spec values (purchaseOrder, inventoryItem, etc.) passed correctly to API
+
+- **Web SPA Navigation (E4):**
+  - WorkspacesListPage.tsx: Replaced 7 `window.location.href` calls with `navigate()` from React Router
+  - handleOpen logic preserved (viewId selection, entityType routing, view fetch fallback, error handling)
+  - Benefits: instant transitions, preserved scroll position, consistent client-side routing across app
+
+- **Definition of Done:**
+  - ✅ Permission message helpers created (web + mobile)
+  - ✅ All hardcoded permission strings replaced (16 total: 12 web + 4 mobile)
+  - ✅ Mobile views now filter by all 11 entity types (feature parity with web)
+  - ✅ WorkspacesListPage uses SPA navigation (no full reloads)
+  - ✅ No new vulnerabilities or regressions
+
 ### Permission Generator Completeness — ✅ Complete (Sprint AC, 2026-01-04)
 
 **Epic Summary:** Expand spec permission annotations to cover Sales SO actions and inventoryItem CRUD; migrate web SalesOrder pages to generated constants.

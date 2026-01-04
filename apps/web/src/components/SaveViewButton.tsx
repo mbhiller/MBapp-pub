@@ -3,6 +3,7 @@ import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
 import { hasPerm } from "../lib/permissions";
 import { PERM_VIEW_WRITE } from "../generated/permissions";
+import { permissionDeniedMessage, permissionRequiredTooltip } from "../lib/permissionMessages";
 import type { ViewConfig } from "../hooks/useViewFilters";
 
 type ViewFilter = { field: string; op: string; value: any };
@@ -91,7 +92,7 @@ export function SaveViewButton({ entityType, filters, sort, buttonLabel, activeV
       }
     } catch (err: any) {
       if (err?.status === 403) {
-        setError("Access denied \u2014 You lack permission to perform this action. Required: view:write");
+        setError(permissionDeniedMessage(PERM_VIEW_WRITE));
       } else {
         setError(err?.message || `Failed to ${mode === "update" ? "update" : "save"} view`);
       }
@@ -117,7 +118,7 @@ export function SaveViewButton({ entityType, filters, sort, buttonLabel, activeV
         <button
           onClick={() => { setMode(activeViewId ? "update" : "save"); setOpen(true); }}
           disabled={loading || !canWriteViews}
-          title={!canWriteViews ? "Requires view:write permission" : ""}
+          title={!canWriteViews ? permissionRequiredTooltip(PERM_VIEW_WRITE) : ""}
           style={{ padding: "6px 10px", opacity: !canWriteViews ? 0.5 : 1 }}
         >
           {loading ? (activeViewId ? "Updating..." : "Saving...") : (buttonLabel || (activeViewId ? "Update View" : "Save as View"))}
@@ -126,7 +127,7 @@ export function SaveViewButton({ entityType, filters, sort, buttonLabel, activeV
           <button
             onClick={() => { setMode("save"); setOpen(true); }}
             disabled={loading || !canWriteViews}
-            title={!canWriteViews ? "Requires view:write permission" : ""}
+            title={!canWriteViews ? permissionRequiredTooltip(PERM_VIEW_WRITE) : ""}
             style={{ padding: "6px 10px", background: "#f5f5f5", border: "1px solid #ccc", opacity: !canWriteViews ? 0.5 : 1 }}
           >
             Save as New
