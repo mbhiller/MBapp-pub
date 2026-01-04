@@ -8,6 +8,28 @@
 
 ## Current State Summary
 
+### Permission Generator Completeness — ✅ Complete (Sprint AC, 2026-01-04)
+
+**Epic Summary:** Expand spec permission annotations to cover Sales SO actions and inventoryItem CRUD; migrate web SalesOrder pages to generated constants.
+
+- **Spec Annotations Added (E2):**
+  - Sales SO actions: `/sales/so/{id}:submit`, `:commit`, `:reserve`, `:release`, `:patch-lines`, `:fulfill`, `:cancel`, `:close` (8 endpoints)
+  - Permission keys: `sales:write` (submit, patch-lines), `sales:commit`, `sales:reserve` (reserve, release), `sales:fulfill`, `sales:cancel`, `sales:close`
+  - inventoryItem CRUD: All 6 operations mapped via `requireObjectPerm()` to `inventory:read`/`inventory:write` (runtime enforcement confirmed in E1)
+- **Artifacts Regenerated (E2):**
+  - Pipeline: `npm run spec:lint` (✅ valid YAML), `npm run spec:bundle` (generated openapi.yaml), `npm run spec:permissions` (extracted 31 endpoints, 18 unique permissions)
+  - Generated constants: `PERM_SALES_WRITE`, `PERM_SALES_COMMIT`, `PERM_SALES_RESERVE`, `PERM_SALES_FULFILL`, `PERM_SALES_CANCEL`, `PERM_SALES_CLOSE` (6 new exports)
+  - Locations: spec/generated/permissions.ts, apps/web/src/generated/permissions.ts, apps/mobile/src/generated/permissions.ts
+- **Web Migration (E3):**
+  - [SalesOrderDetailPage.tsx](../apps/web/src/pages/SalesOrderDetailPage.tsx): Migrated 8 hardcoded `"sales:*"` string literals to `PERM_SALES_*` constants; enhanced 403 error handler to show required permission
+  - [SalesOrdersListPage.tsx](../apps/web/src/pages/SalesOrdersListPage.tsx): Migrated `"sales:write"` to `PERM_SALES_WRITE`
+  - [Layout.tsx](../apps/web/src/components/Layout.tsx): Kept `"sales:read"` as string literal (no API endpoint requires it, no constant generated)
+- **Backorder Legacy Inventory Resilience (E4):**
+  - Verified [getInventoryByEitherType()](../apps/web/src/lib/api.ts#L142-L203): Tries `inventoryItem` → falls back to `inventory` on 404 → returns null only when both 404
+  - Verified BackorderDetailPage.tsx and BackordersListPage.tsx use fallback helper correctly, handle null gracefully, fail-safe on non-404 errors
+- **Verification:** ✅ `npm run spec:lint` (valid YAML); ✅ `npm run spec:bundle` (openapi.yaml generated); ✅ `npm run spec:permissions` (coverage guard passed); ✅ `cd apps/web && npm run typecheck` (0 errors)
+- **Outcome:** Sales and inventoryItem permissions now spec-annotated and generate constants; web SalesOrder pages migrated off string literals; backorder pages confirmed resilient to legacy inventory objects.
+
 ### Views/Workspaces v1 Foundation — ✅ Complete (Sprint AB, 2026-01-04)
 
 **Epic Summary:** Lock in Views/Workspaces foundation with comprehensive RBAC enforcement, permission gating across web/mobile, and CI smoke coverage.

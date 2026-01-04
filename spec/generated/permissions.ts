@@ -26,6 +26,14 @@ export const PERMISSIONS_BY_ENDPOINT = {
   "POST /purchasing/po/{id}:close": "purchase:close",
   "POST /purchasing/po/{id}:receive": "purchase:receive",
   "POST /purchasing/suggest-po": "purchase:write",
+  "POST /sales/so/{id}:cancel": "sales:cancel",
+  "POST /sales/so/{id}:close": "sales:close",
+  "POST /sales/so/{id}:commit": "sales:commit",
+  "POST /sales/so/{id}:fulfill": "sales:fulfill",
+  "POST /sales/so/{id}:patch-lines": "sales:write",
+  "POST /sales/so/{id}:release": "sales:reserve",
+  "POST /sales/so/{id}:reserve": "sales:reserve",
+  "POST /sales/so/{id}:submit": "sales:write",
   "POST /views": "view:write",
   "POST /workspaces": "workspace:write",
   "PUT /views/{id}": "view:write",
@@ -62,6 +70,12 @@ export const PERM_PURCHASE_CANCEL = "purchase:cancel" as const;
 export const PERM_PURCHASE_CLOSE = "purchase:close" as const;
 export const PERM_PURCHASE_RECEIVE = "purchase:receive" as const;
 export const PERM_PURCHASE_WRITE = "purchase:write" as const;
+export const PERM_SALES_CANCEL = "sales:cancel" as const;
+export const PERM_SALES_CLOSE = "sales:close" as const;
+export const PERM_SALES_COMMIT = "sales:commit" as const;
+export const PERM_SALES_FULFILL = "sales:fulfill" as const;
+export const PERM_SALES_RESERVE = "sales:reserve" as const;
+export const PERM_SALES_WRITE = "sales:write" as const;
 export const PERM_VIEW_READ = "view:read" as const;
 export const PERM_VIEW_WRITE = "view:write" as const;
 export const PERM_WORKSPACE_READ = "workspace:read" as const;
@@ -79,6 +93,12 @@ export const PERMISSION_KEYS = [
   "purchase:close",
   "purchase:receive",
   "purchase:write",
+  "sales:cancel",
+  "sales:close",
+  "sales:commit",
+  "sales:fulfill",
+  "sales:reserve",
+  "sales:write",
   "view:read",
   "view:write",
   "workspace:read",
