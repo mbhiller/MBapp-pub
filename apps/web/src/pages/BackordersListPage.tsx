@@ -13,6 +13,7 @@ import {
 import {
   suggestPurchaseOrders,
   createPurchaseOrdersFromSuggestion,
+  getInventoryByEitherType,
   type SuggestPoResponse,
   type PurchaseOrderDraft,
 } from "../lib/api";
@@ -36,6 +37,9 @@ export default function BackordersListPage() {
   // Fail-closed permission checks
   const canWriteBackorders = hasPerm(policy, PERM_OBJECTS_WRITE) && !policyLoading;
   const canSuggestPO = hasPerm(policy, PERM_PURCHASE_WRITE) && !policyLoading;
+
+  // Auth readiness: both token and tenantId must be present
+  const authReady = Boolean(token && tenantId);
   
   // Read filter values from URL params
   const status = (searchParams.get("status") || "open") as "open" | "ignored" | "converted";
@@ -60,6 +64,9 @@ export default function BackordersListPage() {
   const [modalDrafts, setModalDrafts] = useState<PurchaseOrderDraft[]>([]);
   const [modalSkipped, setModalSkipped] = useState<Array<{ backorderRequestId: string; reason?: string }> | undefined>();
   const [groupedView, setGroupedView] = useState(false);
+  const [hideBroken, setHideBroken] = useState(false);
+  const [validMap, setValidMap] = useState<Record<string, boolean | null>>({});
+  const [validating, setValidating] = useState(false);
 
   // Helper to update URL search params
   const updateSearchParams = useCallback(
@@ -138,12 +145,72 @@ export default function BackordersListPage() {
     setActionInfo(null);
     setSuggestResult(null);
     setPageNext(null);
+    setValidMap({});
   };
+
+  // Validate inventory for backorders with concurrency limit
+  const validateInventory = useCallback(
+    async (backorders: BackorderRequest[]) => {
+      if (!authReady || !token || !tenantId) return;
+
+      setValidating(true);
+      const results: Record<string, boolean | null> = {};
+      const concurrencyLimit = 5;
+
+      // Process in batches
+      for (let i = 0; i < backorders.length; i += concurrencyLimit) {
+        const batch = backorders.slice(i, i + concurrencyLimit);
+        const batchPromises = batch.map(async (bo) => {
+          const key = bo.id;
+
+          // No itemId => broken
+          if (!bo.itemId) {
+            results[key] = false;
+            return;
+          }
+
+          try {
+            const inv = await getInventoryByEitherType(bo.itemId, { token, tenantId });
+            results[key] = inv !== null;
+          } catch (err) {
+            // Non-404 errors (auth, network) => don't hide, keep visible
+            if (import.meta.env.DEV) {
+              console.debug("[BackordersListPage] Validation error for", bo.itemId, err);
+            }
+            results[key] = true;
+          }
+        });
+
+        await Promise.all(batchPromises);
+        // Update incrementally to show progress
+        setValidMap((prev) => ({ ...prev, ...results }));
+      }
+
+      setValidating(false);
+    },
+    [authReady, token, tenantId]
+  );
 
   const fetchPage = useCallback(
     async (cursor?: string) => {
+      // Guard: don't call search without auth
+      if (!authReady) {
+        setLoading(true);
+        setError(null);
+        return;
+      }
+
       setLoading(true);
       setError(null);
+
+      // Dev-only debug logging
+      if (import.meta.env.DEV) {
+        console.debug("[BackordersListPage] Fetching search", {
+          tenantId: tenantId,
+          tokenPresent: !!token,
+        });
+      }
+
       try {
         const filter: any = { status };
         if (vendorFilter.trim()) filter.preferredVendorId = vendorFilter.trim();
@@ -151,26 +218,64 @@ export default function BackordersListPage() {
         if (itemIdFilter.trim()) filter.itemId = itemIdFilter.trim();
 
         const res = await searchBackorderRequests(filter, {
-          token: token || undefined,
-          tenantId,
+          token: token!,
+          tenantId: tenantId!,
           limit: 50,
           next: cursor || undefined,
         });
         setItems((prev) => (cursor ? [...prev, ...(res.items ?? [])] : res.items ?? []));
         setPageNext(res.next ?? null);
       } catch (err) {
-        setError(formatError(err));
+        const e = err as any;
+        // Detect auth-related errors
+        if (e?.message?.includes("token") || e?.message?.includes("tenantId") || e?.message?.includes("apiFetchAuthed")) {
+          setError("Session not ready; please reload.");
+        } else {
+          setError(formatError(err));
+        }
       } finally {
         setLoading(false);
       }
     },
-    [status, vendorFilter, soIdFilter, itemIdFilter, tenantId, token]
+    [status, vendorFilter, soIdFilter, itemIdFilter, tenantId, token, authReady]
   );
 
   // Refetch when filters change; replace list
   useEffect(() => {
+    if (!authReady) {
+      return; // Don't fetch until auth ready
+    }
     fetchPage(undefined);
-  }, [fetchPage, status, vendorFilter, soIdFilter, itemIdFilter]);
+  }, [fetchPage, status, vendorFilter, soIdFilter, itemIdFilter, authReady]);
+
+  // Clear stale list state when auth context changes (token/tenantId)
+  // This prevents showing old tenant's data when user switches accounts
+  useEffect(() => {
+    setItems([]);
+    setPageNext(null);
+    setError(null);
+    setSelected({});
+    setActionError(null);
+    setActionInfo(null);
+    setSuggestResult(null);
+    setValidMap({});
+  }, [token, tenantId]);
+
+  // Validate inventory when hideBroken is enabled and items change
+  useEffect(() => {
+    if (hideBroken && items.length > 0 && authReady) {
+      validateInventory(items);
+    } else if (!hideBroken) {
+      // Reset validation map when toggle is OFF
+      setValidMap({});
+      setValidating(false);
+    }
+  }, [hideBroken, items, authReady, validateInventory]);
+
+  // Reset validMap when filters change (new search)
+  useEffect(() => {
+    setValidMap({});
+  }, [status, vendorFilter, soIdFilter, itemIdFilter]);
 
   // Fetch vendor names for display
   useEffect(() => {
@@ -396,6 +501,18 @@ export default function BackordersListPage() {
             />
             Grouped view
           </label>
+          <label
+            style={{ display: "flex", alignItems: "center", gap: 6 }}
+            title="Validates current page only; may take a moment."
+          >
+            <input
+              type="checkbox"
+              checked={hideBroken}
+              onChange={(e) => setHideBroken(e.target.checked)}
+              disabled={!authReady}
+            />
+            Hide broken rows (missing inventory)
+          </label>
           <button onClick={() => fetchPage(undefined)} disabled={loading}>
             {loading ? "Loading..." : "Refresh"}
           </button>
@@ -428,6 +545,12 @@ export default function BackordersListPage() {
 
       {error ? (
         <div style={{ padding: 12, background: "#fee", color: "#b00020", borderRadius: 4 }}>{error}</div>
+      ) : null}
+
+      {validating ? (
+        <div style={{ padding: 12, background: "#e3f2fd", color: "#1565c0", borderRadius: 4, fontSize: 13 }}>
+          Validating inventory… ({Object.keys(validMap).length} / {items.length} checked)
+        </div>
       ) : null}
 
       {actionError ? (
@@ -485,7 +608,9 @@ export default function BackordersListPage() {
         </div>
       )}
 
-      {loading && items.length === 0 ? <div>Loading backorders…</div> : null}
+      {loading && items.length === 0 ? (
+        <div>{authReady ? "Loading backorders…" : "Loading session…"}</div>
+      ) : null}
       {!loading && items.length === 0 && !error ? (
         <div style={{ padding: 12, background: "#f5f5f5", borderRadius: 4 }}>
           No backorders match the current filters.
@@ -512,9 +637,15 @@ export default function BackordersListPage() {
             </tr>
           </thead>
           <tbody>
-            {groupedView
-              ? Object.entries(
-                  items.reduce<Record<string, BackorderRequest[]>>((acc, bo) => {
+            {(() => {
+              // Filter items if hideBroken is ON
+              const displayItems = hideBroken
+                ? items.filter((bo) => validMap[bo.id] !== false)
+                : items;
+
+              return groupedView
+                ? Object.entries(
+                    displayItems.reduce<Record<string, BackorderRequest[]>>((acc, bo) => {
                     const key = bo.preferredVendorId || "__UNASSIGNED__";
                     (acc[key] ||= []).push(bo);
                     return acc;
@@ -600,7 +731,7 @@ export default function BackordersListPage() {
                     </>
                   );
                 })
-              : items.map((bo) => (
+              : displayItems.map((bo) => (
                   <tr key={bo.id} onClick={() => window.location.href = `/backorders/${bo.id}`} style={{ cursor: "pointer" }}>
                     <td style={{ padding: 8, border: "1px solid #ccc" }} onClick={(e) => e.stopPropagation()}>
                       <input
@@ -667,7 +798,8 @@ export default function BackordersListPage() {
                       )}
                     </td>
                   </tr>
-                ))}
+                ));
+            })()}
           </tbody>
         </table>
       ) : null}

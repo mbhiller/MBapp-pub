@@ -13,6 +13,15 @@ export type ApiFetchOptions = {
   query?: Record<string, string | number | boolean | undefined | null>;
 };
 
+/**
+ * Stricter variant of ApiFetchOptions that requires both token and tenantId.
+ * Use apiFetchAuthed() to enforce Authorization + tenant isolation on protected endpoints.
+ */
+export type ApiFetchAuthedOptions = Omit<ApiFetchOptions, "token" | "tenantId"> & {
+  token: string;
+  tenantId: string;
+};
+
 type ApiError = Error & { status?: number; code?: string; details?: unknown };
 
 export async function apiFetch<T>(path: string, opts: ApiFetchOptions = {}): Promise<T> {
@@ -77,3 +86,33 @@ export async function apiFetch<T>(path: string, opts: ApiFetchOptions = {}): Pro
   }
   throw err;
 }
+
+/**
+ * Guarded variant of apiFetch that requires BOTH token and tenantId to be non-empty strings.
+ * Use this for endpoints that require Authorization headers and proper tenant isolation.
+ * Throws a clear error if either is missing, preventing silent failures or fallbacks to default tenant.
+ *
+ * @param path - API path
+ * @param opts - Must include token and tenantId (both required, non-empty)
+ * @returns Promise<T>
+ * @throws If token or tenantId is missing, empty, or not a string
+ */
+export async function apiFetchAuthed<T>(path: string, opts: ApiFetchAuthedOptions): Promise<T> {
+  const tokenValid = opts?.token && opts.token.trim().length > 0;
+  const tenantValid = opts?.tenantId && opts.tenantId.trim().length > 0;
+
+  if (!tokenValid || !tenantValid) {
+    throw new Error(
+      `apiFetchAuthed: token and tenantId are required and must be non-empty. ` +
+      `token=${!!tokenValid}, tenantId=${!!tenantValid}`
+    );
+  }
+
+  // Call apiFetch with validated auth
+  return apiFetch<T>(path, {
+    ...opts,
+    token: opts.token,
+    tenantId: opts.tenantId,
+  });
+}
+
