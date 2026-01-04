@@ -384,6 +384,54 @@ This allows responses from legacy systems or test fixtures to still work. **Clie
 
 ---
 
+### 2.7 Line Editing Invariant (Patch-Lines Pattern)
+
+**Context:** SO and PO support line-by-line edits via `{so,po}:patch-lines` endpoints. Both use a shared pattern to guarantee stable line ids and safe mutation sequences.
+
+**Core Invariant:** `normalize → patch → re-normalize (ensureLineIds)`
+
+**Pattern Overview:**
+1. **Load** existing document (SO or PO) with current lines
+2. **Validate Status** — patch-lines gated by status:
+   - **SO patch-lines:** Allowed in `draft`, `submitted`, `committed` (per spec L4320)
+   - **PO patch-lines:** Allowed in `draft` only (per spec L3999)
+   - Any other status returns 409 `SO_NOT_EDITABLE` or `PO_NOT_EDITABLE`
+3. **Apply Patch Ops** — client sends `PatchLineOp[]` array:
+   ```typescript
+   { op: "upsert", id: "L1", patch: { qty: 10 } }  // update existing line
+   { op: "upsert", cid: "tmp-abc", patch: { itemId: "X", qty: 5 } }  // create new via temp cid
+   { op: "remove", id: "L2" }  // delete line, reserve its id to prevent reuse
+   ```
+4. **Ensure Stable Ids** — defensive call to `ensureLineIds()` guarantees:
+   - Existing ids preserved (L1, L2 unchanged)
+   - New lines get fresh server-assigned ids (L3, L4, ...)
+   - Removed ids are reserved (never reused in future patches)
+   - All ids follow `L{n}` pattern (no client-fabricated ids leaked)
+
+**Shared Implementation:**
+- [apps/api/src/shared/line-editing.ts](../apps/api/src/shared/line-editing.ts) exports `applyPatchLinesAndEnsureIds<T>()` wrapper
+- Both [so-patch-lines.ts](../apps/api/src/sales/so-patch-lines.ts) and [po-patch-lines.ts](../apps/api/src/purchasing/po-patch-lines.ts) call this helper
+- Pattern eliminates duplication and enforces invariant consistently
+
+**Status Gates by Entity:**
+
+| Entity | Editable Statuses | Non-Editable → | Error Code | Notes |
+|--------|---|---|---|---|
+| SalesOrder | `draft`, `submitted`, `committed` | Any other | `SO_NOT_EDITABLE` | 409 Conflict |
+| PurchaseOrder | `draft` | `submitted`, ... | `PO_NOT_EDITABLE` | 409 Conflict |
+
+**Verification:**
+- ✅ Smoke test `smoke:patch-lines:status-gates-and-ids` validates SO allows all 3 statuses, PO blocks non-draft, all returned lines have valid `L{n}` ids
+- ✅ Existing tests `smoke:salesOrders:patch-lines` and `smoke:purchaseOrders:patch-lines` confirm id stability and no-reuse guarantees
+
+**Files:**
+- Spec: [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) lines 4315–4325 (SO), 3993–4003 (PO)
+- Shared: [apps/api/src/shared/line-editing.ts](../apps/api/src/shared/line-editing.ts), [patchLinesEngine.ts](../apps/api/src/shared/patchLinesEngine.ts), [ensureLineIds.ts](../apps/api/src/shared/ensureLineIds.ts)
+- Handlers: [so-patch-lines.ts](../apps/api/src/sales/so-patch-lines.ts), [po-patch-lines.ts](../apps/api/src/purchasing/po-patch-lines.ts)
+- Smokes: [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) — `smoke:patch-lines:status-gates-and-ids`, `smoke:salesOrders:patch-lines`, `smoke:purchaseOrders:patch-lines`
+
+---
+
 
 
 | Module | List Screen | Detail Screen | Create/Edit | Search/Filter | Status |

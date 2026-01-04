@@ -6,7 +6,8 @@ import { resolveTenantId } from "../common/tenant";
 import { badRequest, conflictError, internalError, notFound } from "../common/responses";
 import { logger } from "../common/logger";
 import { type PatchLineOp } from "../shared/patchLines";
-import { runPatchLinesEngine, PatchLinesValidationError } from "../shared/patchLinesEngine";
+import { PatchLinesValidationError } from "../shared/patchLinesEngine";
+import { applyPatchLinesAndEnsureIds } from "../shared/line-editing";
 
 // Types aligned with existing sales order handlers
 type SOLine = {
@@ -63,7 +64,7 @@ function parseOps(event: APIGatewayProxyEventV2): PatchLineOp[] | null {
 
 const PATCH_OPTIONS = {
   entityLabel: "salesOrder",
-  editableStatuses: ["draft"],
+  editableStatuses: ["draft", "submitted", "committed"],
   patchableFields: ["itemId", "qty", "uom"],
 } as const;
 
@@ -87,9 +88,8 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     so = await loadSO(tenantId, id);
     if (!so) return notFound("Sales order not found", requestId);
 
-    const { nextLines } = runPatchLinesEngine<SOLine>({ currentDoc: so, ops, options: PATCH_OPTIONS });
-
-    so.lines = nextLines;
+    const { lines: normalizedLines } = applyPatchLinesAndEnsureIds<SOLine>(so, ops, PATCH_OPTIONS);
+    so.lines = normalizedLines;
     await saveSO(so);
 
     logger.info(logCtx, "so-patch-lines.saved", { soId: so.id, lineCount: (so.lines || []).length });

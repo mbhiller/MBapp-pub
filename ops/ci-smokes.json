@@ -30,7 +30,7 @@
   "smoke:sales:commit-with-location",
   "smoke:sales:fulfill-without-reserve",
   "smoke:salesOrders:patch-lines",
-  "smoke:salesOrders:patch-lines-draft-only-after-submit",
+  "smoke:salesOrders:patch-lines-after-submit",
   "smoke:salesOrders:patch-lines:validation",
   "smoke:salesOrders:fulfill-idempotency-replay",
   "smoke:salesOrders:fulfill-idempotency-key-reuse-different-payload",

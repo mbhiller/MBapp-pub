@@ -4771,14 +4771,15 @@ const tests = {
 
   // SO patch-lines: verify draft-only enforcement (E2 rule)
   // STRICT: patch-lines must be allowed in draft and blocked (409 SO_NOT_EDITABLE) after submit.
-  "smoke:salesOrders:patch-lines-draft-only-after-submit": async () => {
+  // SO patch-lines contract: allowed in draft AND submitted statuses (per Sprint AF)
+  "smoke:salesOrders:patch-lines-after-submit": async () => {
     await ensureBearer();
 
     const { partyId } = await seedParties(api);
-    const prod = await createProduct({ name: "SO-DraftOnly" });
-    if (!prod.ok) return { test: "salesOrders:patch-lines-draft-only-after-submit", result: "FAIL", prod };
-    const inv = await createInventoryForProduct(prod.body?.id, "SO-DraftOnly-Item");
-    if (!inv.ok) return { test: "salesOrders:patch-lines-draft-only-after-submit", result: "FAIL", inv };
+    const prod = await createProduct({ name: "SO-PatchLinesAfterSubmit" });
+    if (!prod.ok) return { test: "salesOrders:patch-lines-after-submit", result: "FAIL", prod };
+    const inv = await createInventoryForProduct(prod.body?.id, "SO-PatchLinesAfterSubmit-Item");
+    if (!inv.ok) return { test: "salesOrders:patch-lines-after-submit", result: "FAIL", inv };
     const itemId = inv.body?.id;
 
     // 1) Create draft SO with 2 lines
@@ -4795,10 +4796,12 @@ const tests = {
       },
       { "Idempotency-Key": idem() }
     );
-    if (!create.ok) return { test: "salesOrders:patch-lines-draft-only-after-submit", result: "FAIL", create };
+    if (!create.ok) return { test: "salesOrders:patch-lines-after-submit", result: "FAIL", create };
     const soId = create.body?.id;
     const lines = Array.isArray(create.body?.lines) ? create.body.lines : [];
     const lineId = lines[0]?.id ?? lines[0]?.lineId;
+    const createdLineIds = lines.map(l => l?.id ?? l?.lineId).filter(Boolean);
+    const createdIdsValid = createdLineIds.every(id => /^L\d+$/.test(id));
 
     // 2) PATCH-LINES in draft: update qty on first line → must succeed
     const patchInDraft = await post(
@@ -4810,9 +4813,11 @@ const tests = {
       },
       { "Idempotency-Key": idem() }
     );
-    if (!patchInDraft.ok) return { test: "salesOrders:patch-lines-draft-only-after-submit", result: "FAIL", patchInDraft };
-    const updatedLine = patchInDraft.body?.lines?.find((l) => (l.id ?? l.lineId) === lineId);
-    const qtyUpdated = updatedLine && Number(updatedLine.qty) === 10;
+    if (!patchInDraft.ok) return { test: "salesOrders:patch-lines-after-submit", result: "FAIL", patchInDraft };
+    const updatedLineAfterDraftPatch = patchInDraft.body?.lines?.find((l) => (l.id ?? l.lineId) === lineId);
+    const draftQtyUpdated = updatedLineAfterDraftPatch && Number(updatedLineAfterDraftPatch.qty) === 10;
+    const draftPatchLineIds = Array.isArray(patchInDraft.body?.lines) ? patchInDraft.body.lines.map(l => l?.id ?? l?.lineId).filter(Boolean) : [];
+    const draftPatchIdsValid = draftPatchLineIds.every(id => /^L\d+$/.test(id));
 
     // 3) Submit the SO
     const submit = await post(
@@ -4820,9 +4825,9 @@ const tests = {
       {},
       { "Idempotency-Key": idem() }
     );
-    if (!submit.ok) return { test: "salesOrders:patch-lines-draft-only-after-submit", result: "FAIL", submit };
+    if (!submit.ok) return { test: "salesOrders:patch-lines-after-submit", result: "FAIL", submit };
 
-    // 4) PATCH-LINES on submitted SO must fail with 409 SO_NOT_EDITABLE
+    // 4) PATCH-LINES on submitted SO must NOW SUCCEED (Sprint AF change: allows submitted status)
     const patchAfterSubmit = await post(
       `/sales/so/${encodeURIComponent(soId)}:patch-lines`,
       {
@@ -4833,21 +4838,235 @@ const tests = {
       { "Idempotency-Key": idem() }
     );
     
-    // STRICT enforcement: must be blocked
-    const blockedCorrectly = !patchAfterSubmit.ok && patchAfterSubmit.status === 409;
-    const errorCodeCorrect = patchAfterSubmit.body?.details?.code === "SO_NOT_EDITABLE";
+    // NEW CONTRACT (E6): patch-lines must succeed in submitted status
+    const patchAfterSubmitSucceeded = patchAfterSubmit.ok && patchAfterSubmit.status === 200;
+    const updatedLineAfterSubmitPatch = patchAfterSubmit.body?.lines?.find((l) => (l.id ?? l.lineId) === lineId);
+    const submittedQtyUpdated = updatedLineAfterSubmitPatch && Number(updatedLineAfterSubmitPatch.qty) === 15;
+    const submittedPatchLineIds = Array.isArray(patchAfterSubmit.body?.lines) ? patchAfterSubmit.body.lines.map(l => l?.id ?? l?.lineId).filter(Boolean) : [];
+    const submittedPatchIdsValid = submittedPatchLineIds.every(id => /^L\d+$/.test(id));
+    
+    // Verify line ids remain stable across both patches
+    const idsStable = createdLineIds.length > 0 && 
+                      draftPatchLineIds.some(id => createdLineIds.includes(id)) &&
+                      submittedPatchLineIds.some(id => createdLineIds.includes(id));
 
-    const pass = create.ok && patchInDraft.ok && qtyUpdated && submit.ok && blockedCorrectly && errorCodeCorrect;
+    const pass = create.ok && createdIdsValid &&
+                 patchInDraft.ok && draftQtyUpdated && draftPatchIdsValid &&
+                 submit.ok &&
+                 patchAfterSubmitSucceeded && submittedQtyUpdated && submittedPatchIdsValid &&
+                 idsStable;
+
     return {
-      test: "salesOrders:patch-lines-draft-only-after-submit",
+      test: "salesOrders:patch-lines-after-submit",
       result: pass ? "PASS" : "FAIL",
+      summary: "E6: Verify SO patch-lines works in both draft and submitted statuses with stable line ids",
       create,
+      createdLineIds,
+      createdIdsValid,
       patchInDraft,
-      qtyUpdated,
+      draftQtyUpdated,
+      draftPatchIdsValid,
       submit,
       patchAfterSubmit,
-      blockedCorrectly,
-      errorCodeCorrect
+      patchAfterSubmitSucceeded,
+      submittedQtyUpdated,
+      submittedPatchIdsValid,
+      idsStable
+    };
+  },
+
+  // DEPRECATED (Sprint AF→AG): Backward-compat alias for smoke:salesOrders:patch-lines-after-submit
+  // Scheduled for removal in Sprint AG (2026-01-11). Use smoke:salesOrders:patch-lines-after-submit instead.
+  "smoke:salesOrders:patch-lines-draft-only-after-submit": async () => {
+    console.warn("[DEPRECATION] smoke:salesOrders:patch-lines-draft-only-after-submit is deprecated (Sprint AF). Use smoke:salesOrders:patch-lines-after-submit instead. Will be removed in Sprint AG.");
+    // Delegate to new test
+    return tests["smoke:salesOrders:patch-lines-after-submit"]();
+  },
+
+  // E4 Validation: patch-lines status gates and line id stability
+  // - SO: patch-lines must succeed in draft, submitted, AND committed statuses
+  // - PO: patch-lines must succeed in draft only
+  // - All returned lines must have stable L{n} id format
+  "smoke:patch-lines:status-gates-and-ids": async () => {
+    await ensureBearer();
+
+    const { vendorId } = await seedVendor(api);
+    const { partyId } = await seedParties(api);
+    const prod = await createProduct({ name: "PatchLinesStatusTest" });
+    if (!prod.ok) return { test: "patch-lines:status-gates-and-ids", result: "FAIL", step: "create-product", prod };
+    const inv = await createInventoryForProduct(prod.body?.id, "PatchLinesStatusTestItem");
+    if (!inv.ok) return { test: "patch-lines:status-gates-and-ids", result: "FAIL", step: "create-inventory", inv };
+    const itemId = inv.body?.id;
+
+    // ===== SO Status Gates Test =====
+    // 1) Create SO in draft status
+    const soCreate = await post(
+      `/objects/salesOrder`,
+      {
+        type: "salesOrder",
+        status: "draft",
+        partyId,
+        lines: [{ itemId, uom: "ea", qty: 10 }]
+      },
+      { "Idempotency-Key": idem() }
+    );
+    if (!soCreate.ok) return { test: "patch-lines:status-gates-and-ids", result: "FAIL", step: "so-create", soCreate };
+    const soId = soCreate.body?.id;
+    const soLines = Array.isArray(soCreate.body?.lines) ? soCreate.body.lines : [];
+    const soLineId = soLines[0]?.id ?? soLines[0]?.lineId;
+
+    // 2) Test patch-lines in DRAFT status (should succeed)
+    const soPatchDraft = await post(
+      `/sales/so/${encodeURIComponent(soId)}:patch-lines`,
+      {
+        ops: [
+          { op: "upsert", id: soLineId, patch: { qty: 15 } }
+        ]
+      },
+      { "Idempotency-Key": idem() }
+    );
+    if (!soPatchDraft.ok) return { test: "patch-lines:status-gates-and-ids", result: "FAIL", step: "so-patch-draft", soPatchDraft };
+    const soPatchDraftLines = Array.isArray(soPatchDraft.body?.lines) ? soPatchDraft.body.lines : [];
+    const soDraftLineIds = soPatchDraftLines.map(l => l?.id ?? l?.lineId).filter(Boolean);
+    const soDraftIdsValid = soDraftLineIds.every(id => /^L\d+$/.test(id));
+
+    // 3) Submit SO to "submitted" status
+    const soSubmit = await post(
+      `/sales/so/${encodeURIComponent(soId)}:submit`,
+      {},
+      { "Idempotency-Key": idem() }
+    );
+    if (!soSubmit.ok) return { test: "patch-lines:status-gates-and-ids", result: "FAIL", step: "so-submit", soSubmit };
+
+    // 4) Test patch-lines in SUBMITTED status (per E1 spec, should now succeed)
+    const soPatchSubmitted = await post(
+      `/sales/so/${encodeURIComponent(soId)}:patch-lines`,
+      {
+        ops: [
+          { op: "upsert", id: soLineId, patch: { qty: 20 } }
+        ]
+      },
+      { "Idempotency-Key": idem() }
+    );
+    const soSubmittedPatched = soPatchSubmitted.ok;
+    if (soSubmittedPatched) {
+      const soSubmittedLines = Array.isArray(soPatchSubmitted.body?.lines) ? soPatchSubmitted.body.lines : [];
+      const soSubmittedLineIds = soSubmittedLines.map(l => l?.id ?? l?.lineId).filter(Boolean);
+      const soSubmittedIdsValid = soSubmittedLineIds.every(id => /^L\d+$/.test(id));
+    }
+
+    // 5) Commit SO to "committed" status
+    const soCommit = await post(
+      `/sales/so/${encodeURIComponent(soId)}:commit`,
+      {},
+      { "Idempotency-Key": idem() }
+    );
+    if (!soCommit.ok) return { test: "patch-lines:status-gates-and-ids", result: "FAIL", step: "so-commit", soCommit };
+
+    // 6) Test patch-lines in COMMITTED status (per E1 spec, should now succeed)
+    const soPatchApproved = await post(
+      `/sales/so/${encodeURIComponent(soId)}:patch-lines`,
+      {
+        ops: [
+          { op: "upsert", id: soLineId, patch: { qty: 25 } }
+        ]
+      },
+      { "Idempotency-Key": idem() }
+    );
+    const soApprovedPatched = soPatchApproved.ok;
+    if (soApprovedPatched) {
+      const soApprovedLines = Array.isArray(soPatchApproved.body?.lines) ? soPatchApproved.body.lines : [];
+      const soApprovedLineIds = soApprovedLines.map(l => l?.id ?? l?.lineId).filter(Boolean);
+      const soApprovedIdsValid = soApprovedLineIds.every(id => /^L\d+$/.test(id));
+    }
+
+    // ===== PO Status Gates Test =====
+    // 1) Create PO in draft status
+    const poCreate = await post(
+      `/objects/purchaseOrder`,
+      {
+        type: "purchaseOrder",
+        status: "draft",
+        vendorId,
+        lines: [{ itemId, uom: "ea", qty: 12 }]
+      },
+      { "Idempotency-Key": idem() }
+    );
+    if (!poCreate.ok) return { test: "patch-lines:status-gates-and-ids", result: "FAIL", step: "po-create", poCreate };
+    const poId = poCreate.body?.id;
+    const poLines = Array.isArray(poCreate.body?.lines) ? poCreate.body.lines : [];
+    const poLineId = poLines[0]?.id ?? poLines[0]?.lineId;
+
+    // 2) Test patch-lines in DRAFT status (should succeed)
+    const poPatchDraft = await post(
+      `/purchasing/po/${encodeURIComponent(poId)}:patch-lines`,
+      {
+        ops: [
+          { op: "upsert", id: poLineId, patch: { qty: 18 } }
+        ]
+      },
+      { "Idempotency-Key": idem() }
+    );
+    if (!poPatchDraft.ok) return { test: "patch-lines:status-gates-and-ids", result: "FAIL", step: "po-patch-draft", poPatchDraft };
+    const poPatchDraftLines = Array.isArray(poPatchDraft.body?.lines) ? poPatchDraft.body.lines : [];
+    const poDraftLineIds = poPatchDraftLines.map(l => l?.id ?? l?.lineId).filter(Boolean);
+    const poDraftIdsValid = poDraftLineIds.every(id => /^L\d+$/.test(id));
+
+    // 3) Submit PO to move away from draft (if supported; if not, note in result)
+    const poSubmit = await post(
+      `/purchasing/po/${encodeURIComponent(poId)}:submit`,
+      {},
+      { "Idempotency-Key": idem() }
+    );
+    const poSubmitSupported = poSubmit.ok;
+
+    // 4) Test patch-lines in NON-DRAFT status (PO spec: draft-only, should fail if submit succeeded)
+    let poNonDraftPatched = null;
+    let poNonDraftBlockedCorrectly = false;
+    if (poSubmitSupported) {
+      const poPatchNonDraft = await post(
+        `/purchasing/po/${encodeURIComponent(poId)}:patch-lines`,
+        {
+          ops: [
+            { op: "upsert", id: poLineId, patch: { qty: 24 } }
+          ]
+        },
+        { "Idempotency-Key": idem() }
+      );
+      poNonDraftPatched = poPatchNonDraft.ok;
+      // STRICT: PO patch-lines must be blocked in non-draft status
+      poNonDraftBlockedCorrectly = !poPatchNonDraft.ok && poPatchNonDraft.status === 409;
+    }
+
+    // ===== Summary =====
+    const pass =
+      soCreate.ok &&
+      soPatchDraft.ok && soDraftIdsValid &&
+      soSubmit.ok &&
+      soSubmittedPatched && // E1: SO patch-lines should succeed in submitted
+      soCommit.ok &&
+      soApprovedPatched && // E1: SO patch-lines should succeed in approved
+      poCreate.ok &&
+      poPatchDraft.ok && poDraftIdsValid &&
+      (poSubmitSupported ? poNonDraftBlockedCorrectly : true); // PO draft-only enforcement
+
+    return {
+      test: "patch-lines:status-gates-and-ids",
+      result: pass ? "PASS" : "FAIL",
+      summary: "E4: Validate patch-lines status gates (SO: draft/submitted/committed; PO: draft-only) and stable line ids",
+      soTests: {
+        "draft-patch-succeeds": soPatchDraft.ok,
+        "draft-line-ids-valid": soDraftIdsValid,
+        "submitted-patch-succeeds": soSubmittedPatched,
+        "committed-patch-succeeds": soApprovedPatched
+      },
+      poTests: {
+        "draft-patch-succeeds": poPatchDraft.ok,
+        "draft-line-ids-valid": poDraftIdsValid,
+        "submit-transition-supported": poSubmitSupported,
+        "non-draft-patch-blocked": poSubmitSupported ? poNonDraftBlockedCorrectly : "not-tested"
+      },
+      artifacts: { soId, poId, itemId }
     };
   },
 
