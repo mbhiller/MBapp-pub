@@ -1364,6 +1364,7 @@ paths:
                 $ref: '#/components/schemas/Error'
   /inventory/{id}/adjust:
     post:
+      x-mbapp-permission: inventory:write
       summary: Adjust on-hand (creates movement)
       parameters:
         - in: path
@@ -1387,6 +1388,7 @@ paths:
                 $ref: '#/components/schemas/InventoryMovement'
   /inventory/{id}:putaway:
     post:
+      x-mbapp-permission: inventory:write
       summary: Putaway inventory to location
       description: Creates a putaway movement; location trace only (no-op for onHand counters).
       parameters:
@@ -1418,6 +1420,7 @@ paths:
                 $ref: '#/components/schemas/Error'
   /inventory/{id}:cycle-count:
     post:
+      x-mbapp-permission: inventory:adjust
       summary: Reconcile on-hand via physical count
       description: |
         Performs a cycle count reconciliation. Computes delta = countedQty - currentOnHand.

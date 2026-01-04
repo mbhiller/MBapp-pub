@@ -2857,7 +2857,7 @@ const tests = {
     const item = await createInventoryForProduct(prodId, "AdjustNegativeItem");
     if (!item.ok) return { test: "inventory-adjust-negative", result: "FAIL", step: "createInventory", item };
     const itemId = item.body?.id;
-    recordCreated("inventory", itemId);
+    recordCreated({ type: "inventory", id: itemId, route: "/objects/inventory" });
 
     // Step 2: Ensure onHand is 5
     const ensure = await ensureOnHand(itemId, 5);
@@ -2901,6 +2901,82 @@ const tests = {
     }
 
     return { test: "inventory-adjust-negative", result: "PASS", itemId, beforeOnHand: 5, afterOnHand: onHandValue, available: availableValue, reserved: reservedValue };
+  },
+
+  "smoke:inventory:adjust-idempotent-replay": async () => {
+    await ensureBearer();
+
+    const prod = await createProduct({ name: "AdjustIdemTest" });
+    if (!prod.ok) return { test: "inventory-adjust-idempotent-replay", result: "FAIL", step: "createProduct", prod };
+    const item = await createInventoryForProduct(prod.body?.id, "AdjustIdemItem");
+    if (!item.ok) return { test: "inventory-adjust-idempotent-replay", result: "FAIL", step: "createInventory", item };
+    const itemId = item.body?.id;
+    recordCreated("inventory", itemId);
+
+    const before = await onhand(itemId);
+    if (!before.ok) return { test: "inventory-adjust-idempotent-replay", result: "FAIL", step: "fetchOnHandBefore", before };
+    const onHandBefore = Number(before.body?.items?.[0]?.onHand ?? 0);
+
+    const payload = { deltaQty: 4, note: "idem-replay" };
+    const idk = `idem_replay_${idem()}`;
+
+    const adjust1 = await post(`/inventory/${itemId}:adjust`, payload, { "Idempotency-Key": idk });
+    if (!adjust1.ok) return { test: "inventory-adjust-idempotent-replay", result: "FAIL", step: "adjust-first", adjust1 };
+    const mvId = adjust1.body?.movementId ?? adjust1.body?.id ?? null;
+    if (mvId) recordCreated({ type: "inventoryMovement", id: mvId, route: "/inventory/:id:adjust", meta: { action: "adjust", deltaQty: payload.deltaQty } });
+
+    const adjust2 = await post(`/inventory/${itemId}:adjust`, payload, { "Idempotency-Key": idk });
+    if (!adjust2.ok) return { test: "inventory-adjust-idempotent-replay", result: "FAIL", step: "adjust-replay", adjust2 };
+
+    const after = await onhand(itemId);
+    if (!after.ok) return { test: "inventory-adjust-idempotent-replay", result: "FAIL", step: "fetchOnHandAfter", after };
+    const onHandAfter = Number(after.body?.items?.[0]?.onHand ?? 0);
+    const expectedOnHand = onHandBefore + payload.deltaQty;
+    if (onHandAfter !== expectedOnHand) {
+      return { test: "inventory-adjust-idempotent-replay", result: "FAIL", step: "assertOnHand", expectedOnHand, onHandBefore, onHandAfter, payload };
+    }
+
+    const fetchMovementPage = async ({ limit = 50, next }) => {
+      const res = await get(`/inventory/${encodeURIComponent(itemId)}/movements`, { limit, next, sort: "desc" });
+      const items = Array.isArray(res.body?.items) ? res.body.items : [];
+      const pageInfo = res.body?.pageInfo ?? {};
+      return { items, pageInfo, body: res.body };
+    };
+
+    let occurrences = null;
+    try {
+      if (mvId) {
+        await findItemById({ fetchPage: fetchMovementPage, targetId: mvId, timeoutMs: 8000, pageSize: 50, maxPages: 100 });
+      }
+
+      const collected = [];
+      let cursor = undefined;
+      for (let i = 0; i < 40; i++) {
+        const { items, pageInfo } = await fetchMovementPage({ limit: 50, next: cursor });
+        collected.push(...items);
+        const nextCursor = pageInfo?.nextCursor ?? pageInfo?.next ?? null;
+        if (!nextCursor) break;
+        cursor = nextCursor;
+      }
+
+      occurrences = mvId ? collected.filter((m) => m.id === mvId).length : null;
+      if (mvId && occurrences !== 1) {
+        return { test: "inventory-adjust-idempotent-replay", result: "FAIL", step: "assertMovementOccurrences", mvId, occurrences, collectedCount: collected.length };
+      }
+    } catch (err) {
+      return { test: "inventory-adjust-idempotent-replay", result: "FAIL", step: "movementLookup", error: err?.message ?? String(err), debug: err?.debug };
+    }
+
+    return {
+      test: "inventory-adjust-idempotent-replay",
+      result: "PASS",
+      itemId,
+      mvId,
+      onHandBefore,
+      onHandAfter,
+      expectedOnHand,
+      occurrences
+    };
   },
 
   /* ===================== Sales Orders ===================== */
