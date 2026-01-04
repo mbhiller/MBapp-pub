@@ -3,7 +3,7 @@ import { DynamoDBDocumentClient, PutCommand, DeleteCommand, QueryCommand } from 
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 
 import { ok, bad, notFound, error } from "../common/responses";
-import { getObjectById, updateObject, buildSkuLock } from "./repo";
+import { updateObject, buildSkuLock } from "./repo";
 import { resolveObjectByIdWithAliases } from "./type-alias";
 import { getAuth, requirePerm } from "../auth/middleware";
 import { ensurePartyRole } from "../common/validators";
@@ -31,7 +31,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const { typeUsed, obj: existing } = resolved;
 
     // 1) Product SKU change → acquire new lock and delete old constant-SK lock
-    if (String(type).toLowerCase() === "product") {
+    if (String(typeUsed).toLowerCase() === "product") {
       const oldSku = (existing as any)?.sku;
       const newSku = patch?.sku;
       if (newSku && newSku !== oldSku) {

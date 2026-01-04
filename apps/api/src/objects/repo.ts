@@ -29,6 +29,8 @@ export type GetArgs = {
   type: string;
   id: string;
   fields?: string[];
+  /** When true, allow returning an item whose stored type differs (used for alias resolution). */
+  acceptAliasType?: boolean;
 };
 
 export type CreateArgs = {
@@ -112,6 +114,21 @@ function project<T extends AnyRecord>(obj: T, fields?: string[]): Partial<T> | T
 }
 
 // -------- Public API --------
+/**
+ * Canonicalize object type for storage.
+ * Treats inventory and inventoryItem as aliases; always writes as inventoryItem (canonical).
+ * Other types are normalized to lowercase for consistency.
+ */
+function canonicalWriteType(typeParam: string): string {
+  const raw = (typeParam || "").trim();
+  const normalized = raw.toLowerCase();
+  if (normalized === "inventory" || normalized === "inventoryitem") {
+    return "inventoryItem";
+  }
+  // Preserve caller casing for non-aliased types to match stored SK prefixes and type-sensitive logic.
+  return raw;
+}
+
 
 export async function createObject({ tenantId, type, body }: CreateArgs) {
   const needsLineIds = type === "salesOrder" || type === "purchaseOrder";
@@ -129,23 +146,23 @@ export async function createObject({ tenantId, type, body }: CreateArgs) {
     updatedAt: nowIso(),
   };
 
-  // enforce route type
-  item.type = type;
+  // Canonicalize type for storage (inventory/inventoryItem -> inventoryItem)
+  item.type = canonicalWriteType(type);
   item.id = id;
 
   await ddb.send(new PutCommand({ TableName: TABLE, Item: item }));
   return item;
 }
 
-export async function getObjectById({ tenantId, type, id, fields }: GetArgs) {
+export async function getObjectById({ tenantId, type, id, fields, acceptAliasType = false }: GetArgs) {
   const Key: AnyRecord = {
     [PK_ATTR]: tenantId,
     [SK_ATTR]: `${type}#${id}`,
   };
 
-  const res = await ddb.send(new GetCommand({ TableName: TABLE, Key }));
+  const res = await ddb.send(new GetCommand({ TableName: TABLE, Key, ConsistentRead: true }));
   if (!res.Item) return null;
-  if ((res.Item as AnyRecord).type !== type) return null;
+  if (!acceptAliasType && (res.Item as AnyRecord).type !== type) return null;
   return project(res.Item as AnyRecord, fields);
 }
 
@@ -170,6 +187,7 @@ export async function listObjects({
         ExpressionAttributeValues: { ":t": tenantId, ":prefix": `${type}#` },
         ExclusiveStartKey,
         Limit: limit,
+        ConsistentRead: true,
       })
     );
     const items = (res.Items || []) as AnyRecord[];
@@ -195,6 +213,7 @@ export async function listObjects({
         ExpressionAttributeValues: { ":t": tenantId, ":prefix": `${type}#` },
         ExclusiveStartKey,
         Limit: Math.max(limit * 2, 100), // Fetch extra to account for filtering
+        ConsistentRead: true,
       })
     );
 

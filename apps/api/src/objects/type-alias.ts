@@ -4,16 +4,39 @@
 import { getObjectById, listObjects, searchObjects, type GetArgs, type ListArgs } from "./repo";
 
 export function expandTypeAliases(type: string): string[] {
-  const t = (type || "").trim();
-  if (t === "inventory") return ["inventory", "inventoryItem"];
-  if (t === "inventoryItem") return ["inventoryItem", "inventory"];
-  return [t];
+  const raw = (type || "").trim();
+  const norm = raw.toLowerCase();
+
+  // Alias map keyed by lowercase route param; values preserve canonical casing and ordering preference.
+  if (norm === "inventory") return ["inventory", "inventoryItem"]; // legacy-first for inventory callers
+  if (norm === "inventoryitem") return ["inventoryItem", "inventory"]; // canonical-first for inventoryItem callers
+
+  // Non-aliased types must preserve the caller's original casing (e.g., backorderRequest).
+  // Provide lowercase fallback second to tolerate legacy lowercased SK prefixes, but keep caller casing first.
+  return norm !== raw ? [raw, norm] : [raw];
 }
+
+// Lightweight sanity check (no throw in prod; logs warn if regression detected).
+function selfCheckExpandTypeAliases() {
+  try {
+    const backorder = expandTypeAliases("backorderRequest");
+    if (backorder[0] !== "backorderRequest") {
+      console.warn("[type-alias] backorderRequest casing regression", { got: backorder });
+    }
+    const inv = expandTypeAliases("inventoryitem");
+    if (!inv.includes("inventoryItem") || !inv.includes("inventory")) {
+      console.warn("[type-alias] inventory alias regression", { got: inv });
+    }
+  } catch {
+    // Do not throw in runtime paths; this is a best-effort guard.
+  }
+}
+selfCheckExpandTypeAliases();
 
 type ResolveArgs = Omit<GetArgs, "type"> & { type: string };
 export async function resolveObjectByIdWithAliases({ tenantId, type, id, fields }: ResolveArgs) {
   for (const t of expandTypeAliases(type)) {
-    const obj = await getObjectById({ tenantId, type: t, id, fields });
+    const obj = await getObjectById({ tenantId, type: t, id, fields, acceptAliasType: true });
     if (obj) return { typeUsed: t, obj } as const;
   }
   return null;

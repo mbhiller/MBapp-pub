@@ -2337,6 +2337,45 @@ const tests = {
     return { test:"inventory-guards", result:guardOk?"PASS":"FAIL", item, rec, resv };
   },
 
+  // Verify legacy /objects/inventory writes are compatible with canonical inventoryItem storage and reads.
+  "smoke:inventory:canonical-write-legacy-compat": async () => {
+    await ensureBearer();
+
+    // Create a product to attach to the item (ensures productId is valid for environments that enforce it).
+    const prod = await createProduct({ name: `InvCompatProd-${SMOKE_RUN_ID}` });
+    if (!prod.ok) return { test: "inventory-canonical-write-legacy-compat", result: "FAIL", step: "createProduct", prod };
+
+    // Create via legacy route; server should store as canonical inventoryItem after E1.
+    const baseName = `InvCompatItem-${SMOKE_RUN_ID}-${Date.now()}`;
+    const legacyCreate = await post(`/objects/inventory`, {
+      type: "inventory",
+      name: smokeTag(baseName),
+      productId: prod.body?.id,
+      uom: "ea",
+    });
+    if (!legacyCreate.ok) return { test: "inventory-canonical-write-legacy-compat", result: "FAIL", step: "legacyCreate", legacyCreate };
+
+    const id = legacyCreate.body?.id;
+
+    // Legacy GET should work even if stored as inventoryItem (alias-aware resolution).
+    const getLegacy = await get(`/objects/inventory/${encodeURIComponent(id)}`);
+    // Canonical GET should also work.
+    const getCanonical = await get(`/objects/inventoryItem/${encodeURIComponent(id)}`);
+
+    const storedType = getCanonical.body?.type ?? getLegacy.body?.type;
+    const typeOk = storedType === "inventoryItem" || storedType === "inventory";
+    const pass = legacyCreate.ok && getLegacy.ok && getCanonical.ok && typeOk;
+
+    return {
+      test: "inventory-canonical-write-legacy-compat",
+      result: pass ? "PASS" : "FAIL",
+      legacyCreate,
+      getLegacy,
+      getCanonical,
+      storedType,
+    };
+  },
+
   "smoke:inventory:onhand-batch": async ()=>{
     await ensureBearer();
     const a = await post(`/objects/${ITEM_TYPE}`, { productId:"prod-a" });
