@@ -6,11 +6,22 @@ import { useViewsApi, type View as SavedView } from "../features/views/hooks";
 import { usePolicy } from "../providers/PolicyProvider";
 import { hasPerm } from "../lib/permissions";
 import { PERM_VIEW_WRITE } from "../generated/permissions";
+import { permissionDeniedMessage } from "../lib/permissionMessages";
 
+// All 11 entity types from spec (sorted by label for readability)
 const ENTITY_OPTIONS: Array<{ label: string; value?: string }> = [
   { label: "All" },
-  { label: "PO", value: "purchaseOrder" },
-  { label: "SO", value: "salesOrder" },
+  { label: "Account", value: "account" },
+  { label: "Class", value: "class" },
+  { label: "Division", value: "division" },
+  { label: "Employee", value: "employee" },
+  { label: "Event", value: "event" },
+  { label: "Inventory", value: "inventoryItem" },
+  { label: "Organization", value: "organization" },
+  { label: "Party", value: "party" },
+  { label: "Product", value: "product" },
+  { label: "Purchase Order", value: "purchaseOrder" },
+  { label: "Sales Order", value: "salesOrder" },
 ];
 
 export default function ViewsManageScreen({ route }: any) {
@@ -32,6 +43,15 @@ export default function ViewsManageScreen({ route }: any) {
   const [renameTarget, setRenameTarget] = React.useState<SavedView | null>(null);
   const [renameValue, setRenameValue] = React.useState("");
   const [renaming, setRenaming] = React.useState(false);
+
+  // Entity type selector modal state
+  const [showEntityTypeSelector, setShowEntityTypeSelector] = React.useState(false);
+
+  // Get label for current entity type (for display)
+  const getEntityTypeLabel = (value?: string): string => {
+    const opt = ENTITY_OPTIONS.find((o) => o.value === value || (!value && !o.value));
+    return opt?.label ?? "Select";
+  };
 
   const fetchPage = React.useCallback(
     async (cursor?: string, append = false) => {
@@ -92,7 +112,7 @@ export default function ViewsManageScreen({ route }: any) {
       fetchPage(undefined, false);
     } catch (e: any) {
       if (e?.status === 403) {
-        toast("Access denied — required: view:write", "error");
+        toast(permissionDeniedMessage(PERM_VIEW_WRITE), "error");
       } else {
         toast(`✗ Rename failed: ${e?.message ?? String(e)}`, "error");
       }
@@ -115,7 +135,7 @@ export default function ViewsManageScreen({ route }: any) {
               fetchPage(undefined, false);
             } catch (e: any) {
               if (e?.status === 403) {
-                toast("Access denied — required: view:write", "error");
+                toast(permissionDeniedMessage(PERM_VIEW_WRITE), "error");
               } else {
                 toast(`✗ Delete failed: ${e?.message ?? String(e)}`, "error");
               }
@@ -127,28 +147,31 @@ export default function ViewsManageScreen({ route }: any) {
     [del, fetchPage, toast]
   );
 
-  const renderChips = ENTITY_OPTIONS.map((opt) => {
-    const selected = entityType === opt.value || (!opt.value && !entityType);
+  // Render entity type dropdown selector (modal-based for better mobile UX with 11 types)
+  const renderEntityTypeSelector = () => {
     return (
       <Pressable
-        key={opt.label}
-        onPress={() => setEntityType(opt.value)}
+        onPress={() => setShowEntityTypeSelector(true)}
         style={{
-          paddingHorizontal: 12,
-          paddingVertical: 6,
-          borderRadius: 16,
-          backgroundColor: selected ? t.colors.primary : t.colors.card,
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
           borderWidth: 1,
-          borderColor: selected ? t.colors.primary : t.colors.border,
-          marginRight: 8,
+          borderColor: t.colors.border,
+          borderRadius: 8,
+          paddingHorizontal: 12,
+          paddingVertical: 10,
+          backgroundColor: t.colors.card,
+          marginBottom: 12,
         }}
       >
-        <Text style={{ color: selected ? t.colors.primaryText ?? "#fff" : t.colors.text, fontWeight: selected ? "700" : "500" }}>
-          {opt.label}
+        <Text style={{ color: t.colors.text, fontWeight: "500", flex: 1 }}>
+          Entity Type: <Text style={{ fontWeight: "700" }}>{getEntityTypeLabel(entityType)}</Text>
         </Text>
+        <Text style={{ color: t.colors.primary, fontSize: 16 }}>▼</Text>
       </Pressable>
     );
-  });
+  };
 
   const renderRow = (view: SavedView) => {
     return (
@@ -189,7 +212,7 @@ export default function ViewsManageScreen({ route }: any) {
           <Pressable
             onPress={() => {
               if (!canWriteViews) {
-                toast("Access denied — required: view:write", "warning");
+                toast(permissionDeniedMessage(PERM_VIEW_WRITE), "warning");
                 return;
               }
               openRename(view);
@@ -211,7 +234,7 @@ export default function ViewsManageScreen({ route }: any) {
           <Pressable
             onPress={() => {
               if (!canWriteViews) {
-                toast("Access denied — required: view:write", "warning");
+                toast(permissionDeniedMessage(PERM_VIEW_WRITE), "warning");
                 return;
               }
               handleDelete(view);
@@ -256,9 +279,7 @@ export default function ViewsManageScreen({ route }: any) {
           }}
         />
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: "row", marginBottom: 12 }}>
-          {renderChips}
-        </ScrollView>
+        {renderEntityTypeSelector()}
 
         {loading && items.length === 0 ? <ActivityIndicator /> : null}
 
@@ -334,6 +355,42 @@ export default function ViewsManageScreen({ route }: any) {
                 )}
               </Pressable>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Entity Type Selector Modal */}
+      <Modal visible={showEntityTypeSelector} transparent animationType="fade" onRequestClose={() => setShowEntityTypeSelector(false)}>
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.4)", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <View style={{ width: "100%", maxWidth: 420, backgroundColor: t.colors.card, borderRadius: 12, borderWidth: 1, borderColor: t.colors.border, maxHeight: "80%" }}>
+            <View style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: t.colors.border }}>
+              <Text style={{ color: t.colors.text, fontSize: 16, fontWeight: "700" }}>Select Entity Type</Text>
+            </View>
+            <ScrollView contentContainerStyle={{ paddingVertical: 8 }}>
+              {ENTITY_OPTIONS.map((opt) => {
+                const selected = entityType === opt.value || (!opt.value && !entityType);
+                return (
+                  <Pressable
+                    key={opt.label}
+                    onPress={() => {
+                      setEntityType(opt.value);
+                      setShowEntityTypeSelector(false);
+                    }}
+                    style={{
+                      paddingHorizontal: 16,
+                      paddingVertical: 12,
+                      backgroundColor: selected ? t.colors.bg : "transparent",
+                      borderLeftWidth: selected ? 4 : 0,
+                      borderLeftColor: selected ? t.colors.primary : "transparent",
+                    }}
+                  >
+                    <Text style={{ color: selected ? t.colors.primary : t.colors.text, fontWeight: selected ? "700" : "500", fontSize: 14 }}>
+                      {opt.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
           </View>
         </View>
       </Modal>

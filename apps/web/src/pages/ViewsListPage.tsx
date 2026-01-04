@@ -4,6 +4,7 @@ import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
 import { hasPerm } from "../lib/permissions";
 import { PERM_VIEW_WRITE } from "../generated/permissions";
+import { permissionDeniedMessage } from "../lib/permissionMessages";
 
 type View = {
   id: string;
@@ -100,7 +101,7 @@ export default function ViewsListPage() {
       fetchPage();
     } catch (err: any) {
       if (err?.status === 403) {
-        alert("Access denied \u2014 You lack permission to perform this action. Required: view:write");
+        alert(permissionDeniedMessage(PERM_VIEW_WRITE));
       } else {
         alert("Delete failed: " + formatError(err));
       }
