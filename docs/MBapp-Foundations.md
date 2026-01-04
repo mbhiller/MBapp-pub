@@ -529,10 +529,12 @@ Permissions are annotated in the spec as vendor extensions (`x-mbapp-permission`
 - `objects:write` (generic fallback for object mutations: backorder ignore/convert, location CRUD)
 - `purchase:write` (purchase order creation and suggestion)
 - `purchase:approve`, `purchase:receive`, `purchase:cancel`, `purchase:close` (granular PO state transitions)
+- `sales:write`, `sales:commit`, `sales:reserve`, `sales:fulfill`, `sales:cancel`, `sales:close` (sales order state transitions, Sprint AC)
 - `inventory:write`, `inventory:adjust` (inventory mutations)
+- `inventory:read`, `inventory:write` (inventoryItem CRUD via requireObjectPerm(), Sprint AC)
 - `party:write`, `product:write` (party/product mutations)
 
-**Generated artifacts (Sprint X E2):**
+**Generated artifacts (Sprint X E2, expanded Sprint AC):**
 
 The spec build pipeline automatically generates TypeScript and JSON permission artifacts from the annotations:
 
@@ -540,7 +542,7 @@ The spec build pipeline automatically generates TypeScript and JSON permission a
 2. **Generator:** [ops/tools/generate-permissions.mjs](../ops/tools/generate-permissions.mjs) (runs as part of `npm run spec:bundle`)
 3. **Outputs:**
    - [spec/generated/permissions.json](../spec/generated/permissions.json) — JSON map of `"METHOD /path"` → `"permission:key"`
-   - [spec/generated/permissions.ts](../spec/generated/permissions.ts) — TypeScript constants + types
+   - [spec/generated/permissions.ts](../spec/generated/permissions.ts) — TypeScript constants + types (31 endpoints, 18 permissions as of Sprint AC)
    - [apps/web/src/generated/permissions.ts](../apps/web/src/generated/permissions.ts) — Web convenience copy
    - [apps/mobile/src/generated/permissions.ts](../apps/mobile/src/generated/permissions.ts) — Mobile convenience copy
 
@@ -557,16 +559,17 @@ const requiredPerm = PERMISSIONS_BY_ENDPOINT['POST /purchasing/suggest-po']; // 
 const purchaseEndpoints = ENDPOINTS_BY_PERMISSION['purchase:write'];
 // ["POST /purchasing/po:create-from-suggestion", "POST /purchasing/suggest-po"]
 
-// Ergonomic aliases (Sprint X E4): Use these for cleaner permission checks
-import { PERM_OBJECTS_WRITE, PERM_PURCHASE_WRITE } from '../generated/permissions';
+// Ergonomic aliases (Sprint X E4, expanded Sprint AC): Use these for cleaner permission checks
+import { PERM_OBJECTS_WRITE, PERM_PURCHASE_WRITE, PERM_SALES_COMMIT } from '../generated/permissions';
 
 const canWrite = hasPerm(policy, PERM_OBJECTS_WRITE);  // cleaner than string literals
 const canPurchase = hasPerm(policy, PERM_PURCHASE_WRITE);
+const canCommitSO = hasPerm(policy, PERM_SALES_COMMIT);
 
 // All available exports:
 // - PERMISSIONS_BY_ENDPOINT (endpoint → permission map)
 // - ENDPOINTS_BY_PERMISSION (permission → endpoints array)
-// - PERM_OBJECTS_WRITE, PERM_PURCHASE_WRITE, etc. (ergonomic aliases)
+// - PERM_OBJECTS_WRITE, PERM_PURCHASE_*, PERM_SALES_*, PERM_INVENTORY_*, etc. (ergonomic aliases)
 // - PERMISSION_KEYS (array of all unique permission strings)
 // - PermissionKey, EndpointKey (TypeScript types)
 ```

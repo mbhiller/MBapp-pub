@@ -1811,6 +1811,7 @@ paths:
   /sales/so/{id}:submit:
     post:
       summary: Submit sales order
+      x-mbapp-permission: sales:write
       parameters:
         - in: path
           name: id
@@ -1828,6 +1829,7 @@ paths:
   /sales/so/{id}:commit:
     post:
       summary: Commit/allocate inventory for a sales order
+      x-mbapp-permission: sales:commit
       description: |
         Default is non-strict (200 with `shortages[]` when partially available).
         Set `?strict=1` or `{ "strict": true }` to require full availability (409 on shortage).
@@ -1867,6 +1869,7 @@ paths:
   /sales/so/{id}:reserve:
     post:
       summary: Reserve specific line quantities on a sales order
+      x-mbapp-permission: sales:reserve
       description: Valid from **submitted** or **committed**.
       parameters:
         - in: path
@@ -1913,6 +1916,7 @@ paths:
   /sales/so/{id}:release:
     post:
       summary: Release previously reserved quantity
+      x-mbapp-permission: sales:reserve
       parameters:
         - in: path
           name: id
@@ -1942,6 +1946,7 @@ paths:
   /sales/so/{id}:patch-lines:
     post:
       summary: Apply patch operations to sales order lines (draft/submitted/approved)
+      x-mbapp-permission: sales:write
       description: Patch lines while the sales order is editable (draft, submitted, or approved). Non-editable states reject with 409. Server preserves existing line ids and assigns stable ids (e.g., L1, L2, ...) for new lines.
       operationId: patchSalesOrderLines
       parameters:
@@ -1973,6 +1978,7 @@ paths:
   /sales/so/{id}:fulfill:
     post:
       summary: Fulfill (ship/pick) SO lines
+      x-mbapp-permission: sales:fulfill
       parameters:
         - in: path
           name: id
@@ -2028,6 +2034,7 @@ paths:
   /sales/so/{id}:cancel:
     post:
       summary: Cancel sales order
+      x-mbapp-permission: sales:cancel
       description: Blocked when **net reservations > 0** or **any fulfillments** exist.
       parameters:
         - in: path
@@ -2052,6 +2059,7 @@ paths:
   /sales/so/{id}:close:
     post:
       summary: Close sales order (allowed from fulfilled)
+      x-mbapp-permission: sales:close
       parameters:
         - in: path
           name: id

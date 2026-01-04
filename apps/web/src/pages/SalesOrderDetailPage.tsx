@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
 import { hasPerm } from "../lib/permissions";
+import { PERM_SALES_WRITE, PERM_SALES_COMMIT, PERM_SALES_RESERVE, PERM_SALES_FULFILL, PERM_SALES_CLOSE, PERM_SALES_CANCEL } from "../generated/permissions";
 import LocationPicker from "../components/LocationPicker";
 import { getOnHandByLocation, type InventoryOnHandByLocationItem } from "../lib/inventory";
 import { listLocations, type Location } from "../lib/locations";
@@ -381,7 +382,8 @@ export default function SalesOrderDetailPage() {
         
         // Handle 403 Forbidden (missing permission)
         if (e?.status === 403) {
-          setActionError("Access denied: you lack permission to perform this action.");
+          const requiredPerm = details?.requiredPermission || "sales operation";
+          setActionError(`Access denied — required: ${requiredPerm}`);
           return;
         }
         
@@ -700,14 +702,14 @@ export default function SalesOrderDetailPage() {
   }, [backorders]);
 
   const status = order?.status ?? "";
-  const canEdit = status === "draft" && hasPerm(policy, "sales:write") && !policyLoading;
-  const canSubmit = status === "draft" && hasPerm(policy, "sales:write") && !policyLoading;
-  const canCommit = (status === "submitted" || status === "committed" || status === "draft") && hasPerm(policy, "sales:commit") && !policyLoading;
-  const canReserve = (status === "submitted" || status === "committed") && hasPerm(policy, "sales:reserve") && !policyLoading;
-  const canRelease = status !== "cancelled" && status !== "closed" && status !== "draft" && hasPerm(policy, "sales:reserve") && !policyLoading;
-  const canFulfill = (status === "committed" || status === "partially_fulfilled" || status === "submitted") && hasPerm(policy, "sales:fulfill") && !policyLoading;
-  const canClose = (status === "fulfilled" || status === "partially_fulfilled" || status === "committed") && hasPerm(policy, "sales:close") && !policyLoading;
-  const canCancel = status !== "cancelled" && status !== "closed" && status !== "fulfilled" && hasPerm(policy, "sales:cancel") && !policyLoading;
+  const canEdit = status === "draft" && hasPerm(policy, PERM_SALES_WRITE) && !policyLoading;
+  const canSubmit = status === "draft" && hasPerm(policy, PERM_SALES_WRITE) && !policyLoading;
+  const canCommit = (status === "submitted" || status === "committed" || status === "draft") && hasPerm(policy, PERM_SALES_COMMIT) && !policyLoading;
+  const canReserve = (status === "submitted" || status === "committed") && hasPerm(policy, PERM_SALES_RESERVE) && !policyLoading;
+  const canRelease = status !== "cancelled" && status !== "closed" && status !== "draft" && hasPerm(policy, PERM_SALES_RESERVE) && !policyLoading;
+  const canFulfill = (status === "committed" || status === "partially_fulfilled" || status === "submitted") && hasPerm(policy, PERM_SALES_FULFILL) && !policyLoading;
+  const canClose = (status === "fulfilled" || status === "partially_fulfilled" || status === "committed") && hasPerm(policy, PERM_SALES_CLOSE) && !policyLoading;
+  const canCancel = status !== "cancelled" && status !== "closed" && status !== "fulfilled" && hasPerm(policy, PERM_SALES_CANCEL) && !policyLoading;
   const showLocSelectors = canFulfill || canReserve;
 
   const lines = useMemo(() => order?.lines ?? [], [order?.lines]);

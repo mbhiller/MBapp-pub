@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
 import { hasPerm } from "../lib/permissions";
+import { PERM_SALES_WRITE } from "../generated/permissions";
 import { ViewSelector } from "../components/ViewSelector";
 import { SaveViewButton } from "../components/SaveViewButton";
 import { mapViewToSOFilters } from "../lib/viewFilterMappers";
@@ -39,7 +40,7 @@ export default function SalesOrdersListPage() {
   const [error, setError] = useState<string | null>(null);
   const [appliedView, setAppliedView] = useState<ViewConfig | null>(null);
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
-  const canCreateSalesOrder = hasPerm(policy, "sales:write") && !policyLoading;
+  const canCreateSalesOrder = hasPerm(policy, PERM_SALES_WRITE) && !policyLoading;
 
   const queryParams = useMemo(() => {
     const q: Record<string, string | number | boolean | undefined> = {
