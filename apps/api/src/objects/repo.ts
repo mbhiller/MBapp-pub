@@ -9,6 +9,7 @@ import {
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { ensureLineIds } from "../shared/ensureLineIds";
+import { normalizeTypeParam } from "./type-alias";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -90,16 +91,18 @@ function decodeNext(token?: string | null) {
 /**
  * Compute table keys for an item (Layout A).
  * Table PK is PK_ATTR (e.g., "pk") containing the tenant id.
- * Table SK is SK_ATTR (e.g., "sk") containing `${type}#${id}`.
+ * Table SK is SK_ATTR (e.g., "sk") containing `${canonicalType}#${id}`.
  * We also keep plain `id` and `type` for client convenience.
+ * Type is normalized to canonical form to prevent casing mismatches in SK prefixes.
  */
 function computeKeys(tenantId: string | undefined, type: string, id: string) {
-  const skValue = `${type}#${id}`;
+  const canonicalType = normalizeTypeParam(type) ?? type;
+  const skValue = `${canonicalType}#${id}`;
   return {
     [PK_ATTR]: tenantId,
     [SK_ATTR]: skValue,
     id,
-    type,
+    type: canonicalType,
   } as AnyRecord;
 }
 
@@ -114,24 +117,10 @@ function project<T extends AnyRecord>(obj: T, fields?: string[]): Partial<T> | T
 }
 
 // -------- Public API --------
-/**
- * Canonicalize object type for storage.
- * Treats inventory and inventoryItem as aliases; always writes as inventoryItem (canonical).
- * Other types are normalized to lowercase for consistency.
- */
-function canonicalWriteType(typeParam: string): string {
-  const raw = (typeParam || "").trim();
-  const normalized = raw.toLowerCase();
-  if (normalized === "inventory" || normalized === "inventoryitem") {
-    return "inventoryItem";
-  }
-  // Preserve caller casing for non-aliased types to match stored SK prefixes and type-sensitive logic.
-  return raw;
-}
-
 
 export async function createObject({ tenantId, type, body }: CreateArgs) {
-  const needsLineIds = type === "salesOrder" || type === "purchaseOrder";
+  const canonicalType = normalizeTypeParam(type) ?? type;
+  const needsLineIds = canonicalType === "salesOrder" || canonicalType === "purchaseOrder";
   const normalizedBody = needsLineIds && Array.isArray((body as AnyRecord)?.lines)
     ? { ...body, lines: ensureLineIds((body as AnyRecord).lines as AnyRecord[]) }
     : body;
@@ -141,13 +130,13 @@ export async function createObject({ tenantId, type, body }: CreateArgs) {
 
   const item: AnyRecord = {
     ...normalizedBody,
-    ...computeKeys(tenantId!, type, id),
+    ...computeKeys(tenantId!, canonicalType, id),
     createdAt,
     updatedAt: nowIso(),
   };
 
-  // Canonicalize type for storage (inventory/inventoryItem -> inventoryItem)
-  item.type = canonicalWriteType(type);
+  // Type is already canonical from computeKeys; ensure consistency
+  item.type = canonicalType;
   item.id = id;
 
   await ddb.send(new PutCommand({ TableName: TABLE, Item: item }));
@@ -155,14 +144,15 @@ export async function createObject({ tenantId, type, body }: CreateArgs) {
 }
 
 export async function getObjectById({ tenantId, type, id, fields, acceptAliasType = false }: GetArgs) {
+  const canonicalType = normalizeTypeParam(type) ?? type;
   const Key: AnyRecord = {
     [PK_ATTR]: tenantId,
-    [SK_ATTR]: `${type}#${id}`,
+    [SK_ATTR]: `${canonicalType}#${id}`,
   };
 
   const res = await ddb.send(new GetCommand({ TableName: TABLE, Key, ConsistentRead: true }));
   if (!res.Item) return null;
-  if (!acceptAliasType && (res.Item as AnyRecord).type !== type) return null;
+  if (!acceptAliasType && (res.Item as AnyRecord).type !== canonicalType) return null;
   return project(res.Item as AnyRecord, fields);
 }
 
@@ -175,6 +165,7 @@ export async function listObjects({
   limit = 20,
   fields,
 }: ListArgs) {
+  const canonicalType = normalizeTypeParam(type) ?? type;
   // If no filters and no q, use simple path
   const hasFilters = filters && Object.keys(filters).length > 0;
   if (!hasFilters && !q) {
@@ -184,7 +175,7 @@ export async function listObjects({
         TableName: TABLE,
         KeyConditionExpression: `#pk = :t AND begins_with(#sk, :prefix)`,
         ExpressionAttributeNames: { "#pk": PK_ATTR, "#sk": SK_ATTR },
-        ExpressionAttributeValues: { ":t": tenantId, ":prefix": `${type}#` },
+        ExpressionAttributeValues: { ":t": tenantId, ":prefix": `${canonicalType}#` },
         ExclusiveStartKey,
         Limit: limit,
         ConsistentRead: true,
@@ -210,7 +201,7 @@ export async function listObjects({
         TableName: TABLE,
         KeyConditionExpression: `#pk = :t AND begins_with(#sk, :prefix)`,
         ExpressionAttributeNames: { "#pk": PK_ATTR, "#sk": SK_ATTR },
-        ExpressionAttributeValues: { ":t": tenantId, ":prefix": `${type}#` },
+        ExpressionAttributeValues: { ":t": tenantId, ":prefix": `${canonicalType}#` },
         ExclusiveStartKey,
         Limit: Math.max(limit * 2, 100), // Fetch extra to account for filtering
         ConsistentRead: true,
@@ -267,7 +258,7 @@ export async function listObjects({
   // Defensive guard: if outgoing cursor equals incoming cursor, we're stuck
   if (outgoingCursor && outgoingCursor === incomingCursorString) {
     console.warn(
-      `[objects/repo] Stuck cursor detected: type=${type}, tenantId=${tenantId}, cursor=${outgoingCursor.slice(0, 20)}...`
+      `[objects/repo] Stuck cursor detected: type=${canonicalType}, tenantId=${tenantId}, cursor=${outgoingCursor.slice(0, 20)}...`
     );
     return {
       items: collected.slice(0, limit).map((o) => project(o, fields)),
@@ -287,6 +278,7 @@ export async function searchObjects(args: ListArgs) {
 }
 
 export async function replaceObject({ tenantId, type, id, body }: ReplaceArgs) {
+  const canonicalType = normalizeTypeParam(type) ?? type;
   const existing = await getObjectById({ tenantId, type, id });
   const createdAt =
     (body.createdAt as string) ||
@@ -295,9 +287,9 @@ export async function replaceObject({ tenantId, type, id, body }: ReplaceArgs) {
 
   const item: AnyRecord = {
     ...body,
-    ...computeKeys(tenantId!, type, id),
+    ...computeKeys(tenantId!, canonicalType, id),
     id,
-    type,
+    type: canonicalType,
     createdAt,
     updatedAt: nowIso(),
   };
@@ -307,7 +299,8 @@ export async function replaceObject({ tenantId, type, id, body }: ReplaceArgs) {
 }
 
 export async function updateObject({ tenantId, type, id, body }: UpdateArgs) {
-  const needsLineIds = type === "salesOrder" || type === "purchaseOrder";
+  const canonicalType = normalizeTypeParam(type) ?? type;
+  const needsLineIds = canonicalType === "salesOrder" || canonicalType === "purchaseOrder";
   let normalizedBody: AnyRecord | UpdateArgs["body"] = body;
 
   if (needsLineIds && Array.isArray((body as AnyRecord)?.lines)) {
@@ -349,7 +342,7 @@ export async function updateObject({ tenantId, type, id, body }: UpdateArgs) {
   }
 
   names["#n_type"] = "type";
-  values[":v_type"] = type;
+  values[":v_type"] = canonicalType;
   sets.push("#n_type = :v_type");
 
   names["#n_updatedAt"] = "updatedAt";
@@ -358,7 +351,7 @@ export async function updateObject({ tenantId, type, id, body }: UpdateArgs) {
 
   const Key: AnyRecord = {
     [PK_ATTR]: tenantId,
-    [SK_ATTR]: `${type}#${id}`,
+    [SK_ATTR]: `${canonicalType}#${id}`,
   };
 
   const res = await ddb.send(
@@ -377,9 +370,10 @@ export async function updateObject({ tenantId, type, id, body }: UpdateArgs) {
 }
 
 export async function deleteObject({ tenantId, type, id }: DeleteArgs) {
+  const canonicalType = normalizeTypeParam(type) ?? type;
   const Key: AnyRecord = {
     [PK_ATTR]: tenantId,
-    [SK_ATTR]: `${type}#${id}`,
+    [SK_ATTR]: `${canonicalType}#${id}`,
   };
   await ddb.send(new DeleteCommand({ TableName: TABLE, Key }));
   return { ok: true };

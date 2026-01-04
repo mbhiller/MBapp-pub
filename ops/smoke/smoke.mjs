@@ -6142,6 +6142,109 @@ const tests = {
     };
   },
 
+  // === Sprint AK E5: Type casing and alias correctness ===
+  "smoke:objects:type-casing-and-alias": async () => {
+    await ensureBearer();
+    const { customerId } = await seedCustomer(api);
+    const { vendorId } = await seedVendor(api);
+
+    // A) SalesOrder: Create via canonical, GET via different casings
+    const soName = smokeTag(`SO-TypeCasing-${SMOKE_RUN_ID}`);
+    const soCreate = await post(`/objects/salesOrder`, {
+      type: "salesOrder",
+      status: "draft",
+      partyId: customerId,
+      name: soName,
+      lines: []
+    });
+    if (!soCreate.ok) return { test: "objects:type-casing-and-alias", result: "FAIL", step: "so-create", soCreate };
+    const soId = soCreate.body?.id;
+
+    // GET via canonical casing
+    const soCanonical = await get(`/objects/salesOrder/${encodeURIComponent(soId)}`);
+    // GET via lowercase
+    const soLower = await get(`/objects/salesorder/${encodeURIComponent(soId)}`);
+    // GET via uppercase
+    const soUpper = await get(`/objects/SALESORDER/${encodeURIComponent(soId)}`);
+
+    const soTestOk = soCanonical.ok && soCanonical.body?.id === soId
+      && soLower.ok && soLower.body?.id === soId
+      && soUpper.ok && soUpper.body?.id === soId;
+
+    // B) BackorderRequest: Create via SO commit flow, LIST using casing variant
+    const prodBo = await createProduct({ name: smokeTag(`BO-CasingTest-${SMOKE_RUN_ID}`) });
+    if (!prodBo.ok) return { test: "objects:type-casing-and-alias", result: "FAIL", step: "bo-product", prodBo };
+    const itemBo = await createInventoryForProduct(prodBo.body?.id, smokeTag(`BOItem-${SMOKE_RUN_ID}`));
+    if (!itemBo.ok) return { test: "objects:type-casing-and-alias", result: "FAIL", step: "bo-item", itemBo };
+    const itemBoId = itemBo.body?.id;
+
+    // Zero onhand to force backorder
+    const onhandBo = await onhand(itemBoId);
+    const qtyBo = onhandBo.body?.items?.[0]?.onHand ?? 0;
+    if (qtyBo > 0) await post(`/objects/inventoryMovement`, { itemId: itemBoId, type: "adjust", qty: -qtyBo });
+
+    const soBo = await post(`/objects/salesOrder`, {
+      type: "salesOrder",
+      status: "draft",
+      partyId: customerId,
+      lines: [{ itemId: itemBoId, qty: 5, uom: "ea" }]
+    });
+    if (!soBo.ok) return { test: "objects:type-casing-and-alias", result: "FAIL", step: "so-bo-create", soBo };
+    const soBoId = soBo.body?.id;
+
+    await post(`/sales/so/${encodeURIComponent(soBoId)}:submit`, {}, { "Idempotency-Key": idem() });
+    await post(`/sales/so/${encodeURIComponent(soBoId)}:commit`, {}, { "Idempotency-Key": idem() });
+
+    // Wait for backorder to appear
+    const boSearch = await waitForBackorders({ soId: soBoId, itemId: itemBoId, status: "open" });
+    const boFound = boSearch.ok && Array.isArray(boSearch.items) && boSearch.items.length > 0;
+    const boId = boFound ? boSearch.items[0].id : null;
+
+    // LIST using casing variant (lowercase)
+    const boListLower = await get(`/objects/backorderrequest`, { soId: soBoId });
+    const boListLowerOk = boListLower.ok && Array.isArray(boListLower.body?.items) && boListLower.body.items.length > 0;
+
+    // GET using casing variants
+    const boCanonical = boId ? await get(`/objects/backorderRequest/${encodeURIComponent(boId)}`) : { ok: false };
+    const boLower = boId ? await get(`/objects/backorderrequest/${encodeURIComponent(boId)}`) : { ok: false };
+    const boTestOk = boFound && boListLowerOk && boCanonical.ok && boLower.ok;
+
+    // C) Inventory alias: Create inventoryItem, GET via both /objects/inventory and /objects/inventoryItem
+    const prodInv = await createProduct({ name: smokeTag(`Inv-AliasTest-${SMOKE_RUN_ID}`) });
+    if (!prodInv.ok) return { test: "objects:type-casing-and-alias", result: "FAIL", step: "inv-product", prodInv };
+    
+    // Create via canonical route
+    const invCreate = await post(`/objects/inventoryItem`, {
+      type: "inventoryItem",
+      productId: prodInv.body?.id,
+      name: smokeTag(`InvItem-${SMOKE_RUN_ID}`),
+      uom: "ea"
+    });
+    if (!invCreate.ok) return { test: "objects:type-casing-and-alias", result: "FAIL", step: "inv-create", invCreate };
+    const invId = invCreate.body?.id;
+
+    // GET via canonical type
+    const invCanonical = await get(`/objects/inventoryItem/${encodeURIComponent(invId)}`);
+    // GET via alias
+    const invAlias = await get(`/objects/inventory/${encodeURIComponent(invId)}`);
+    // GET via casing variants
+    const invLower = await get(`/objects/inventoryitem/${encodeURIComponent(invId)}`);
+
+    const invTestOk = invCanonical.ok && invCanonical.body?.id === invId
+      && invAlias.ok && invAlias.body?.id === invId
+      && invLower.ok && invLower.body?.id === invId;
+
+    const pass = soTestOk && boTestOk && invTestOk;
+
+    return {
+      test: "objects:type-casing-and-alias",
+      result: pass ? "PASS" : "FAIL",
+      salesOrder: { create: soCreate, canonical: soCanonical, lower: soLower, upper: soUpper, testOk: soTestOk },
+      backorder: { found: boFound, listLower: boListLowerOk, canonical: boCanonical.ok, lower: boLower.ok, testOk: boTestOk },
+      inventory: { create: invCreate, canonical: invCanonical, alias: invAlias, lower: invLower, testOk: invTestOk }
+    };
+  },
+
   // === Sprint I: cursor pagination on objects list ===
   "smoke:objects:list-pagination": async () => {
     await ensureBearer();

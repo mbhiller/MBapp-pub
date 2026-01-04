@@ -220,6 +220,64 @@
 
 - **Outcome:** Wipe tool is hardened against accidental tenant deletion via multi-layer safety gates (allowlist, confirmation match, production block), resilient to transient DynamoDB failures (retries with backoff), and accessible via convenient npm scripts. Documentation in Foundations covers safety model, usage patterns, exit codes, and logging output. Ready for use in CI tenant reset workflows and dev cleanup.
 
+### Type Normalization & Aliasing — ✅ Complete (Sprint AK, 2026-01-04)
+
+**Epic Summary:** Eliminate type casing bugs; enforce canonical SK prefixes; harden inline type comparisons; add comprehensive smoke coverage.
+
+- **Canonical Type Helper (E1):**
+  - Created [apps/api/src/objects/type-alias.ts](../apps/api/src/objects/type-alias.ts) with `normalizeTypeParam()` and `expandTypeAliases()` helpers
+  - CANONICAL_TYPE_BY_LOWER map: 17 type mappings (salesOrder, purchaseOrder, inventoryItem, backorderRequest, inventoryMovement, product, party, etc.)
+  - `normalizeTypeParam(type)` returns canonical casing or null if unknown; preserves unknown types as-is
+  - `expandTypeAliases(type)` returns array of candidate types for fallback resolution (e.g., ["inventoryItem", "inventory"])
+
+- **Repo SK Canonical Prefixes (E2):**
+  - Updated [apps/api/src/objects/repo.ts](../apps/api/src/objects/repo.ts) `computeKeys()` to normalize type before SK construction
+  - All DynamoDB writes now use canonical SK prefixes: `inventoryItem#{id}`, `salesOrder#{id}`, `backorderRequest#{id}`, `inventoryMovement#{id}`
+  - Fixed regression risk: prevents `backorderrequest#` or `inventory#` SK prefixes from variant casing
+  - `createObject()`, `getObjectById()`, `listObjects()`, `updateObject()`, `deleteObject()` all use canonicalType
+
+- **CRUD Route Normalization (E3):**
+  - [create.ts](../apps/api/src/objects/create.ts): Normalizes type early, sets `body.type = canonicalType` before persist, uses canonical comparisons for type-specific logic (inventoryMovement/product/salesOrder/purchaseOrder/reservation)
+  - [update.ts](../apps/api/src/objects/update.ts): Replaced `String(type).toLowerCase()` comparisons with canonical `typeUsed === "product"` checks
+  - [get.ts](../apps/api/src/objects/get.ts): Already correct (uses `resolveObjectByIdWithAliases()` for alias-aware resolution)
+  - [delete.ts](../apps/api/src/objects/delete.ts): Already correct (resolves by alias, deletes with resolved `typeUsed`)
+
+- **Inline Type Comparison Hardening (E4):**
+  - [suggest-po.ts](../apps/api/src/purchasing/suggest-po.ts): Replaced `bo.type !== "backorderRequest"` with `normalizeTypeParam(bo.type) !== "backorderRequest"`
+  - [movements.ts](../apps/api/src/inventory/movements.ts): Replaced 3 instances of `m?.type === "inventoryMovement"` with `normalizeTypeParam(m?.type) === "inventoryMovement"`
+  - Protects against stored data with variant casing (`BackorderRequest`, `inventorymovement`) causing silent filter failures
+
+- **Smoke Coverage (E5):**
+  - New smoke test `smoke:objects:type-casing-and-alias` added to [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) and [ops/ci-smokes.json](../ops/ci-smokes.json)
+  - **Test Matrix:**
+    - SalesOrder: Create canonical, GET via `salesOrder`, `salesorder`, `SALESORDER` (all 200 ✅)
+    - BackorderRequest: Create via SO commit flow, LIST/GET using lowercase `backorderrequest` path (200 ✅)
+    - Inventory alias: Create `inventoryItem`, GET via both `/objects/inventory/{id}` and `/objects/inventoryItem/{id}` (both 200 ✅)
+  - **Regression Protection:** Would have caught original "backorderrequest" SK prefix bug (GET would 404 looking for `backorderRequest#` but finding `backorderrequest#`)
+
+- **Documentation (E6):**
+  - Added § 2.8 Object Type Normalization to [docs/MBapp-Foundations.md](../docs/MBapp-Foundations.md)
+  - Invariant documented: "Route params are case-insensitive; SK prefixes always use canonical type"
+  - Usage patterns, canonical type map, normalization helpers, and verification smokes all documented
+
+- **Definition of Done:**
+  - ✅ normalizeTypeParam() helper created and imported in all critical paths
+  - ✅ All repo SK building uses canonical types (verified via smoke test)
+  - ✅ All CRUD routes use canonical type for storage and comparisons
+  - ✅ All inline type checks hardened with normalizeTypeParam()
+  - ✅ Smoke test `smoke:objects:type-casing-and-alias` passes and added to CI
+  - ✅ TypeScript compilation clean
+  - ✅ Docs updated (Foundations.md § 2.8, Status.md Sprint AK)
+
+- **Impact:**
+  - 🛡️ Prevents SK prefix regressions (no more `backorderrequest#` or `inventory#` storage)
+  - 🛡️ Case-insensitive API routes (accept any casing, normalize to canonical)
+  - 🛡️ Alias resolution works end-to-end (inventory → inventoryItem)
+  - 🛡️ Inline type comparisons safe against variant casing in stored data
+  - 🛡️ CI validates casing/alias correctness on every deployment
+
+- Verification: `node ops/smoke/smoke.mjs smoke:objects:type-casing-and-alias` → PASS ✅
+
 ### InventoryItem Canonicalization — ✅ Complete (Sprint AH, 2026-01-04)
 
 - **Canonical writes:** /objects/inventory now stores as canonical `inventoryItem` via [apps/api/src/objects/repo.ts](../apps/api/src/objects/repo.ts#L115-L146) helper `canonicalWriteType`.

@@ -4,6 +4,7 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 
 import { ok, bad, error } from "../common/responses";
 import { createObject, buildSkuLock } from "./repo";
+import { normalizeTypeParam } from "./type-alias";
 import { getAuth, requirePerm } from "../auth/middleware";
 import { ensurePartyRole } from "../common/validators";
 import { featureReservationsEnabled } from "../flags";
@@ -21,11 +22,12 @@ export async function handle(event: APIGatewayProxyEventV2) {
     if (!type) return bad("Missing type");
     // Permission already checked by router via requireObjectPerm()
 
+    const canonicalType = normalizeTypeParam(type) ?? type;
     const body = event.body ? JSON.parse(event.body) : {};
 
     // ---- inventoryMovement normalization & reserve guard (INLINE, no helpers) ----
     // Do this *before* we overwrite body.type with the route param.
-    if (String(type).toLowerCase() === "inventorymovement") {
+    if (canonicalType === "inventoryMovement") {
       const MOVEMENT_ACTIONS = new Set(["receive","reserve","commit","fulfill","adjust","release","putaway","cycle_count"]);
       // Accept verb from action or legacy fields (including body.type if it held the verb)
       const incomingVerb = String(
@@ -88,11 +90,11 @@ export async function handle(event: APIGatewayProxyEventV2) {
     // ---- end inventoryMovement normalization ----
 
     // Route type is canonical for storage
-    body.type = type;
+    body.type = canonicalType;
 
     // 1) SKU uniqueness (products only) — constant SK lock
     let lockedSku: string | undefined;
-    if (String(type).toLowerCase() === "product" && body?.sku) {
+    if (canonicalType === "product" && body?.sku) {
       const lock = buildSkuLock(auth.tenantId, "pending", String(body.sku));
       await ddb.send(new PutCommand({
         TableName: TABLE,
@@ -110,9 +112,8 @@ export async function handle(event: APIGatewayProxyEventV2) {
 
     // 2) Tier-1 gate (SO/PO require party role)
     try {
-      const t = String(type || "");
-      const isSO = t.toLowerCase() === "salesorder";
-      const isPO = t.toLowerCase() === "purchaseorder";
+      const isSO = canonicalType === "salesOrder";
+      const isPO = canonicalType === "purchaseOrder";
       if (isSO || isPO) {
         const pid = body?.partyId || body?.customerId || body?.vendorId;
         if (!pid) return bad("Missing partyId");
@@ -125,7 +126,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
     }
 
     // 3) Reservation overlap check (create only)
-    if (String(type).toLowerCase() === "reservation") {
+    if (canonicalType === "reservation") {
       if (!featureReservationsEnabled(event)) {
         return { statusCode: 403, headers: { "content-type":"application/json" }, body: JSON.stringify({ message: "Feature not enabled" }) };
       }
@@ -181,7 +182,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
     }
 
     // 3) Create the object
-    const item = await createObject({ tenantId: auth.tenantId, type, body }) as { id: string } & Record<string, any>;
+    const item = await createObject({ tenantId: auth.tenantId, type: canonicalType, body }) as { id: string } & Record<string, any>;
 
     // 4) Finalize the SKU lock with real productId (same PK/SK)
     if (lockedSku) {

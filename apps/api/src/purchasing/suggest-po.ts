@@ -3,6 +3,7 @@ import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda
 import { GetCommand } from "@aws-sdk/lib-dynamodb";
 import { ddb, tableObjects } from "../common/ddb";
 import { getObjectById } from "../objects/repo";
+import { normalizeTypeParam } from "../objects/type-alias";
 import { ensureLineIds } from "../shared/ensureLineIds";
 import { resolveInventoryByEitherType } from "../backorders/related-refs";
 
@@ -220,7 +221,7 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
 
   for (const r of body.requests) {
     const bo = await loadBackorder(tenantId, r.backorderRequestId);
-    if (!bo || bo.type !== "backorderRequest") {
+    if (!bo || normalizeTypeParam(bo.type as string) !== "backorderRequest") {
       skipped.push({ backorderRequestId: r.backorderRequestId, reason: "NOT_FOUND" });
       continue;
     }
