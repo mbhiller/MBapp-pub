@@ -2,6 +2,7 @@ import { type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../providers/AuthProvider";
 import { hasPerm } from "../lib/permissions";
+import { PERM_INVENTORY_READ } from "../generated/permissions";
 
 export function Layout({ children }: { children: ReactNode }) {
   const { tenantId, token, setToken, policy, policyLoading, policyError } = useAuth();
@@ -13,7 +14,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const canViewProducts = hasPerm(policy, "product:read");
   const canViewSalesOrders = hasPerm(policy, "sales:read");
   const canViewPurchaseOrders = hasPerm(policy, "purchase:read");
-  const canViewInventory = hasPerm(policy, "inventory:read");
+  const canViewInventory = hasPerm(policy, PERM_INVENTORY_READ);
 
   return (
     <div style={{ fontFamily: "system-ui", minHeight: "100vh", background: "#f7f7f7", color: "#111" }}>

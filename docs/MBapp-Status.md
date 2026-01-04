@@ -105,6 +105,56 @@
 - **Alias-aware CRUD/search:** GET/UPDATE/DELETE/SEARCH use alias resolution for inventory ↔ inventoryItem in [apps/api/src/objects](../apps/api/src/objects) (get/update/delete handlers + `searchObjectsWithAliases` + `/inventory/search`).
 - **Legacy route compatibility smoke:** Added `smoke:inventory:canonical-write-legacy-compat` to [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) to ensure creating via `/objects/inventory` can be read from both inventory and inventoryItem routes; not yet added to CI list.
 
+### Inventory/Onhand Permissions Constant Migration — ✅ Complete (Sprint AI, 2026-01-04)
+
+**Epic Summary:** Formalize onhand permission enforcement via generated constants; eliminate hardcoded permission strings in web/mobile onhand code paths.
+
+- **Spec Status (Already Complete):**
+  - All three onhand endpoints already annotated with `x-mbapp-permission: inventory:read` in [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) (lines 3642, 3666, 3698):
+    - GET /inventory/{id}/onhand
+    - GET /inventory/{id}/onhand:by-location
+    - POST /inventory/onhand:batch
+  - Generated permission constants: `PERM_INVENTORY_READ = "inventory:read"` in spec/generated/permissions.ts, apps/web/src/generated/permissions.ts, apps/mobile/src/generated/permissions.ts
+
+- **API Enforcement (Already Complete):**
+  - All three onhand routes enforce `inventory:read` via `requirePerm(auth, "inventory:read")` in [apps/api/src/index.ts](../apps/api/src/index.ts#L345, L355, L363)
+  - Handler implementations (onhand-get.ts, onhand-by-location.ts, onhand-batch.ts) rely on router-layer permission check (no handler-level enforcement needed)
+
+- **Web Permission String Migration (E1):**
+  - [apps/web/src/components/Layout.tsx](../apps/web/src/components/Layout.tsx): Replaced hardcoded `hasPerm(policy, "inventory:read")` with `hasPerm(policy, PERM_INVENTORY_READ)` imported from generated/permissions.ts
+
+- **Mobile Permission String Migration (E2):**
+  - [apps/mobile/src/features/_shared/modules.ts](../apps/mobile/src/features/_shared/modules.ts): Replaced hardcoded `required: ["inventory:read"]` array with `required: [PERM_INVENTORY_READ]` imported from generated/permissions.ts
+
+- **Smoke Test Coverage (E3):**
+  - New smoke test `smoke:inventory:onhand-permission-denied` added to [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) that:
+    - Creates inventory item with onhand data (as admin)
+    - Mints restricted token lacking `inventory:read` (has product:read, party:read)
+    - Calls all three onhand endpoints → asserts 403 Forbidden on each
+    - Confirms permission enforcement is working end-to-end
+  - Test passes ✅
+
+- **CI Integration (E4):**
+  - `smoke:inventory:onhand-permission-denied` added to [ops/ci-smokes.json](../ops/ci-smokes.json) flows list (positioned after smoke:inventory:onhand-by-location)
+  - Will run in CI pipeline to lock-in permission enforcement
+
+- **Definition of Done:**
+  - ✅ Spec already annotated (no spec changes needed)
+  - ✅ API already enforcing (no API changes needed)
+  - ✅ Web/mobile migrated to PERM_* constants (no hardcoded strings remain)
+  - ✅ New permission-denial smoke added + passing
+  - ✅ Smoke registered in CI (will run on all future commits)
+  - ✅ Typecheck passes (web: clean; mobile: clean)
+  - ✅ No regressions (existing onhand smokes still pass)
+
+- **Outcome:** Onhand endpoints have formal permission coverage via generated constants and CI-locked permission-denial test. Clients (web/mobile) use centralized PERM_INVENTORY_READ constant instead of hardcoded strings, enabling easy future permission model changes.
+
+### InventoryItem Canonicalization — ✅ Complete (Sprint AH, 2026-01-04)
+
+- **Canonical writes:** /objects/inventory now stores as canonical `inventoryItem` via [apps/api/src/objects/repo.ts](../apps/api/src/objects/repo.ts#L115-L146) helper `canonicalWriteType`.
+- **Alias-aware CRUD/search:** GET/UPDATE/DELETE/SEARCH use alias resolution for inventory ↔ inventoryItem in [apps/api/src/objects](../apps/api/src/objects) (get/update/delete handlers + `searchObjectsWithAliases` + `/inventory/search`).
+- **Legacy route compatibility smoke:** Added `smoke:inventory:canonical-write-legacy-compat` to [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) to ensure creating via `/objects/inventory` can be read from both inventory and inventoryItem routes; not yet added to CI list.
+
 ### Views/Workspaces v1 Foundation — ✅ Complete (Sprint AB, 2026-01-04)
 
 **Epic Summary:** Lock in Views/Workspaces foundation with comprehensive RBAC enforcement, permission gating across web/mobile, and CI smoke coverage.

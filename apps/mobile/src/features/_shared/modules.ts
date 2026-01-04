@@ -1,5 +1,6 @@
 // apps/mobile/src/features/_shared/modules.ts
 import { FEATURE_RESERVATIONS_ENABLED, FEATURE_REGISTRATIONS_ENABLED } from "./flags";
+import { PERM_INVENTORY_READ } from "../../generated/permissions";
 
 export type ModuleEntry = {
   key: string;
@@ -116,7 +117,7 @@ export const MODULES: readonly ModuleEntry[] = [
   // Aliases for legacy keys (parties/products/purchaseorder/salesorder) handled by expandPolicyWithAliases()
 
   { key: "parties",       title: "Parties",          screen: "PartyList",      icon: "users",           required: ["party:read"] },
-  { key: "inventory",     title: "Inventory",        screen: "InventoryList",    icon: "boxes",           required: ["inventory:read"] },
+  { key: "inventory",     title: "Inventory",        screen: "InventoryList",    icon: "boxes",           required: [PERM_INVENTORY_READ] },
   { key: "products",      title: "Products",         screen: "ProductsList",     icon: "package",         required: ["product:read"] },
 
 

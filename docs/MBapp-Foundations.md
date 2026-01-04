@@ -139,6 +139,12 @@ const TENANT = process.env.MBAPP_TENANT_ID ?? "DemoTenant";
 - API objects layer resolves both types for GET/UPDATE/DELETE/LIST/SEARCH (inventoryItem first, inventory fallback) so callers can use either id/type during migration; `/objects/inventory` now persists as `inventoryItem` (canonical) while legacy read routes remain supported via alias resolution.
 - New code should write `inventoryItem` and read using alias-aware helpers (API: type-alias helpers; web/mobile: fetch inventoryItem then inventory on 404).
 
+**Onhand Endpoints & Permissions (Sprint AI):**
+- All three onhand endpoints (`GET /inventory/{id}/onhand`, `GET /inventory/{id}/onhand:by-location`, `POST /inventory/onhand:batch`) require `inventory:read` permission.
+- Permission enforcement: API enforces via `requirePerm(auth, "inventory:read")` in router; handlers rely on router check (no handler-level enforcement needed).
+- Generated constant: Use `PERM_INVENTORY_READ` imported from `apps/web/src/generated/permissions.ts` or `apps/mobile/src/generated/permissions.ts` instead of hardcoding `"inventory:read"` strings.
+- Wildcard matching: `inventory:read` permission is granted by `*:read` (read all types) or `*` (superuser) in user policy.
+- CI Coverage: `smoke:inventory:onhand-permission-denied` test validates permission enforcement; 403 Forbidden is returned when `inventory:read` is absent.
 
 
 ### 2.1 Idempotency & Error Handling
