@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../providers/AuthProvider";
 import { hasPerm } from "../lib/permissions";
+import { PERM_OBJECTS_WRITE, PERM_PURCHASE_WRITE } from "../generated/permissions";
 import {
   createPurchaseOrdersFromSuggestion,
   suggestPurchaseOrders,
   type PurchaseOrderDraft,
   type SuggestPoResponse,
 } from "../lib/api";
+import { convertBackorderRequest } from "../lib/backorders";
 
 function formatError(err: unknown): string {
   const e = err as any;
@@ -107,8 +109,9 @@ export default function SuggestPurchaseOrdersPage() {
   const navigate = useNavigate();
   const { token, tenantId, policy, policyLoading } = useAuth();
 
-  // Fail-closed permission check
-  const canCreatePO = hasPerm(policy, "purchase:write") && !policyLoading;
+  // Fail-closed permission checks
+  const canCreatePO = hasPerm(policy, PERM_PURCHASE_WRITE) && !policyLoading;
+  const canConvertBackorders = hasPerm(policy, PERM_OBJECTS_WRITE) && !policyLoading;
 
   const vendorIdFromState = (location.state as any)?.vendorId as string | undefined;
   const vendorIdFromQuery = new URLSearchParams(location.search || "").get("vendorId") || undefined;
@@ -119,7 +122,16 @@ export default function SuggestPurchaseOrdersPage() {
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionInfo, setActionInfo] = useState<string | null>(null);
   const [createdIds, setCreatedIds] = useState<string[]>([]);
+
+  // Stable idempotency keys for the page session (one per page load)
+  const createIdemKeyRef = useRef<string>(
+    `web:create-po-from-suggestion:${Date.now()}:${Math.random().toString(16).slice(2)}`
+  );
+  const convertIdemKeyRef = useRef<string>(
+    `web:convert-backorders:${Date.now()}:${Math.random().toString(16).slice(2)}`
+  );
 
   const drafts = useMemo<PurchaseOrderDraft[]>(
     () => resp?.drafts ?? (resp?.draft ? [resp.draft] : []),
@@ -151,11 +163,22 @@ export default function SuggestPurchaseOrdersPage() {
       setActionError("No drafts to create");
       return;
     }
+    if (creating) return; // Prevent concurrent clicks
+
     setCreating(true);
     setActionError(null);
+    setActionInfo(null);
+
     try {
+      // 1) Create PO(s) with stable idempotency key
       const results = await Promise.all(
-        drafts.map((draft) => createPurchaseOrdersFromSuggestion(draft, { token, tenantId }))
+        drafts.map((draft) =>
+          createPurchaseOrdersFromSuggestion(draft, {
+            token,
+            tenantId,
+            idempotencyKey: createIdemKeyRef.current,
+          })
+        )
       );
       const ids: string[] = [];
       results.forEach((res) => {
@@ -163,13 +186,68 @@ export default function SuggestPurchaseOrdersPage() {
         ids.push(...created);
       });
       setCreatedIds(ids);
+
       if (ids.length === 0) {
         setActionError("No purchase orders were created.");
-      } else {
-        navigate(`/purchase-orders/${encodeURIComponent(ids[0])}`);
+        setCreating(false);
+        return;
       }
-    } catch (err) {
-      setActionError(formatError(err));
+
+      // 2) Show success message
+      setActionInfo(`Created ${ids.length} purchase order${ids.length > 1 ? "s" : ""}.`);
+
+      // 3) Best-effort: convert referenced backorders if user has permission
+      if (canConvertBackorders) {
+        const allBackorderIds = new Set<string>();
+        drafts.forEach((draft) => {
+          draft.lines?.forEach((ln) => {
+            ln.backorderRequestIds?.forEach((boId) => allBackorderIds.add(boId));
+          });
+        });
+
+        if (allBackorderIds.size > 0) {
+          const backorderIds = Array.from(allBackorderIds);
+          let convertErrors = 0;
+          let forbidden = false;
+
+          for (const boId of backorderIds) {
+            try {
+              await convertBackorderRequest(boId, {
+                token: token || undefined,
+                tenantId: tenantId || "",
+              });
+            } catch (convErr: any) {
+              const is403 = convErr?.status === 403 || convErr?.statusCode === 403;
+              if (is403) forbidden = true;
+              else convertErrors++;
+              console.warn(`Failed to convert backorder ${boId}:`, convErr);
+            }
+          }
+
+          // Report partial failures (non-blocking)
+          if (forbidden) {
+            setActionInfo(
+              (prev) =>
+                `${prev || ""} Note: You lack permission to mark backorders as converted (objects:write).`
+            );
+          } else if (convertErrors > 0) {
+            setActionInfo(
+              (prev) =>
+                `${prev || ""} Warning: Failed to update ${convertErrors} backorder(s). See console for details.`
+            );
+          }
+        }
+      }
+
+      // 4) Navigate to first PO
+      navigate(`/purchase-orders/${encodeURIComponent(ids[0])}`);
+    } catch (err: any) {
+      const is403 = err?.status === 403 || err?.statusCode === 403;
+      if (is403) {
+        setActionError("Access denied: You lack permission to create purchase orders (purchase:write).");
+      } else {
+        setActionError(formatError(err));
+      }
     } finally {
       setCreating(false);
     }
@@ -221,6 +299,12 @@ export default function SuggestPurchaseOrdersPage() {
       {actionError && (
         <div style={{ padding: 12, marginBottom: 12, background: "#fee", color: "#b00020", borderRadius: 6 }}>
           {actionError}
+        </div>
+      )}
+
+      {actionInfo && (
+        <div style={{ padding: 12, marginBottom: 12, background: "#e3f2fd", color: "#1565c0", borderRadius: 6 }}>
+          {actionInfo}
         </div>
       )}
 
