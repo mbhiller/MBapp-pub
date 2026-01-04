@@ -4,6 +4,7 @@
   "smoke:products:crud",
   "smoke:inventory:crud",
   "smoke:inventory:onhand-by-location",
+  "smoke:inventory:onhand-permission-denied",
   "smoke:inventory:adjust-negative",
   "smoke:inventory:movements-by-location",
   "smoke:views:crud",

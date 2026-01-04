@@ -2392,6 +2392,156 @@ const tests = {
     return { test:"inventory-onhand-batch", result:ok?"PASS":"FAIL", a, b, recA, recB, batch };
   },
 
+  "smoke:inventory:onhand-permission-denied": async ()=>{
+    // Test: onhand endpoints require inventory:read permission and return 403 without it
+    // Flow:
+    //   1) Create product + inventory item with onhand data (as admin)
+    //   2) Mint read-only token (lacks inventory:read)
+    //   3) Try GET /inventory/{id}/onhand with restricted token → expect 403
+    //   4) Try GET /inventory/{id}/onhand:by-location with restricted token → expect 403
+    //   5) Try POST /inventory/onhand:batch with restricted token → expect 403
+
+    await ensureBearer();
+
+    // Step 1: Create product and inventory item (as admin bearer token)
+    const prod = await createProduct({ name: `OnhandPermTest-${SMOKE_RUN_ID}` });
+    if (!prod.ok) return { test: "inventory-onhand-permission-denied", result: "FAIL", step: "createProduct", prod };
+    const prodId = prod.body?.id;
+
+    const item = await post(`/objects/${ITEM_TYPE}`, { productId: prodId, name: smokeTag("OnhandPermItem") });
+    if (!item.ok) return { test: "inventory-onhand-permission-denied", result: "FAIL", step: "createItem", item };
+    const itemId = item.body?.id;
+
+    // Add some onhand data so endpoints return meaningful data (not just empty arrays)
+    const rec = await post(`/objects/${MV_TYPE}`, { itemId, action: "receive", qty: 5 });
+    if (!rec.ok) return { test: "inventory-onhand-permission-denied", result: "FAIL", step: "addMovement", rec };
+
+    // Step 2: Mint read-only token (policy with no inventory:read)
+    const readOnlyPayload = {
+      tenantId: TENANT,
+      policy: {
+        "product:read": true,  // Allow product reads but not inventory:read
+        "party:read": true     // Allow party reads but not inventory:read
+      }
+    };
+
+    const loginRes = await fetch(`${API}/auth/dev-login`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify(readOnlyPayload)
+    });
+
+    if (!loginRes.ok) {
+      const errText = await loginRes.text().catch(() => "");
+      return {
+        test: "inventory-onhand-permission-denied",
+        result: "FAIL",
+        step: "restricted-login",
+        status: loginRes.status,
+        error: errText
+      };
+    }
+
+    const loginData = await loginRes.json();
+    const restrictedToken = loginData.token;
+    if (!restrictedToken) {
+      return {
+        test: "inventory-onhand-permission-denied",
+        result: "FAIL",
+        step: "extract-token",
+        loginData
+      };
+    }
+
+    // Helper to make request with restricted token
+    const getWithToken = async (path, token) =>
+      fetch(`${API}${path}`, {
+        method: "GET",
+        headers: {
+          "authorization": `Bearer ${token}`,
+          "x-tenant-id": TENANT
+        }
+      });
+
+    const postWithToken = async (path, token, body) =>
+      fetch(`${API}${path}`, {
+        method: "POST",
+        headers: {
+          "authorization": `Bearer ${token}`,
+          "x-tenant-id": TENANT,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(body)
+      });
+
+    // Step 3: GET /inventory/{id}/onhand with restricted token → expect 403
+    const onhandRes = await getWithToken(`/inventory/${encodeURIComponent(itemId)}/onhand`, restrictedToken);
+    const onhandDenied = onhandRes.status === 403;
+    const onhandBody = await onhandRes.json().catch(() => ({}));
+
+    if (!onhandDenied) {
+      return {
+        test: "inventory-onhand-permission-denied",
+        result: "FAIL",
+        step: "onhand-get-not-denied",
+        expectedStatus: 403,
+        actualStatus: onhandRes.status,
+        body: onhandBody
+      };
+    }
+
+    // Step 4: GET /inventory/{id}/onhand:by-location with restricted token → expect 403
+    const byLocRes = await getWithToken(`/inventory/${encodeURIComponent(itemId)}/onhand:by-location`, restrictedToken);
+    const byLocDenied = byLocRes.status === 403;
+    const byLocBody = await byLocRes.json().catch(() => ({}));
+
+    if (!byLocDenied) {
+      return {
+        test: "inventory-onhand-permission-denied",
+        result: "FAIL",
+        step: "onhand-by-location-not-denied",
+        expectedStatus: 403,
+        actualStatus: byLocRes.status,
+        body: byLocBody
+      };
+    }
+
+    // Step 5: POST /inventory/onhand:batch with restricted token → expect 403
+    const batchRes = await postWithToken(`/inventory/onhand:batch`, restrictedToken, { itemIds: [itemId] });
+    const batchDenied = batchRes.status === 403;
+    const batchBody = await batchRes.json().catch(() => ({}));
+
+    if (!batchDenied) {
+      return {
+        test: "inventory-onhand-permission-denied",
+        result: "FAIL",
+        step: "onhand-batch-not-denied",
+        expectedStatus: 403,
+        actualStatus: batchRes.status,
+        body: batchBody
+      };
+    }
+
+    // All permission denials verified
+    return {
+      test: "inventory-onhand-permission-denied",
+      result: "PASS",
+      summary: "All onhand endpoints correctly enforce inventory:read permission",
+      assertions: {
+        onhandDenied,
+        byLocDenied,
+        batchDenied
+      },
+      artifacts: {
+        product: prodId,
+        item: itemId
+      }
+    };
+  },
+
   "smoke:inventory:list-movements": async ()=>{
     await ensureBearer();
     const item = await post(`/objects/${ITEM_TYPE}`, { productId:"prod-smoke" });
