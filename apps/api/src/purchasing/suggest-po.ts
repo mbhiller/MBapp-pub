@@ -4,6 +4,7 @@ import { GetCommand } from "@aws-sdk/lib-dynamodb";
 import { ddb, tableObjects } from "../common/ddb";
 import { getObjectById } from "../objects/repo";
 import { ensureLineIds } from "../shared/ensureLineIds";
+import { resolveInventoryByEitherType } from "../backorders/related-refs";
 
 /**
  * Request body shape
@@ -80,20 +81,13 @@ async function loadBackorder(tenantId: string, boId: string): Promise<any | null
 }
 
 /**
- * Load an inventory item to extract productId (works with either "inventory" or "inventoryItem" type)
+ * Load an inventory item to extract productId (inventory/inventoryItem aliases are both supported)
  */
 async function loadInventoryForProductId(tenantId: string, itemId: string): Promise<string | null> {
-  const invRes = await ddb.send(
-    new GetCommand({
-      TableName: tableObjects,
-      Key: { [PK]: tenantId, [SK]: `inventory#${itemId}` },
-    })
-  );
-  const inv = invRes.Item as any;
-  if (inv && (inv.type === "inventory" || inv.type === "inventoryItem")) {
-    return inv.productId ? String(inv.productId) : null;
-  }
-  return null;
+  // inventory and inventoryItem are aliases; resolve via shared helper so vendor derivation is resilient.
+  const inv = await resolveInventoryByEitherType({ tenantId, itemId });
+  const productId = inv?.obj?.productId;
+  return productId ? String(productId) : null;
 }
 
 /**

@@ -8,7 +8,7 @@ import { resolveTenantId } from "../common/tenant";
 import { listMovementsByItem, createMovement } from "../inventory/movements";
 import { badRequest, conflictError, internalError, notFound } from "../common/responses";
 import { logger, emitDomainEvent } from "../common/logger";
-import { validateBackorderRefsOrThrow } from "../backorders/related-refs";
+import { validateBackorderRefsOrThrow, resolveInventoryByEitherType } from "../backorders/related-refs";
 
 type SOStatus =
   | "draft"
@@ -162,7 +162,8 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
 
     const loadInventory = async (itemId: string) => {
       if (inventoryCache.has(itemId)) return inventoryCache.get(itemId);
-      const inv = await getObjectById({ tenantId, type: "inventory", id: itemId }).catch(() => null);
+      // inventory and inventoryItem are aliases; resolve via shared helper so vendor derivation is resilient.
+      const inv = await resolveInventoryByEitherType({ tenantId, itemId }).then((res) => res?.obj ?? null).catch(() => null);
       inventoryCache.set(itemId, inv);
       return inv;
     };

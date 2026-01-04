@@ -685,7 +685,7 @@ async function ensureOnHand(itemId, qty){
 }
 
 /** objects helpers */
-const ITEM_TYPE=process.env.SMOKE_ITEM_TYPE??"inventory"; // safer default matches your endpoints
+const ITEM_TYPE=process.env.SMOKE_ITEM_TYPE??"inventoryItem"; // default to canonical, aliases supported server-side
 async function createProduct(body) {
   const baseName = `${body?.name ?? "Prod"}-${Date.now()}`;
   const baseSku = `SKU-${Math.random().toString(36).slice(2,7)}`;
@@ -693,7 +693,12 @@ async function createProduct(body) {
 }
 async function createInventoryForProduct(productId, name = "Item") {
   const baseName = `${name}-${Date.now()}`;
-  return await post(`/objects/inventory`, { type:"inventory", name: smokeTag(baseName), productId, uom:"ea" });
+  // Prefer canonical inventoryItem; server aliases allow legacy fallback if needed
+  const payload = { type:"inventoryItem", name: smokeTag(baseName), productId, uom:"ea" };
+  const res = await post(`/objects/inventoryItem`, payload);
+  if (res.ok) return res;
+  // Fallback once to legacy inventory for unexpected environments
+  return await post(`/objects/inventory`, { ...payload, type:"inventory" });
 }
 /* minimal api wrapper so seeders can call /objects/<type> consistently */
 const api = {

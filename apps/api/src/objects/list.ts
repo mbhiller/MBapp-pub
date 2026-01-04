@@ -2,6 +2,7 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { ok, bad, error } from "../common/responses";
 import { listObjects } from "./repo";
+import { listObjectsWithAliases } from "./type-alias";
 import { getAuth, requirePerm } from "../auth/middleware";
 
 export async function handle(event: APIGatewayProxyEventV2) {
@@ -27,7 +28,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
       }
     }
 
-    const page = await listObjects({ tenantId: auth.tenantId, type, q, next, limit, fields, filters: Object.keys(filters).length > 0 ? filters : undefined });
+    const page = await listObjectsWithAliases({ tenantId: auth.tenantId, type, q, next, limit, fields, filters: Object.keys(filters).length > 0 ? filters : undefined });
     // Backward-compatible: keep { items, next } but also include pageInfo if available
     return ok({
       ...page,
