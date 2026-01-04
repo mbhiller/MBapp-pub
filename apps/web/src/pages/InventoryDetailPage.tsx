@@ -8,6 +8,7 @@ import LocationPicker from "../components/LocationPicker";
 import MovementsTable from "../components/MovementsTable";
 import { getOnHandByLocation, adjustInventory, type InventoryOnHandByLocationItem } from "../lib/inventory";
 import { listLocations, type Location } from "../lib/locations";
+import { getInventoryByEitherType } from "../lib/api";
 
 type InventoryItem = {
   id: string;
@@ -16,6 +17,7 @@ type InventoryItem = {
   name?: string;
   createdAt?: string;
   updatedAt?: string;
+  type?: string; // legacy inventory objects return type="inventory"
 };
 
 type OnHand = {
@@ -190,16 +192,23 @@ export default function InventoryDetailPage() {
   });
 
   useEffect(() => {
-    if (!id) return;
+    if (!id || !token || !tenantId) return;
     const fetch = async () => {
       setLoading(true);
       setError(null);
       try {
-        const itemRes = await apiFetch<InventoryItem>(`/objects/inventoryItem/${id}`, {
-          token: token || undefined,
-          tenantId,
-        });
-        setItem(itemRes);
+        const inv = await getInventoryByEitherType<InventoryItem>(id, { token: token!, tenantId: tenantId! });
+        if (!inv) {
+          setItem(null);
+          setLoading(false);
+          return;
+        }
+
+        if (import.meta.env.DEV && inv.type === "inventory") {
+          console.debug("[InventoryDetailPage] Loaded legacy inventory object", { id: inv.id, type: inv.type });
+        }
+
+        setItem(inv);
 
         // Optionally fetch onHand
         try {
