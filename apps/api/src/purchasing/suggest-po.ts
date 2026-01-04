@@ -1,6 +1,6 @@
 // apps/api/src/purchasing/suggest-po.ts
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
-import { GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
+import { GetCommand } from "@aws-sdk/lib-dynamodb";
 import { ddb, tableObjects } from "../common/ddb";
 import { getObjectById } from "../objects/repo";
 import { ensureLineIds } from "../shared/ensureLineIds";
@@ -308,23 +308,9 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
     // Find all backorderRequestIds for this item/vendor
     const backorderRequestIds = [it.boId];
 
-    // Convert backorderRequest to status="converted" (minimal logic)
-    try {
-      const bo = await loadBackorder(tenantId, it.boId);
-      if (bo && bo.status === "open") {
-        // If convertBackorderRequest helper exists, use it; else update inline
-        await ddb.send(new GetCommand({
-          TableName: tableObjects,
-          Key: { [PK]: tenantId, [SK]: `backorderRequest#${it.boId}` },
-        }));
-        bo.status = "converted";
-        bo.updatedAt = new Date().toISOString();
-        await ddb.send(new PutCommand({
-          TableName: tableObjects,
-          Item: bo,
-        }));
-      }
-    } catch {}
+    // NOTE: suggest-po is a pure read/compute endpoint. It does NOT mutate backorder status.
+    // Callers must explicitly convert backorders via POST /objects/backorderRequest/{id}:convert
+    // if they want to track conversion state. backorderRequestIds in the draft enables that flow.
 
     const line: PurchaseOrderLine = {
       itemId: it.itemId,

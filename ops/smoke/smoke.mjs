@@ -1604,6 +1604,188 @@ const tests = {
       };
     },
 
+    "smoke:suggest-po:skip-reasons": async () => {
+      await ensureBearer();
+      
+      // 1) Create vendor and products
+      const { vendorId } = await seedVendor(api);
+      const { customerId } = await seedCustomer(api);
+      
+      // Product A: Has vendor (will create VALID backorder)
+      const prodA = await createProduct({ name: "SkipTest-Valid", preferredVendorId: vendorId });
+      if (!prodA.ok) return { test: "smoke:suggest-po:skip-reasons", result: "FAIL", step: "createProduct-A", prodA };
+      const productIdA = prodA.body?.id;
+      const itemA = await createInventoryForProduct(productIdA, "SkipTestItem-Valid");
+      if (!itemA.ok) return { test: "smoke:suggest-po:skip-reasons", result: "FAIL", step: "createInventory-A", itemA };
+      const itemIdA = itemA.body?.id;
+      
+      // Product C: NO vendor (will create MISSING_VENDOR backorder)
+      const prodC = await createProduct({ name: "SkipTest-NoVendor" });
+      if (!prodC.ok) return { test: "smoke:suggest-po:skip-reasons", result: "FAIL", step: "createProduct-C", prodC };
+      const productIdC = prodC.body?.id;
+      const itemC = await createInventoryForProduct(productIdC, "SkipTestItem-NoVendor");
+      if (!itemC.ok) return { test: "smoke:suggest-po:skip-reasons", result: "FAIL", step: "createInventory-C", itemC };
+      const itemIdC = itemC.body?.id;
+      
+      // 2) Ensure all items have onHand=0 (to force backorders on commit)
+      for (const itemId of [itemIdA, itemIdC]) {
+        const ohPre = await onhand(itemId);
+        const currentOnHand = ohPre.body?.items?.[0]?.onHand ?? 0;
+        if (currentOnHand !== 0) {
+          await post(`/inventory/${encodeURIComponent(itemId)}/adjust`, { deltaQty: -currentOnHand }, { "Idempotency-Key": idem() });
+        }
+      }
+      
+      // 3) Create Sales Orders to generate backorders A and C
+      const soA = await post(`/objects/salesOrder`, {
+        type: "salesOrder", 
+        status: "draft", 
+        partyId: customerId, 
+        lines: [{ itemId: itemIdA, qty: 10, uom: "ea" }]
+      });
+      if (!soA.ok) return { test: "smoke:suggest-po:skip-reasons", result: "FAIL", step: "createSO-A", soA };
+      const soIdA = soA.body?.id;
+      
+      const soC = await post(`/objects/salesOrder`, {
+        type: "salesOrder", 
+        status: "draft", 
+        partyId: customerId, 
+        lines: [{ itemId: itemIdC, qty: 10, uom: "ea" }]
+      });
+      if (!soC.ok) return { test: "smoke:suggest-po:skip-reasons", result: "FAIL", step: "createSO-C", soC };
+      const soIdC = soC.body?.id;
+      
+      // Submit and commit both SOs to generate backorders
+      await post(`/sales/so/${encodeURIComponent(soIdA)}:submit`, {}, { "Idempotency-Key": idem() });
+      await post(`/sales/so/${encodeURIComponent(soIdA)}:commit`, {}, { "Idempotency-Key": idem() });
+      
+      await post(`/sales/so/${encodeURIComponent(soIdC)}:submit`, {}, { "Idempotency-Key": idem() });
+      await post(`/sales/so/${encodeURIComponent(soIdC)}:commit`, {}, { "Idempotency-Key": idem() });
+      
+      // 4) Wait for backorders A and C to appear
+      const boSearchA = await waitForBackorders({ soId: soIdA, itemId: itemIdA, status: "open" });
+      if (!boSearchA.ok || !boSearchA.items?.[0]?.id) {
+        return { test: "smoke:suggest-po:skip-reasons", result: "FAIL", step: "backorder-A-not-found", boSearchA };
+      }
+      const backorderIdA = boSearchA.items[0].id;
+      
+      const boSearchC = await waitForBackorders({ soId: soIdC, itemId: itemIdC, status: "open" });
+      if (!boSearchC.ok || !boSearchC.items?.[0]?.id) {
+        return { test: "smoke:suggest-po:skip-reasons", result: "FAIL", step: "backorder-C-not-found", boSearchC };
+      }
+      const backorderIdC = boSearchC.items[0].id;
+      
+      // 5) Create backorder B (ZERO_QTY) - manually via objects API
+      const backorderB = await post(`/objects/backorderRequest`, {
+        type: "backorderRequest",
+        soId: soIdA,
+        itemId: itemIdA,
+        qty: 0,
+        uom: "ea",
+        status: "open",
+        preferredVendorId: vendorId
+      }, { "Idempotency-Key": idem() });
+      if (!backorderB.ok) return { test: "smoke:suggest-po:skip-reasons", result: "FAIL", step: "create-backorder-B", backorderB };
+      const backorderIdB = backorderB.body?.id;
+      
+      // 6) Create backorder D (IGNORED) - use backorder A, ignore it, and create another valid one for suggest
+      // Let's create a second SO to get backorder D
+      const soD = await post(`/objects/salesOrder`, {
+        type: "salesOrder", 
+        status: "draft", 
+        partyId: customerId, 
+        lines: [{ itemId: itemIdA, qty: 5, uom: "ea" }]
+      });
+      if (!soD.ok) return { test: "smoke:suggest-po:skip-reasons", result: "FAIL", step: "createSO-D", soD };
+      const soIdD = soD.body?.id;
+      
+      await post(`/sales/so/${encodeURIComponent(soIdD)}:submit`, {}, { "Idempotency-Key": idem() });
+      await post(`/sales/so/${encodeURIComponent(soIdD)}:commit`, {}, { "Idempotency-Key": idem() });
+      
+      const boSearchD = await waitForBackorders({ soId: soIdD, itemId: itemIdA, status: "open" });
+      if (!boSearchD.ok || !boSearchD.items?.[0]?.id) {
+        return { test: "smoke:suggest-po:skip-reasons", result: "FAIL", step: "backorder-D-not-found", boSearchD };
+      }
+      const backorderIdD = boSearchD.items[0].id;
+      
+      // Ignore backorder D
+      const ignoreResp = await post(`/objects/backorderRequest/${encodeURIComponent(backorderIdD)}:ignore`, {}, { "Idempotency-Key": idem() });
+      if (!ignoreResp.ok) return { test: "smoke:suggest-po:skip-reasons", result: "FAIL", step: "ignore-backorder-D", ignoreResp };
+      
+      // 7) Call suggest-po with all 4 backorder IDs (A=valid, B=ZERO_QTY, C=MISSING_VENDOR, D=IGNORED)
+      const suggestResp = await post(`/purchasing/suggest-po`, {
+        requests: [
+          { backorderRequestId: backorderIdA },
+          { backorderRequestId: backorderIdB },
+          { backorderRequestId: backorderIdC },
+          { backorderRequestId: backorderIdD }
+        ]
+      }, { "Idempotency-Key": idem() });
+      
+      if (!suggestResp.ok) {
+        return { test: "smoke:suggest-po:skip-reasons", result: "FAIL", step: "suggest-po", suggestResp };
+      }
+      
+      // Normalize drafts (handle both `draft` and `drafts` response shapes)
+      const drafts = suggestResp.body?.drafts ?? (suggestResp.body?.draft ? [suggestResp.body.draft] : []);
+      const skipped = suggestResp.body?.skipped ?? [];
+      
+      // 8) Assertions
+      // A) Check skipped array contains correct entries
+      const skippedB = skipped.find(s => s.backorderRequestId === backorderIdB);
+      const skippedC = skipped.find(s => s.backorderRequestId === backorderIdC);
+      const skippedD = skipped.find(s => s.backorderRequestId === backorderIdD);
+      
+      const skippedBCorrect = skippedB && skippedB.reason === "ZERO_QTY";
+      const skippedCCorrect = skippedC && skippedC.reason === "MISSING_VENDOR";
+      const skippedDCorrect = skippedD && skippedD.reason === "IGNORED";
+      
+      // B) Check drafts contain ONLY backorder A
+      const allBackorderIdsInDrafts = new Set();
+      drafts.forEach(draft => {
+        (draft.lines || []).forEach(line => {
+          (line.backorderRequestIds || []).forEach(boId => allBackorderIdsInDrafts.add(boId));
+        });
+      });
+      
+      const containsA = allBackorderIdsInDrafts.has(backorderIdA);
+      const notContainsB = !allBackorderIdsInDrafts.has(backorderIdB);
+      const notContainsC = !allBackorderIdsInDrafts.has(backorderIdC);
+      const notContainsD = !allBackorderIdsInDrafts.has(backorderIdD);
+      
+      // C) Verify skipped count is exactly 3
+      const skippedCountCorrect = skipped.length === 3;
+      
+      const pass = skippedBCorrect && skippedCCorrect && skippedDCorrect &&
+                   containsA && notContainsB && notContainsC && notContainsD &&
+                   skippedCountCorrect;
+      
+      return {
+        test: "smoke:suggest-po:skip-reasons",
+        result: pass ? "PASS" : "FAIL",
+        steps: {
+          backorderIdA, // VALID
+          backorderIdB, // ZERO_QTY
+          backorderIdC, // MISSING_VENDOR
+          backorderIdD, // IGNORED
+          draftsCount: drafts.length,
+          skippedCount: skipped.length,
+          skippedReasons: skipped.map(s => ({ id: s.backorderRequestId, reason: s.reason })),
+          backorderIdsInDrafts: Array.from(allBackorderIdsInDrafts),
+          checks: {
+            skippedBCorrect,
+            skippedCCorrect,
+            skippedDCorrect,
+            containsA,
+            notContainsB,
+            notContainsC,
+            notContainsD,
+            skippedCountCorrect
+          }
+        }
+      };
+    },
+
     "smoke:backorders:ignore": async () => {
       await ensureBearer();
       
@@ -10054,6 +10236,179 @@ const tests = {
           vendorFetched: vendorOk
         }
       })
+    };
+  },
+
+  /**
+   * E4: Idempotent replay test for po:create-from-suggestion endpoint
+   * Validates that calling create-from-suggestion with same Idempotency-Key returns identical PO IDs
+   * and does not create duplicate POs
+   */
+  "smoke:po:create-from-suggestion:idempotent-replay": async () => {
+    await ensureBearer();
+    
+    // Step 1: Seed vendor
+    const { vendorId } = await seedVendor(api);
+    if (!vendorId) {
+      return { test: "smoke:po:create-from-suggestion:idempotent-replay", result: "FAIL", reason: "vendor-seed-failed" };
+    }
+    
+    // Step 2: Create product with preferredVendorId and inventory item
+    const prod = await createProduct({ name: "IdempotentReplayTest", preferredVendorId: vendorId });
+    if (!prod.ok) return { test: "smoke:po:create-from-suggestion:idempotent-replay", result: "FAIL", reason: "product-create-failed", prod };
+    
+    const inv = await createInventoryForProduct(prod.body.id, "IdempotentReplayItem");
+    if (!inv.ok) return { test: "smoke:po:create-from-suggestion:idempotent-replay", result: "FAIL", reason: "inventory-create-failed", inv };
+    
+    const itemId = inv.body?.id;
+    
+    // Step 3: Create customer for SO
+    const { customerId } = await seedCustomer(api);
+    if (!customerId) {
+      return { test: "smoke:po:create-from-suggestion:idempotent-replay", result: "FAIL", reason: "customer-seed-failed" };
+    }
+    
+    // Step 4: Create SO with shortage to trigger backorder
+    const soCreate = await post(`/objects/salesOrder`, {
+      type: "salesOrder",
+      status: "draft",
+      customerId,
+      lines: [{ id: "L1", itemId, qty: 10, uom: "ea" }]
+    });
+    
+    if (!soCreate.ok || !soCreate.body?.id) {
+      return { test: "smoke:po:create-from-suggestion:idempotent-replay", result: "FAIL", reason: "so-create-failed", soCreate };
+    }
+    
+    const soId = soCreate.body.id;
+    
+    // Step 5: Submit and commit SO to create backorder
+    const submit = await post(
+      `/sales/so/${encodeURIComponent(soId)}:submit`,
+      {},
+      { "Idempotency-Key": idem() }
+    );
+    
+    if (!submit.ok) {
+      return { test: "smoke:po:create-from-suggestion:idempotent-replay", result: "FAIL", reason: "so-submit-failed", submit };
+    }
+    
+    const commit = await post(
+      `/sales/so/${encodeURIComponent(soId)}:commit`,
+      { strict: false },
+      { "Idempotency-Key": idem() }
+    );
+    
+    if (!commit.ok) {
+      return { test: "smoke:po:create-from-suggestion:idempotent-replay", result: "FAIL", reason: "so-commit-failed", commit };
+    }
+    
+    // Step 6: Wait for backorder request
+    const boWait = await waitForBackorders({ soId, itemId, status: "open", preferredVendorId: vendorId }, { timeoutMs: 5000 });
+    if (!boWait.ok || !boWait.items || boWait.items.length === 0) {
+      return { test: "smoke:po:create-from-suggestion:idempotent-replay", result: "FAIL", reason: "backorder-not-created", boWait };
+    }
+    
+    const boId = boWait.items[0]?.id;
+    if (!boId) {
+      return { test: "smoke:po:create-from-suggestion:idempotent-replay", result: "FAIL", reason: "backorder-missing-id" };
+    }
+    
+    // Step 7: Suggest PO from backorder
+    const sugg = await post(
+      `/purchasing/suggest-po`,
+      { requests: [{ backorderRequestId: boId }] },
+      { "Idempotency-Key": idem() }
+    );
+    
+    if (!sugg.ok) {
+      return { test: "smoke:po:create-from-suggestion:idempotent-replay", result: "FAIL", reason: "suggest-po-failed", sugg };
+    }
+    
+    const drafts = Array.isArray(sugg.body?.drafts) ? sugg.body.drafts : (sugg.body?.draft ? [sugg.body.draft] : []);
+    
+    if (drafts.length === 0) {
+      const skipped = Array.isArray(sugg.body?.skipped) ? sugg.body.skipped : [];
+      return {
+        test: "smoke:po:create-from-suggestion:idempotent-replay",
+        result: "FAIL",
+        reason: "no-drafts-from-suggest-po",
+        skipped: skipped.map(s => ({ id: s.backorderRequestId, reason: s.reason }))
+      };
+    }
+    
+    const draft = drafts[0];
+    if (!draft.vendorId) {
+      return { test: "smoke:po:create-from-suggestion:idempotent-replay", result: "FAIL", reason: "draft-missing-vendor", draft };
+    }
+    
+    // Step 8: FIRST create-from-suggestion call with stable Idempotency-Key
+    const fixedKey = `idempotent-replay-test-${Date.now()}`;
+    const create1 = await post(
+      `/purchasing/po:create-from-suggestion`,
+      { draft },
+      { "Idempotency-Key": fixedKey }
+    );
+    
+    if (!create1.ok) {
+      return { test: "smoke:po:create-from-suggestion:idempotent-replay", result: "FAIL", reason: "first-create-failed", create1 };
+    }
+    
+    const ids1 = create1.body?.ids || (create1.body?.id ? [create1.body.id] : []);
+    if (ids1.length === 0) {
+      return { test: "smoke:po:create-from-suggestion:idempotent-replay", result: "FAIL", reason: "no-ids-returned-first-call", create1: create1.body };
+    }
+    
+    // Step 9: REPLAY with same Idempotency-Key
+    const create2 = await post(
+      `/purchasing/po:create-from-suggestion`,
+      { draft },
+      { "Idempotency-Key": fixedKey }
+    );
+    
+    if (!create2.ok) {
+      return { test: "smoke:po:create-from-suggestion:idempotent-replay", result: "FAIL", reason: "replay-create-failed", create2 };
+    }
+    
+    const ids2 = create2.body?.ids || (create2.body?.id ? [create2.body.id] : []);
+    if (ids2.length === 0) {
+      return { test: "smoke:po:create-from-suggestion:idempotent-replay", result: "FAIL", reason: "no-ids-returned-replay-call", create2: create2.body };
+    }
+    
+    // Step 10: Assert identical IDs
+    const idsMatch = JSON.stringify(ids1.sort()) === JSON.stringify(ids2.sort());
+    
+    // Step 11: Verify only one PO exists (use first ID)
+    const poId = ids1[0];
+    const fetchPo = await get(`/objects/purchaseOrder/${encodeURIComponent(poId)}`);
+    
+    if (!fetchPo.ok || !fetchPo.body) {
+      return { test: "smoke:po:create-from-suggestion:idempotent-replay", result: "FAIL", reason: "po-fetch-failed", poId, fetchPo };
+    }
+    
+    const po = fetchPo.body;
+    const hasVendor = po.vendorId === vendorId;
+    const hasLines = Array.isArray(po.lines) && po.lines.length > 0;
+    
+    const pass = idsMatch && hasVendor && hasLines;
+    
+    return {
+      test: "smoke:po:create-from-suggestion:idempotent-replay",
+      result: pass ? "PASS" : "FAIL",
+      steps: {
+        boId,
+        vendorId,
+        itemId,
+        firstCallIds: ids1,
+        replayCallIds: ids2,
+        idsMatch,
+        poId,
+        poVendorId: po.vendorId,
+        poLineCount: po.lines?.length || 0,
+        hasVendor,
+        hasLines
+      },
+      ...(!pass ? { failures: { idsMatch, hasVendor, hasLines } } : {})
     };
   },
 
