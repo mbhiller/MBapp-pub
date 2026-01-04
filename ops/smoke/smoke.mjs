@@ -6245,6 +6245,85 @@ const tests = {
     };
   },
 
+  // === Sprint AK E2: UPDATE and DELETE via alias and casing variants ===
+  "smoke:objects:inventory-alias-update-delete": async () => {
+    await ensureBearer();
+
+    // 1) Create product
+    const prodRes = await createProduct({ name: smokeTag(`Inv-UpdateDel-${SMOKE_RUN_ID}`) });
+    if (!prodRes.ok) return { test: "objects:inventory-alias-update-delete", result: "FAIL", step: "product-create", prodRes };
+    const productId = prodRes.body?.id;
+
+    // 2) Create inventoryItem via legacy "inventory" route
+    const invCreate = await post(`/objects/inventory`, {
+      type: "inventoryItem",
+      productId,
+      name: smokeTag(`InvItem-UpdateDel-${SMOKE_RUN_ID}`),
+      uom: "ea"
+    });
+    if (!invCreate.ok) return { test: "objects:inventory-alias-update-delete", result: "FAIL", step: "inventory-create-via-alias", invCreate };
+    const invId = invCreate.body?.id;
+
+    // 3) UPDATE via canonical route with mixed casing in body
+    const updateCanonical = await put(`/objects/inventoryItem/${encodeURIComponent(invId)}`, {
+      name: smokeTag(`InvItem-Updated-Canonical-${SMOKE_RUN_ID}`)
+    });
+    if (!updateCanonical.ok) return { test: "objects:inventory-alias-update-delete", result: "FAIL", step: "update-canonical", updateCanonical };
+
+    // Verify update took effect
+    const getAfterCanonical = await get(`/objects/inventoryItem/${encodeURIComponent(invId)}`);
+    const canonicalUpdateWorked = getAfterCanonical.ok && getAfterCanonical.body?.name?.includes("Updated-Canonical");
+
+    // 4) UPDATE via legacy "inventory" route (alias)
+    const updateAlias = await put(`/objects/inventory/${encodeURIComponent(invId)}`, {
+      name: smokeTag(`InvItem-Updated-Alias-${SMOKE_RUN_ID}`)
+    });
+    if (!updateAlias.ok) return { test: "objects:inventory-alias-update-delete", result: "FAIL", step: "update-alias", updateAlias };
+
+    // Verify alias update took effect
+    const getAfterAlias = await get(`/objects/inventory/${encodeURIComponent(invId)}`);
+    const aliasUpdateWorked = getAfterAlias.ok && getAfterAlias.body?.name?.includes("Updated-Alias");
+
+    // 5) DELETE via canonical route
+    const deleteRes = await fetch(`${API}/objects/inventoryItem/${encodeURIComponent(invId)}`, {
+      method: "DELETE",
+      headers: buildHeaders()
+    });
+    const deleteStatus = deleteRes.status;
+    const deleteOk = deleteStatus === 204 || deleteStatus === 200;
+
+    if (!deleteOk) {
+      const deleteBody = await deleteRes.json().catch(() => ({}));
+      return { 
+        test: "objects:inventory-alias-update-delete", 
+        result: "FAIL", 
+        step: "delete-canonical", 
+        expectedStatus: "204 or 200",
+        actualStatus: deleteStatus,
+        body: deleteBody
+      };
+    }
+
+    // 6) Confirm 404 via both canonical and alias routes
+    const getCanonical404 = await get(`/objects/inventoryItem/${encodeURIComponent(invId)}`);
+    const getAlias404 = await get(`/objects/inventory/${encodeURIComponent(invId)}`);
+
+    const canonical404 = getCanonical404.status === 404;
+    const alias404 = getAlias404.status === 404;
+
+    const pass = canonicalUpdateWorked && aliasUpdateWorked && deleteOk && canonical404 && alias404;
+
+    return {
+      test: "objects:inventory-alias-update-delete",
+      result: pass ? "PASS" : "FAIL",
+      create: { ok: invCreate.ok, id: invId },
+      updateCanonical: { ok: updateCanonical.ok, verified: canonicalUpdateWorked },
+      updateAlias: { ok: updateAlias.ok, verified: aliasUpdateWorked },
+      delete: { ok: deleteOk, status: deleteStatus },
+      verify404: { canonical: canonical404, alias: alias404 }
+    };
+  },
+
   // === Sprint I: cursor pagination on objects list ===
   "smoke:objects:list-pagination": async () => {
     await ensureBearer();

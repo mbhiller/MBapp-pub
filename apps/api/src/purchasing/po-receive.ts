@@ -3,6 +3,7 @@ import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda
 import { ddb, tableObjects } from "../common/ddb";
 import { GetCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import { getObjectById } from "../objects/repo";
+import { normalizeTypeParam } from "../objects/type-alias";
 import { getPurchaseOrder, updatePurchaseOrder } from "../shared/db";
 import { createMovement } from "../inventory/movements";
 import { featureVendorGuardEnabled, featureEventsSimulate } from "../flags";
@@ -102,7 +103,8 @@ async function receivedSoFar(tenantId: string, poId: string): Promise<Record<str
     } as any));
     for (const mv of (res.Items ?? []) as any[]) {
       const act = (mv.action ?? mv.type)?.toLowerCase?.();
-      if (mv.docType === "inventoryMovement" && act === "receive" && mv.refId === poId && mv.poLineId) {
+      const isMovement = normalizeTypeParam(mv.docType as string) === "inventoryMovement" || normalizeTypeParam(mv.type as string) === "inventoryMovement";
+      if (isMovement && act === "receive" && mv.refId === poId && mv.poLineId) {
         out[mv.poLineId] = (out[mv.poLineId] ?? 0) + Number(mv.qty ?? 0);
       }
     }

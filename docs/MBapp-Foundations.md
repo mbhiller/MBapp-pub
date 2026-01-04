@@ -616,13 +616,26 @@ function expandTypeAliases(type: string): string[] {
    }
    ```
 
+**Best Practices (Developer Guidelines):**
+- ⚠️ **Never compare raw strings for doc.type/docType** — Always use `normalizeTypeParam()` for comparisons to protect against variant casing in stored data
+- ✅ Import `normalizeTypeParam` from `type-alias.ts` whenever checking object types in business logic
+- ✅ Use canonical types in all type-specific conditionals (e.g., `if (canonicalType === "inventoryMovement")`)
+- ❌ Avoid raw comparisons like `obj.docType === "inventoryMovement"` or `type.toLowerCase() === "salesorder"`
+
 **Verification:**
 - ✅ Smoke test `smoke:objects:type-casing-and-alias` validates:
   - SalesOrder GET works via `salesOrder`, `salesorder`, `SALESORDER` paths
   - BackorderRequest LIST/GET work via lowercase `backorderrequest` path
   - Inventory alias: Create via `inventoryItem`, GET via both `inventory` and `inventoryItem`
+- ✅ Smoke test `smoke:objects:inventory-alias-update-delete` validates:
+  - UPDATE operations work via both canonical (`inventoryItem`) and alias (`inventory`) routes
+  - DELETE operations via canonical route return 404 on both routes post-deletion
+  - Inventory alias behavior is consistent across all CRUD operations (GET/LIST/UPDATE/DELETE)
+- ✅ Smoke test `smoke:inventory:canonical-write-legacy-compat` enforces:
+  - POST `/objects/inventory` stores as canonical `inventoryItem` type with `inventoryItem#` SK prefix
+  - Legacy route writes are readable via both alias and canonical routes
 - ✅ All stored objects have canonical SK prefixes: `inventoryItem#`, `salesOrder#`, `backorderRequest#`
-- ✅ Type-specific logic uses `normalizeTypeParam()` for casing-safe comparisons
+- ✅ Type-specific logic uses `normalizeTypeParam()` for casing-safe comparisons (enforced in CI via smokes)
 
 **Files:**
 - Normalization helpers: [apps/api/src/objects/type-alias.ts](../apps/api/src/objects/type-alias.ts)

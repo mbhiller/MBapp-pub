@@ -7,6 +7,7 @@
   "smoke:inventory:onhand-permission-denied",
   "smoke:inventory:adjust-negative",
   "smoke:inventory:movements-by-location",
+  "smoke:inventory:canonical-write-legacy-compat",
   "smoke:views:crud",
   "smoke:views:validate-filters",
   "smoke:workspaces:list",
@@ -57,6 +58,7 @@
   "smoke:auth:warehouse-receive-deny-approve",
   "smoke:objects:perm-prefix-normalization",
   "smoke:objects:type-casing-and-alias",
+  "smoke:objects:inventory-alias-update-delete",
   "smoke:views-workspaces:permissions"
   ]
 

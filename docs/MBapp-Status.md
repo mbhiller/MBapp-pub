@@ -220,6 +220,51 @@
 
 - **Outcome:** Wipe tool is hardened against accidental tenant deletion via multi-layer safety gates (allowlist, confirmation match, production block), resilient to transient DynamoDB failures (retries with backoff), and accessible via convenient npm scripts. Documentation in Foundations covers safety model, usage patterns, exit codes, and logging output. Ready for use in CI tenant reset workflows and dev cleanup.
 
+### Type Normalization Hardening — ✅ Complete (Sprint AL, 2026-01-04)
+
+**Epic Summary:** Close remaining type comparison gaps; expand smoke coverage for UPDATE/DELETE alias operations; ensure CI enforces canonical-write legacy-compat.
+
+- **PO Receive Movement Type Check (E1):**
+  - Fixed brittle type comparison in [apps/api/src/purchasing/po-receive.ts](../apps/api/src/purchasing/po-receive.ts#L106-L107) `receivedSoFar()` function
+  - Replaced `mv.docType === "inventoryMovement"` with normalized check: `normalizeTypeParam(mv.docType) === "inventoryMovement" || normalizeTypeParam(mv.type) === "inventoryMovement"`
+  - Protects against stored movements with variant casing (e.g., `inventorymovement`, `InventoryMovement`) causing silent aggregation failures
+  - Pattern matches existing normalizations in [movements.ts](../apps/api/src/inventory/movements.ts#L142) and [suggest-po.ts](../apps/api/src/purchasing/suggest-po.ts#L224)
+
+- **Inventory Alias UPDATE/DELETE Smoke (E2):**
+  - New smoke test `smoke:objects:inventory-alias-update-delete` added to [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs#L6271-L6321) and [ops/ci-smokes.json](../ops/ci-smokes.json#L61)
+  - **Test Coverage:**
+    1. Create product
+    2. Create inventoryItem via legacy `/objects/inventory` route (alias)
+    3. UPDATE via canonical `/objects/inventoryItem/{id}` (verify name change persists)
+    4. UPDATE via legacy `/objects/inventory/{id}` (verify alias route works for writes)
+    5. DELETE via canonical `/objects/inventoryItem/{id}`
+    6. Confirm 404 via both canonical and alias routes post-deletion
+  - Validates that UPDATE and DELETE operations work correctly with alias and casing variants (closes gap from Sprint AK which only tested GET/LIST/SEARCH)
+
+- **CI Coverage Addition (E3):**
+  - Added `smoke:inventory:canonical-write-legacy-compat` to [ops/ci-smokes.json](../ops/ci-smokes.json#L10)
+  - Ensures regressions in canonical-write behavior (POST `/objects/inventory` storing as `inventoryItem`) are caught automatically
+  - Placed near other inventory smokes for logical grouping
+
+- **Documentation (E4):**
+  - Updated [docs/MBapp-Foundations.md](../docs/MBapp-Foundations.md) § 2.8 to add best practice: "Never compare raw strings for doc.type/docType — always use normalizeTypeParam()"
+  - Added CI smoke references for inventory alias enforcement
+
+- **Definition of Done:**
+  - ✅ po-receive.ts type check hardened with normalizeTypeParam()
+  - ✅ New smoke test validates UPDATE/DELETE via alias/casing variants (PASS)
+  - ✅ canonical-write-legacy-compat smoke added to CI manifest
+  - ✅ TypeScript compilation clean
+  - ✅ Docs updated with best practices and smoke references
+
+- **Impact:**
+  - 🛡️ PO receive aggregation now resilient to variant-cased stored movements
+  - 🛡️ UPDATE/DELETE operations verified to work with inventory alias (same guarantee as GET/LIST)
+  - 🛡️ CI enforces canonical-write legacy-compat behavior on every deployment
+  - 🛡️ Developer guidelines established: all type comparisons must normalize first
+
+- Verification: `node ops/smoke/smoke.mjs smoke:objects:inventory-alias-update-delete` → PASS ✅
+
 ### Type Normalization & Aliasing — ✅ Complete (Sprint AK, 2026-01-04)
 
 **Epic Summary:** Eliminate type casing bugs; enforce canonical SK prefixes; harden inline type comparisons; add comprehensive smoke coverage.
