@@ -99,12 +99,11 @@
   - Outputs per-tenant counts (missing SO / line / inventory / valid) and auto-ignores open orphans in fix mode.
 - Verification: `cd apps/api && npm run typecheck` ✅
 
-### InventoryItem Canonicalization Groundwork — 🚧 In Progress (Sprint AE)
+### InventoryItem Canonicalization — ✅ Complete (Sprint AH, 2026-01-04)
 
-- Spec: `InventoryItem` schema now declares `type=inventoryItem`; note added that `inventory` is a legacy alias.
-- API objects layer: GET/UPDATE/DELETE/LIST/SEARCH now resolve inventory vs inventoryItem via aliases; canonical responses preserved.
-- Smokes: close-the-loop now creates inventoryItem first (falls back to inventory only if needed).
-- Guidance: new writes should use `inventoryItem`; reads should resolve by either type until legacy inventory records are migrated.
+- **Canonical writes:** /objects/inventory now stores as canonical `inventoryItem` via [apps/api/src/objects/repo.ts](../apps/api/src/objects/repo.ts#L115-L146) helper `canonicalWriteType`.
+- **Alias-aware CRUD/search:** GET/UPDATE/DELETE/SEARCH use alias resolution for inventory ↔ inventoryItem in [apps/api/src/objects](../apps/api/src/objects) (get/update/delete handlers + `searchObjectsWithAliases` + `/inventory/search`).
+- **Legacy route compatibility smoke:** Added `smoke:inventory:canonical-write-legacy-compat` to [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) to ensure creating via `/objects/inventory` can be read from both inventory and inventoryItem routes; not yet added to CI list.
 
 ### Views/Workspaces v1 Foundation — ✅ Complete (Sprint AB, 2026-01-04)
 

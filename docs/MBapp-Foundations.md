@@ -136,7 +136,7 @@ const TENANT = process.env.MBAPP_TENANT_ID ?? "DemoTenant";
 
 **Inventory ↔ InventoryItem aliasing:**
 - Canonical type is `inventoryItem`; legacy records may still have `type=inventory`.
-- API objects layer resolves both types for GET/UPDATE/DELETE/LIST/SEARCH (inventoryItem first, inventory fallback) so callers can use either id/type during migration.
+- API objects layer resolves both types for GET/UPDATE/DELETE/LIST/SEARCH (inventoryItem first, inventory fallback) so callers can use either id/type during migration; `/objects/inventory` now persists as `inventoryItem` (canonical) while legacy read routes remain supported via alias resolution.
 - New code should write `inventoryItem` and read using alias-aware helpers (API: type-alias helpers; web/mobile: fetch inventoryItem then inventory on 404).
 
 

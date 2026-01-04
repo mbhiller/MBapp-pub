@@ -6,7 +6,7 @@ import {
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 
 import { ok, bad, notFound, error } from "../common/responses";
-import { getObjectById, deleteObject } from "./repo";
+import { deleteObject } from "./repo";
 import { resolveObjectByIdWithAliases } from "./type-alias";
 import { getAuth, requirePerm } from "../auth/middleware";
 
@@ -31,7 +31,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const { typeUsed, obj: existing } = resolved;
 
     // If product has a SKU, release its uniqueness lock
-    if (type === "product" && (existing as any)?.sku) {
+    if (typeUsed === "product" && (existing as any)?.sku) {
       const sku = String((existing as any).sku);
       await ddb.send(new DeleteCommand({
         TableName: TABLE,
