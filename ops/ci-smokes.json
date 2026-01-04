@@ -7,6 +7,7 @@
   "smoke:inventory:adjust-negative",
   "smoke:inventory:movements-by-location",
   "smoke:views:crud",
+  "smoke:views:validate-filters",
   "smoke:workspaces:list",
   "smoke:workspaces:mixed-dedupe",
   "smoke:workspaces:get-fallback",
@@ -15,6 +16,7 @@
   "smoke:views:apply-to-product-list",
   "smoke:views:apply-to-inventory-list",
   "smoke:views:apply-to-party-list",
+  "smoke:views:save-then-update",
   "smoke:events:enabled-noop",
   "smoke:close-the-loop",
   "smoke:backorders:partial-fulfill",
@@ -52,7 +54,8 @@
   "smoke:auth:legacy-plural-policy-products-read",
   "smoke:auth:perm-keys-are-lowercase",
   "smoke:auth:warehouse-receive-deny-approve",
-  "smoke:objects:perm-prefix-normalization"
+  "smoke:objects:perm-prefix-normalization",
+  "smoke:views-workspaces:permissions"
   ]
 
 }

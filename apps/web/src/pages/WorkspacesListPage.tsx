@@ -260,31 +260,57 @@ export default function WorkspacesListPage() {
             <tr style={{ background: "#eee", textAlign: "left" }}>
               <th style={{ padding: 8, border: "1px solid #ccc" }}>Name</th>
               <th style={{ padding: 8, border: "1px solid #ccc" }}>Entity Type</th>
+              <th style={{ padding: 8, border: "1px solid #ccc" }}>Views</th>
+              <th style={{ padding: 8, border: "1px solid #ccc" }}>Default View</th>
               <th style={{ padding: 8, border: "1px solid #ccc" }}>Updated</th>
               <th style={{ padding: 8, border: "1px solid #ccc" }}>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {items.map((item) => (
-              <tr key={item.id}>
-                <td style={{ padding: 8, border: "1px solid #ccc" }}>
-                  <Link to={`/workspaces/${item.id}`}>{item.name || "(no name)"}</Link>
-                </td>
-                <td style={{ padding: 8, border: "1px solid #ccc" }}>
-                  {item.entityType || "—"}
-                </td>
-                <td style={{ padding: 8, border: "1px solid #ccc" }}>
-                  {item.updatedAt
-                    ? new Date(item.updatedAt).toLocaleDateString()
-                    : item.createdAt
-                    ? new Date(item.createdAt).toLocaleDateString()
-                    : "—"}
-                </td>
-                <td style={{ padding: 8, border: "1px solid #ccc" }}>
-                  <Link to={`/workspaces/${item.id}`}>View</Link>
-                </td>
-              </tr>
-            ))}
+            {items.map((item) => {
+              const viewCount = item.views?.length ?? 0;
+              const hasDefaultView = !!item.defaultViewId;
+              const hasViews = viewCount > 0;
+              return (
+                <tr key={item.id}>
+                  <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                    <Link to={`/workspaces/${item.id}`}>{item.name || "(no name)"}</Link>
+                  </td>
+                  <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                    {item.entityType || "—"}
+                  </td>
+                  <td style={{ padding: 8, border: "1px solid #ccc", textAlign: "center" }}>
+                    {viewCount}
+                  </td>
+                  <td style={{ padding: 8, border: "1px solid #ccc", textAlign: "center" }}>
+                    {hasDefaultView ? "✓" : "—"}
+                  </td>
+                  <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                    {item.updatedAt
+                      ? new Date(item.updatedAt).toLocaleDateString()
+                      : item.createdAt
+                      ? new Date(item.createdAt).toLocaleDateString()
+                      : "—"}
+                  </td>
+                  <td style={{ padding: 8, border: "1px solid #ccc" }}>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {(hasDefaultView || hasViews) && (
+                        <button
+                          onClick={() => handleOpen(item)}
+                          style={{ padding: "4px 8px", cursor: "pointer" }}
+                          title={item.defaultViewId ? "Open default view" : "Open first view"}
+                        >
+                          Open
+                        </button>
+                      )}
+                      <Link to={`/workspaces/${item.id}`} style={{ padding: "4px 8px" }}>
+                        Details
+                      </Link>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}

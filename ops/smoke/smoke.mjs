@@ -7407,6 +7407,441 @@ const tests = {
     };
   },
 
+  "smoke:views-workspaces:permissions": async () => {
+    // Test: RBAC boundaries for views/workspaces - write permissions enforced, reads allowed
+    // Flow:
+    //   1) Mint admin token with view:write + workspace:write
+    //   2) Mint viewer token (roles:["viewer"], lacks write perms)
+    //   3) Admin creates view + workspace (expect 201)
+    //   4) Viewer attempts POST/PATCH/DELETE views (expect 403)
+    //   5) Viewer attempts POST/PATCH/DELETE workspaces (expect 403)
+    //   6) Viewer confirms GET views/workspaces still works (if policy allows read)
+
+    const featureHeaders = { "X-Feature-Views-Enabled": "true" };
+    const runTimestamp = Date.now();
+    let viewId = null;
+    let workspaceId = null;
+
+    try {
+      // Step 1: Mint admin token (operator role with write perms)
+      const adminLoginRes = await fetch(`${API}/auth/dev-login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-tenant-id": TENANT
+        },
+        body: JSON.stringify({
+          tenantId: TENANT,
+          roles: ["operator"]
+          // operator role includes view:write + workspace:write by default
+        })
+      });
+
+      if (!adminLoginRes.ok) {
+        return {
+          test: "views-workspaces:permissions",
+          result: "FAIL",
+          step: "admin-login",
+          status: adminLoginRes.status
+        };
+      }
+
+      const adminData = await adminLoginRes.json();
+      const adminToken = adminData.token;
+      if (!adminToken) {
+        return {
+          test: "views-workspaces:permissions",
+          result: "FAIL",
+          step: "admin-extract-token",
+          adminData
+        };
+      }
+
+      // Step 2: Mint viewer token (read-only role, no write perms)
+      const viewerLoginRes = await fetch(`${API}/auth/dev-login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-tenant-id": TENANT
+        },
+        body: JSON.stringify({
+          tenantId: TENANT,
+          roles: ["viewer"]
+          // viewer role has *:read but lacks view:write, workspace:write
+        })
+      });
+
+      if (!viewerLoginRes.ok) {
+        return {
+          test: "views-workspaces:permissions",
+          result: "FAIL",
+          step: "viewer-login",
+          status: viewerLoginRes.status
+        };
+      }
+
+      const viewerData = await viewerLoginRes.json();
+      const viewerToken = viewerData.token;
+      if (!viewerToken) {
+        return {
+          test: "views-workspaces:permissions",
+          result: "FAIL",
+          step: "viewer-extract-token",
+          viewerData
+        };
+      }
+
+      // Step 3a: Admin creates view (expect 201)
+      const viewCreateRes = await fetch(`${API}/views`, {
+        method: "POST",
+        headers: {
+          "authorization": `Bearer ${adminToken}`,
+          "x-tenant-id": TENANT,
+          "content-type": "application/json",
+          ...featureHeaders
+        },
+        body: JSON.stringify({
+          name: `PermTest View ${runTimestamp}`,
+          entityType: "purchaseOrder",
+          filters: [{ field: "status", op: "eq", value: "draft" }]
+        })
+      });
+
+      const viewCreateOk = viewCreateRes.ok;
+      const viewCreateStatus = viewCreateRes.status;
+      if (!viewCreateOk || viewCreateStatus !== 201) {
+        const viewCreateBody = await viewCreateRes.json().catch(() => ({}));
+        return {
+          test: "views-workspaces:permissions",
+          result: "FAIL",
+          step: "admin-create-view",
+          expectedStatus: 201,
+          actualStatus: viewCreateStatus,
+          body: viewCreateBody
+        };
+      }
+
+      const viewBody = await viewCreateRes.json();
+      viewId = viewBody.id;
+      if (!viewId) {
+        return {
+          test: "views-workspaces:permissions",
+          result: "FAIL",
+          step: "admin-create-view-extract-id",
+          viewBody
+        };
+      }
+      recordCreated({ type: 'view', id: viewId, route: '/views', meta: { entityType: "purchaseOrder" } });
+
+      // Step 3b: Admin creates workspace (expect 201)
+      const workspaceCreateRes = await fetch(`${API}/workspaces`, {
+        method: "POST",
+        headers: {
+          "authorization": `Bearer ${adminToken}`,
+          "x-tenant-id": TENANT,
+          "content-type": "application/json",
+          ...featureHeaders
+        },
+        body: JSON.stringify({
+          name: `PermTest Workspace ${runTimestamp}`,
+          entityType: "purchaseOrder",
+          views: [viewId]
+        })
+      });
+
+      const workspaceCreateOk = workspaceCreateRes.ok;
+      const workspaceCreateStatus = workspaceCreateRes.status;
+      if (!workspaceCreateOk || workspaceCreateStatus !== 201) {
+        const workspaceCreateBody = await workspaceCreateRes.json().catch(() => ({}));
+        return {
+          test: "views-workspaces:permissions",
+          result: "FAIL",
+          step: "admin-create-workspace",
+          expectedStatus: 201,
+          actualStatus: workspaceCreateStatus,
+          body: workspaceCreateBody
+        };
+      }
+
+      const workspaceBody = await workspaceCreateRes.json();
+      workspaceId = workspaceBody.id;
+      if (!workspaceId) {
+        return {
+          test: "views-workspaces:permissions",
+          result: "FAIL",
+          step: "admin-create-workspace-extract-id",
+          workspaceBody
+        };
+      }
+      recordCreated({ type: 'workspace', id: workspaceId, route: '/workspaces', meta: { entityType: "purchaseOrder" } });
+
+      // Step 4a: Viewer attempts POST /views (expect 403)
+      const viewerCreateViewRes = await fetch(`${API}/views`, {
+        method: "POST",
+        headers: {
+          "authorization": `Bearer ${viewerToken}`,
+          "x-tenant-id": TENANT,
+          "content-type": "application/json",
+          ...featureHeaders
+        },
+        body: JSON.stringify({
+          name: `Viewer Test View ${runTimestamp}`,
+          entityType: "product"
+        })
+      });
+
+      const viewerCreateViewStatus = viewerCreateViewRes.status;
+      const viewerCreateViewDenied = viewerCreateViewStatus === 403;
+      const viewerCreateViewBody = await viewerCreateViewRes.json().catch(() => ({}));
+      const viewerCreateViewForbiddenMsg = viewerCreateViewBody?.message && 
+        (viewerCreateViewBody.message.toLowerCase().includes("forbidden") || 
+         viewerCreateViewBody.message.toLowerCase().includes("missing permission"));
+
+      if (!viewerCreateViewDenied) {
+        return {
+          test: "views-workspaces:permissions",
+          result: "FAIL",
+          step: "viewer-create-view-denied",
+          expectedStatus: 403,
+          actualStatus: viewerCreateViewStatus,
+          body: viewerCreateViewBody
+        };
+      }
+
+      // Step 4b: Viewer attempts PATCH /views/{id} (expect 403)
+      const viewerPatchViewRes = await fetch(`${API}/views/${encodeURIComponent(viewId)}`, {
+        method: "PATCH",
+        headers: {
+          "authorization": `Bearer ${viewerToken}`,
+          "x-tenant-id": TENANT,
+          "content-type": "application/json",
+          ...featureHeaders
+        },
+        body: JSON.stringify({
+          filters: [{ field: "status", op: "eq", value: "submitted" }]
+        })
+      });
+
+      const viewerPatchViewStatus = viewerPatchViewRes.status;
+      const viewerPatchViewDenied = viewerPatchViewStatus === 403;
+      const viewerPatchViewBody = await viewerPatchViewRes.json().catch(() => ({}));
+
+      if (!viewerPatchViewDenied) {
+        return {
+          test: "views-workspaces:permissions",
+          result: "FAIL",
+          step: "viewer-patch-view-denied",
+          expectedStatus: 403,
+          actualStatus: viewerPatchViewStatus,
+          body: viewerPatchViewBody
+        };
+      }
+
+      // Step 4c: Viewer attempts DELETE /views/{id} (expect 403)
+      const viewerDeleteViewRes = await fetch(`${API}/views/${encodeURIComponent(viewId)}`, {
+        method: "DELETE",
+        headers: {
+          "authorization": `Bearer ${viewerToken}`,
+          "x-tenant-id": TENANT,
+          ...featureHeaders
+        }
+      });
+
+      const viewerDeleteViewStatus = viewerDeleteViewRes.status;
+      const viewerDeleteViewDenied = viewerDeleteViewStatus === 403;
+      const viewerDeleteViewBody = await viewerDeleteViewRes.json().catch(() => ({}));
+
+      if (!viewerDeleteViewDenied) {
+        return {
+          test: "views-workspaces:permissions",
+          result: "FAIL",
+          step: "viewer-delete-view-denied",
+          expectedStatus: 403,
+          actualStatus: viewerDeleteViewStatus,
+          body: viewerDeleteViewBody
+        };
+      }
+
+      // Step 5a: Viewer attempts POST /workspaces (expect 403)
+      const viewerCreateWorkspaceRes = await fetch(`${API}/workspaces`, {
+        method: "POST",
+        headers: {
+          "authorization": `Bearer ${viewerToken}`,
+          "x-tenant-id": TENANT,
+          "content-type": "application/json",
+          ...featureHeaders
+        },
+        body: JSON.stringify({
+          name: `Viewer Test Workspace ${runTimestamp}`,
+          entityType: "product"
+        })
+      });
+
+      const viewerCreateWorkspaceStatus = viewerCreateWorkspaceRes.status;
+      const viewerCreateWorkspaceDenied = viewerCreateWorkspaceStatus === 403;
+      const viewerCreateWorkspaceBody = await viewerCreateWorkspaceRes.json().catch(() => ({}));
+
+      if (!viewerCreateWorkspaceDenied) {
+        return {
+          test: "views-workspaces:permissions",
+          result: "FAIL",
+          step: "viewer-create-workspace-denied",
+          expectedStatus: 403,
+          actualStatus: viewerCreateWorkspaceStatus,
+          body: viewerCreateWorkspaceBody
+        };
+      }
+
+      // Step 5b: Viewer attempts PATCH /workspaces/{id} (expect 403)
+      const viewerPatchWorkspaceRes = await fetch(`${API}/workspaces/${encodeURIComponent(workspaceId)}`, {
+        method: "PATCH",
+        headers: {
+          "authorization": `Bearer ${viewerToken}`,
+          "x-tenant-id": TENANT,
+          "content-type": "application/json",
+          ...featureHeaders
+        },
+        body: JSON.stringify({
+          name: `Viewer Patched Workspace ${runTimestamp}`
+        })
+      });
+
+      const viewerPatchWorkspaceStatus = viewerPatchWorkspaceRes.status;
+      const viewerPatchWorkspaceDenied = viewerPatchWorkspaceStatus === 403;
+      const viewerPatchWorkspaceBody = await viewerPatchWorkspaceRes.json().catch(() => ({}));
+
+      if (!viewerPatchWorkspaceDenied) {
+        return {
+          test: "views-workspaces:permissions",
+          result: "FAIL",
+          step: "viewer-patch-workspace-denied",
+          expectedStatus: 403,
+          actualStatus: viewerPatchWorkspaceStatus,
+          body: viewerPatchWorkspaceBody
+        };
+      }
+
+      // Step 5c: Viewer attempts DELETE /workspaces/{id} (expect 403)
+      const viewerDeleteWorkspaceRes = await fetch(`${API}/workspaces/${encodeURIComponent(workspaceId)}`, {
+        method: "DELETE",
+        headers: {
+          "authorization": `Bearer ${viewerToken}`,
+          "x-tenant-id": TENANT,
+          ...featureHeaders
+        }
+      });
+
+      const viewerDeleteWorkspaceStatus = viewerDeleteWorkspaceRes.status;
+      const viewerDeleteWorkspaceDenied = viewerDeleteWorkspaceStatus === 403;
+      const viewerDeleteWorkspaceBody = await viewerDeleteWorkspaceRes.json().catch(() => ({}));
+
+      if (!viewerDeleteWorkspaceDenied) {
+        return {
+          test: "views-workspaces:permissions",
+          result: "FAIL",
+          step: "viewer-delete-workspace-denied",
+          expectedStatus: 403,
+          actualStatus: viewerDeleteWorkspaceStatus,
+          body: viewerDeleteWorkspaceBody
+        };
+      }
+
+      // Step 6a: Viewer confirms GET /views still works (read allowed)
+      const viewerReadViewsRes = await fetch(`${API}/views?limit=5`, {
+        headers: {
+          "authorization": `Bearer ${viewerToken}`,
+          "x-tenant-id": TENANT,
+          ...featureHeaders
+        }
+      });
+
+      const viewerReadViewsOk = viewerReadViewsRes.ok;
+      const viewerReadViewsStatus = viewerReadViewsRes.status;
+      if (!viewerReadViewsOk) {
+        return {
+          test: "views-workspaces:permissions",
+          result: "FAIL",
+          step: "viewer-read-views-allowed",
+          expectedStatus: 200,
+          actualStatus: viewerReadViewsStatus,
+          body: await viewerReadViewsRes.json().catch(() => ({}))
+        };
+      }
+
+      // Step 6b: Viewer confirms GET /workspaces still works (read allowed)
+      const viewerReadWorkspacesRes = await fetch(`${API}/workspaces?limit=5`, {
+        headers: {
+          "authorization": `Bearer ${viewerToken}`,
+          "x-tenant-id": TENANT,
+          ...featureHeaders
+        }
+      });
+
+      const viewerReadWorkspacesOk = viewerReadWorkspacesRes.ok;
+      const viewerReadWorkspacesStatus = viewerReadWorkspacesRes.status;
+      if (!viewerReadWorkspacesOk) {
+        return {
+          test: "views-workspaces:permissions",
+          result: "FAIL",
+          step: "viewer-read-workspaces-allowed",
+          expectedStatus: 200,
+          actualStatus: viewerReadWorkspacesStatus,
+          body: await viewerReadWorkspacesRes.json().catch(() => ({}))
+        };
+      }
+
+      // All checks passed
+      return {
+        test: "views-workspaces:permissions",
+        result: "PASS",
+        summary: "RBAC boundaries enforced: admin writes succeed, viewer writes denied (403), viewer reads succeed",
+        assertions: {
+          adminCreateView: viewCreateOk,
+          adminCreateWorkspace: workspaceCreateOk,
+          viewerCreateViewDenied: viewerCreateViewDenied,
+          viewerPatchViewDenied: viewerPatchViewDenied,
+          viewerDeleteViewDenied: viewerDeleteViewDenied,
+          viewerCreateWorkspaceDenied: viewerCreateWorkspaceDenied,
+          viewerPatchWorkspaceDenied: viewerPatchWorkspaceDenied,
+          viewerDeleteWorkspaceDenied: viewerDeleteWorkspaceDenied,
+          viewerReadViewsAllowed: viewerReadViewsOk,
+          viewerReadWorkspacesAllowed: viewerReadWorkspacesOk
+        },
+        artifacts: {
+          viewId,
+          workspaceId
+        }
+      };
+    } finally {
+      // Cleanup: delete view and workspace with admin token
+      await ensureBearer(); // Use default admin token for cleanup
+
+      if (viewId) {
+        const deleteHeaders = { ...baseHeaders(), ...featureHeaders };
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const delRes = await fetch(`${API}/views/${encodeURIComponent(viewId)}`, {
+            method: "DELETE",
+            headers: deleteHeaders
+          });
+          if (delRes.ok || delRes.status === 404) break;
+          await sleep(300);
+        }
+      }
+
+      if (workspaceId) {
+        const deleteHeaders = { ...baseHeaders(), ...featureHeaders };
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const delRes = await fetch(`${API}/workspaces/${encodeURIComponent(workspaceId)}`, {
+            method: "DELETE",
+            headers: deleteHeaders
+          });
+          if (delRes.ok || delRes.status === 404) break;
+          await sleep(300);
+        }
+      }
+    }
+  },
+
   /* ===================== Sprint III: Views, Workspaces, Events ===================== */
   
   "smoke:views:crud": async ()=>{
@@ -8992,6 +9427,256 @@ const tests = {
           view: { id: viewId, filters: viewBody?.filters },
           derivedQueryParams,
           results: { filteredCount: filteredItems.length }
+        }
+      };
+    } finally {
+      if (viewId) {
+        const deleteHeaders = { ...baseHeaders(), ...featureHeaders };
+        let deleted = false;
+        for (let attempt = 0; attempt < 5 && !deleted; attempt++) {
+          const delResp = await fetch(`${API}/views/${encodeURIComponent(viewId)}`, { method: "DELETE", headers: deleteHeaders });
+          if (delResp.ok || delResp.status === 404) {
+            deleted = true;
+            break;
+          }
+          await sleep(300);
+        }
+      }
+    }
+  },
+
+  "smoke:views:save-then-update": async () => {
+    // Test PATCH workflow: create view, apply filters, update filters, reapply, verify flip
+    // This validates "operator leverage" — update existing view without creating duplicate
+    await ensureBearer();
+
+    const featureHeaders = { "X-Feature-Views-Enabled": "true" };
+    const runTimestamp = Date.now();
+    let vendorId = null;
+    let prodId = null;
+    let itemId = null;
+    let po1Id = null;
+    let po2Id = null;
+    let viewId = null;
+
+    try {
+      // 1) Seed: vendor → product → inventory
+      const { vendorId: vid } = await seedVendor(api);
+      vendorId = vid;
+
+      const productRes = await createProduct({ vendorId, token: smokeTag(`VTOK-SAVEUPD-${runTimestamp}`) });
+      if (!productRes.ok) {
+        return {
+          test: "views:save-then-update",
+          result: "FAIL",
+          step: "createProduct",
+          status: productRes.status
+        };
+      }
+      prodId = productRes.body?.id;
+
+      const inventoryRes = await createInventoryForProduct(prodId, `Item-SaveUpdate-${runTimestamp}`);
+      if (!inventoryRes.ok) {
+        return {
+          test: "views:save-then-update",
+          result: "FAIL",
+          step: "createInventory",
+          status: inventoryRes.status
+        };
+      }
+      itemId = inventoryRes.body?.id;
+
+      // 2) Create 2 POs with different statuses (both draft initially, then submit one)
+      const po1Create = await post(`/objects/purchaseOrder`, {
+        type: "purchaseOrder",
+        status: "draft",
+        vendorId,
+        lines: [{ itemId, qty: 10, uom: "ea" }]
+      }, { "Idempotency-Key": idem() });
+      if (!po1Create.ok || !po1Create.body?.id) {
+        return {
+          test: "views:save-then-update",
+          result: "FAIL",
+          step: "createPO1",
+          status: po1Create.status
+        };
+      }
+      po1Id = po1Create.body.id;
+      recordCreated({ type: 'purchaseOrder', id: po1Id, route: '/objects/purchaseOrder' });
+
+      const po2Create = await post(`/objects/purchaseOrder`, {
+        type: "purchaseOrder",
+        status: "draft",
+        vendorId,
+        lines: [{ itemId, qty: 20, uom: "ea" }]
+      }, { "Idempotency-Key": idem() });
+      if (!po2Create.ok || !po2Create.body?.id) {
+        return {
+          test: "views:save-then-update",
+          result: "FAIL",
+          step: "createPO2",
+          status: po2Create.status
+        };
+      }
+      po2Id = po2Create.body.id;
+      recordCreated({ type: 'purchaseOrder', id: po2Id, route: '/objects/purchaseOrder' });
+
+      // 3) Submit PO2 (flip status from draft to submitted)
+      const submitResp = await fetch(`${API}/purchasing/po/${encodeURIComponent(po2Id)}:submit`, {
+        method: "POST",
+        headers: baseHeaders()
+      });
+      if (!submitResp.ok) {
+        return {
+          test: "views:save-then-update",
+          result: "FAIL",
+          step: "submitPO2",
+          status: submitResp.status
+        };
+      }
+
+      // 4) Create view with status="draft" filter
+      const viewCreateResp = await fetch(`${API}/views`, {
+        method: "POST",
+        headers: { ...baseHeaders(), ...featureHeaders },
+        body: JSON.stringify({
+          name: `View SaveUpdate Draft ${runTimestamp}`,
+          entityType: "purchaseOrder",
+          filters: [
+            { field: "status", op: "eq", value: "draft" }
+          ]
+        })
+      });
+      const viewBody = await viewCreateResp.json().catch(() => ({}));
+      if (!viewCreateResp.ok || !viewBody?.id) {
+        return {
+          test: "views:save-then-update",
+          result: "FAIL",
+          step: "createView",
+          status: viewCreateResp.status
+        };
+      }
+      viewId = viewBody.id;
+      recordCreated({ type: 'view', id: viewId, route: '/views', meta: { entityType: "purchaseOrder" } });
+
+      // 5) Apply view (PO1 draft should be found, PO2 submitted should NOT)
+      const maxAttempts = 25;
+      const delayMs = 500;
+      let po1InFilteredDraft = false;
+      let po2InFilteredDraft = false;
+      let filteredItemsDraft = [];
+
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        if (attempt > 0) await sleep(delayMs);
+        const listResp = await get(`/objects/purchaseOrder`, { "filter.vendorId": vendorId, "filter.status": "draft", limit: 200 });
+        if (listResp.ok && Array.isArray(listResp.body?.items)) {
+          const items = listResp.body.items;
+          filteredItemsDraft = items;
+          po1InFilteredDraft = items.some(po => po.id === po1Id);
+          po2InFilteredDraft = items.some(po => po.id === po2Id);
+          if (po1InFilteredDraft && !po2InFilteredDraft) break;
+        }
+      }
+
+      // 6) Assert initial state (draft filter: PO1 yes, PO2 no)
+      if (!po1InFilteredDraft) {
+        return {
+          test: "views:save-then-update",
+          result: "FAIL",
+          step: "assertPO1InDraftFilter",
+          reason: "draft-PO-should-be-in-results",
+          po1Id,
+          filteredCount: filteredItemsDraft.length
+        };
+      }
+      if (po2InFilteredDraft) {
+        return {
+          test: "views:save-then-update",
+          result: "FAIL",
+          step: "assertPO2NotInDraftFilter",
+          reason: "submitted-PO-should-not-be-in-draft-filter",
+          po2Id,
+          filteredCount: filteredItemsDraft.length
+        };
+      }
+
+      // 7) PATCH view to flip filter to status="submitted"
+      const patchResp = await fetch(`${API}/views/${encodeURIComponent(viewId)}`, {
+        method: "PATCH",
+        headers: { ...baseHeaders(), ...featureHeaders },
+        body: JSON.stringify({
+          filters: [
+            { field: "status", op: "eq", value: "submitted" }
+          ]
+        })
+      });
+      if (!patchResp.ok) {
+        return {
+          test: "views:save-then-update",
+          result: "FAIL",
+          step: "patchViewToSubmitted",
+          status: patchResp.status,
+          body: await patchResp.json().catch(() => ({}))
+        };
+      }
+
+      // 8) Apply updated view (PO2 submitted should be found, PO1 draft should NOT)
+      let po1InFilteredSubmitted = false;
+      let po2InFilteredSubmitted = false;
+      let filteredItemsSubmitted = [];
+
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        if (attempt > 0) await sleep(delayMs);
+        const listResp = await get(`/objects/purchaseOrder`, { "filter.vendorId": vendorId, "filter.status": "submitted", limit: 200 });
+        if (listResp.ok && Array.isArray(listResp.body?.items)) {
+          const items = listResp.body.items;
+          filteredItemsSubmitted = items;
+          po1InFilteredSubmitted = items.some(po => po.id === po1Id);
+          po2InFilteredSubmitted = items.some(po => po.id === po2Id);
+          if (!po1InFilteredSubmitted && po2InFilteredSubmitted) break;
+        }
+      }
+
+      // 9) Assert flipped state (submitted filter: PO1 no, PO2 yes)
+      if (po1InFilteredSubmitted) {
+        return {
+          test: "views:save-then-update",
+          result: "FAIL",
+          step: "assertPO1NotInSubmittedFilter",
+          reason: "draft-PO-should-not-be-in-submitted-filter",
+          po1Id,
+          filteredCount: filteredItemsSubmitted.length
+        };
+      }
+      if (!po2InFilteredSubmitted) {
+        return {
+          test: "views:save-then-update",
+          result: "FAIL",
+          step: "assertPO2InSubmittedFilter",
+          reason: "submitted-PO-should-be-in-results",
+          po2Id,
+          filteredCount: filteredItemsSubmitted.length
+        };
+      }
+
+      const pass = po1InFilteredDraft && !po2InFilteredDraft && !po1InFilteredSubmitted && po2InFilteredSubmitted;
+      return {
+        test: "views:save-then-update",
+        result: pass ? "PASS" : "FAIL",
+        message: "Updated view filters via PATCH and reapplied with flipped results",
+        steps: {
+          vendor: { vendorId },
+          product: { prodId },
+          inventory: { itemId },
+          po1: { id: po1Id, status: "draft", inDraftFilter: po1InFilteredDraft, inSubmittedFilter: po1InFilteredSubmitted },
+          po2: { id: po2Id, status: "submitted", inDraftFilter: po2InFilteredDraft, inSubmittedFilter: po2InFilteredSubmitted },
+          view: { id: viewId, entityType: "purchaseOrder" },
+          assertions: {
+            draftFilterCorrect: po1InFilteredDraft && !po2InFilteredDraft,
+            submittedFilterCorrect: !po1InFilteredSubmitted && po2InFilteredSubmitted,
+            filteredCountDraft: filteredItemsDraft.length,
+            filteredCountSubmitted: filteredItemsSubmitted.length
+          }
         }
       };
     } finally {

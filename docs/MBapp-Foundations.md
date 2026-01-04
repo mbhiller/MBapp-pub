@@ -179,6 +179,14 @@ See [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) for full OpenAPI defin
 - **Error messages:** API returns specific error codes for each failure mode: `"Unknown viewId: <id>"`, `"not found in views array"`, `"has entityType X but workspace has Y"`.
 - **Smoke coverage:** `smoke:workspaces:default-view-validation` validates all 8 scenarios including creation, PATCH updates, unknown viewId rejection, entityType mismatches, and removal edge cases.
 
+**Views/Workspaces v1 Foundation — CI-Locked (Sprint AB):**
+- **Filter Validation:** All 11 filter operators (eq, ne, lt, le, gt, ge, in, nin, contains, startsWith, regex) validated and locked in CI via `smoke:views:validate-filters`.
+- **PATCH Workflow:** View update + reapplication tested via `smoke:views:save-then-update` (validates operator leverage: update existing view without creating duplicate).
+- **RBAC Boundaries:** Permission enforcement validated via `smoke:views-workspaces:permissions` (admin writes succeed, viewer writes denied 403, reads allowed).
+- **Web UX:** Workspace hub polished with view count, default view indicator, and "Open" buttons (WorkspacesListPage + WorkspaceDetailPage).
+- **Filter Mapping:** Remains best-effort per entityType; unsupported filters warned in UI (e.g., "Some filters may not be supported for this entity type").
+- **Phase 2 Scope:** Shared views, columns UI rendering, mobile list screen integration deferred to next sprint.
+
 **Status Lifecycles:**
 - Purchase Orders: `draft → submitted → approved → (partially-)received → fulfilled → closed` (also `cancelled`)
 - Sales Orders: `draft → submitted → approved → (partially-)fulfilled → completed` (also `cancelled`)

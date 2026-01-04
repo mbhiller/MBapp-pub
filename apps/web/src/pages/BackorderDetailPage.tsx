@@ -3,7 +3,7 @@ import { Link, useParams, useNavigate } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
 import { hasPerm } from "../lib/permissions";
-import { getObject } from "../lib/api";
+import { getObjectAuthed } from "../lib/api";
 import { track } from "../lib/telemetry";
 import * as Sentry from "@sentry/browser";
 import { ignoreBackorderRequest, convertBackorderRequest, type BackorderRequest } from "../lib/backorders";
@@ -39,6 +39,13 @@ function formatError(err: unknown): string {
   return parts.join(" · ") || "Request failed";
 }
 
+type RelatedObjectWarning = {
+  type: "salesOrder" | "inventory" | "party";
+  id: string;
+  notFound: boolean;
+  error: string | null;
+};
+
 function getStatusColor(status?: string): string {
   switch (status) {
     case "open": return "#b00020";
@@ -64,6 +71,9 @@ export default function BackorderDetailPage() {
   const { token, tenantId, policy, policyLoading } = useAuth();
   const navigate = useNavigate();
 
+  // Auth readiness: both token and tenantId must be present
+  const authReady = Boolean(token && tenantId);
+
   // Fail-closed permission checks (using ergonomic permission aliases)
   const canWriteBackorders = hasPerm(policy, PERM_OBJECTS_WRITE) && !policyLoading;
   const canSuggestPO = hasPerm(policy, PERM_PURCHASE_WRITE) && !policyLoading;
@@ -74,51 +84,134 @@ export default function BackorderDetailPage() {
   const [vendor, setVendor] = useState<Party | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notFound, setNotFound] = useState(false);
+  const [warnings, setWarnings] = useState<RelatedObjectWarning[]>([]);
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionInfo, setActionInfo] = useState<string | null>(null);
   const [convertLoading, setConvertLoading] = useState(false);
 
+  /**
+   * Safe GET helper: attempts to fetch a related object.
+   * Returns structured result instead of throwing on 404.
+   * Assumes authReady is true before calling.
+   */
+  const safeGet = async <T,>(type: string, id: string): Promise<{ value: T | null; notFound: boolean; error: any | null }> => {
+    try {
+      const value = await getObjectAuthed<T>(type, id, { token: token!, tenantId: tenantId! });
+      return { value, notFound: false, error: null };
+    } catch (err) {
+      const e = err as any;
+      const is404 = e?.status === 404 || e?.statusCode === 404;
+      return { value: null, notFound: is404, error: is404 ? null : err };
+    }
+  };
+
+  /**
+   * Fetch main backorder (required).
+   * Throws if missing/404.
+   * Assumes authReady is true before calling.
+   */
+  const fetchBackorder = async (boId: string) => {
+    try {
+      const bo = await getObjectAuthed<BackorderRequest>("backorderRequest", boId, { token: token!, tenantId: tenantId! });
+      setBackorder(bo);
+      return bo;
+    } catch (err) {
+      const e = err as any;
+      if (e?.status === 404 || e?.statusCode === 404) {
+        setNotFound(true);
+      } else {
+        setError(formatError(err));
+      }
+      throw err;
+    }
+  };
+
+  /**
+   * Fetch related objects (best-effort).
+   * Collects warnings for missing/failed objects, does not throw.
+   */
+  const fetchRelated = async (bo: BackorderRequest) => {
+    const collectedWarnings: RelatedObjectWarning[] = [];
+
+    // Fetch related sales order
+    if (bo.soId) {
+      const { value: so, notFound, error } = await safeGet<SalesOrder>("salesOrder", bo.soId);
+      if (so) {
+        setSalesOrder(so);
+      } else if (notFound || error) {
+        collectedWarnings.push({
+          type: "salesOrder",
+          id: bo.soId,
+          notFound: notFound,
+          error: error ? formatError(error) : null,
+        });
+      }
+    }
+
+    // Fetch related inventory item
+    if (bo.itemId) {
+      const { value: inv, notFound, error } = await safeGet<InventoryItem>("inventory", bo.itemId);
+      if (inv) {
+        setItem(inv);
+      } else if (notFound || error) {
+        collectedWarnings.push({
+          type: "inventory",
+          id: bo.itemId,
+          notFound: notFound,
+          error: error ? formatError(error) : null,
+        });
+      }
+    }
+
+    // Fetch vendor if present
+    if (bo.preferredVendorId) {
+      const { value: v, notFound, error } = await safeGet<Party>("party", bo.preferredVendorId);
+      if (v) {
+        setVendor(v);
+      } else if (notFound || error) {
+        collectedWarnings.push({
+          type: "party",
+          id: bo.preferredVendorId,
+          notFound: notFound,
+          error: error ? formatError(error) : null,
+        });
+      }
+    }
+
+    setWarnings(collectedWarnings);
+  };
+
+  /**
+   * Main fetch orchestrator.
+   */
   const fetchDetail = async () => {
-    if (!id) return;
+    // Early returns
+    if (!id || !id.trim()) {
+      setNotFound(true);
+      setLoading(false);
+      return;
+    }
+
+    if (!authReady) {
+      // Wait for auth to be ready
+      setLoading(true);
+      return;
+    }
+
+    // Reset stale state before refetch
     setLoading(true);
     setError(null);
+    setNotFound(false);
+    setWarnings([]);
+
     try {
-      // Fetch backorder
-      const bo = await getObject<BackorderRequest>("backorderRequest", id);
-      setBackorder(bo);
-
-      // Fetch related SO
-      if (bo.soId) {
-        try {
-          const so = await getObject<SalesOrder>("salesOrder", bo.soId);
-          setSalesOrder(so);
-        } catch (err) {
-          console.warn("Failed to fetch SO:", err);
-        }
-      }
-
-      // Fetch related item
-      if (bo.itemId) {
-        try {
-          const inv = await getObject<InventoryItem>("inventory", bo.itemId);
-          setItem(inv);
-        } catch (err) {
-          console.warn("Failed to fetch item:", err);
-        }
-      }
-
-      // Fetch vendor if present
-      if (bo.preferredVendorId) {
-        try {
-          const v = await getObject<Party>("party", bo.preferredVendorId);
-          setVendor(v);
-        } catch (err) {
-          console.warn("Failed to fetch vendor:", err);
-        }
-      }
-    } catch (err) {
-      setError(formatError(err));
+      // Fetch required backorder (will throw on 404)
+      const bo = await fetchBackorder(id);
+      
+      // Fetch related objects (best-effort, collects warnings)
+      await fetchRelated(bo);
     } finally {
       setLoading(false);
     }
@@ -126,7 +219,7 @@ export default function BackorderDetailPage() {
 
   useEffect(() => {
     fetchDetail();
-  }, [id]);
+  }, [id, authReady]);
 
   // Track screen view when backorder is loaded
   useEffect(() => {
@@ -196,7 +289,28 @@ export default function BackorderDetailPage() {
   if (loading) {
     return (
       <div style={{ padding: 24 }}>
-        <div>Loading backorder detail...</div>
+        <div>{authReady ? "Loading backorder detail..." : "Loading auth..."}</div>
+      </div>
+    );
+  }
+
+  if (notFound) {
+    return (
+      <div style={{ padding: 24, maxWidth: 600 }}>
+        <div style={{ backgroundColor: "#fff3cd", border: "1px solid #ffc107", borderRadius: 4, padding: 16, marginBottom: 16 }}>
+          <h2 style={{ margin: "0 0 8px 0", fontSize: 18, color: "#856404" }}>Backorder Not Found</h2>
+          <p style={{ margin: 0, color: "#856404" }}>
+            The backorder <code style={{ backgroundColor: "#fff", padding: "2px 6px", borderRadius: 2 }}>{id}</code> could not be found. It may have been deleted or the ID is incorrect.
+          </p>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => navigate("/backorders")} style={{ padding: "8px 16px", cursor: "pointer" }}>
+            ← Back to Backorders List
+          </button>
+          <button onClick={() => fetchDetail()} style={{ padding: "8px 16px", cursor: "pointer", backgroundColor: "#f5f5f5" }}>
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
@@ -290,6 +404,19 @@ export default function BackorderDetailPage() {
       {actionInfo && (
         <div style={{ padding: 12, marginBottom: 16, background: "#e8f5e9", color: "#1b5e20", borderRadius: 4 }}>
           {actionInfo}
+        </div>
+      )}
+
+      {/* Warnings for missing related objects */}
+      {warnings.length > 0 && (
+        <div style={{ marginBottom: 16, padding: 12, background: "#fff3cd", border: "1px solid #ffc107", borderRadius: 4 }}>
+          <div style={{ fontWeight: 600, color: "#856404", marginBottom: 8 }}>Related Objects Not Found</div>
+          {warnings.map((warning, idx) => (
+            <div key={idx} style={{ fontSize: 13, color: "#856404", marginBottom: idx < warnings.length - 1 ? 6 : 0 }}>
+              <strong>{warning.type}:</strong> {warning.id}
+              {warning.error && <div style={{ fontSize: 12, marginLeft: 16, marginTop: 2 }}>{warning.error}</div>}
+            </div>
+          ))}
         </div>
       )}
 
