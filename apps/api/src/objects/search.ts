@@ -2,6 +2,7 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { ok, bad, error } from "../common/responses";
 import { searchObjects } from "./repo";
+import { searchObjectsWithAliases } from "./type-alias";
 import { getAuth, requirePerm } from "../auth/middleware";
 
 export async function handle(event: APIGatewayProxyEventV2) {
@@ -27,7 +28,8 @@ export async function handle(event: APIGatewayProxyEventV2) {
       }
     }
 
-    const page = await searchObjects({ tenantId: auth.tenantId, type, q, filters, next, limit, fields });
+    // Alias-aware union for inventory/inventoryItem when not paginating; falls back to single-type paging otherwise.
+    const page = await searchObjectsWithAliases({ tenantId: auth.tenantId, type, q, filters, next, limit, fields });
     // Backward-compatible: keep { items, next } and also include pageInfo
     return ok({
       ...page,

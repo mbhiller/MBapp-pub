@@ -4,6 +4,7 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 
 import { ok, bad, notFound, error } from "../common/responses";
 import { getObjectById, updateObject, buildSkuLock } from "./repo";
+import { resolveObjectByIdWithAliases } from "./type-alias";
 import { getAuth, requirePerm } from "../auth/middleware";
 import { ensurePartyRole } from "../common/validators";
 import { featureReservationsEnabled } from "../flags";
@@ -25,8 +26,9 @@ export async function handle(event: APIGatewayProxyEventV2) {
     // Permission already checked by router via requireObjectPerm()
 
     const patch = event.body ? JSON.parse(event.body) : {};
-    const existing = await getObjectById({ tenantId: auth.tenantId, type, id });
-    if (!existing) return notFound("Not Found");
+    const resolved = await resolveObjectByIdWithAliases({ tenantId: auth.tenantId, type, id });
+    if (!resolved) return notFound("Not Found");
+    const { typeUsed, obj: existing } = resolved;
 
     // 1) Product SKU change → acquire new lock and delete old constant-SK lock
     if (String(type).toLowerCase() === "product") {
@@ -149,7 +151,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
       patch.docType = "inventoryMovement";
     }
     
-    const updated = await updateObject({ tenantId: auth.tenantId, type, id, body: patch });
+    const updated = await updateObject({ tenantId: auth.tenantId, type: typeUsed, id, body: patch });
     
     return ok(updated);
   } catch (e: any) {

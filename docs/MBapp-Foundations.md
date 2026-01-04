@@ -134,6 +134,11 @@ const TENANT = process.env.MBAPP_TENANT_ID ?? "DemoTenant";
 - Each backorderRequest must reference an existing salesOrder (`soId`), a line on that order (`soLineId` match against `lines`/`lineItems`), and an inventory record (try `inventoryItem`, fall back to `inventory`).
 - Validation runs at sales order commit (when creating backorders) and on convert; ignore remains permissive for cleanup but emits integrity context for observability.
 
+**Inventory ↔ InventoryItem aliasing:**
+- Canonical type is `inventoryItem`; legacy records may still have `type=inventory`.
+- API objects layer resolves both types for GET/UPDATE/DELETE/LIST/SEARCH (inventoryItem first, inventory fallback) so callers can use either id/type during migration.
+- New code should write `inventoryItem` and read using alias-aware helpers (API: type-alias helpers; web/mobile: fetch inventoryItem then inventory on 404).
+
 
 
 ### 2.1 Idempotency & Error Handling

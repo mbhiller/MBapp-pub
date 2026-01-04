@@ -1,6 +1,7 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { ok, bad, notFound, error } from "../common/responses";
 import { getObjectById } from "./repo";
+import { resolveObjectByIdWithAliases } from "./type-alias";
 import { getAuth, requirePerm } from "../auth/middleware";
 
 export async function handle(event: APIGatewayProxyEventV2) {
@@ -12,10 +13,11 @@ export async function handle(event: APIGatewayProxyEventV2) {
 
     // Permission already checked by router via requireObjectPerm()
 
-    const obj = await getObjectById({ tenantId: auth.tenantId, type, id });
-    if (!obj) return notFound("Not Found");
+    // Prefer canonical type, fall back to aliases for inventory vs inventoryItem only
+    const resolved = await resolveObjectByIdWithAliases({ tenantId: auth.tenantId, type, id });
+    if (!resolved) return notFound("Not Found");
 
-    return ok(obj);
+    return ok(resolved.obj);
   } catch (e: any) {
     return error(e);
   }

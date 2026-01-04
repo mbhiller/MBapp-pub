@@ -7,6 +7,7 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 
 import { ok, bad, notFound, error } from "../common/responses";
 import { getObjectById, deleteObject } from "./repo";
+import { resolveObjectByIdWithAliases } from "./type-alias";
 import { getAuth, requirePerm } from "../auth/middleware";
 
 // Match repo.ts envs
@@ -25,8 +26,9 @@ export async function handle(event: APIGatewayProxyEventV2) {
 
     // Permission already checked by router via requireObjectPerm()
 
-    const existing = await getObjectById({ tenantId: auth.tenantId, type, id });
-    if (!existing) return notFound("Not Found");
+    const resolved = await resolveObjectByIdWithAliases({ tenantId: auth.tenantId, type, id });
+    if (!resolved) return notFound("Not Found");
+    const { typeUsed, obj: existing } = resolved;
 
     // If product has a SKU, release its uniqueness lock
     if (type === "product" && (existing as any)?.sku) {
@@ -40,8 +42,8 @@ export async function handle(event: APIGatewayProxyEventV2) {
       })).catch(() => {});
     }
 
-    await deleteObject({ tenantId: auth.tenantId, type, id });
-    return ok({ ok: true, id, type, deleted: true });
+    await deleteObject({ tenantId: auth.tenantId, type: typeUsed, id });
+    return ok({ ok: true, id, type: typeUsed, deleted: true });
   } catch (e: any) {
     return error(e);
   }

@@ -1,6 +1,8 @@
 {
   "DELETE /views/{id}": "view:write",
   "DELETE /workspaces/{id}": "workspace:write",
+  "GET /inventory/{id}/onhand": "inventory:read",
+  "GET /inventory/{id}/onhand:by-location": "inventory:read",
   "GET /views": "view:read",
   "GET /views/{id}": "view:read",
   "GET /workspaces": "workspace:read",
@@ -10,6 +12,7 @@
   "POST /inventory/{id}:cycle-count": "inventory:adjust",
   "POST /inventory/{id}:putaway": "inventory:write",
   "POST /inventory/{id}/adjust": "inventory:write",
+  "POST /inventory/onhand:batch": "inventory:read",
   "POST /objects/backorderRequest/{id}:convert": "objects:write",
   "POST /objects/backorderRequest/{id}:ignore": "objects:write",
   "POST /purchasing/po:create-from-suggestion": "purchase:write",

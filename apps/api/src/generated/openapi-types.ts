@@ -2423,9 +2423,11 @@ export interface components {
             /** @description Optional note for the cycle count movement */
             note?: string | null;
         };
+        /** @description Canonical inventory object (type=inventoryItem). Legacy records may be stored with type=inventory; server treats inventory and inventoryItem as aliases for backward compatibility.
+         *      */
         InventoryItem: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
-            type: "inventory";
+            type: "inventoryItem";
             productId?: string | null;
             name: string;
             sku?: string;

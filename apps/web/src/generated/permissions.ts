@@ -9,6 +9,8 @@
 export const PERMISSIONS_BY_ENDPOINT = {
   "DELETE /views/{id}": "view:write",
   "DELETE /workspaces/{id}": "workspace:write",
+  "GET /inventory/{id}/onhand": "inventory:read",
+  "GET /inventory/{id}/onhand:by-location": "inventory:read",
   "GET /views": "view:read",
   "GET /views/{id}": "view:read",
   "GET /workspaces": "workspace:read",
@@ -18,6 +20,7 @@ export const PERMISSIONS_BY_ENDPOINT = {
   "POST /inventory/{id}:cycle-count": "inventory:adjust",
   "POST /inventory/{id}:putaway": "inventory:write",
   "POST /inventory/{id}/adjust": "inventory:write",
+  "POST /inventory/onhand:batch": "inventory:read",
   "POST /objects/backorderRequest/{id}:convert": "objects:write",
   "POST /objects/backorderRequest/{id}:ignore": "objects:write",
   "POST /purchasing/po:create-from-suggestion": "purchase:write",
@@ -63,6 +66,7 @@ export type EndpointKey = keyof typeof PERMISSIONS_BY_ENDPOINT;
  * Example: hasPerm(policy, PERM_OBJECTS_WRITE)
  */
 export const PERM_INVENTORY_ADJUST = "inventory:adjust" as const;
+export const PERM_INVENTORY_READ = "inventory:read" as const;
 export const PERM_INVENTORY_WRITE = "inventory:write" as const;
 export const PERM_OBJECTS_WRITE = "objects:write" as const;
 export const PERM_PURCHASE_APPROVE = "purchase:approve" as const;
@@ -86,6 +90,7 @@ export const PERM_WORKSPACE_WRITE = "workspace:write" as const;
  */
 export const PERMISSION_KEYS = [
   "inventory:adjust",
+  "inventory:read",
   "inventory:write",
   "objects:write",
   "purchase:approve",

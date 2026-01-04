@@ -41,6 +41,13 @@
   - Outputs per-tenant counts (missing SO / line / inventory / valid) and auto-ignores open orphans in fix mode.
 - Verification: `cd apps/api && npm run typecheck` ✅
 
+### InventoryItem Canonicalization Groundwork — 🚧 In Progress (Sprint AE)
+
+- Spec: `InventoryItem` schema now declares `type=inventoryItem`; note added that `inventory` is a legacy alias.
+- API objects layer: GET/UPDATE/DELETE/LIST/SEARCH now resolve inventory vs inventoryItem via aliases; canonical responses preserved.
+- Smokes: close-the-loop now creates inventoryItem first (falls back to inventory only if needed).
+- Guidance: new writes should use `inventoryItem`; reads should resolve by either type until legacy inventory records are migrated.
+
 ### Views/Workspaces v1 Foundation — ✅ Complete (Sprint AB, 2026-01-04)
 
 **Epic Summary:** Lock in Views/Workspaces foundation with comprehensive RBAC enforcement, permission gating across web/mobile, and CI smoke coverage.

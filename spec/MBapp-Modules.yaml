@@ -775,6 +775,8 @@ components:
           nullable: true
           description: Optional note for the cycle count movement
     InventoryItem:
+      description: |
+        Canonical inventory object (type=inventoryItem). Legacy records may be stored with type=inventory; server treats inventory and inventoryItem as aliases for backward compatibility.
       allOf:
       - $ref: '#/components/schemas/ObjectBase'
       - type: object
@@ -785,7 +787,7 @@ components:
           type:
             type: string
             enum:
-            - inventory
+            - inventoryItem
           productId:
             type: string
             nullable: true
@@ -3637,6 +3639,7 @@ paths:
   /inventory/{id}/onhand:
     get:
       summary: Get computed counters for an inventory item
+      x-mbapp-permission: inventory:read
       parameters:
       - in: path
         name: id
@@ -3660,6 +3663,7 @@ paths:
       tags:
       - Inventory
       summary: Get computed counters for an inventory item grouped by location
+      x-mbapp-permission: inventory:read
       parameters:
       - in: path
         name: id
@@ -3691,6 +3695,7 @@ paths:
       tags:
       - Inventory
       summary: Batch counters query (array)
+      x-mbapp-permission: inventory:read
       parameters:
       - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
