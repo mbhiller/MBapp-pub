@@ -146,8 +146,18 @@ export async function listObjectsWithAliases(args: ListWithAliasesArgs) {
     if (Array.isArray(res?.items)) collected.push(...res.items);
   }
 
+  // Deduplicate by id (defensive guard against data corruption with both SK forms)
+  const dedupedMap = new Map<string, any>();
+  for (const item of collected) {
+    const itemId = item?.id;
+    if (itemId && !dedupedMap.has(itemId)) {
+      dedupedMap.set(itemId, item);
+    }
+  }
+  const deduped = Array.from(dedupedMap.values());
+
   // Deterministic ordering: updatedAt desc if present, else id asc.
-  collected.sort((a, b) => {
+  deduped.sort((a, b) => {
     const aUpdated = (a?.updatedAt as string) || "";
     const bUpdated = (b?.updatedAt as string) || "";
     if (aUpdated && bUpdated && aUpdated !== bUpdated) return aUpdated > bUpdated ? -1 : 1;
@@ -157,7 +167,7 @@ export async function listObjectsWithAliases(args: ListWithAliasesArgs) {
   });
 
   return {
-    items: collected.slice(0, limit),
+    items: deduped.slice(0, limit),
     next: null, // union paging not supported in minimal helper
     unionApplied: true,
   } as const;
@@ -188,7 +198,17 @@ export async function searchObjectsWithAliases(args: SearchWithAliasesArgs) {
     if (Array.isArray(page?.items)) collected.push(...page.items);
   }
 
-  collected.sort((a, b) => {
+  // Deduplicate by id (defensive guard against data corruption with both SK forms)
+  const dedupedMap = new Map<string, any>();
+  for (const item of collected) {
+    const itemId = item?.id;
+    if (itemId && !dedupedMap.has(itemId)) {
+      dedupedMap.set(itemId, item);
+    }
+  }
+  const deduped = Array.from(dedupedMap.values());
+
+  deduped.sort((a, b) => {
     const aUpdated = (a?.updatedAt as string) || "";
     const bUpdated = (b?.updatedAt as string) || "";
     if (aUpdated && bUpdated && aUpdated !== bUpdated) return aUpdated > bUpdated ? -1 : 1;
@@ -198,7 +218,7 @@ export async function searchObjectsWithAliases(args: SearchWithAliasesArgs) {
   });
 
   return {
-    items: collected.slice(0, limit),
+    items: deduped.slice(0, limit),
     next: null,
     unionApplied: true,
   } as const;

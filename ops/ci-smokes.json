@@ -59,6 +59,10 @@
   "smoke:objects:perm-prefix-normalization",
   "smoke:objects:type-casing-and-alias",
   "smoke:objects:inventory-alias-update-delete",
+  "smoke:objects:search-inventory-alias-union",
+  "smoke:objects:update-casing-variants",
+  "smoke:objects:list-inventory-pagination-alias",
+  "smoke:objects:create-casing-normalization",
   "smoke:views-workspaces:permissions"
   ]
 

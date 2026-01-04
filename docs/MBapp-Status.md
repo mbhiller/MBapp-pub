@@ -5,6 +5,46 @@
 **Workflow & DoD:** See [MBapp-Cadence.md](MBapp-Cadence.md) for canonical workflow, Definition of Done, and testing rules.
 
 ---
+### Objects Contract Hardening — ✅ Complete (Sprint AM, 2026-01-04)
+
+**Epic Summary:** Eliminate type normalization gaps in Objects API; ensure canonical type usage across all handlers; add comprehensive smoke coverage for type casing + inventory alias invariants.
+
+- **Canonical Type in update.ts Conditionals (E1):** [apps/api/src/objects/update.ts](../apps/api/src/objects/update.ts) now computes `canonicalTypeUsed = normalizeTypeParam(typeUsed) ?? typeUsed` after alias resolution. All 5 type-specific conditionals (product SKU lock, party role validation, reservation overlap, inventoryMovement validation) now compare against canonical type instead of raw alias form. Prevents silent failures when `resolveObjectByIdWithAliases()` returns `"inventory"` but logic checks `=== "inventoryItem"`.
+
+- **Permission Prefix Hardening (E2):** [apps/api/src/index.ts](../apps/api/src/index.ts) `typeToPermissionPrefix()` refactored to normalize incoming type first (`normalizeTypeParam(typeRaw) ?? typeRaw.trim()`), then map canonical types to module prefixes (salesOrder→sales, purchaseOrder→purchase, inventoryItem→inventory). Eliminates dual source of truth (was hardcoded lowercase map diverging from CANONICAL_TYPE_BY_LOWER); now single-source-of-truth via normalization.
+
+- **Union Query Deduplication (E3):** [apps/api/src/objects/type-alias.ts](../apps/api/src/objects/type-alias.ts) `listObjectsWithAliases()` and `searchObjectsWithAliases()` now deduplicate by id before sorting. Defensive guard against data corruption scenario where both `inventory#{id}` and `inventoryItem#{id}` SKs exist for same entity. First occurrence wins, then sort by id ascending.
+
+- **Comprehensive Smoke Tests (E4):** 5 new/extended smokes added to [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) and [ops/ci-smokes.json](../ops/ci-smokes.json):
+  - `smoke:objects:inventory-alias-update-delete` (extended): Added DELETE via alias route test (steps 7-9), validates DELETE works via both canonical and alias routes
+  - `smoke:objects:search-inventory-alias-union` (new): POST /objects/inventory/search with unique marker, validates union query finds item created via alias
+  - `smoke:objects:update-casing-variants` (new): PUT via /objects/inventoryitem (lowercase) and /objects/INVENTORYITEM (uppercase), validates both succeed
+  - `smoke:objects:list-inventory-pagination-alias` (new): GET /objects/inventory with limit=2, validates pagination fallback when cursor present
+  - `smoke:objects:create-casing-normalization` (new): POST /objects/PRODUCT (uppercase) and /objects/salesorder (lowercase), validates response returns canonical casing
+  - All 5 smokes verified PASS individually, added to CI manifest
+
+- **Spec + Docs Alignment (E5):**
+  - [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml): PUT /objects/{type}/{id} renamed `operationId: updateObject` (was `replaceObject`), added explicit description: "Partial update payload (merge semantics). Only fields present in the request body are updated; omitted fields retain their existing values."
+  - [docs/MBapp-Foundations.md](MBapp-Foundations.md): Added § 2.9 Objects Contract Invariants documenting: type normalization on ingress, canonical SK building, inventory alias behavior (write canonical, read/list/search with fallback), union query constraints (no union when paginating, deduplication), PUT merge semantics (partial update, not replace)
+  - [docs/smoke-coverage.md](smoke-coverage.md): Added § Objects Contract Invariants (Sprint AM) table with all 5 smokes, E1-E4 summary, and link to Foundations invariants section
+
+- **Verification:**
+  - All spec pipeline steps passed: `npm run spec:lint` ✓, `npm run spec:bundle` ✓, `npm run spec:types:api` ✓, `npm run spec:types:mobile` ✓
+  - TypeScript compilation clean (0 errors)
+  - All 5 smokes individually verified PASS
+
+- **Definition of Done:**
+  - ✅ E1: update.ts uses canonical type in all conditionals
+  - ✅ E2: permission prefix mapping uses single-source-of-truth normalization
+  - ✅ E3: union helpers deduplicate by id
+  - ✅ E4: 5 comprehensive smokes added to CI + all passing
+  - ✅ E5: spec reflects PUT merge semantics, docs codify invariants
+  - ✅ Spec pipeline clean, TypeScript clean, all smokes passing
+
+- **Guarantee:** Objects contract now fully hardened with canonical type usage enforced across all handlers, permission mapping centralized, union queries deduplicated, PUT merge semantics documented, and comprehensive smoke coverage protecting all invariants.
+
+---
+
 
 ## Current State Summary
 

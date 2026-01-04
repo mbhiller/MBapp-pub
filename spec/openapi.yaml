@@ -240,7 +240,7 @@ paths:
     put:
       tags:
         - Objects
-      operationId: replaceObject
+      operationId: updateObject
       security:
         - bearerAuth: []
       parameters:
@@ -256,7 +256,7 @@ paths:
               $ref: '#/components/schemas/AnyObject'
       responses:
         '200':
-          description: Updated
+          description: Updated (partial merge applied)
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -265,7 +265,7 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-      summary: Update Objects
+      summary: Update Object (partial merge)
     delete:
       tags:
         - Objects

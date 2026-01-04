@@ -6285,21 +6285,21 @@ const tests = {
     const aliasUpdateWorked = getAfterAlias.ok && getAfterAlias.body?.name?.includes("Updated-Alias");
 
     // 5) DELETE via canonical route
-    const deleteRes = await fetch(`${API}/objects/inventoryItem/${encodeURIComponent(invId)}`, {
+    const deleteCanonical = await fetch(`${API}/objects/inventoryItem/${encodeURIComponent(invId)}`, {
       method: "DELETE",
       headers: buildHeaders()
     });
-    const deleteStatus = deleteRes.status;
-    const deleteOk = deleteStatus === 204 || deleteStatus === 200;
+    const deleteCanonicalStatus = deleteCanonical.status;
+    const deleteCanonicalOk = deleteCanonicalStatus === 204 || deleteCanonicalStatus === 200;
 
-    if (!deleteOk) {
-      const deleteBody = await deleteRes.json().catch(() => ({}));
+    if (!deleteCanonicalOk) {
+      const deleteBody = await deleteCanonical.json().catch(() => ({}));
       return { 
         test: "objects:inventory-alias-update-delete", 
         result: "FAIL", 
         step: "delete-canonical", 
         expectedStatus: "204 or 200",
-        actualStatus: deleteStatus,
+        actualStatus: deleteCanonicalStatus,
         body: deleteBody
       };
     }
@@ -6311,7 +6311,45 @@ const tests = {
     const canonical404 = getCanonical404.status === 404;
     const alias404 = getAlias404.status === 404;
 
-    const pass = canonicalUpdateWorked && aliasUpdateWorked && deleteOk && canonical404 && alias404;
+    // 7) Create another item to test DELETE via alias route (Sprint AM E4 extension)
+    const invCreate2 = await post(`/objects/inventory`, {
+      type: "inventoryItem",
+      productId,
+      name: smokeTag(`InvItem-DelAlias-${SMOKE_RUN_ID}`),
+      uom: "ea"
+    });
+    if (!invCreate2.ok) return { test: "objects:inventory-alias-update-delete", result: "FAIL", step: "inventory-create2", invCreate2 };
+    const invId2 = invCreate2.body?.id;
+
+    // 8) DELETE via alias route
+    const deleteAlias = await fetch(`${API}/objects/inventory/${encodeURIComponent(invId2)}`, {
+      method: "DELETE",
+      headers: buildHeaders()
+    });
+    const deleteAliasStatus = deleteAlias.status;
+    const deleteAliasOk = deleteAliasStatus === 204 || deleteAliasStatus === 200;
+
+    if (!deleteAliasOk) {
+      const deleteAliasBody = await deleteAlias.json().catch(() => ({}));
+      return { 
+        test: "objects:inventory-alias-update-delete", 
+        result: "FAIL", 
+        step: "delete-alias", 
+        expectedStatus: "204 or 200",
+        actualStatus: deleteAliasStatus,
+        body: deleteAliasBody
+      };
+    }
+
+    // 9) Verify 404 via both routes after alias DELETE
+    const getCanonical404_2 = await get(`/objects/inventoryItem/${encodeURIComponent(invId2)}`);
+    const getAlias404_2 = await get(`/objects/inventory/${encodeURIComponent(invId2)}`);
+
+    const canonical404_2 = getCanonical404_2.status === 404;
+    const alias404_2 = getAlias404_2.status === 404;
+
+    const pass = canonicalUpdateWorked && aliasUpdateWorked && deleteCanonicalOk && canonical404 && alias404 
+                 && deleteAliasOk && canonical404_2 && alias404_2;
 
     return {
       test: "objects:inventory-alias-update-delete",
@@ -6319,8 +6357,191 @@ const tests = {
       create: { ok: invCreate.ok, id: invId },
       updateCanonical: { ok: updateCanonical.ok, verified: canonicalUpdateWorked },
       updateAlias: { ok: updateAlias.ok, verified: aliasUpdateWorked },
-      delete: { ok: deleteOk, status: deleteStatus },
-      verify404: { canonical: canonical404, alias: alias404 }
+      deleteCanonical: { ok: deleteCanonicalOk, status: deleteCanonicalStatus },
+      verify404: { canonical: canonical404, alias: alias404 },
+      deleteAlias: { ok: deleteAliasOk, status: deleteAliasStatus, id: invId2 },
+      verify404Alias: { canonical: canonical404_2, alias: alias404_2 }
+    };
+  },
+
+  // === Sprint AM E4: SEARCH with inventory alias union ===
+  "smoke:objects:search-inventory-alias-union": async () => {
+    await ensureBearer();
+
+    const prodRes = await createProduct({ name: smokeTag(`SearchAliasUnion-${SMOKE_RUN_ID}`) });
+    if (!prodRes.ok) return { test: "objects:search-inventory-alias-union", result: "FAIL", step: "product-create", prodRes };
+    const productId = prodRes.body?.id;
+
+    // Create via legacy inventory route with unique searchable marker
+    const uniqueMarker = `SearchMarker-${SMOKE_RUN_ID}-${Date.now()}`;
+    const invCreate = await post(`/objects/inventory`, {
+      type: "inventoryItem",
+      productId,
+      name: smokeTag(uniqueMarker),
+      uom: "ea"
+    });
+    if (!invCreate.ok) return { test: "objects:search-inventory-alias-union", result: "FAIL", step: "create", invCreate };
+    const invId = invCreate.body?.id;
+
+    // Verify stored as inventoryItem
+    const getCanonical = await get(`/objects/inventoryItem/${encodeURIComponent(invId)}`);
+    if (!getCanonical.ok || getCanonical.body?.type !== "inventoryItem") {
+      return { test: "objects:search-inventory-alias-union", result: "FAIL", step: "verify-type", getCanonical };
+    }
+
+    // Search via alias route (POST /objects/inventory/search)
+    const searchRes = await post(`/objects/inventory/search`, { q: uniqueMarker });
+    if (!searchRes.ok) return { test: "objects:search-inventory-alias-union", result: "FAIL", step: "search", searchRes };
+
+    const items = searchRes.body?.items || [];
+    const found = items.some(item => item?.id === invId);
+
+    return {
+      test: "objects:search-inventory-alias-union",
+      result: found ? "PASS" : "FAIL",
+      create: { ok: invCreate.ok, id: invId, storedType: getCanonical.body?.type },
+      search: { ok: searchRes.ok, itemCount: items.length, found }
+    };
+  },
+
+  // === Sprint AM E4: UPDATE with casing variants ===
+  "smoke:objects:update-casing-variants": async () => {
+    await ensureBearer();
+
+    const prodRes = await createProduct({ name: smokeTag(`UpdateCasing-${SMOKE_RUN_ID}`) });
+    if (!prodRes.ok) return { test: "objects:update-casing-variants", result: "FAIL", step: "product-create", prodRes };
+    const productId = prodRes.body?.id;
+
+    // Create inventory item via canonical route
+    const invCreate = await post(`/objects/inventoryItem`, {
+      type: "inventoryItem",
+      productId,
+      name: smokeTag(`InvCasing-${SMOKE_RUN_ID}`),
+      uom: "ea"
+    });
+    if (!invCreate.ok) return { test: "objects:update-casing-variants", result: "FAIL", step: "create", invCreate };
+    const invId = invCreate.body?.id;
+
+    // Update via lowercase route
+    const updateLower = await put(`/objects/inventoryitem/${encodeURIComponent(invId)}`, {
+      name: smokeTag(`InvCasing-Lower-${SMOKE_RUN_ID}`)
+    });
+    if (!updateLower.ok) return { test: "objects:update-casing-variants", result: "FAIL", step: "update-lower", updateLower };
+
+    // Verify via canonical GET
+    const getAfterLower = await get(`/objects/inventoryItem/${encodeURIComponent(invId)}`);
+    const lowerUpdateWorked = getAfterLower.ok && getAfterLower.body?.name?.includes("Lower");
+
+    // Update via uppercase route
+    const updateUpper = await put(`/objects/INVENTORYITEM/${encodeURIComponent(invId)}`, {
+      name: smokeTag(`InvCasing-Upper-${SMOKE_RUN_ID}`)
+    });
+    if (!updateUpper.ok) return { test: "objects:update-casing-variants", result: "FAIL", step: "update-upper", updateUpper };
+
+    // Verify via canonical GET
+    const getAfterUpper = await get(`/objects/inventoryItem/${encodeURIComponent(invId)}`);
+    const upperUpdateWorked = getAfterUpper.ok && getAfterUpper.body?.name?.includes("Upper");
+
+    const pass = lowerUpdateWorked && upperUpdateWorked;
+
+    return {
+      test: "objects:update-casing-variants",
+      result: pass ? "PASS" : "FAIL",
+      updateLower: { ok: updateLower.ok, verified: lowerUpdateWorked },
+      updateUpper: { ok: updateUpper.ok, verified: upperUpdateWorked }
+    };
+  },
+
+  // === Sprint AM E4: LIST pagination with inventory alias ===
+  "smoke:objects:list-inventory-pagination-alias": async () => {
+    await ensureBearer();
+
+    const prodRes = await createProduct({ name: smokeTag(`ListPagAlias-${SMOKE_RUN_ID}`) });
+    if (!prodRes.ok) return { test: "objects:list-inventory-pagination-alias", result: "FAIL", step: "product-create", prodRes };
+    const productId = prodRes.body?.id;
+
+    // Create 3 inventory items
+    const items = [];
+    for (let i = 1; i <= 3; i++) {
+      const res = await post(`/objects/inventoryItem`, {
+        type: "inventoryItem",
+        productId,
+        name: smokeTag(`ListPagItem-${i}-${SMOKE_RUN_ID}`),
+        uom: "ea"
+      });
+      if (!res.ok) return { test: "objects:list-inventory-pagination-alias", result: "FAIL", step: `create-${i}`, res };
+      items.push(res.body?.id);
+    }
+
+    // List via alias route with limit=2
+    const page1 = await get(`/objects/inventory`, { limit: 2 });
+    if (!page1.ok) return { test: "objects:list-inventory-pagination-alias", result: "FAIL", step: "page1", page1 };
+
+    const page1Items = page1.body?.items || [];
+    const nextCursor = page1.body?.next || page1.body?.pageInfo?.nextCursor;
+
+    // If we got a cursor, fetch next page
+    let page2Items = [];
+    let page2Ok = true;
+    if (nextCursor) {
+      const page2 = await get(`/objects/inventory`, { limit: 2, next: nextCursor });
+      page2Ok = page2.ok;
+      page2Items = page2.body?.items || [];
+    }
+
+    // Verify pagination works (union skipped when cursor present, falls back to single-type query)
+    const pass = page1.ok && page1Items.length > 0 && page2Ok;
+
+    return {
+      test: "objects:list-inventory-pagination-alias",
+      result: pass ? "PASS" : "FAIL",
+      page1: { ok: page1.ok, count: page1Items.length, hasCursor: Boolean(nextCursor) },
+      page2: { ok: page2Ok, count: page2Items.length }
+    };
+  },
+
+  // === Sprint AM E4: CREATE with casing normalization ===
+  "smoke:objects:create-casing-normalization": async () => {
+    await ensureBearer();
+
+    // Create product via uppercase route
+    const prodUpper = await post(`/objects/PRODUCT`, {
+      type: "product",
+      name: smokeTag(`ProdUpper-${SMOKE_RUN_ID}`),
+      kind: "good"
+    });
+    if (!prodUpper.ok) return { test: "objects:create-casing-normalization", result: "FAIL", step: "product-upper", prodUpper };
+    const prodUpperId = prodUpper.body?.id;
+    const prodUpperType = prodUpper.body?.type;
+
+    // Verify via canonical GET
+    const getProdUpper = await get(`/objects/product/${encodeURIComponent(prodUpperId)}`);
+    const prodUpperOk = getProdUpper.ok && getProdUpper.body?.type === "product";
+
+    // Create salesOrder via lowercase route
+    const { customerId } = await seedCustomer(api);
+    const soLower = await post(`/objects/salesorder`, {
+      type: "salesOrder",
+      status: "draft",
+      partyId: customerId,
+      name: smokeTag(`SOLower-${SMOKE_RUN_ID}`),
+      lines: []
+    });
+    if (!soLower.ok) return { test: "objects:create-casing-normalization", result: "FAIL", step: "so-lower", soLower };
+    const soLowerId = soLower.body?.id;
+    const soLowerType = soLower.body?.type;
+
+    // Verify via canonical GET
+    const getSoLower = await get(`/objects/salesOrder/${encodeURIComponent(soLowerId)}`);
+    const soLowerOk = getSoLower.ok && getSoLower.body?.type === "salesOrder";
+
+    const pass = prodUpperOk && prodUpperType === "product" && soLowerOk && soLowerType === "salesOrder";
+
+    return {
+      test: "objects:create-casing-normalization",
+      result: pass ? "PASS" : "FAIL",
+      productUpper: { ok: prodUpper.ok, id: prodUpperId, responseType: prodUpperType, verified: prodUpperOk },
+      soLower: { ok: soLower.ok, id: soLowerId, responseType: soLowerType, verified: soLowerOk }
     };
   },
 

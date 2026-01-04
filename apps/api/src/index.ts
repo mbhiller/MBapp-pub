@@ -3,6 +3,7 @@ import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda
 import { notFound as respondNotFound, unauthorized, forbidden, internalError } from "./common/responses";
 import { getAuth, requirePerm, policyFromAuth } from "./auth/middleware";
 import { buildCtx, attachCtxToEvent } from "./shared/ctx";
+import { normalizeTypeParam } from "./objects/type-alias";
 
 /* Routes */
 // Views
@@ -194,16 +195,18 @@ function assertAllowedObjectType(typeRaw: string): APIGatewayProxyResultV2 | nul
  * Normalizes compound/camelCase types to match module-based permission keys.
  */
 function typeToPermissionPrefix(typeRaw: string): string {
-  const type = (typeRaw || "").toLowerCase();
+  // Normalize to canonical type first (handles casing variants and aliases)
+  const canonicalType = normalizeTypeParam(typeRaw) ?? typeRaw.trim();
   
-  // Map compound/camelCase object types to canonical module prefixes
+  // Map canonical object types to their permission module prefixes
   const moduleMap: Record<string, string> = {
-    "salesorder": "sales",
-    "purchaseorder": "purchase",
-    "inventoryitem": "inventory",
+    "salesOrder": "sales",
+    "purchaseOrder": "purchase",
+    "inventoryItem": "inventory",
   };
   
-  return moduleMap[type] || type;  // fallback to type as-is for party, product, etc.
+  // Return mapped prefix or fall back to canonical type for party, product, etc.
+  return moduleMap[canonicalType] || canonicalType;
 }
 
 /** Require object access, allowing generic objects:* as a fallback for new types (e.g., location) */
