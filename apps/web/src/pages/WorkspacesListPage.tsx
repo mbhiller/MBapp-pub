@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
 import { hasPerm } from "../lib/permissions";
+import { PERM_WORKSPACE_WRITE } from "../generated/permissions";
 
 type Workspace = {
   id: string;
@@ -62,7 +63,7 @@ const ENTITY_TYPES = [
 
 export default function WorkspacesListPage() {
   const { token, tenantId, policy, policyLoading } = useAuth();
-  const canCreateWorkspace = hasPerm(policy, "workspace:write") && !policyLoading;
+  const canCreateWorkspace = hasPerm(policy, PERM_WORKSPACE_WRITE) && !policyLoading;
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("");
   const [entityTypeFilter, setEntityTypeFilter] = useState("");

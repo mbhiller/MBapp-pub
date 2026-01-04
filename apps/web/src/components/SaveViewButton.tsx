@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
+import { hasPerm } from "../lib/permissions";
+import { PERM_VIEW_WRITE } from "../generated/permissions";
 import type { ViewConfig } from "../hooks/useViewFilters";
 
 type ViewFilter = { field: string; op: string; value: any };
@@ -25,7 +27,8 @@ function normalizeFilters(filters: ViewFilter[]): ViewFilter[] {
 }
 
 export function SaveViewButton({ entityType, filters, sort, buttonLabel, activeViewId, activeViewName, onSaved }: Props) {
-  const { token, tenantId } = useAuth();
+  const { token, tenantId, policy, policyLoading } = useAuth();
+  const canWriteViews = hasPerm(policy, PERM_VIEW_WRITE) && !policyLoading;
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"update" | "save">(activeViewId ? "update" : "save");
   const [name, setName] = useState("");
@@ -87,7 +90,11 @@ export function SaveViewButton({ entityType, filters, sort, buttonLabel, activeV
         setError(`Failed to ${isUpdate ? "update" : "save"} view`);
       }
     } catch (err: any) {
-      setError(err?.message || `Failed to ${mode === "update" ? "update" : "save"} view`);
+      if (err?.status === 403) {
+        setError("Access denied \u2014 You lack permission to perform this action. Required: view:write");
+      } else {
+        setError(err?.message || `Failed to ${mode === "update" ? "update" : "save"} view`);
+      }
     } finally {
       setLoading(false);
     }
@@ -107,11 +114,21 @@ export function SaveViewButton({ entityType, filters, sort, buttonLabel, activeV
       )}
 
       <div style={{ display: "flex", gap: 6 }}>
-        <button onClick={() => { setMode(activeViewId ? "update" : "save"); setOpen(true); }} disabled={loading} style={{ padding: "6px 10px" }}>
+        <button
+          onClick={() => { setMode(activeViewId ? "update" : "save"); setOpen(true); }}
+          disabled={loading || !canWriteViews}
+          title={!canWriteViews ? "Requires view:write permission" : ""}
+          style={{ padding: "6px 10px", opacity: !canWriteViews ? 0.5 : 1 }}
+        >
           {loading ? (activeViewId ? "Updating..." : "Saving...") : (buttonLabel || (activeViewId ? "Update View" : "Save as View"))}
         </button>
         {activeViewId && (
-          <button onClick={() => { setMode("save"); setOpen(true); }} disabled={loading} style={{ padding: "6px 10px", background: "#f5f5f5", border: "1px solid #ccc" }}>
+          <button
+            onClick={() => { setMode("save"); setOpen(true); }}
+            disabled={loading || !canWriteViews}
+            title={!canWriteViews ? "Requires view:write permission" : ""}
+            style={{ padding: "6px 10px", background: "#f5f5f5", border: "1px solid #ccc", opacity: !canWriteViews ? 0.5 : 1 }}
+          >
             Save as New
           </button>
         )}

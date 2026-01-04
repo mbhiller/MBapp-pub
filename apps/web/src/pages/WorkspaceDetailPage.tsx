@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
 import { hasPerm } from "../lib/permissions";
+import { PERM_WORKSPACE_WRITE } from "../generated/permissions";
 
 type Workspace = {
   id: string;
@@ -49,7 +50,7 @@ function getListPageRoute(entityType?: string): string | null {
 export default function WorkspaceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { token, tenantId, policy, policyLoading } = useAuth();
-  const canEditWorkspace = hasPerm(policy, "workspace:write") && !policyLoading;
+  const canEditWorkspace = hasPerm(policy, PERM_WORKSPACE_WRITE) && !policyLoading;
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -165,8 +166,12 @@ export default function WorkspaceDetailPage() {
       });
       // Navigate back to list
       window.location.href = "/workspaces";
-    } catch (err) {
-      alert("Delete failed: " + formatError(err));
+    } catch (err: any) {
+      if (err?.status === 403) {
+        alert("Access denied \u2014 You lack permission to perform this action. Required: workspace:write");
+      } else {
+        alert("Delete failed: " + formatError(err));
+      }
     }
   };
 
@@ -231,8 +236,12 @@ export default function WorkspaceDetailPage() {
       });
       setNewViewId("");
       await fetchWorkspace();
-    } catch (err) {
-      setUpdateError(formatError(err));
+    } catch (err: any) {
+      if (err?.status === 403) {
+        setUpdateError("Access denied \u2014 You lack permission to perform this action. Required: workspace:write");
+      } else {
+        setUpdateError(formatError(err));
+      }
     } finally {
       setUpdateLoading(false);
     }
@@ -263,8 +272,12 @@ export default function WorkspaceDetailPage() {
         body: patchBody,
       });
       await fetchWorkspace();
-    } catch (err) {
-      setUpdateError(formatError(err));
+    } catch (err: any) {
+      if (err?.status === 403) {
+        setUpdateError("Access denied \u2014 You lack permission to perform this action. Required: workspace:write");
+      } else {
+        setUpdateError(formatError(err));
+      }
     } finally {
       setUpdateLoading(false);
     }
@@ -283,8 +296,12 @@ export default function WorkspaceDetailPage() {
         body: { defaultViewId: viewId },
       });
       await fetchWorkspace();
-    } catch (err) {
-      setUpdateError(formatError(err));
+    } catch (err: any) {
+      if (err?.status === 403) {
+        setUpdateError("Access denied \u2014 You lack permission to perform this action. Required: workspace:write");
+      } else {
+        setUpdateError(formatError(err));
+      }
     } finally {
       setUpdateLoading(false);
     }
@@ -303,8 +320,12 @@ export default function WorkspaceDetailPage() {
         body: { defaultViewId: null },
       });
       await fetchWorkspace();
-    } catch (err) {
-      setUpdateError(formatError(err));
+    } catch (err: any) {
+      if (err?.status === 403) {
+        setUpdateError("Access denied \u2014 You lack permission to perform this action. Required: workspace:write");
+      } else {
+        setUpdateError(formatError(err));
+      }
     } finally {
       setUpdateLoading(false);
     }

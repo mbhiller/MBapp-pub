@@ -1,5 +1,8 @@
 import React, { useState } from "react";
 import { ViewConfig, useViewFilters, FilterMapResult } from "../hooks/useViewFilters";
+import { useAuth } from "../providers/AuthProvider";
+import { hasPerm } from "../lib/permissions";
+import { PERM_VIEW_WRITE } from "../generated/permissions";
 
 type Props = {
   entityType: string;
@@ -27,6 +30,9 @@ export function ViewSelector({
   onApplyView,
   currentFilterState,
 }: Props) {
+  const { policy, policyLoading } = useAuth();
+  const canWriteViews = hasPerm(policy, PERM_VIEW_WRITE) && !policyLoading;
+  
   const {
     views,
     selectedView,
@@ -134,15 +140,21 @@ export function ViewSelector({
           </select>
         </label>
 
-        <button onClick={() => setShowSaveModal(true)} disabled={loading} style={{ padding: "6px 10px" }}>
+        <button
+          onClick={() => setShowSaveModal(true)}
+          disabled={loading || !canWriteViews}
+          title={!canWriteViews ? "Requires view:write permission" : ""}
+          style={{ padding: "6px 10px", opacity: !canWriteViews ? 0.5 : 1 }}
+        >
           Save As View
         </button>
 
         {selectedView && (
           <button
             onClick={() => setShowOverwriteModal(true)}
-            disabled={loading}
-            style={{ padding: "6px 10px" }}
+            disabled={loading || !canWriteViews}
+            title={!canWriteViews ? "Requires view:write permission" : ""}
+            style={{ padding: "6px 10px", opacity: !canWriteViews ? 0.5 : 1 }}
           >
             Overwrite
           </button>

@@ -145,7 +145,11 @@ export function useViewFilters(
         setError("Failed to create view");
         return null;
       } catch (err: any) {
-        setError(err?.message ?? "Failed to save view");
+        if (err?.status === 403) {
+          setError("Access denied \u2014 You lack permission to perform this action. Required: view:write");
+        } else {
+          setError(err?.message ?? "Failed to save view");
+        }
         return null;
       } finally {
         setLoading(false);
@@ -191,7 +195,11 @@ export function useViewFilters(
         setError(null);
         return true;
       } catch (err: any) {
-        setError(err?.message ?? "Failed to overwrite view");
+        if (err?.status === 403) {
+          setError("Access denied \u2014 You lack permission to perform this action. Required: view:write");
+        } else {
+          setError(err?.message ?? "Failed to overwrite view");
+        }
         return false;
       } finally {
         setLoading(false);

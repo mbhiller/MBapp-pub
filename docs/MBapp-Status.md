@@ -1,12 +1,45 @@
 # MBapp Status / Working
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Foundations](MBapp-Foundations.md) · [Cadence](MBapp-Cadence.md) · [Verification](smoke-coverage.md)  
-**Last Updated:** 2026-01-03  
+**Last Updated:** 2026-01-04  
 **Workflow & DoD:** See [MBapp-Cadence.md](MBapp-Cadence.md) for canonical workflow, Definition of Done, and testing rules.
 
 ---
 
 ## Current State Summary
+
+### Views/Workspaces v1 Foundation — ✅ Complete (Sprint AB, 2026-01-04)
+
+**Epic Summary:** Lock in Views/Workspaces foundation with comprehensive RBAC enforcement, permission gating across web/mobile, and CI smoke coverage.
+
+- **API RBAC Enforcement (E1-E3):**
+  - All 12 Views/Workspaces endpoints annotated with `x-mbapp-permission` in spec/MBapp-Modules.yaml (view:read, view:write, workspace:read, workspace:write)
+  - Permission constants generated: `PERM_VIEW_READ`, `PERM_VIEW_WRITE`, `PERM_WORKSPACE_READ`, `PERM_WORKSPACE_WRITE` exported in apps/web/src/generated/permissions.ts, apps/mobile/src/generated/permissions.ts, spec/generated/permissions.ts
+  - Inventory permissions restored: `PERM_INVENTORY_WRITE`, `PERM_INVENTORY_ADJUST` (E4)
+- **Web Permission Gating (E2-E3):**
+  - [SaveViewButton.tsx](../apps/web/src/components/SaveViewButton.tsx): Both "Save" and "Save as New" buttons disabled when `!canWriteViews`, 403 errors show "Access denied — required: view:write"
+  - [ViewSelector.tsx](../apps/web/src/components/ViewSelector.tsx): "Save As View" and "Overwrite" buttons gated by `PERM_VIEW_WRITE`, disabled state + opacity feedback
+  - [useViewFilters.ts](../apps/web/src/hooks/useViewFilters.ts): saveAsNewView and overwriteView detect `err?.status === 403` with permission-specific error messages
+  - String literal migration: ViewsListPage, ViewDetailPage, WorkspacesListPage, WorkspaceDetailPage, App.tsx all migrated from "view:write"/"workspace:write" literals to PERM_* constants
+  - Delete/modify handlers: All 7 write handlers (3 delete + 4 workspace modify) detect 403 and show "Access denied — required: {permission}"
+- **Mobile Permission Gating (E4):**
+  - [ViewsManageScreen.tsx](../apps/mobile/src/screens/ViewsManageScreen.tsx): Rename and Delete buttons disabled when `!canWriteViews`, opacity 0.5 visual feedback
+  - Pre-check toasts: "Access denied — required: view:write" (warning) shown on disabled button tap
+  - 403 error handling: handleRename and handleDelete catch blocks detect `err?.status === 403` and show permission-specific error toast
+  - Pattern matches PurchaseOrderDetailScreen (fail-closed during policy load)
+- **CI Smoke Coverage:**
+  - `smoke:views:validate-filters` (E1): All 11 filter operators validated with positive + negative cases
+  - `smoke:views:save-then-update` (E2): PATCH workflow validation (create → apply → update filter → reapply → verify results flip)
+  - `smoke:views-workspaces:permissions` (E3): RBAC boundary enforcement (admin writes succeed 201, viewer writes denied 403, reads allowed 200)
+  - `smoke:views:apply-to-*-list` (PO/product/inventory/party): View filter application validated across entity types
+  - `smoke:workspaces:default-view-validation`: All 8 default view scenarios (create, update, remove, validation)
+- **Verification:** ✅ Web typecheck passes (InventoryDetailPage now imports valid PERM_INVENTORY_* constants); ✅ All CI smokes pass
+- **Foundation Status:**
+  - ✅ Spec ↔ API: Complete (23 endpoints with permissions, 12 unique permissions)
+  - ✅ API ↔ Web: Complete (SaveViewButton, ViewSelector, all list pages permission-gated with 403 UX)
+  - ✅ Web ↔ Mobile: Complete (ViewsManageScreen permission-gated, matches web pattern)
+  - ✅ CI Lock-In: Complete (filter validation, PATCH workflow, RBAC boundaries, apply-to-list flows)
+- **Outcome:** Views/Workspaces v1 foundation is CI-locked with full RBAC enforcement. Permission gating consistent across web/mobile with clear 403 error messaging. Ready for Phase 2 (shared views, columns UI, mobile list integration).
 
 ### Views/Workspaces v1 Foundation — ✅ CI-Locked (Sprint AB, 2026-01-03)
 

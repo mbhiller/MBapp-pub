@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
 import { hasPerm } from "../lib/permissions";
+import { PERM_VIEW_WRITE } from "../generated/permissions";
 
 type View = {
   id: string;
@@ -45,8 +46,8 @@ export default function ViewsListPage() {
   const [entityTypeFilter, setEntityTypeFilter] = useState("");
   const [items, setItems] = useState<View[]>([]);
   const [next, setNext] = useState<string | null>(null);
-  const canCreateView = hasPerm(policy, "view:write") && !policyLoading;
-  const canEditView = hasPerm(policy, "view:write") && !policyLoading;
+  const canCreateView = hasPerm(policy, PERM_VIEW_WRITE) && !policyLoading;
+  const canEditView = hasPerm(policy, PERM_VIEW_WRITE) && !policyLoading;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -97,8 +98,12 @@ export default function ViewsListPage() {
       setItems([]);
       setNext(null);
       fetchPage();
-    } catch (err) {
-      alert("Delete failed: " + formatError(err));
+    } catch (err: any) {
+      if (err?.status === 403) {
+        alert("Access denied \u2014 You lack permission to perform this action. Required: view:write");
+      } else {
+        alert("Delete failed: " + formatError(err));
+      }
     }
   };
 

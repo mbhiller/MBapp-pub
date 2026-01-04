@@ -3,6 +3,9 @@ import { View, Text, TextInput, ScrollView, Pressable, ActivityIndicator, Alert,
 import { useTheme } from "../providers/ThemeProvider";
 import { useToast } from "../features/_shared/Toast";
 import { useViewsApi, type View as SavedView } from "../features/views/hooks";
+import { usePolicy } from "../providers/PolicyProvider";
+import { hasPerm } from "../lib/permissions";
+import { PERM_VIEW_WRITE } from "../generated/permissions";
 
 const ENTITY_OPTIONS: Array<{ label: string; value?: string }> = [
   { label: "All" },
@@ -14,6 +17,9 @@ export default function ViewsManageScreen({ route }: any) {
   const t = useTheme();
   const toast = useToast();
   const { list, patch, del } = useViewsApi();
+  const { policy, policyLoading } = usePolicy();
+
+  const canWriteViews = !policyLoading && hasPerm(policy, PERM_VIEW_WRITE);
 
   const initialEntityType = route?.params?.initialEntityType as string | undefined;
   const [entityType, setEntityType] = React.useState<string | undefined>(initialEntityType);
@@ -85,7 +91,11 @@ export default function ViewsManageScreen({ route }: any) {
       closeRename();
       fetchPage(undefined, false);
     } catch (e: any) {
-      toast(`✗ Rename failed: ${e?.message ?? String(e)}` , "error");
+      if (e?.status === 403) {
+        toast("Access denied — required: view:write", "error");
+      } else {
+        toast(`✗ Rename failed: ${e?.message ?? String(e)}`, "error");
+      }
     } finally {
       setRenaming(false);
     }
@@ -104,7 +114,11 @@ export default function ViewsManageScreen({ route }: any) {
               toast("✓ Deleted view", "success");
               fetchPage(undefined, false);
             } catch (e: any) {
-              toast(`✗ Delete failed: ${e?.message ?? String(e)}`, "error");
+              if (e?.status === 403) {
+                toast("Access denied — required: view:write", "error");
+              } else {
+                toast(`✗ Delete failed: ${e?.message ?? String(e)}`, "error");
+              }
             }
           },
         },
@@ -173,7 +187,14 @@ export default function ViewsManageScreen({ route }: any) {
         ) : null}
         <View style={{ flexDirection: "row", gap: 8 }}>
           <Pressable
-            onPress={() => openRename(view)}
+            onPress={() => {
+              if (!canWriteViews) {
+                toast("Access denied — required: view:write", "warning");
+                return;
+              }
+              openRename(view);
+            }}
+            disabled={!canWriteViews}
             style={{
               paddingHorizontal: 12,
               paddingVertical: 8,
@@ -182,12 +203,20 @@ export default function ViewsManageScreen({ route }: any) {
               borderColor: t.colors.primary,
               alignItems: "center",
               justifyContent: "center",
+              opacity: canWriteViews ? 1 : 0.5,
             }}
           >
             <Text style={{ color: t.colors.primary, fontWeight: "700" }}>Rename</Text>
           </Pressable>
           <Pressable
-            onPress={() => handleDelete(view)}
+            onPress={() => {
+              if (!canWriteViews) {
+                toast("Access denied — required: view:write", "warning");
+                return;
+              }
+              handleDelete(view);
+            }}
+            disabled={!canWriteViews}
             style={{
               paddingHorizontal: 12,
               paddingVertical: 8,
@@ -196,6 +225,7 @@ export default function ViewsManageScreen({ route }: any) {
               borderColor: t.colors.danger ?? "#c33",
               alignItems: "center",
               justifyContent: "center",
+              opacity: canWriteViews ? 1 : 0.5,
             }}
           >
             <Text style={{ color: t.colors.danger ?? "#c33", fontWeight: "700" }}>Delete</Text>

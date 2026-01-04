@@ -7,6 +7,14 @@
  */
 
 export const PERMISSIONS_BY_ENDPOINT = {
+  "DELETE /views/{id}": "view:write",
+  "DELETE /workspaces/{id}": "workspace:write",
+  "GET /views": "view:read",
+  "GET /views/{id}": "view:read",
+  "GET /workspaces": "workspace:read",
+  "GET /workspaces/{id}": "workspace:read",
+  "PATCH /views/{id}": "view:write",
+  "PATCH /workspaces/{id}": "workspace:write",
   "POST /inventory/{id}:cycle-count": "inventory:adjust",
   "POST /inventory/{id}:putaway": "inventory:write",
   "POST /inventory/{id}/adjust": "inventory:write",
@@ -17,7 +25,11 @@ export const PERMISSIONS_BY_ENDPOINT = {
   "POST /purchasing/po/{id}:cancel": "purchase:cancel",
   "POST /purchasing/po/{id}:close": "purchase:close",
   "POST /purchasing/po/{id}:receive": "purchase:receive",
-  "POST /purchasing/suggest-po": "purchase:write"
+  "POST /purchasing/suggest-po": "purchase:write",
+  "POST /views": "view:write",
+  "POST /workspaces": "workspace:write",
+  "PUT /views/{id}": "view:write",
+  "PUT /workspaces/{id}": "workspace:write"
 } as const;
 
 /**
@@ -50,6 +62,10 @@ export const PERM_PURCHASE_CANCEL = "purchase:cancel" as const;
 export const PERM_PURCHASE_CLOSE = "purchase:close" as const;
 export const PERM_PURCHASE_RECEIVE = "purchase:receive" as const;
 export const PERM_PURCHASE_WRITE = "purchase:write" as const;
+export const PERM_VIEW_READ = "view:read" as const;
+export const PERM_VIEW_WRITE = "view:write" as const;
+export const PERM_WORKSPACE_READ = "workspace:read" as const;
+export const PERM_WORKSPACE_WRITE = "workspace:write" as const;
 
 /**
  * Array of all unique permission keys (sorted).
@@ -62,5 +78,9 @@ export const PERMISSION_KEYS = [
   "purchase:cancel",
   "purchase:close",
   "purchase:receive",
-  "purchase:write"
+  "purchase:write",
+  "view:read",
+  "view:write",
+  "workspace:read",
+  "workspace:write"
 ] as const;

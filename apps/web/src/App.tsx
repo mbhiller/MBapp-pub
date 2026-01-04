@@ -2,6 +2,7 @@ import { Link, Route, Routes } from "react-router-dom";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Layout } from "./components/Layout";
 import { ProtectedRoute } from "./components/ProtectedRoute";
+import { PERM_VIEW_WRITE } from "./generated/permissions";
 import CreatePartyPage from "./pages/CreatePartyPage";
 import EditPartyPage from "./pages/EditPartyPage";
 import PartiesListPage from "./pages/PartiesListPage";
@@ -78,9 +79,9 @@ export default function App() {
           <Route path="/inventory/:id" element={<InventoryDetailPage />} />
           <Route path="/inventory-movements" element={<InventoryMovementsPage />} />
           <Route path="/views" element={<ViewsListPage />} />
-          <Route path="/views/new" element={<ProtectedRoute requiredPerm="view:write"><CreateViewPage /></ProtectedRoute>} />
+          <Route path="/views/new" element={<ProtectedRoute requiredPerm={PERM_VIEW_WRITE}><CreateViewPage /></ProtectedRoute>} />
           <Route path="/views/:id" element={<ViewDetailPage />} />
-          <Route path="/views/:id/edit" element={<ProtectedRoute requiredPerm="view:write"><EditViewPage /></ProtectedRoute>} />
+          <Route path="/views/:id/edit" element={<ProtectedRoute requiredPerm={PERM_VIEW_WRITE}><EditViewPage /></ProtectedRoute>} />
           <Route path="/workspaces" element={<WorkspacesListPage />} />
           <Route path="/workspaces/:id" element={<WorkspaceDetailPage />} />
           <Route path="/backorders" element={<BackordersListPage />} />
