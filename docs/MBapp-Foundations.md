@@ -183,7 +183,11 @@ See [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) for full OpenAPI defin
 - **Filter Validation:** All 11 filter operators (eq, ne, lt, le, gt, ge, in, nin, contains, startsWith, regex) validated and locked in CI via `smoke:views:validate-filters`.
 - **PATCH Workflow:** View update + reapplication tested via `smoke:views:save-then-update` (validates operator leverage: update existing view without creating duplicate).
 - **RBAC Boundaries:** Permission enforcement validated via `smoke:views-workspaces:permissions` (admin writes succeed, viewer writes denied 403, reads allowed).
-- **Web UX:** Workspace hub polished with view count, default view indicator, and "Open" buttons (WorkspacesListPage + WorkspaceDetailPage).
+- **API RBAC:** All 12 Views/Workspaces endpoints annotated with `x-mbapp-permission` (view:read, view:write, workspace:read, workspace:write); enforced at API layer.
+- **Generated Permissions:** `PERM_VIEW_READ`, `PERM_VIEW_WRITE`, `PERM_WORKSPACE_READ`, `PERM_WORKSPACE_WRITE` exported in web/mobile/spec generated files.
+- **Web UX:** SaveViewButton and ViewSelector permission-gated by `PERM_VIEW_WRITE`; disabled when `!canWriteViews`, 403 errors show "Access denied — required: view:write".
+- **Mobile UX:** ViewsManageScreen rename/delete permission-gated by `PERM_VIEW_WRITE`; disabled buttons (opacity 0.5), 403 errors show clear permission messaging.
+- **Web Workspace Hub:** Polished with view count, default view indicator, and "Open" buttons (WorkspacesListPage + WorkspaceDetailPage).
 - **Filter Mapping:** Remains best-effort per entityType; unsupported filters warned in UI (e.g., "Some filters may not be supported for this entity type").
 - **Phase 2 Scope:** Shared views, columns UI rendering, mobile list screen integration deferred to next sprint.
 

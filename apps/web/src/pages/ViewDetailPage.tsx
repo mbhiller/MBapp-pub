@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
 import { hasPerm } from "../lib/permissions";
+import { PERM_VIEW_WRITE } from "../generated/permissions";
 
 type View = {
   id: string;
@@ -28,7 +29,7 @@ export default function ViewDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { token, tenantId, policy, policyLoading } = useAuth();
-  const canEditView = hasPerm(policy, "view:write") && !policyLoading;
+  const canEditView = hasPerm(policy, PERM_VIEW_WRITE) && !policyLoading;
   const [view, setView] = useState<View | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -64,8 +65,12 @@ export default function ViewDetailPage() {
         tenantId,
       });
       navigate("/views");
-    } catch (err) {
-      alert("Delete failed: " + formatError(err));
+    } catch (err: any) {
+      if (err?.status === 403) {
+        alert("Access denied \u2014 You lack permission to perform this action. Required: view:write");
+      } else {
+        alert("Delete failed: " + formatError(err));
+      }
     }
   };
 

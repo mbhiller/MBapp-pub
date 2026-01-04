@@ -1,7 +1,7 @@
 # Smoke Test Coverage (Sprint S, 2025-12-31)
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Status/Working](MBapp-Status.md) · [Foundations](MBapp-Foundations.md) · [Cadence](MBapp-Cadence.md)  
-**Last Updated:** 2026-01-01
+**Last Updated:** 2026-01-04
 
 ---
 
@@ -11,7 +11,7 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 
 Sprint I (2026-01-02): No new smokes added; existing backorder → suggest-po → receive loops remain covered via `npm run smokes:run:ci`.
 
-**CI Smoke Manifest:** The definitive list of tests run in CI is maintained in [ops/ci-smokes.json](../ops/ci-smokes.json). Additional flows exist in `ops/smoke/smoke.mjs` but are opt-in only. CI includes `smoke:views:crud`, `smoke:workspaces:list`, `smoke:workspaces:mixed-dedupe`, `smoke:workspaces:get-fallback`, `smoke:workspaces:default-view-validation`, `smoke:views:apply-to-po-list`, `smoke:views:apply-to-product-list`, `smoke:views:apply-to-inventory-list`, `smoke:views:apply-to-party-list`, `smoke:views:save-then-update`, and `smoke:views-workspaces:permissions`.
+**CI Smoke Manifest:** The definitive list of tests run in CI is maintained in [ops/ci-smokes.json](../ops/ci-smokes.json). Additional flows exist in `ops/smoke/smoke.mjs` but are opt-in only. CI includes `smoke:views:crud`, `smoke:views:validate-filters`, `smoke:views:save-then-update`, `smoke:views-workspaces:permissions`, `smoke:workspaces:list`, `smoke:workspaces:mixed-dedupe`, `smoke:workspaces:get-fallback`, `smoke:workspaces:default-view-validation`, `smoke:views:apply-to-po-list`, `smoke:views:apply-to-product-list`, `smoke:views:apply-to-inventory-list`, `smoke:views:apply-to-party-list`.
 
 **Scanner Actions Flows (Sprint S, E2):**
 - `smoke:scanner:actions:record` — **NEW** (E2). Validates POST /scanner/actions endpoint:

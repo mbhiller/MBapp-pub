@@ -2776,6 +2776,7 @@ paths:
       tags:
       - Views
       operationId: listViews
+      x-mbapp-permission: view:read
       security:
       - bearerAuth: []
       parameters:
@@ -2810,6 +2811,7 @@ paths:
       tags:
       - Views
       operationId: createView
+      x-mbapp-permission: view:write
       security:
       - bearerAuth: []
       parameters:
@@ -2839,6 +2841,7 @@ paths:
       tags:
       - Views
       operationId: getView
+      x-mbapp-permission: view:read
       security:
       - bearerAuth: []
       parameters:
@@ -2884,6 +2887,7 @@ paths:
       tags:
       - Views
       operationId: replaceView
+      x-mbapp-permission: view:write
       security:
       - bearerAuth: []
       parameters:
@@ -2935,6 +2939,7 @@ paths:
       tags:
       - Views
       operationId: updateView
+      x-mbapp-permission: view:write
       security:
       - bearerAuth: []
       parameters:
@@ -2988,6 +2993,7 @@ paths:
       tags:
       - Views
       operationId: deleteView
+      x-mbapp-permission: view:write
       security:
       - bearerAuth: []
       parameters:
@@ -3030,6 +3036,7 @@ paths:
       tags:
       - Workspaces
       operationId: listWorkspaces
+      x-mbapp-permission: workspace:read
       security:
       - bearerAuth: []
       parameters:
@@ -3074,6 +3081,7 @@ paths:
       tags:
       - Workspaces
       operationId: createWorkspace
+      x-mbapp-permission: workspace:write
       security:
       - bearerAuth: []
       parameters:
@@ -3103,6 +3111,7 @@ paths:
       tags:
       - Workspaces
       operationId: getWorkspace
+      x-mbapp-permission: workspace:read
       security:
       - bearerAuth: []
       parameters:
@@ -3148,6 +3157,7 @@ paths:
       tags:
       - Workspaces
       operationId: replaceWorkspace
+      x-mbapp-permission: workspace:write
       security:
       - bearerAuth: []
       parameters:
@@ -3199,6 +3209,7 @@ paths:
       tags:
       - Workspaces
       operationId: updateWorkspace
+      x-mbapp-permission: workspace:write
       security:
       - bearerAuth: []
       parameters:
@@ -3235,6 +3246,7 @@ paths:
       tags:
       - Workspaces
       operationId: deleteWorkspace
+      x-mbapp-permission: workspace:write
       security:
       - bearerAuth: []
       parameters:
@@ -3824,6 +3836,7 @@ paths:
   /inventory/{id}/adjust:
     post:
       summary: Adjust on-hand (creates movement)
+      x-mbapp-permission: inventory:write
       parameters:
       - in: path
         name: id
@@ -3848,6 +3861,7 @@ paths:
     post:
       summary: Putaway inventory to location
       description: Creates a putaway movement; location trace only (no-op for onHand counters).
+      x-mbapp-permission: inventory:write
       parameters:
       - in: path
         name: id
@@ -3882,6 +3896,7 @@ paths:
         Performs a cycle count reconciliation. Computes delta = countedQty - currentOnHand.
         If delta = 0, returns early without writing a movement.
         Otherwise, creates a cycle_count movement with qty=delta to correct the onHand.
+      x-mbapp-permission: inventory:adjust
       parameters:
       - in: path
         name: id
