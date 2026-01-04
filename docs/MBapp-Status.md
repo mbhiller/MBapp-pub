@@ -149,6 +149,77 @@
 
 - **Outcome:** Onhand endpoints have formal permission coverage via generated constants and CI-locked permission-denial test. Clients (web/mobile) use centralized PERM_INVENTORY_READ constant instead of hardcoded strings, enabling easy future permission model changes.
 
+### Tenant Wipe Tool: Safety Guardrails & Reliability — ✅ Complete (Sprint AJ, 2026-01-04)
+
+**Epic Summary:** Harden `ops/tools/wipe-tenant.mjs` with tenant allowlisting, confirmed deletion matching, production gating, retry resilience, and convenience npm scripts.
+
+- **Tenant Allowlist (E1):**
+  - Restricted to `["SmokeTenant", "DemoTenant"]` by default; prevents accidental wipes of production or custom tenants.
+  - Override with `--allow-any-tenant` flag (prints loud warning, not recommended).
+  - Validation: If tenant not in allowlist and flag absent, exits(2) with clear error message.
+
+- **Confirmed Deletion Matching (E1):**
+  - New flag: `--confirm-tenant <TENANT>` required when `--confirm` is present.
+  - Must exactly match target tenant (case-sensitive, trimmed whitespace).
+  - Prevents typo-based accidental deletes; non-interactive and script-friendly.
+  - Validation: If `--confirm` without `--confirm-tenant`, or if mismatch detected, exits(2) with example command.
+
+- **Production Environment Gating (E2):**
+  - Detection: `NODE_ENV=production` or `MBAPP_ENV=prod`.
+  - Blocks all deletes in production unless `--allow-production` flag is set.
+  - Dry-runs permitted in production (safe inspection of item counts).
+  - Validation: If `--confirm` + production mode + no flag, exits(3) with environment context.
+  - Logging: Startup message includes `env=development|production` and `[PRODUCTION]` tag when applicable; warning printed when `--allow-production` used with `--confirm`.
+
+- **Retry Resilience with Exponential Backoff (E3):**
+  - Handles DynamoDB `UnprocessedItems` from BatchWrite: retries up to 8 times with exponential backoff.
+  - Backoff formula: base 100ms × 2^attempt, capped at 5000ms, with random jitter.
+  - Logs retry attempts: `[wipe-tenant] retry N/8 in Xms (Y items)`.
+  - Tracks failed items separately; non-zero exit if any items fail after retries (allows CI to detect partial failures).
+
+- **Progress Logging & Timing (E3):**
+  - Progress printed every N items (default 25, configurable via `--progress=N`).
+  - Enhanced with elapsed time and rate: `[wipe-tenant] deleted 250/1387... (12.5 items/sec, 20.0s)`.
+  - Final summary: `[wipe-tenant] done. found=X deleted=Y failed=Z duration=Ts (R items/sec)`.
+  - Failed item sample: First 5 keys logged + count if more (e.g., `"SmokeTenant#inv-001, SmokeTenant#inv-002, ... (8 more)"`).
+
+- **Argument Parsing Enhancement (E4):**
+  - Updated `parseArgs()` to support both formats: `--tenant=VALUE` and `--tenant VALUE` (space-separated).
+  - Enables npm scripts to pass arguments naturally (npm passes as separate args).
+  - Backward compatible: both formats work.
+
+- **Convenience npm Scripts (E4):**
+  - `npm run wipe:smoke`: Dry-run for SmokeTenant (safe, lists items only).
+  - `npm run wipe:demo`: Dry-run for DemoTenant (safe, lists items only).
+  - `npm run wipe:smoke-and-demo`: Sequential cleanup (runs wipe:smoke then wipe:demo with `&&`).
+  - All scripts default to dry-run (require `--` separator to pass `--confirm` flag).
+    ```bash
+    npm run wipe:smoke -- --confirm --confirm-tenant SmokeTenant
+    npm run wipe:smoke-and-demo  # dry-runs only
+    ```
+
+- **Exit Code Strategy:**
+  - `0`: Success (dry-run or complete deletion).
+  - `1`: Runtime failure (query error, batch write error, or partial delete failure).
+  - `2`: Validation failure (invalid tenant, missing/mismatched confirm-tenant, allowlist violation).
+  - `3`: Production mode block (delete attempted without --allow-production).
+  - Distinct exit codes enable CI to detect specific failure modes.
+
+- **Definition of Done:**
+  - ✅ Tenant allowlist enforcement with override (E1).
+  - ✅ Confirm-tenant exact match validation (E1).
+  - ✅ Production environment detection and deletion blocking (E2).
+  - ✅ UnprocessedItems retry logic with exponential backoff (E3).
+  - ✅ Progress logging with timing and rate (E3).
+  - ✅ Argument parser supports both --flag=value and --flag value formats (E4).
+  - ✅ Convenience npm scripts for SmokeTenant and DemoTenant (E4).
+  - ✅ npm run wipe:smoke-and-demo for sequential cleanup (E4).
+  - ✅ Documentation in MBapp-Foundations.md (1.5 Dev Tools) with usage examples and safety model (E5).
+  - ✅ Syntax validation passes (Node -c check).
+  - ✅ All manual test scenarios pass (dry-run, allowlist, confirm-tenant, production gate, retry scenario).
+
+- **Outcome:** Wipe tool is hardened against accidental tenant deletion via multi-layer safety gates (allowlist, confirmation match, production block), resilient to transient DynamoDB failures (retries with backoff), and accessible via convenient npm scripts. Documentation in Foundations covers safety model, usage patterns, exit codes, and logging output. Ready for use in CI tenant reset workflows and dev cleanup.
+
 ### InventoryItem Canonicalization — ✅ Complete (Sprint AH, 2026-01-04)
 
 - **Canonical writes:** /objects/inventory now stores as canonical `inventoryItem` via [apps/api/src/objects/repo.ts](../apps/api/src/objects/repo.ts#L115-L146) helper `canonicalWriteType`.

@@ -27,6 +27,8 @@
     "api:build": "esbuild apps/api/src/index.ts --bundle --platform=node --target=node20 --outfile=apps/api/dist/bootstrap.js",
     "api:deploy": "powershell -ExecutionPolicy Bypass -File ops/Publish-ObjectsLambda-Daily.ps1",
     "wipe:smoke": "node ops/tools/wipe-tenant.mjs --tenant SmokeTenant",
+    "wipe:demo": "node ops/tools/wipe-tenant.mjs --tenant DemoTenant",
+    "wipe:smoke-and-demo": "npm run wipe:smoke && npm run wipe:demo",
     "smoke:list": "node ops/smoke/smoke.mjs list",
     "smoke:ping": "node ops/smoke/smoke.mjs ping",
     "smoke:parties:happy": "node ops/smoke/smoke.mjs smoke:parties:happy",

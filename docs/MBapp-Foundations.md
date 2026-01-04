@@ -146,6 +146,83 @@ const TENANT = process.env.MBAPP_TENANT_ID ?? "DemoTenant";
 - Wildcard matching: `inventory:read` permission is granted by `*:read` (read all types) or `*` (superuser) in user policy.
 - CI Coverage: `smoke:inventory:onhand-permission-denied` test validates permission enforcement; 403 Forbidden is returned when `inventory:read` is absent.
 
+---
+
+### 1.5 Dev Tools: Tenant Wipe Utility (ops/tools)
+
+**Purpose:** Safely delete all objects in a DynamoDB tenant partition (dev/staging cleanup only).
+
+**Tool:** [ops/tools/wipe-tenant.mjs](../ops/tools/wipe-tenant.mjs) — Node.js utility for tenant cleanup (non-interactive, script-friendly).
+
+**Safety Model:**
+
+1. **Allowlisted Tenants:** Only `SmokeTenant` and `DemoTenant` can be wiped by default.
+   - Prevents accidental wipes of production or custom tenants.
+   - Override with `--allow-any-tenant` flag (prints warning, not recommended).
+
+2. **Dry-Run Default:** No deletion occurs unless `--confirm --confirm-tenant` match is provided.
+   - Dry-run queries and reports item count safely.
+   - Deletion requires explicit confirmation with matching tenant name (typo-proof).
+
+3. **Production Gating:** Blocks deletes in production environments unless `--allow-production` is set.
+   - Detection: `NODE_ENV=production` or `MBAPP_ENV=prod`.
+   - Dry-runs allowed in production (safe inspection).
+   - Deletes in production require both `--confirm` AND `--allow-production` (loud warning printed).
+
+4. **Retry & Reliability:**
+   - Handles DynamoDB `UnprocessedItems` with exponential backoff (base 100ms, max 5s, up to 8 retries).
+   - Non-zero exit if any items fail to delete (for CI detection).
+   - Tracks deleted/failed counts in final summary.
+
+**Usage:**
+
+```bash
+# Dry-run (list items, no delete) — safe for all environments
+npm run wipe:smoke
+npm run wipe:demo
+
+# Delete with explicit confirmation
+npm run wipe:smoke -- --confirm --confirm-tenant SmokeTenant
+npm run wipe:demo -- --confirm --confirm-tenant DemoTenant
+
+# Sequential cleanup (both tenants)
+npm run wipe:smoke-and-demo
+
+# Direct invocation (both --tenant= and --tenant formats work)
+node ops/tools/wipe-tenant.mjs --tenant=SmokeTenant
+node ops/tools/wipe-tenant.mjs --tenant SmokeTenant --confirm --confirm-tenant SmokeTenant
+node ops/tools/wipe-tenant.mjs --tenant CustomTenant --allow-any-tenant  # dry-run, warns
+node ops/tools/wipe-tenant.mjs --tenant CustomTenant --confirm --confirm-tenant CustomTenant --allow-any-tenant  # delete, warns
+```
+
+**Logging & Output:**
+
+- Init: `[wipe-tenant] env=development table=mbapp_objects tenant=SmokeTenant confirm=false`
+- Query: `[wipe-tenant] found 1387 items for tenant SmokeTenant`
+- Dry-run: `[wipe-tenant] Dry run complete (no deletes performed). Re-run with --confirm to delete.`
+- Progress (deletion): `[wipe-tenant] deleted 250/1387... (12.5 items/sec, 20.0s)`
+- Summary: `[wipe-tenant] done. found=1387 deleted=1387 failed=0 duration=15.3s (90.5 items/sec)`
+- Retries: `[wipe-tenant] retry 1/8 in 142ms (3 items)` — printed on unprocessed items
+
+**Exit Codes:**
+
+- `0`: Success (dry-run or all items deleted)
+- `1`: Query failure, batch write failure, or partial delete failure (items in failed list)
+- `2`: Validation failure (invalid tenant, missing confirm-tenant, confirm mismatch, allowlist violation)
+- `3`: Production mode block (deletes attempted without --allow-production)
+
+**Scope:**
+
+- Wipes ONLY the `objects` table partition for the tenant (DynamoDB Query by PK).
+- Does NOT touch movements, audit logs, or other tables.
+- Does NOT backup or version data before deletion (permanent).
+
+**CI/Smoke Integration:**
+
+- Smoke tests that need a clean tenant call `npm run wipe:smoke` (dry-run) or `npm run wipe:demo` before setup.
+- Example: [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) may reset SmokeTenant state via wipe before provisioning test data.
+- Wipe tool itself has no dedicated smoke (tool failures are caught by broader smoke test failures).
+
 
 ### 2.1 Idempotency & Error Handling
 - All mutating endpoints (`POST /purchase-orders`, `POST /purchase-orders/{id}/submit`, etc.) accept optional `idempotencyKey` header
