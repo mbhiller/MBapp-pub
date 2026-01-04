@@ -4,6 +4,7 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, QueryCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { PutCommand } from "@aws-sdk/lib-dynamodb";
+import { normalizeTypeParam } from "../objects/type-alias";
 import { resolveTenantId } from "../common/tenant";
 import { logger } from "../common/logger";
 
@@ -138,7 +139,7 @@ async function repoListMovementsByItem(
     const pageMatches: InventoryMovement[] = raw
       .filter((m) => {
         // Ensure it's actually a movement document
-        const isMovement = m?.docType === "inventoryMovement" || m?.type === "inventoryMovement";
+        const isMovement = normalizeTypeParam(m?.docType as string) === "inventoryMovement" || normalizeTypeParam(m?.type as string) === "inventoryMovement";
         if (!isMovement) return false;
         // Filter by itemId
         return String(m?.itemId) === wantItemId;
@@ -227,7 +228,7 @@ async function repoListMovementsByItem(
       
       const fallbackMatches: InventoryMovement[] = canonicalRaw
         .filter((m) => {
-          const isMovement = m?.docType === "inventoryMovement" || m?.type === "inventoryMovement";
+          const isMovement = normalizeTypeParam(m?.docType as string) === "inventoryMovement" || normalizeTypeParam(m?.type as string) === "inventoryMovement";
           if (!isMovement) return false;
           const itemIdMatch = String(m?.itemId) === wantItemId;
           if (itemIdMatch && process.env.MBAPP_DEBUG_ONHAND === "1") {
@@ -397,7 +398,7 @@ async function repoListMovementsByLocation(
     const pageItems: InventoryMovement[] = raw
       .filter((m) => {
         // Ensure it's actually a movement document
-        const isMovement = m?.docType === "inventoryMovement" || m?.type === "inventoryMovement";
+        const isMovement = normalizeTypeParam(m?.docType as string) === "inventoryMovement" || normalizeTypeParam(m?.type as string) === "inventoryMovement";
         if (!isMovement) return false;
         // Required filter: locationId must match
         if (String(m?.locationId ?? "") !== wantLocationId) return false;

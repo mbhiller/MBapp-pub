@@ -515,6 +515,125 @@ This allows responses from legacy systems or test fixtures to still work. **Clie
 
 ---
 
+### 2.8 Object Type Normalization
+
+**Context:** API routes accept object types in path/query params (e.g., `/objects/{type}`, `/objects/{type}/{id}`) and must handle case-insensitive input while maintaining consistent DynamoDB storage.
+
+**Core Invariant:** Route params are case-insensitive; SK prefixes always use canonical type.
+
+**Canonical Type Rules:**
+- **Case Normalization:** All types have a single canonical casing (e.g., `salesOrder`, `purchaseOrder`, `inventoryItem`, `backorderRequest`).
+- **SK Prefix Consistency:** DynamoDB sort keys (SK) use canonical type: `{canonicalType}#{id}` (e.g., `salesOrder#abc123`, `inventoryItem#xyz789`).
+- **Route Tolerance:** API routes accept any casing (`salesorder`, `SALESORDER`, `SalesOrder`) and normalize to canonical form before storage/query.
+
+**Type Aliasing:**
+- **inventory ↔ inventoryItem:** The `inventory` type is a legacy alias for canonical `inventoryItem`.
+- **Canonical Write Policy:** All writes (POST /objects/inventory) store as `inventoryItem` with SK prefix `inventoryItem#{id}`.
+- **Alias-Aware Reads:** GET/UPDATE/DELETE routes try canonical type first, then expand to aliases if not found.
+
+**Normalization Helpers:**
+
+```typescript
+// apps/api/src/objects/type-alias.ts
+
+// Normalize any casing to canonical type (or null if unknown)
+function normalizeTypeParam(type: string | undefined): string | null {
+  if (!type) return null;
+  const lower = String(type).toLowerCase().trim();
+  return CANONICAL_TYPE_BY_LOWER[lower] ?? null;
+}
+
+// Expand type to include aliases for fallback resolution
+function expandTypeAliases(type: string): string[] {
+  const canonical = normalizeTypeParam(type);
+  if (!canonical) return [type];
+  
+  // inventoryItem → ["inventoryItem", "inventory"]
+  if (canonical === "inventoryItem") return ["inventoryItem", "inventory"];
+  
+  return [canonical];
+}
+```
+
+**Canonical Type Map (CANONICAL_TYPE_BY_LOWER):**
+
+| Input Casing | Canonical Type |
+|--------------|----------------|
+| `salesorder`, `salesOrder`, `SALESORDER` | `salesOrder` |
+| `purchaseorder`, `purchaseOrder`, `PURCHASEORDER` | `purchaseOrder` |
+| `inventory`, `inventoryitem`, `inventoryItem` | `inventoryItem` |
+| `backorderrequest`, `backorderRequest` | `backorderRequest` |
+| `inventorymovement`, `inventoryMovement` | `inventoryMovement` |
+| `product`, `PRODUCT` | `product` |
+| `party`, `PARTY` | `party` |
+
+**Usage Pattern:**
+
+1. **Route Handler (Early Normalization):**
+   ```typescript
+   // apps/api/src/objects/create.ts
+   const rawType = event.pathParameters?.type ?? "";
+   const canonicalType = normalizeTypeParam(rawType) ?? rawType;
+   
+   // Use canonicalType for all type-specific logic
+   if (canonicalType === "inventoryMovement") { /* validate */ }
+   
+   // Force canonical type in body before persist
+   body.type = canonicalType;
+   await createObject({ tenantId, type: canonicalType, body });
+   ```
+
+2. **Repo Layer (SK Prefix Building):**
+   ```typescript
+   // apps/api/src/objects/repo.ts
+   export function computeKeys(tenantId: string, type: string, id: string) {
+     const canonicalType = normalizeTypeParam(type) ?? type;
+     return {
+       pk: tenantId,
+       sk: `${canonicalType}#${id}`,  // Always canonical
+     };
+   }
+   ```
+
+3. **Alias-Aware Resolution:**
+   ```typescript
+   // apps/api/src/objects/get.ts
+   const resolved = await resolveObjectByIdWithAliases({ tenantId, type, id });
+   // Tries: inventoryItem#123, then inventory#123 (if type="inventory")
+   if (!resolved) return notFound("Not Found");
+   return ok(resolved.obj);
+   ```
+
+4. **Type Comparisons (Hardened Inline Checks):**
+   ```typescript
+   // apps/api/src/purchasing/suggest-po.ts
+   import { normalizeTypeParam } from "../objects/type-alias";
+   
+   // Protect against stored data with variant casing
+   if (!bo || normalizeTypeParam(bo.type as string) !== "backorderRequest") {
+     skipped.push({ backorderRequestId, reason: "NOT_FOUND" });
+     continue;
+   }
+   ```
+
+**Verification:**
+- ✅ Smoke test `smoke:objects:type-casing-and-alias` validates:
+  - SalesOrder GET works via `salesOrder`, `salesorder`, `SALESORDER` paths
+  - BackorderRequest LIST/GET work via lowercase `backorderrequest` path
+  - Inventory alias: Create via `inventoryItem`, GET via both `inventory` and `inventoryItem`
+- ✅ All stored objects have canonical SK prefixes: `inventoryItem#`, `salesOrder#`, `backorderRequest#`
+- ✅ Type-specific logic uses `normalizeTypeParam()` for casing-safe comparisons
+
+**Files:**
+- Normalization helpers: [apps/api/src/objects/type-alias.ts](../apps/api/src/objects/type-alias.ts)
+- Repo layer (SK building): [apps/api/src/objects/repo.ts](../apps/api/src/objects/repo.ts)
+- Route handlers: [create.ts](../apps/api/src/objects/create.ts), [get.ts](../apps/api/src/objects/get.ts), [update.ts](../apps/api/src/objects/update.ts), [delete.ts](../apps/api/src/objects/delete.ts)
+- Type comparisons: [suggest-po.ts](../apps/api/src/purchasing/suggest-po.ts), [movements.ts](../apps/api/src/inventory/movements.ts)
+- Smoke tests: [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) — `smoke:objects:type-casing-and-alias`, `smoke:inventory:onhand`
+- CI integration: [ops/ci-smokes.json](../ops/ci-smokes.json)
+
+---
+
 
 
 | Module | List Screen | Detail Screen | Create/Edit | Search/Filter | Status |

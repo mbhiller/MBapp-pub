@@ -31,7 +31,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const { typeUsed, obj: existing } = resolved;
 
     // 1) Product SKU change → acquire new lock and delete old constant-SK lock
-    if (String(typeUsed).toLowerCase() === "product") {
+    if (typeUsed === "product") {
       const oldSku = (existing as any)?.sku;
       const newSku = patch?.sku;
       if (newSku && newSku !== oldSku) {
@@ -62,9 +62,8 @@ export async function handle(event: APIGatewayProxyEventV2) {
 
     // 2) Tier-1 gate on update (SO/PO require party role)
     try {
-      const t = String(type || "");
-      const isSO = t.toLowerCase() === "salesorder";
-      const isPO = t.toLowerCase() === "purchaseorder";
+      const isSO = typeUsed === "salesOrder";
+      const isPO = typeUsed === "purchaseOrder";
       if (isSO || isPO) {
         let pid = patch?.partyId as string | undefined;
         if (!pid) {
@@ -80,7 +79,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
     }
 
     // 3) Reservation overlap check (on update, if time fields are being changed)
-    if (String(type).toLowerCase() === "reservation") {
+    if (typeUsed === "reservation") {
       if (!featureReservationsEnabled(event)) {
         return { statusCode: 403, headers: { "content-type":"application/json" }, body: JSON.stringify({ message: "Feature not enabled" }) };
       }
@@ -139,7 +138,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
 
     // 3) Apply update
     // If updating an inventory movement, validate action (when provided) and keep canonical markers.
-    if (String(type).toLowerCase() === "inventorymovement") {
+    if (typeUsed === "inventoryMovement") {
       if (Object.prototype.hasOwnProperty.call(patch, "action")) {
         const a = String(patch?.action ?? "").toLowerCase();
         if (!MOVEMENT_ACTIONS.has(a)) {
