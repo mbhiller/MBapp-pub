@@ -59,10 +59,32 @@ async function req<T = any>(path: string, init: RequestInit = {}, opts: { token?
       const j = await res.json();
       msg = (j?.message as string) || msg;
     } catch {}
-    throw new Error(msg);
+    const err: any = new Error(msg);
+    err.status = res.status;
+    err.statusCode = res.status; // backward compat
+    throw err;
   }
   const ct = res.headers.get("content-type") || "";
   return ct.includes("application/json") ? res.json() : (undefined as T);
+}
+
+/**
+ * Guarded request that requires both token and tenantId.
+ * Throws if either is missing or empty to catch authorization setup bugs early.
+ */
+async function reqAuthed<T = any>(
+  path: string,
+  opts: { token: string; tenantId: string },
+  init: RequestInit = {}
+): Promise<T> {
+  const tokenValid = opts?.token && opts.token.trim().length > 0;
+  const tenantValid = opts?.tenantId && opts.tenantId.trim().length > 0;
+  
+  if (!tokenValid || !tenantValid) {
+    throw new Error(`reqAuthed: token and tenantId are required and must be non-empty. token=${!!tokenValid}, tenantId=${!!tenantValid}`);
+  }
+  
+  return req<T>(path, init, opts);
 }
 
 /** ---------- Canonical Objects API ---------- **/
@@ -83,6 +105,18 @@ export function listObjects<T>(
 
 export function getObject<T>(type: string, id: string): Promise<T> {
   return req(`/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}`);
+}
+
+/**
+ * Guarded version of getObject that requires token + tenantId.
+ * Use this when you have access to AuthProvider context to ensure proper tenant isolation.
+ */
+export function getObjectAuthed<T>(
+  type: string,
+  id: string,
+  opts: { token: string; tenantId: string }
+): Promise<T> {
+  return reqAuthed<T>(`/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}`, opts);
 }
 
 /** Create supports BOTH canonical (body) and legacy (name, tag) overloads */

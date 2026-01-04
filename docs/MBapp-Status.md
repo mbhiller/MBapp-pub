@@ -8,6 +8,25 @@
 
 ## Current State Summary
 
+### Views/Workspaces v1 Foundation — ✅ CI-Locked (Sprint AB, 2026-01-03)
+
+**Epic Summary:** Lock in Views/Workspaces "Operator Leverage" foundation with comprehensive CI smoke coverage.
+
+- **Smoke Tests Added to CI:**
+  - `smoke:views:validate-filters` (E1): Validates all 11 filter operators (eq, ne, lt, le, gt, ge, in, nin, contains, startsWith, regex) with positive + negative cases; prevents filter regression
+  - `smoke:views:save-then-update` (E2): PATCH workflow validation — creates POs (draft + submitted), view with draft filter, applies (asserts PO1 only), PATCHes to submitted filter, reapplies (asserts PO2 only, results flip); validates operator leverage pattern (update existing view without duplicate)
+  - `smoke:views-workspaces:permissions` (E3): RBAC boundary enforcement — admin token creates view + workspace (201), viewer token denied POST/PATCH/DELETE on both (403), viewer reads succeed (200); validates permission gates at API layer
+- **Web Workspaces UX Polish (E4):**
+  - [WorkspacesListPage.tsx](../apps/web/src/pages/WorkspacesListPage.tsx): Enhanced table with view count column, default view indicator (✓/—), "Open" button (routes to entity list with `?viewId=`)
+  - [WorkspaceDetailPage.tsx](../apps/web/src/pages/WorkspaceDetailPage.tsx): Added "Open Default View" button in header (routes to list page if entityType set, else view detail)
+- **Verification:** ✅ All 56 CI smokes pass (E2 local test + E3 local test verified); ✅ `npm run typecheck` passes
+- **Foundation Status:**
+  - ✅ Spec ↔ API: Complete (12 endpoints, all permissions annotated)
+  - ✅ API ↔ Web: Complete (3+ list pages integrated, workspace hub polished)
+  - ✅ CI Lock-In: Complete (filter validation, PATCH workflow, RBAC boundaries all smoke-tested)
+  - 🟡 Web ↔ Mobile: Partial (workspace hub works; list screen integration deferred Phase 2)
+- **Outcome:** Views/Workspaces v1 foundation is CI-locked and ready for Phase 2 (shared views, columns UI, mobile list integration). Filter mapping remains best-effort per entityType; unsupported filters warned in UI.
+
 ### Web Permission Literals → PERM_* Migration — ✅ Complete (Sprint AA E4, 2026-01-03)
 
 **Epic Summary:** Reduce drift by migrating web permission string literals to generated PERM_* aliases.

@@ -339,21 +339,42 @@ export default function WorkspaceDetailPage() {
     <div style={{ display: "grid", gap: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h1>{workspace.name || "Workspace"}</h1>
-        {canEditWorkspace && (
-          <button
-            onClick={handleDelete}
-            style={{
-              padding: "8px 16px",
-              background: "#c00",
-              color: "#fff",
-              border: "none",
-              borderRadius: 4,
-              cursor: "pointer",
-            }}
-          >
-            Delete Workspace
-          </button>
-        )}
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {workspace.defaultViewId && (
+            <Link
+              to={
+                workspace.entityType && getListPageRoute(workspace.entityType)
+                  ? `${getListPageRoute(workspace.entityType)}?viewId=${encodeURIComponent(workspace.defaultViewId)}`
+                  : `/views/${encodeURIComponent(workspace.defaultViewId)}`
+              }
+              style={{
+                padding: "8px 16px",
+                background: "#08a",
+                color: "#fff",
+                borderRadius: 4,
+                textDecoration: "none",
+                fontWeight: 600,
+              }}
+            >
+              Open Default View
+            </Link>
+          )}
+          {canEditWorkspace && (
+            <button
+              onClick={handleDelete}
+              style={{
+                padding: "8px 16px",
+                background: "#c00",
+                color: "#fff",
+                border: "none",
+                borderRadius: 4,
+                cursor: "pointer",
+              }}
+            >
+              Delete Workspace
+            </button>
+          )}
+        </div>
       </div>
 
       <div style={{ display: "grid", gap: 12, maxWidth: 600 }}>
