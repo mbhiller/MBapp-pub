@@ -8,6 +8,34 @@
 
 ## Current State Summary
 
+### Line Editing Foundation Alignment — ✅ Complete (Sprint AF, 2026-01-04)
+
+**Epic Summary:** Unify SO/PO patch-lines handlers with shared normalization pattern; align SO status gates with spec; validate stable line ids across all patch operations.
+
+- **Shared Helper (E4):** [apps/api/src/shared/line-editing.ts](../apps/api/src/shared/line-editing.ts) introduced `applyPatchLinesAndEnsureIds<T>()` wrapper that orchestrates: validate status → apply patch ops → reserve removed line ids → assign stable L{n} ids to new lines. Both [so-patch-lines.ts](../apps/api/src/sales/so-patch-lines.ts) and [po-patch-lines.ts](../apps/api/src/purchasing/po-patch-lines.ts) now call this shared helper, eliminating duplication and encoding invariant: "**normalize → patch → re-normalize (ensureLineIds)**".
+
+- **SO Status Gates Corrected (E1):** [so-patch-lines.ts](../apps/api/src/sales/so-patch-lines.ts) `editableStatuses` updated from `["draft"]` to `["draft", "submitted", "committed"]` per spec description (line 4320: "draft/submitted/approved"); actual SO enum states are draft/submitted/committed (approved doesn't exist; commit→committed). PO remains draft-only per spec (line 3999).
+
+- **Line Id Stability (E2–E3):** Both handlers apply defensive `ensureLineIds()` call before persist; guaranteed invariant: all returned lines have stable `id` fields in `L{n}` format (L1, L2, etc.). Removed line ids are reserved and never reused. New lines via cid receive fresh server-assigned ids.
+
+- **Smoke Validation (E5):** New test `smoke:patch-lines:status-gates-and-ids` validates:
+  - SO patch-lines succeeds in draft ✓, submitted ✓, committed ✓
+  - PO patch-lines succeeds in draft ✓, fails (409 blocked) in non-draft ✓
+  - All returned lines have valid `L{n}` ids ✓
+  - Removed ids never reused ✓
+  - Existing smokes (`smoke:salesOrders:patch-lines`, `smoke:purchaseOrders:patch-lines`) still pass
+
+- **Definition of Done:**
+  - ✅ Shared helper (line-editing.ts) created and documented
+  - ✅ Both patch-lines handlers refactored to use helper
+  - ✅ SO editableStatuses corrected to spec-matching values
+  - ✅ Defensive ensureLineIds normalization applied in both handlers
+  - ✅ New comprehensive smoke test validates status gates + id stability
+  - ✅ No regressions (existing smokes pass, typecheck clean)
+  - ✅ Docs updated (this section + Foundations.md § Line Editing Invariant)
+
+- **Guarantee:** SO and PO patch-lines now use consistent shared pattern; status gates match actual SO/PO enum values per spec; all line operations preserve id stability invariant; CI smoke coverage locks in both behaviors.
+
 ### Permission Generator Completeness — ✅ Complete (Sprint AC, 2026-01-04)
 
 **Epic Summary:** Expand spec permission annotations to cover Sales SO actions and inventoryItem CRUD; migrate web SalesOrder pages to generated constants.

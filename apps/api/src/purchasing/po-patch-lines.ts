@@ -5,7 +5,8 @@ import { badRequest, conflictError, internalError, notFound } from "../common/re
 import { logger } from "../common/logger";
 import { getPurchaseOrder, updatePurchaseOrder, type PurchaseOrder } from "../shared/db";
 import { type PatchLineOp } from "../shared/patchLines";
-import { runPatchLinesEngine, PatchLinesValidationError } from "../shared/patchLinesEngine";
+import { PatchLinesValidationError } from "../shared/patchLinesEngine";
+import { applyPatchLinesAndEnsureIds } from "../shared/line-editing";
 
 // Lightweight types for PO lines
 type POLine = { id?: string; itemId?: string; qty?: number; uom?: string; [k: string]: any };
@@ -62,9 +63,8 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
       return internalError(err, requestId);
     }
 
-    const { nextLines } = runPatchLinesEngine<POLine>({ currentDoc: po, ops, options: PATCH_OPTIONS });
-
-    const updated = await updatePurchaseOrder(id, tenantId, { lines: nextLines, updatedAt: new Date().toISOString() } as any);
+    const { lines: normalizedLines } = applyPatchLinesAndEnsureIds<POLine>(po, ops, PATCH_OPTIONS);
+    const updated = await updatePurchaseOrder(id, tenantId, { lines: normalizedLines, updatedAt: new Date().toISOString() } as any);
 
     logger.info(logCtx, "po-patch-lines.saved", { poId: updated.id, lineCount: (updated.lines || []).length });
 
