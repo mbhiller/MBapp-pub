@@ -1,9 +1,0 @@
-{
-  "smokeRunId": "smk-1767568364550-6nff",
-  "base": "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com",
-  "tenantHeader": "SmokeTenant",
-  "jwtTenant": null,
-  "startedAt": "2026-01-04T23:12:44.550Z",
-  "finishedAt": "2026-01-04T23:12:44.552Z",
-  "entries": []
-}

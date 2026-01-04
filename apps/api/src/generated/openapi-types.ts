@@ -66,8 +66,8 @@ export interface paths {
         };
         /** Get Objects by Type and ID */
         get: operations["getObject"];
-        /** Update Objects */
-        put: operations["replaceObject"];
+        /** Update Object (partial merge) */
+        put: operations["updateObject"];
         post?: never;
         /** Delete Objects */
         delete: operations["deleteObject"];
@@ -3624,7 +3624,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    replaceObject: {
+    updateObject: {
         parameters: {
             query?: never;
             header: {
@@ -3644,7 +3644,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Updated */
+            /** @description Updated (partial merge applied) */
             200: {
                 headers: {
                     [name: string]: unknown;

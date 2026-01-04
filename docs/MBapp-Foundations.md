@@ -618,6 +618,95 @@ function expandTypeAliases(type: string): string[] {
 
 **Best Practices (Developer Guidelines):**
 - ⚠️ **Never compare raw strings for doc.type/docType** — Always use `normalizeTypeParam()` for comparisons to protect against variant casing in stored data
+
+---
+
+### 2.9 Objects Contract Invariants
+
+**Context:** Objects API (`/objects/{type}`, `/objects/{type}/{id}`, `/objects/{type}/search`) provides CRUD + search across all entity types (product, party, inventoryItem, salesOrder, etc.). These invariants govern type handling, storage keys, alias resolution, and update semantics.
+
+**Core Invariants:**
+
+1. **Type Normalization on Ingress:**
+   - All incoming type parameters (path, query) are normalized via `normalizeTypeParam()` before storage or query building.
+   - Route tolerates any casing (`salesorder`, `SALESORDER`, `SalesOrder`) → canonical (`salesOrder`).
+   - Ensures consistent SK building and eliminates casing-related lookup failures.
+
+2. **Storage Keys Use Canonical Type:**
+   - DynamoDB `pk = tenantId`, `sk = {canonicalType}#{id}` (e.g., `salesOrder#abc123`, `inventoryItem#xyz789`).
+   - All writes (POST, PUT) normalize type before calling `computeKeys()` to build SK.
+   - Guarantees: single canonical SK per entity; no duplicates with variant casing.
+
+3. **Inventory Alias Behavior (Legacy `inventory` ↔ Canonical `inventoryItem`):**
+   - **Write Policy:** POST `/objects/inventory` stores as `inventoryItem` with SK `inventoryItem#{id}`.
+   - **Read/List/Search Fallback:** GET/PUT/DELETE routes try canonical type first, then expand to aliases via `resolveObjectByIdWithAliases()`.
+   - **Union Queries (List/Search):** When no pagination cursor present, `listObjectsWithAliases()` and `searchObjectsWithAliases()` perform union queries across alias types (e.g., query both `inventoryItem#*` and `inventory#*`), then deduplicate by id before sorting.
+   - **Alias Expansion:** Only `inventoryItem` has a true alias (`inventory`); other types support casing variants (lowercase/uppercase) but map to single canonical type.
+
+4. **Union Behavior Constraints:**
+   - **Pagination Boundary:** When a pagination cursor (`next`) is present, union queries fall back to single-type query using cursor's type to avoid mixed-cursor issues.
+   - **Deduplication:** If data corruption causes both `inventory#{id}` and `inventoryItem#{id}` SKs to exist, union helpers deduplicate by id (first occurrence wins) before sorting and returning results.
+   - **Stable Sort:** Deduplicated results sorted by `id` ascending to ensure deterministic pagination across runs.
+
+5. **PUT Merge Semantics (Partial Update):**
+   - **Behavior:** PUT `/objects/{type}/{id}` performs a **partial merge**, not full replacement.
+   - **Semantics:** Only fields present in the request body are updated; omitted fields retain their existing values.
+   - **Type-Specific Logic:** Handler applies type-specific guards (SKU lock for products, reservation overlap checks for reservations, role validation for parties, movement validation for inventoryMovement) before merge.
+   - **Spec Alignment:** Spec reflects merge semantics with `operationId: updateObject` (not `replaceObject`) and explicit merge description.
+   - **Developer Note:** To clear a field, send explicit `null` value; omitting a field preserves its current value.
+
+**Permission Mapping:**
+- `typeToPermissionPrefix()` in [apps/api/src/index.ts](../apps/api/src/index.ts) maps canonical types to module prefixes:
+  - `salesOrder` → `sales`, `purchaseOrder` → `purchase`, `inventoryItem` → `inventory`
+  - Falls back to canonical type for unknown types (e.g., `product` → `product`, `party` → `party`)
+- Normalizes incoming type first to ensure consistent permission checks regardless of input casing.
+
+**Alias Resolution Flow (GET/PUT/DELETE):**
+```typescript
+// 1. Try canonical type
+const canonical = normalizeTypeParam(typeParam) ?? typeParam;
+let obj = await getObject({ tenantId, type: canonical, id });
+
+// 2. If not found and alias exists, try alias types
+if (!obj) {
+  const aliases = expandTypeAliases(canonical); // ["inventoryItem", "inventory"]
+  for (const alias of aliases) {
+    obj = await getObject({ tenantId, type: alias, id });
+    if (obj) break;
+  }
+}
+```
+
+**Union Query Flow (LIST/SEARCH):**
+```typescript
+// 1. Check pagination cursor
+if (next) {
+  // Paginated: use single type from cursor
+  return queryByType({ type: cursorType, tenantId, next, limit });
+}
+
+// 2. Union query across aliases
+const aliases = expandTypeAliases(canonicalType);
+const results = await Promise.all(
+  aliases.map(alias => queryByType({ type: alias, tenantId, limit }))
+);
+
+// 3. Deduplicate by id (first occurrence wins)
+const dedupMap = new Map<string, any>();
+for (const item of results.flat()) {
+  const itemId = item.id ?? item.itemId ?? item.sk?.split("#")[1];
+  if (!dedupMap.has(itemId)) dedupMap.set(itemId, item);
+}
+
+// 4. Sort by id ascending
+return Array.from(dedupMap.values()).sort((a, b) => a.id.localeCompare(b.id));
+```
+
+**Developer Guidelines:**
+- Always use `normalizeTypeParam()` for type comparisons; never compare raw `doc.type` strings.
+- Understand PUT is merge, not replace: omit fields to preserve, send `null` to clear.
+- When paginating, avoid union queries to prevent mixed-cursor issues.
+- Alias resolution is transparent to clients; both `/objects/inventory` and `/objects/inventoryItem` work correctly.
 - ✅ Import `normalizeTypeParam` from `type-alias.ts` whenever checking object types in business logic
 - ✅ Use canonical types in all type-specific conditionals (e.g., `if (canonicalType === "inventoryMovement")`)
 - ❌ Avoid raw comparisons like `obj.docType === "inventoryMovement"` or `type.toLowerCase() === "salesorder"`
