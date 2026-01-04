@@ -3,6 +3,7 @@ import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda
 import { GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { ddb, tableObjects } from "../common/ddb";
 import { emitDomainEvent } from "../common/logger";
+import { resolveInventoryByEitherType, resolveSalesOrder, salesOrderHasLine } from "./related-refs";
 const PK = process.env.MBAPP_TABLE_PK || "pk";
 const SK = process.env.MBAPP_TABLE_SK || "sk";
 const json = (s:number,b:unknown):APIGatewayProxyResultV2=>({statusCode:s,headers:{"content-type":"application/json"},body:JSON.stringify(b)});
@@ -25,6 +26,7 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
 
   // Fetch existing record to capture statusBefore and related IDs
   let existing: any = null;
+  let relatedIntegrity: { inventoryFound?: boolean; inventoryType?: string; salesOrderFound?: boolean; salesOrderLineFound?: boolean } | undefined;
   try {
     const got = await ddb.send(new GetCommand({
       TableName: tableObjects,
@@ -35,6 +37,19 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
   if (!existing) {
     return json(404, { message: "BackorderRequest not found" });
   }
+
+  // Best-effort integrity snapshot for observability (ignore remains permissive)
+  try {
+    const inv = existing?.itemId ? await resolveInventoryByEitherType({ tenantId, itemId: existing.itemId }) : null;
+    const so = existing?.soId ? await resolveSalesOrder({ tenantId, soId: existing.soId }) : null;
+    const lineFound = so ? salesOrderHasLine(so, existing?.soLineId) : false;
+    relatedIntegrity = {
+      inventoryFound: !!inv,
+      inventoryType: inv?.type,
+      salesOrderFound: !!so,
+      salesOrderLineFound: !!lineFound,
+    };
+  } catch {}
   const res = await ddb.send(new UpdateCommand({
     TableName: tableObjects,
     Key: { [PK]: tenantId, [SK]: `backorderRequest#${id}` },
@@ -55,6 +70,7 @@ export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayP
       itemId: existing?.itemId ?? updated?.itemId,
       statusBefore: existing?.status,
       statusAfter: updated?.status,
+      ...(relatedIntegrity ? { relatedIntegrity } : {}),
       result: "success",
       durationMs: Date.now() - started,
     });
