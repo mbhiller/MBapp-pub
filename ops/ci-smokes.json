@@ -63,7 +63,7 @@
   "smoke:objects:update-casing-variants",
   "smoke:objects:list-inventory-pagination-alias",
   "smoke:objects:create-casing-normalization",
-  "smoke:views-workspaces:permissions"
+  "smoke:objects:list-filter-cursor-roundtrip",    "smoke:objects:search-filter-cursor-roundtrip",  "smoke:views-workspaces:permissions"
   ]
 
 }

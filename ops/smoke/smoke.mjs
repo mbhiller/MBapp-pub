@@ -6687,6 +6687,347 @@ const tests = {
     };
   },
 
+  // === Sprint AN: filtered cursor round-trip (no dupes/skips) ===
+  "smoke:objects:list-filter-cursor-roundtrip": async () => {
+    await ensureBearer();
+
+    // Create a customer/party for SO
+    const { customerId } = await seedCustomer(api);
+
+    // Create product + inventory item
+    const prod = await createProduct({ name: smokeTag(`BOR-Cursor-${SMOKE_RUN_ID}`) });
+    if (!prod.ok) return { test: "objects:list-filter-cursor-roundtrip", result: "FAIL", step: "product-create", prod };
+    const inv = await createInventoryForProduct(prod.body.id, smokeTag(`BOR-Item-${SMOKE_RUN_ID}`));
+    if (!inv.ok) return { test: "objects:list-filter-cursor-roundtrip", result: "FAIL", step: "inventory-create", inv };
+
+    // Create SO
+    const so = await post(`/objects/salesOrder`, {
+      type: "salesOrder",
+      status: "draft",
+      partyId: customerId,
+      customerId,
+      lines: [{ id: "L1", itemId: inv.body.id, uom: "ea", qty: 1 }]
+    }, { "Idempotency-Key": idem() });
+    if (!so.ok) return { test: "objects:list-filter-cursor-roundtrip", result: "FAIL", step: "so-create", so };
+    const soId = so.body?.id;
+
+    // Seed 6 backorderRequests for this soId to ensure multiple pages (limit=2 ⇒ 3 pages)
+    const creates = [];
+    for (let i = 1; i <= 6; i++) {
+      const bo = await post(`/objects/backorderRequest`, {
+        type: "backorderRequest",
+        soId,
+        soLineId: "L1",
+        itemId: inv.body.id,
+        qty: i,
+        status: "open",
+        note: smokeTag(`BOR-${i}-${SMOKE_RUN_ID}`)
+      });
+      creates.push(bo);
+      if (!bo.ok) return { test: "objects:list-filter-cursor-roundtrip", result: "FAIL", step: `bo-create-${i}`, bo };
+    }
+    const boIds = creates.map(c => c?.body?.id).filter(Boolean);
+    if (boIds.length !== 6) {
+      return { test: "objects:list-filter-cursor-roundtrip", result: "FAIL", step: "bo-create-count", boIds, creates };
+    }
+
+    // Wait for all 6 backorders to become visible (eventual consistency)
+    const waitForSix = async () => {
+      let lastItems = [];
+      for (let i = 0; i < 12; i++) {
+        const res = await get(`/objects/backorderRequest`, { "filter.soId": soId, limit: 20 });
+        if (!res.ok) return { ok: false, res };
+        const items = Array.isArray(res.body?.items) ? res.body.items : [];
+        lastItems = items;
+        if (items.length >= 6) return { ok: true, items };
+        await sleep(500);
+      }
+      return { ok: false, items: lastItems };
+    };
+
+    const sixReady = await waitForSix();
+    if (!sixReady.ok) {
+      return { test: "objects:list-filter-cursor-roundtrip", result: "FAIL", step: "wait-for-six", response: sixReady.res, boIds, count: sixReady.items?.length || 0, items: sixReady.items };
+    }
+    const observedCount = Array.isArray(sixReady.items) ? sixReady.items.length : 0;
+
+    // Page through filtered results, allowing for eventual consistency
+    const fetchPages = async () => {
+      let nextCursor = null;
+      const pages = [];
+      const cursors = [];
+      let lastPageInfo = null;
+      for (let p = 0; p < 6; p++) {
+        const params = { limit: 2, "filter.soId": soId };
+        if (nextCursor) {
+          params.next = nextCursor;
+          params.cursor = nextCursor;
+        }
+        const res = await get(`/objects/backorderRequest`, params);
+        if (!res.ok) {
+          return { ok: false, res };
+        }
+        const items = Array.isArray(res.body?.items) ? res.body.items : [];
+        pages.push(items);
+        const pageInfo = res.body?.pageInfo ?? {};
+        lastPageInfo = pageInfo;
+        nextCursor = pageInfo?.nextCursor ?? pageInfo?.next ?? pageInfo?.cursor ?? res.body?.next ?? res.body?.cursor ?? null;
+        cursors.push(nextCursor);
+        const hasNext = !!(pageInfo?.hasNext || pageInfo?.has_more || pageInfo?.more || nextCursor);
+        if (!nextCursor || !hasNext) break;
+      }
+      return { ok: true, pages, cursors, lastPageInfo };
+    };
+
+    let attempts = 0;
+    let collected = null;
+    while (attempts < 8) {
+      collected = await fetchPages();
+      if (!collected.ok) {
+        return { test: "objects:list-filter-cursor-roundtrip", result: "FAIL", step: "list", response: collected.res };
+      }
+      const flatIds = collected.pages.flat().map(i => i?.id).filter(Boolean);
+      if (flatIds.length >= 6) break;
+      await sleep(400);
+      attempts++;
+    }
+
+    const idsFlat = collected.pages.flat().map(i => i?.id).filter(Boolean);
+    const uniqueIds = new Set(idsFlat);
+    const pageLengths = collected.pages.map(p => p.length);
+    const firstThree = pageLengths.slice(0, 3);
+
+    const hasOverlap = uniqueIds.size !== idsFlat.length;
+    const pageCountOk = firstThree.length === 3 && firstThree.every(len => len === 2);
+    const countOk = idsFlat.length === 6;
+
+    // Ordering assertion: updatedAt desc (allow ties), then id asc on ties
+    const allItems = collected.pages.flat();
+    let orderingOk = true;
+    let orderingReason = "";
+    for (let i = 1; i < allItems.length; i++) {
+      const prev = allItems[i - 1];
+      const curr = allItems[i];
+      const prevUpdated = prev?.updatedAt || "";
+      const currUpdated = curr?.updatedAt || "";
+      const prevId = prev?.id || "";
+      const currId = curr?.id || "";
+
+      // If both have updatedAt and they differ, assert descending
+      if (prevUpdated && currUpdated && prevUpdated !== currUpdated) {
+        if (prevUpdated < currUpdated) {
+          orderingOk = false;
+          orderingReason = `updatedAt not descending: [${i-1}]=${prevUpdated} < [${i}]=${currUpdated}`;
+          break;
+        }
+      } else if (prevUpdated === currUpdated) {
+        // Tie on updatedAt (or both empty): assert id ascending
+        if (prevId > currId) {
+          orderingOk = false;
+          orderingReason = `id not ascending on updatedAt tie: [${i-1}]=${prevId} > [${i}]=${currId}`;
+          break;
+        }
+      }
+    }
+
+    const pass = !hasOverlap && countOk && pageCountOk && orderingOk;
+
+    if (!pass) {
+      return {
+        test: "objects:list-filter-cursor-roundtrip",
+        result: "FAIL",
+        ids: idsFlat,
+        uniqueCount: uniqueIds.size,
+        pageLengths,
+        cursors: collected.cursors,
+        lastPageInfo: collected.lastPageInfo,
+        boIds,
+        observedCount,
+        orderingOk,
+        orderingReason,
+      };
+    }
+
+    return {
+      test: "objects:list-filter-cursor-roundtrip",
+      result: "PASS",
+      ids: idsFlat,
+      pageLengths,
+      cursors: collected.cursors,
+      orderingOk,
+    };
+  },
+
+  // === Sprint AN: POST search filtered cursor round-trip (no dupes/skips) ===
+  "smoke:objects:search-filter-cursor-roundtrip": async () => {
+    await ensureBearer();
+
+    // Create a customer/party for SO
+    const { customerId } = await seedCustomer(api);
+
+    // Create product + inventory item
+    const prod = await createProduct({ name: smokeTag(`BOR-Search-${SMOKE_RUN_ID}`) });
+    if (!prod.ok) return { test: "objects:search-filter-cursor-roundtrip", result: "FAIL", step: "product-create", prod };
+    const inv = await createInventoryForProduct(prod.body.id, smokeTag(`BOR-Search-Item-${SMOKE_RUN_ID}`));
+    if (!inv.ok) return { test: "objects:search-filter-cursor-roundtrip", result: "FAIL", step: "inventory-create", inv };
+
+    // Create SO
+    const so = await post(`/objects/salesOrder`, {
+      type: "salesOrder",
+      status: "draft",
+      partyId: customerId,
+      customerId,
+      lines: [{ id: "L1", itemId: inv.body.id, uom: "ea", qty: 1 }]
+    }, { "Idempotency-Key": idem() });
+    if (!so.ok) return { test: "objects:search-filter-cursor-roundtrip", result: "FAIL", step: "so-create", so };
+    const soId = so.body?.id;
+
+    // Seed 6 backorderRequests for this soId to ensure multiple pages (limit=2 ⇒ 3 pages)
+    const creates = [];
+    for (let i = 1; i <= 6; i++) {
+      const bo = await post(`/objects/backorderRequest`, {
+        type: "backorderRequest",
+        soId,
+        soLineId: "L1",
+        itemId: inv.body.id,
+        qty: i,
+        status: "open",
+        note: smokeTag(`BOR-Search-${i}-${SMOKE_RUN_ID}`)
+      });
+      creates.push(bo);
+      if (!bo.ok) return { test: "objects:search-filter-cursor-roundtrip", result: "FAIL", step: `bo-create-${i}`, bo };
+    }
+    const boIds = creates.map(c => c?.body?.id).filter(Boolean);
+    if (boIds.length !== 6) {
+      return { test: "objects:search-filter-cursor-roundtrip", result: "FAIL", step: "bo-create-count", boIds, creates };
+    }
+
+    // Wait for all 6 backorders to become visible (eventual consistency)
+    const waitForSix = async () => {
+      let lastItems = [];
+      for (let i = 0; i < 12; i++) {
+        const res = await post(`/objects/backorderRequest/search`, { soId, limit: 20 });
+        if (!res.ok) return { ok: false, res };
+        const items = Array.isArray(res.body?.items) ? res.body.items : [];
+        lastItems = items;
+        if (items.length >= 6) return { ok: true, items };
+        await sleep(500);
+      }
+      return { ok: false, items: lastItems };
+    };
+
+    const sixReady = await waitForSix();
+    if (!sixReady.ok) {
+      return { test: "objects:search-filter-cursor-roundtrip", result: "FAIL", step: "wait-for-six", response: sixReady.res, boIds, count: sixReady.items?.length || 0, items: sixReady.items };
+    }
+    const observedCount = Array.isArray(sixReady.items) ? sixReady.items.length : 0;
+
+    // Page through search results with POST body
+    const fetchPages = async () => {
+      let nextCursor = null;
+      const pages = [];
+      const cursors = [];
+      let lastPageInfo = null;
+      for (let p = 0; p < 6; p++) {
+        const body = { limit: 2, soId };
+        if (nextCursor) {
+          body.next = nextCursor;
+        }
+        const res = await post(`/objects/backorderRequest/search`, body);
+        if (!res.ok) {
+          return { ok: false, res };
+        }
+        const items = Array.isArray(res.body?.items) ? res.body.items : [];
+        pages.push(items);
+        const pageInfo = res.body?.pageInfo ?? {};
+        lastPageInfo = pageInfo;
+        nextCursor = pageInfo?.nextCursor ?? pageInfo?.next ?? pageInfo?.cursor ?? res.body?.next ?? res.body?.cursor ?? null;
+        cursors.push(nextCursor);
+        const hasNext = !!(pageInfo?.hasNext || pageInfo?.has_more || pageInfo?.more || nextCursor);
+        if (!nextCursor || !hasNext) break;
+      }
+      return { ok: true, pages, cursors, lastPageInfo };
+    };
+
+    let attempts = 0;
+    let collected = null;
+    while (attempts < 8) {
+      collected = await fetchPages();
+      if (!collected.ok) {
+        return { test: "objects:search-filter-cursor-roundtrip", result: "FAIL", step: "search", response: collected.res };
+      }
+      const flatIds = collected.pages.flat().map(i => i?.id).filter(Boolean);
+      if (flatIds.length >= 6) break;
+      await sleep(400);
+      attempts++;
+    }
+
+    const idsFlat = collected.pages.flat().map(i => i?.id).filter(Boolean);
+    const uniqueIds = new Set(idsFlat);
+    const pageLengths = collected.pages.map(p => p.length);
+    const firstThree = pageLengths.slice(0, 3);
+
+    const hasOverlap = uniqueIds.size !== idsFlat.length;
+    const pageCountOk = firstThree.length === 3 && firstThree.every(len => len === 2);
+    const countOk = idsFlat.length === 6;
+
+    // Ordering assertion: updatedAt desc (allow ties), then id asc on ties
+    const allItems = collected.pages.flat();
+    let orderingOk = true;
+    let orderingReason = "";
+    for (let i = 1; i < allItems.length; i++) {
+      const prev = allItems[i - 1];
+      const curr = allItems[i];
+      const prevUpdated = prev?.updatedAt || "";
+      const currUpdated = curr?.updatedAt || "";
+      const prevId = prev?.id || "";
+      const currId = curr?.id || "";
+
+      // If both have updatedAt and they differ, assert descending
+      if (prevUpdated && currUpdated && prevUpdated !== currUpdated) {
+        if (prevUpdated < currUpdated) {
+          orderingOk = false;
+          orderingReason = `updatedAt not descending: [${i-1}]=${prevUpdated} < [${i}]=${currUpdated}`;
+          break;
+        }
+      } else if (prevUpdated === currUpdated) {
+        // Tie on updatedAt (or both empty): assert id ascending
+        if (prevId > currId) {
+          orderingOk = false;
+          orderingReason = `id not ascending on updatedAt tie: [${i-1}]=${prevId} > [${i}]=${currId}`;
+          break;
+        }
+      }
+    }
+
+    const pass = !hasOverlap && countOk && pageCountOk && orderingOk;
+
+    if (!pass) {
+      return {
+        test: "objects:search-filter-cursor-roundtrip",
+        result: "FAIL",
+        ids: idsFlat,
+        uniqueCount: uniqueIds.size,
+        pageLengths,
+        cursors: collected.cursors,
+        lastPageInfo: collected.lastPageInfo,
+        boIds,
+        observedCount,
+        orderingOk,
+        orderingReason,
+      };
+    }
+
+    return {
+      test: "objects:search-filter-cursor-roundtrip",
+      result: "PASS",
+      ids: idsFlat,
+      pageLengths,
+      cursors: collected.cursors,
+      orderingOk,
+    };
+  },
+
   // === Sprint XXI: backorder status filter ===
   "smoke:objects:list-filter-status": async () => {
     await ensureBearer();

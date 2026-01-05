@@ -6,6 +6,7 @@ import {
   PutCommand,
   DeleteCommand,
   QueryCommand,
+  QueryCommandOutput,
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { ensureLineIds } from "../shared/ensureLineIds";
@@ -188,28 +189,46 @@ export async function listObjects({
     };
   }
 
-  // Pagination-aware filtering: loop through Dynamo pages until we collect `limit` matches
-  let collected: AnyRecord[] = [];
-  const incomingCursorString = next ?? null;
-  let ExclusiveStartKey = decodeNext(next);
-  let LastEvaluatedKey: AnyRecord | undefined = undefined;
-  let hasMorePages = true;
+  // Pagination-aware filtering: for filtered/q paths, we need to:
+  // 1) Fetch all matching items (up to a reasonable cap)
+  // 2) Sort deterministically (updatedAt desc, then id asc)
+  // 3) Use offset-based pagination (cursor encodes offset, not DynamoDB key)
+  // This ensures consistent ordering across pages when filtering/searching.
 
-  while (collected.length < limit && hasMorePages) {
-    const res = await ddb.send(
+  const incomingCursorString = next ?? null;
+  let offset = 0;
+  
+  // Decode offset from cursor if present
+  if (incomingCursorString) {
+    try {
+      const decoded = JSON.parse(Buffer.from(incomingCursorString, "base64").toString("utf8"));
+      offset = typeof decoded.offset === "number" ? decoded.offset : 0;
+    } catch {
+      offset = 0;
+    }
+  }
+
+  // Fetch all matching items (up to a cap to prevent runaway queries)
+  let collected: AnyRecord[] = [];
+  let ExclusiveStartKey: AnyRecord | undefined = undefined;
+  const maxFetch = 10000; // Safety cap
+
+  for (let pageIdx = 0; pageIdx < 50; pageIdx++) {
+    if (collected.length >= maxFetch) break;
+
+    const queryRes: QueryCommandOutput = await ddb.send(
       new QueryCommand({
         TableName: TABLE,
         KeyConditionExpression: `#pk = :t AND begins_with(#sk, :prefix)`,
         ExpressionAttributeNames: { "#pk": PK_ATTR, "#sk": SK_ATTR },
         ExpressionAttributeValues: { ":t": tenantId, ":prefix": `${canonicalType}#` },
         ExclusiveStartKey,
-        Limit: Math.max(limit * 2, 100), // Fetch extra to account for filtering
+        Limit: 1000,
         ConsistentRead: true,
       })
     );
 
-    const rawItems = (res.Items || []) as AnyRecord[];
-    LastEvaluatedKey = res.LastEvaluatedKey;
+    const rawItems = (queryRes.Items || []) as AnyRecord[];
 
     // Apply filters and q to each item
     for (const item of rawItems) {
@@ -231,43 +250,53 @@ export async function listObjects({
         if (!JSON.stringify(item).toLowerCase().includes(needle)) continue;
       }
 
-      // Item matched all filters and q; add to results
+      // Item matched; collect it
       collected.push(item);
-
-      // Stop if we've collected enough
-      if (collected.length >= limit) break;
+      if (collected.length >= maxFetch) break;
     }
 
-    // Check if we have more pages
-    if (!LastEvaluatedKey) {
-      hasMorePages = false;
-      break;
-    } else if (collected.length >= limit) {
-      // We have enough results; next cursor is from Dynamo (more may exist after filters)
-      hasMorePages = true;
-      break;
-    } else {
-      // We exhausted the page but haven't collected enough; continue with Dynamo's cursor
-      ExclusiveStartKey = LastEvaluatedKey;
-    }
+    // If no more pages, stop
+    if (!queryRes.LastEvaluatedKey) break;
+    ExclusiveStartKey = queryRes.LastEvaluatedKey;
   }
 
-  // Compute outgoing cursor ONLY from DynamoDB's LastEvaluatedKey
-  const outgoingCursor = hasMorePages && LastEvaluatedKey ? encodeNext(LastEvaluatedKey) : null;
+  // Apply deterministic ordering:
+  // 1) Deduplicate by id (defensive guard)
+  const dedupMap = new Map<string, AnyRecord>();
+  for (const item of collected) {
+    const itemId = item?.id as string | undefined;
+    if (itemId && !dedupMap.has(itemId)) {
+      dedupMap.set(itemId, item);
+    }
+  }
+  const deduped = Array.from(dedupMap.values());
 
-  // Defensive guard: if outgoing cursor equals incoming cursor, we're stuck
-  if (outgoingCursor && outgoingCursor === incomingCursorString) {
-    console.warn(
-      `[objects/repo] Stuck cursor detected: type=${canonicalType}, tenantId=${tenantId}, cursor=${outgoingCursor.slice(0, 20)}...`
-    );
-    return {
-      items: collected.slice(0, limit).map((o) => project(o, fields)),
-      next: null,
-    };
+  // 2) Sort: updatedAt desc, then id asc
+  deduped.sort((a, b) => {
+    const aUpdated = (a?.updatedAt as string) || "";
+    const bUpdated = (b?.updatedAt as string) || "";
+    if (aUpdated && bUpdated && aUpdated !== bUpdated) {
+      return aUpdated > bUpdated ? -1 : 1;
+    }
+    const aId = (a?.id as string) || "";
+    const bId = (b?.id as string) || "";
+    return aId.localeCompare(bId);
+  });
+
+  // 3) Slice for current page
+  const finalItems = deduped.slice(offset, offset + limit);
+  const hasMore = offset + limit < deduped.length;
+
+  // 4) Generate offset-based cursor if more items exist
+  let outgoingCursor: string | null = null;
+  if (hasMore) {
+    const nextOffset = offset + limit;
+    const cursorObj = { offset: nextOffset };
+    outgoingCursor = Buffer.from(JSON.stringify(cursorObj)).toString("base64");
   }
 
   return {
-    items: collected.slice(0, limit).map((o) => project(o, fields)),
+    items: finalItems.map((o) => project(o, fields)),
     next: outgoingCursor,
   };
 }

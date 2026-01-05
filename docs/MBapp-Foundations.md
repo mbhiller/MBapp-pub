@@ -646,9 +646,15 @@ function expandTypeAliases(type: string): string[] {
 4. **Union Behavior Constraints:**
    - **Pagination Boundary:** When a pagination cursor (`next`) is present, union queries fall back to single-type query using cursor's type to avoid mixed-cursor issues.
    - **Deduplication:** If data corruption causes both `inventory#{id}` and `inventoryItem#{id}` SKs to exist, union helpers deduplicate by id (first occurrence wins) before sorting and returning results.
-   - **Stable Sort:** Deduplicated results sorted by `id` ascending to ensure deterministic pagination across runs.
+   - **Stable Sort:** Deduplicated results sorted by `updatedAt` desc (when present on both), then `id` ascending to ensure deterministic pagination across runs.
 
-5. **PUT Merge Semantics (Partial Update):**
+5. **Ordering Contract (LIST/SEARCH):**
+   - **Without filters or q (simple path):** Results returned in DynamoDB SK order (`type#id` ascending). Efficient for large datasets; relies on natural key ordering.
+   - **With filters or q (filtered path):** Results deduped by id, then sorted by `updatedAt` desc (when present), then `id` asc. Ensures deterministic ordering across pagination when in-memory filtering is applied.
+   - **Union mode (alias types, no pagination cursor):** Results deduped by id, then sorted by `updatedAt` desc, then `id` asc. Matches filtered path ordering to avoid user confusion.
+   - **Why:** Filtered/q path requires in-memory filtering, so we enforce consistent sorting to prevent arbitrary SK order from surfacing. Union mode already required sorting for deduplication, so aligning filtered/q with union provides uniform behavior.
+
+6. **PUT Merge Semantics (Partial Update):**
    - **Behavior:** PUT `/objects/{type}/{id}` performs a **partial merge**, not full replacement.
    - **Semantics:** Only fields present in the request body are updated; omitted fields retain their existing values.
    - **Type-Specific Logic:** Handler applies type-specific guards (SKU lock for products, reservation overlap checks for reservations, role validation for parties, movement validation for inventoryMovement) before merge.
