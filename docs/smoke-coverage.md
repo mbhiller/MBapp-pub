@@ -85,6 +85,23 @@ Smokes are organized by tier for targeted CI validation:
 
 ---
 
+## CI Artifacts (Smoke Manifests)
+
+Smokes write a manifest locally to `ops/smoke/.manifests/` containing details about created entities (type, id, route, metadata) for debugging and cleanup.
+
+**GitHub Actions Artifact Upload:**
+- **PR/push (`ci-smokes` job):** Uploaded only on failure (7-day retention)
+  - Artifact name: `smoke-manifests-core-{run_id}`
+  - Use to inspect failed test artifacts when a core smoke fails
+- **Nightly (`ci-smokes-nightly` job):** Uploaded always (14-day retention)
+  - Artifact name: `smoke-manifests-nightly-{run_id}`
+  - Useful for performance analysis and trend tracking across nightly runs
+
+**Local Debugging:**
+Manifest path is printed at run start: `ops/smoke/.manifests/smk-{timestamp}-{random}.json`
+
+---
+
 ## Overview (Continued)
 
 Sprint I (2026-01-02): No new smokes added; existing backorder → suggest-po → receive loops remain covered via `npm run smokes:run:ci`.
