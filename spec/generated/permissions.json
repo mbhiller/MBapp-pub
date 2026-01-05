@@ -15,6 +15,7 @@
   "POST /inventory/onhand:batch": "inventory:read",
   "POST /objects/backorderRequest/{id}:convert": "objects:write",
   "POST /objects/backorderRequest/{id}:ignore": "objects:write",
+  "POST /objects/party:batch": "party:read",
   "POST /purchasing/po:create-from-suggestion": "purchase:write",
   "POST /purchasing/po/{id}:approve": "purchase:approve",
   "POST /purchasing/po/{id}:cancel": "purchase:cancel",

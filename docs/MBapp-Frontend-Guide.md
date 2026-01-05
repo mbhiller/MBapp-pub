@@ -185,7 +185,7 @@ VITE_API_BASE=https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com
 
 See [apps/web/README.md](../apps/web/README.md) for complete configuration guide.
 
-**List-page enrichment:** When enriching rows with vendor/party names, use the batching helper in [apps/web/src/lib/concurrency.ts](../apps/web/src/lib/concurrency.ts) and avoid unbounded `Promise.all(...apiFetch...)` fan-out to prevent burst-related 503s.
+**List-page enrichment:** When enriching rows with vendor/party names, prefer the `batchGetParties()` helper in [apps/web/src/lib/api.ts](../apps/web/src/lib/api.ts) which calls the `/objects/party:batch` endpoint (handles up to 100 IDs per request, auto-chunks larger sets). This replaces manual batching loops and prevents unbounded `Promise.all(...apiFetch...)` fan-out that causes burst-related 503s. For fallback scenarios, use the concurrency helper in [apps/web/src/lib/concurrency.ts](../apps/web/src/lib/concurrency.ts).
 
 - Lease Billing Run
 - Auction self-bid smoke

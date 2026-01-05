@@ -200,6 +200,48 @@ export async function getInventoryByEitherType<T>(
   }
 }
 
+/** Batch fetch parties by IDs with chunking support */
+export async function batchGetParties(
+  partyIds: string[],
+  opts: { token?: string; tenantId?: string }
+): Promise<Map<string, any>> {
+  if (!partyIds.length) return new Map();
+  
+  // Hard cap to 100 per batch request (server-side limit)
+  const BATCH_SIZE = 100;
+  const results = new Map<string, any>();
+  
+  try {
+    // Chunk into batches of 100
+    for (let i = 0; i < partyIds.length; i += BATCH_SIZE) {
+      const chunk = partyIds.slice(i, i + BATCH_SIZE);
+      const res = await req<{ items: any[] }>(
+        `/objects/party:batch`,
+        {
+          method: "POST",
+          body: JSON.stringify({ partyIds: chunk }),
+        },
+        { token: opts.token ?? undefined, tenantId: opts.tenantId ?? undefined }
+      );
+      
+      if (res?.items) {
+        for (const party of res.items) {
+          if (party?.id) {
+            results.set(party.id, party);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    if (import.meta.env.DEV) {
+      console.error("[batchGetParties] Batch request failed, will fall back to individual fetches:", err);
+    }
+    throw err;
+  }
+  
+  return results;
+}
+
 /** Create supports BOTH canonical (body) and legacy (name, tag) overloads */
 export function createObject<T>(type: string, body: any): Promise<T>;
 export function createObject(type: string, name?: string, tag?: string): Promise<{ id?: string }>;

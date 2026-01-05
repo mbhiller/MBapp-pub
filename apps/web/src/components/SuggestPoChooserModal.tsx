@@ -1,5 +1,7 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { apiFetch } from "../lib/http";
+import { batchGetParties } from "../lib/api";
+import { forEachBatched } from "../lib/concurrency";
 import type { PurchaseOrderDraft } from "../lib/api";
 
 export type SkippedReason = {
@@ -66,10 +68,32 @@ export default function SuggestPoChooserModal({
     const missing = vendorIds.filter((v) => !(v in vendorNameById));
     if (missing.length === 0) return;
 
+    let cancelled = false;
+
     (async () => {
       const entries: Record<string, string> = {};
-      await Promise.all(
-        missing.map(async (vendorId) => {
+      
+      try {
+        // Try batch endpoint first
+        const partyMap = await batchGetParties(missing, { token, tenantId });
+        for (const vendorId of missing) {
+          const party = partyMap.get(vendorId);
+          entries[vendorId] = party?.name ?? party?.displayName ?? vendorId;
+        }
+        
+        if (!cancelled) {
+          setVendorNameById((prev) => ({ ...prev, ...entries }));
+        }
+      } catch (batchErr) {
+        // Fallback: Use concurrency-limited individual fetches
+        if (import.meta.env.DEV) {
+          console.debug("[SuggestPoChooserModal] Batch fetch failed, falling back to limited concurrency:", batchErr);
+        }
+        
+        const CONCURRENCY_LIMIT = 5;
+        await forEachBatched(missing, CONCURRENCY_LIMIT, async (vendorId) => {
+          if (cancelled) return;
+          
           try {
             const res = await apiFetch<{ name?: string; displayName?: string }>(
               `/objects/party/${vendorId}`,
@@ -79,10 +103,17 @@ export default function SuggestPoChooserModal({
           } catch {
             entries[vendorId] = vendorId;
           }
-        })
-      );
-      setVendorNameById((prev) => ({ ...prev, ...entries }));
+        });
+        
+        if (!cancelled) {
+          setVendorNameById((prev) => ({ ...prev, ...entries }));
+        }
+      }
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [open, drafts, tenantId, token, vendorNameById]);
 
   // Reset selection when modal opens/closes
