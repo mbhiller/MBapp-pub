@@ -1,8 +1,59 @@
 # MBapp Status / Working
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Foundations](MBapp-Foundations.md) · [Cadence](MBapp-Cadence.md) · [Verification](smoke-coverage.md)  
-**Last Updated:** 2026-01-04  
+**Last Updated:** 2026-01-05  
 **Workflow & DoD:** See [MBapp-Cadence.md](MBapp-Cadence.md) for canonical workflow, Definition of Done, and testing rules.
+
+---
+### Backorders Views on Web — ✅ Complete (Sprint AT, 2026-01-05)
+
+**Epic Summary:** Enable Backorders list to support Views (apply/save filters); implement forward and reverse mappers for view-to-state conversions; validate end-to-end with smoke test.
+
+- **E1: Forward Mapper (`mapViewToBackorderFilters`):** [apps/web/src/lib/viewFilterMappers.ts](../apps/web/src/lib/viewFilterMappers.ts)
+  - Converts saved View filters to BackordersListPage filter state
+  - Supported fields: `status` (eq/ne), `soId` (eq/contains), `vendorId` (eq/contains), `itemId` (eq/contains)
+  - Returns `{ applied, unsupported }` structure (matches inventory/party/product/PO patterns)
+  - Tracks unsupported filters (sort, unknown fields) in array for UI warnings
+  - Example: View with `{ field: "status", op: "eq", value: "open" }` → `{ applied: { status: "open" }, unsupported: [] }`
+
+- **E2: Reverse Mapper (current list state → View filters):** [apps/web/src/pages/BackordersListPage.tsx](../apps/web/src/pages/BackordersListPage.tsx) lines 517–523
+  - `currentViewFilters` reconstructs View filter objects from active filters (status, soId, vendorId, itemId)
+  - Each filter: `{ field: string, op: "eq", value: any }`
+  - Passed to `SaveViewButton` for save/overwrite operations
+  - Enables round-trip: apply view → modify filters → save updated view
+
+- **E3: List Page Integration:** [apps/web/src/pages/BackordersListPage.tsx](../apps/web/src/pages/BackordersListPage.tsx)
+  - Imports mapper at line 9; uses in ViewSelector (line 532) and handleApplyView (lines 327–328)
+  - handleApplyView (lines 158–177): maps view.filters → URL params (status, vendorId, soId, itemId)
+  - View application on ?viewId URL param (lines 313–336): fetches view, maps filters, applies via URL
+  - SaveViewButton (lines 601–607): uses currentViewFilters for save/overwrite
+
+- **E4: Smoke Test — `smoke:views:apply-to-backorders-list`:** [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) lines 10894–11107
+  - **Setup:** Creates sales order + 2 backorders (status: open, ignored) + vendor party
+  - **View Creation:** Creates View with `entityType: "backorderRequest"` and filter `{ field: "status", op: "eq", value: "open" }`
+  - **Filtering:** Calls `/objects/backorderRequest/search` with derived params `{ status: "open", limit: 100 }`
+  - **Assertions:** Validates open backorder present, ignored backorder absent in filtered results
+  - **Cleanup:** Deletes view in finally block (with 5-attempt retry)
+  - **Registered:** [ops/ci-smokes.json](../ops/ci-smokes.json) line 52, tier `extended`
+  - **Result:** ✅ PASS
+
+- **Verification:**
+  - TypeScript compilation clean: `npm run typecheck -w apps/web` ✓
+  - Individual smoke: `node ops/smoke/smoke.mjs smoke:views:apply-to-backorders-list` → PASS (backorderA in filtered, backorderB absent)
+  - Extended suite: `npm run smokes:run:extended` → All 25 extended flows PASS
+
+- **Definition of Done:**
+  - ✅ E1: mapViewToBackorderFilters implemented with supported/unsupported filter tracking
+  - ✅ E2: Reverse mapper (currentViewFilters) reconstructs View filters from list state
+  - ✅ E3: BackordersListPage wired for view apply/save; handleApplyView + ViewSelector + SaveViewButton integrated
+  - ✅ E4: smoke:views:apply-to-backorders-list implemented, registered, PASS; extended suite PASS
+  - ✅ Typecheck clean, no regressions
+
+- **Guarantees:**
+  - Backorders list now supports View application (filters constrain results as expected)
+  - View save captures current filter state for later reuse
+  - Filter mapping consistent with other entity mappers (PO, inventory, parties, products)
+  - Unsupported filters tracked and reportable to UI
 
 ---
 ### Foundation Protection: Wipe Tool Safety Smoke — ✅ Complete (Sprint AQ, 2026-01-04)

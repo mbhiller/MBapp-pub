@@ -195,3 +195,58 @@ export function mapViewToPartyFilters(view: ViewConfig): FilterMapResult {
 
   return { applied, unsupported };
 }
+
+/**
+ * Maps a saved View's filters to BackordersListPage filter state.
+ *
+ * Supported fields in Views:
+ * - status: eq, ne -> status
+ * - soId: eq, contains -> soId
+ * - vendorId: eq, contains -> vendorId (via preferredVendorId)
+ * - itemId: eq, contains -> itemId
+ *
+ * Example View filters:
+ * [{ field: "status", op: "eq", value: "open" }]
+ */
+export function mapViewToBackorderFilters(view: ViewConfig): FilterMapResult {
+  const applied: Record<string, any> = {};
+  const unsupported: Array<{ field: string; reason: string }> = [];
+
+  view.filters?.forEach((filter) => {
+    const { field, op, value } = filter;
+
+    if (field === "status") {
+      if (op === "eq" || op === "ne") {
+        applied.status = op === "eq" ? value : "open";
+      } else {
+        unsupported.push({ field, reason: `operator '${op}' not supported` });
+      }
+    } else if (field === "soId") {
+      if (op === "eq" || op === "contains") {
+        applied.soId = value || "";
+      } else {
+        unsupported.push({ field, reason: `operator '${op}' not supported` });
+      }
+    } else if (field === "vendorId" || field === "preferredVendorId") {
+      if (op === "eq" || op === "contains") {
+        applied.vendorId = value || "";
+      } else {
+        unsupported.push({ field, reason: `operator '${op}' not supported` });
+      }
+    } else if (field === "itemId") {
+      if (op === "eq" || op === "contains") {
+        applied.itemId = value || "";
+      } else {
+        unsupported.push({ field, reason: `operator '${op}' not supported` });
+      }
+    } else {
+      unsupported.push({ field, reason: "field not mapped for backorder list" });
+    }
+  });
+
+  if (view.sort?.field) {
+    unsupported.push({ field: view.sort.field, reason: "sort not supported in UI" });
+  }
+
+  return { applied, unsupported };
+}

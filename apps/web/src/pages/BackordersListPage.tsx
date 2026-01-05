@@ -4,6 +4,10 @@ import { useAuth } from "../providers/AuthProvider";
 import { hasPerm } from "../lib/permissions";
 import { PERM_OBJECTS_WRITE, PERM_PURCHASE_WRITE } from "../generated/permissions";
 import { apiFetch } from "../lib/http";
+import { SaveViewButton } from "../components/SaveViewButton";
+import { ViewSelector } from "../components/ViewSelector";
+import { mapViewToBackorderFilters } from "../lib/viewFilterMappers";
+import type { ViewConfig } from "../hooks/useViewFilters";
 import {
   searchBackorderRequests,
   ignoreBackorderRequest,
@@ -67,6 +71,8 @@ export default function BackordersListPage() {
   const [hideBroken, setHideBroken] = useState(false);
   const [validMap, setValidMap] = useState<Record<string, boolean | null>>({});
   const [validating, setValidating] = useState(false);
+  const [appliedView, setAppliedView] = useState<ViewConfig | null>(null);
+  const [activeViewId, setActiveViewId] = useState<string | null>(null);
 
   // Helper to update URL search params
   const updateSearchParams = useCallback(
@@ -147,6 +153,32 @@ export default function BackordersListPage() {
     setPageNext(null);
     setValidMap({});
   };
+
+  // Handle View application: apply mapped filters and refresh the list
+  const handleApplyView = useCallback(
+    (mappedState: Record<string, any>) => {
+      const updates: Record<string, string | null> = {};
+      
+      if (mappedState.status !== undefined) {
+        updates.status = mappedState.status || "open";
+      }
+      if (mappedState.vendorId !== undefined) {
+        updates.vendorId = mappedState.vendorId || "";
+        updates.preferredVendorId = null; // Remove legacy param
+      }
+      if (mappedState.soId !== undefined) {
+        updates.soId = mappedState.soId || "";
+      }
+      if (mappedState.itemId !== undefined) {
+        updates.itemId = mappedState.itemId || "";
+      }
+      
+      if (Object.keys(updates).length > 0) {
+        updateSearchParams(updates);
+      }
+    },
+    [updateSearchParams]
+  );
 
   // Validate inventory for backorders with concurrency limit
   const validateInventory = useCallback(
@@ -276,6 +308,32 @@ export default function BackordersListPage() {
   useEffect(() => {
     setValidMap({});
   }, [status, vendorFilter, soIdFilter, itemIdFilter]);
+
+  // Initialize from URL params: viewId
+  useEffect(() => {
+    const urlViewId = searchParams.get("viewId") || "";
+
+    if (urlViewId) {
+      setActiveViewId(urlViewId);
+      (async () => {
+        try {
+          const view = await apiFetch<ViewConfig>(`/views/${urlViewId}`, {
+            token: token || undefined,
+            tenantId,
+          });
+          if (view) {
+            setAppliedView(view);
+            const mapped = mapViewToBackorderFilters(view);
+            handleApplyView(mapped.applied);
+          }
+        } catch {
+          // Ignore silently if view cannot be fetched
+        }
+      })();
+    } else {
+      setActiveViewId(null);
+    }
+  }, [searchParams, tenantId, token, handleApplyView]);
 
   // Fetch vendor names for display
   useEffect(() => {
@@ -449,11 +507,32 @@ export default function BackordersListPage() {
 
   const allSelected = items.length > 0 && items.every((bo) => selected[bo.id]);
 
+  const currentFilterState = {
+    status,
+    vendorId: vendorFilter,
+    soId: soIdFilter,
+    itemId: itemIdFilter,
+  };
+
+  const currentViewFilters = [
+    { field: "status", op: "eq", value: status },
+    vendorFilter.trim() ? { field: "vendorId", op: "eq", value: vendorFilter.trim() } : null,
+    soIdFilter.trim() ? { field: "soId", op: "eq", value: soIdFilter.trim() } : null,
+    itemIdFilter.trim() ? { field: "itemId", op: "eq", value: itemIdFilter.trim() } : null,
+  ].filter(Boolean) as Array<{ field: string; op: string; value: any }>;
+
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h1>Backorders</h1>
       </div>
+
+      <ViewSelector
+        entityType="backorderRequest"
+        mapViewToFilterState={mapViewToBackorderFilters}
+        onApplyView={handleApplyView}
+        currentFilterState={currentFilterState}
+      />
 
       <div style={{ display: "grid", gap: 8 }}>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -519,6 +598,13 @@ export default function BackordersListPage() {
           <button onClick={handleClearFilters} disabled={loading}>
             Clear filters
           </button>
+          <SaveViewButton
+            entityType="backorderRequest"
+            filters={currentViewFilters}
+            buttonLabel="Save as View"
+            activeViewId={activeViewId || undefined}
+            activeViewName={appliedView?.name}
+          />
         </div>
 
         {selectedIds.length > 0 && (

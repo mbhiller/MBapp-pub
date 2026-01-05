@@ -10891,6 +10891,227 @@ const tests = {
     }
   },
 
+  "smoke:views:apply-to-backorders-list": async () => {
+    await ensureBearer();
+
+    const featureHeaders = { "X-Feature-Views-Enabled": "true" };
+    const runTimestamp = Date.now();
+    let viewId = null;
+    let backorderAId = null;
+    let backorderBId = null;
+
+    try {
+      // 1) Create inventory and sales order for backorders
+      const itemName = smokeTag(`VBOITEM-${runTimestamp}`);
+      const soName = smokeTag(`VBOSO-${runTimestamp}`);
+      const vendorName = smokeTag(`VBOVENDOR-${runTimestamp}`);
+
+      // Create product
+      const prod = await post(`/objects/product`, {
+        type: "product",
+        name: itemName,
+        sku: `SKU-${runTimestamp}`,
+        uom: "unit"
+      }, { "Idempotency-Key": idem() });
+      if (!prod.ok || !prod.body?.id) {
+        return { test: "views:apply-to-backorders-list", result: "FAIL", step: "createProduct", prod };
+      }
+      const productId = prod.body.id;
+      recordCreated({ type: 'product', id: productId, route: '/objects/product', meta: {} });
+
+      // Create customer party for sales order
+      const customer = await post(`/objects/party`, {
+        type: "party",
+        kind: "organization",
+        name: smokeTag(`VBOCUSTOMER-${runTimestamp}`),
+        roles: ["customer"]
+      }, { "Idempotency-Key": idem() });
+      if (!customer.ok || !customer.body?.id) {
+        return { test: "views:apply-to-backorders-list", result: "FAIL", step: "createCustomer", customer };
+      }
+      const customerId = customer.body.id;
+      recordCreated({ type: 'party', id: customerId, route: '/objects/party', meta: { roles: ["customer"] } });
+
+      // Create vendor party for preferred vendor
+      const vendor = await post(`/objects/party`, {
+        type: "party",
+        kind: "organization",
+        name: vendorName,
+        roles: ["vendor"]
+      }, { "Idempotency-Key": idem() });
+      if (!vendor.ok || !vendor.body?.id) {
+        return { test: "views:apply-to-backorders-list", result: "FAIL", step: "createVendor", vendor };
+      }
+      const vendorId = vendor.body.id;
+      recordCreated({ type: 'party', id: vendorId, route: '/objects/party', meta: { roles: ["vendor"] } });
+
+      // Create inventory item
+      const invItem = await post(`/objects/inventoryItem`, {
+        type: "inventoryItem",
+        itemId: itemName,
+        productId,
+        onHand: 0,
+        reserved: 0
+      }, { "Idempotency-Key": idem() });
+      if (!invItem.ok || !invItem.body?.id) {
+        return { test: "views:apply-to-backorders-list", result: "FAIL", step: "createInventory", invItem };
+      }
+      const inventoryId = invItem.body.id;
+      recordCreated({ type: 'inventoryItem', id: inventoryId, route: '/objects/inventoryItem', meta: {} });
+
+      // Create sales order using customer party
+      const so = await post(`/objects/salesOrder`, {
+        type: "salesOrder",
+        partyId: customerId,
+        lines: [{ itemId: inventoryId, qtyOrdered: 10, notes: "test backorder" }],
+        notes: soName
+      }, { "Idempotency-Key": idem() });
+      if (!so.ok || !so.body?.id) {
+        return { test: "views:apply-to-backorders-list", result: "FAIL", step: "createSalesOrder", so };
+      }
+      const soId = so.body.id;
+      recordCreated({ type: 'salesOrder', id: soId, route: '/objects/salesOrder', meta: {} });
+
+      // 2) Create two backorders (one with open status, one with ignored status)
+      const backorderA = await post(`/objects/backorderRequest`, {
+        type: "backorderRequest",
+        soId,
+        soLineId: "L1",
+        itemId: inventoryId,
+        qty: 5,
+        status: "open",
+        preferredVendorId: vendorId
+      }, { "Idempotency-Key": idem() });
+
+      if (!backorderA.ok || !backorderA.body?.id) {
+        return { test: "views:apply-to-backorders-list", result: "FAIL", step: "createBackorderA", backorderA };
+      }
+      backorderAId = backorderA.body.id;
+      recordCreated({ type: 'backorderRequest', id: backorderAId, route: '/objects/backorderRequest', meta: { status: "open" } });
+
+      const backorderB = await post(`/objects/backorderRequest`, {
+        type: "backorderRequest",
+        soId,
+        soLineId: "L1",
+        itemId: inventoryId,
+        qty: 3,
+        status: "ignored",
+        preferredVendorId: vendorId
+      }, { "Idempotency-Key": idem() });
+
+      if (!backorderB.ok || !backorderB.body?.id) {
+        return { test: "views:apply-to-backorders-list", result: "FAIL", step: "createBackorderB", backorderB };
+      }
+      backorderBId = backorderB.body.id;
+      recordCreated({ type: 'backorderRequest', id: backorderBId, route: '/objects/backorderRequest', meta: { status: "ignored" } });
+
+      // 3) Create a View with status=open filter
+      const viewCreateHeaders = { ...baseHeaders(), ...featureHeaders };
+      const viewCreate = await fetch(`${API}/views`, {
+        method: "POST",
+        headers: viewCreateHeaders,
+        body: JSON.stringify({
+          name: smokeTag(`ViewBackorderFilter-${runTimestamp}`),
+          entityType: "backorderRequest",
+          filters: [{ field: "status", op: "eq", value: "open" }],
+          description: "smoke:views:apply-to-backorders-list filter test"
+        })
+      });
+      const viewBody = await viewCreate.json().catch(() => ({}));
+
+      if (!viewCreate.ok || !viewBody?.id) {
+        return {
+          test: "views:apply-to-backorders-list",
+          result: "FAIL",
+          step: "createView",
+          status: viewCreate.status,
+          body: snippet(viewBody, 400)
+        };
+      }
+      viewId = viewBody.id;
+      recordCreated({ type: 'view', id: viewId, route: '/views', meta: { entityType: "backorderRequest" } });
+
+      // 4) Derive query params from view filters and list backorders with status=open filter
+      const derivedQueryParams = { status: "open", limit: 25 };
+      let backorderAInFiltered = false;
+      let backorderBInFiltered = false;
+      let filteredItems = [];
+
+      const maxAttempts = 10;
+      const delayMs = 250;
+
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        if (attempt > 0) await sleep(delayMs);
+        const listFiltered = await post(`/objects/backorderRequest/search`, derivedQueryParams);
+        if (listFiltered.ok && Array.isArray(listFiltered.body?.items)) {
+          const items = listFiltered.body.items;
+          filteredItems = items;
+          backorderAInFiltered = items.some(b => b.id === backorderAId);
+          backorderBInFiltered = items.some(b => b.id === backorderBId);
+          if (backorderAInFiltered && !backorderBInFiltered) break;
+        }
+      }
+
+      // 5) Assert: BackorderA (status=open) is in filtered results
+      if (!backorderAInFiltered) {
+        return {
+          test: "views:apply-to-backorders-list",
+          result: "FAIL",
+          step: "assertBackorderAInFiltered",
+          reason: "open-backorder-not-in-results",
+          backorderAId,
+          filteredCount: filteredItems.length,
+          returnedIdsSample: filteredItems.slice(0, 10).map(b => b.id)
+        };
+      }
+
+      // 6) Assert: BackorderB (status=ignored) is NOT in filtered results
+      if (backorderBInFiltered) {
+        return {
+          test: "views:apply-to-backorders-list",
+          result: "FAIL",
+          step: "assertBackorderBNotInFiltered",
+          reason: "ignored-backorder-should-not-be-in-filtered-results",
+          backorderBId,
+          filteredCount: filteredItems.length,
+          returnedIdsSample: filteredItems.slice(0, 10).map(b => b.id)
+        };
+      }
+
+      const pass = backorderAInFiltered && !backorderBInFiltered;
+      return {
+        test: "views:apply-to-backorders-list",
+        result: pass ? "PASS" : "FAIL",
+        message: "Applied view filter (status=open) to backorder list",
+        steps: {
+          backorderA: { id: backorderAId, status: "open", inFiltered: backorderAInFiltered },
+          backorderB: { id: backorderBId, status: "ignored", inFiltered: backorderBInFiltered },
+          view: { id: viewId, filters: viewBody?.filters },
+          derivedQueryParams,
+          results: {
+            containsA: backorderAInFiltered,
+            containsB: backorderBInFiltered,
+            returnedIdsSample: filteredItems.slice(0, 10).map(b => b.id),
+            filteredCount: filteredItems.length
+          }
+        }
+      };
+    } finally {
+      if (viewId) {
+        const deleteHeaders = { ...baseHeaders(), ...featureHeaders };
+        let deleted = false;
+        for (let attempt = 0; attempt < 5 && !deleted; attempt++) {
+          const delResp = await fetch(`${API}/views/${encodeURIComponent(viewId)}`, { method: "DELETE", headers: deleteHeaders });
+          if (delResp.ok || delResp.status === 404) {
+            deleted = true;
+            break;
+          }
+          await sleep(300);
+        }
+      }
+    }
+  },
+
   "smoke:views:save-then-update": async () => {
     // Test PATCH workflow: create view, apply filters, update filters, reapply, verify flip
     // This validates "operator leverage" — update existing view without creating duplicate
