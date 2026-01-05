@@ -15,16 +15,19 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const auth = await getAuth(event);
     requirePerm(auth, "workspace:write");
 
+    const id = event.pathParameters?.id;
+    if (!id) return bad({ message: "id is required" });
+
     if (DUALWRITE_LEGACY) {
       console.warn(JSON.stringify({
         event: "workspaces:dualwrite_enabled",
         tenantId: auth.tenantId,
         op: "update",
+        workspaceId: id,
+        flagName: "MBAPP_WORKSPACES_DUALWRITE_LEGACY",
+        flagValue: "true",
       }));
     }
-
-    const id = event.pathParameters?.id;
-    if (!id) return notFound();
 
     const body = JSON.parse(event.body || "{}");
 

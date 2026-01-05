@@ -156,6 +156,7 @@ Sprint I (2026-01-02): No new smokes added; existing backorder → suggest-po �
 - `smoke:views-workspaces:permissions` (NEW, Sprint AB) — **RBAC boundary enforcement.** Mints admin token (operator role with view:write + workspace:write) and viewer token (read-only role). Admin creates view + workspace (expect 201). Viewer attempts POST/PATCH/DELETE on views (all expect 403). Viewer attempts POST/PATCH/DELETE on workspaces (all expect 403). Viewer confirms GET /views and GET /workspaces still succeed (read allowed). Validates permission boundaries: writes blocked for read-only roles, reads succeed. **CI:** ✅ Yes (Sprint AB E3)
 - `smoke:workspaces:mixed-dedupe` (Sprint Q) — Forces mixed-source pagination across true workspaces and legacy view-backed workspaces, asserting duplicates are deduped before counting toward `limit`, multi-page cursors stay stable, and IDs remain unique across pages. **CI:** ✅ Yes
 - `smoke:workspaces:get-fallback` (Sprint Q) — Verifies legacy view-backed workspaces still resolve via workspace GET when no dedicated workspace record exists (ensures migration fallback safety). **CI:** ✅ Yes
+- `smoke:migrate-legacy-workspaces:creates-workspace` (NEW, Sprint AU) — **End-to-end migration test.** Creates a legacy workspace-shaped view (type="view", with name, views[], shared, ownerId, no filters) via `/views`. Optionally verifies fallback works: GET /workspaces/:id should return it before migration. Invokes `ops/tools/migrate-legacy-workspaces.mjs --confirm` to copy the view to a canonical workspace record (type="workspace"). Validates canonical workspace created via GET /workspaces/:id and asserts fields preserved (name, views[], type, shared, ownerId, entityType, description). **Requires AWS credentials** (tool needs DynamoDB access); SKIP in CI if creds unavailable. Records both artifacts (legacy view, migrated workspace) for cleanup. **Purpose:** Prove migration tool successfully copies legacy views to workspace source; validates copy-only behavior (legacy view preserved) and field preservation across the copy operation. **CI:** ⚠️ Local only (AWS credentials required); skips in CI.
 
 **Note (2025-12-30):** No new smokes needed; `smoke:views:crud` revalidated after `/views` added server-side `entityType` filtering, and `smoke:workspaces:list` still passes with q + entityType filters across pages after pagination hardening.
 **Note (2025-12-30):** During the workspace storage migration (primary `type="workspace"` with legacy `type="view"` fallback/dual-write), `smoke:workspaces:list` continues to validate list semantics across both sources; keep it as the guardrail for pagination + filter compatibility.
@@ -638,7 +639,77 @@ npm run smokes:cleanup
 
 ---
 
+### 7. Special Case: Migration Smoke (Legacy Workspace Retirement)
+
+**Test:** `smoke:migrate-legacy-workspaces:creates-workspace` ([ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs#L13765))
+
+**Purpose:** Validates end-to-end legacy-to-canonical workspace migration (Phase 1 of retirement plan).
+
+**Requirements:**
+- AWS credentials (tool invokes DynamoDB scan/put)
+- Local run only (CI skips if creds unavailable)
+
+**How to Run:**
+
+```bash
+# With AWS credentials in shell environment
+node ops/smoke/smoke.mjs smoke:migrate-legacy-workspaces:creates-workspace
+
+# Expected Output (PASS):
+# {
+#   "test": "smoke:migrate-legacy-workspaces:creates-workspace",
+#   "result": "PASS",
+#   "summary": "Legacy workspace-shaped view successfully migrated to canonical workspace record",
+#   "artifacts": {
+#     "legacyViewId": "view-xyz...",
+#     "workspaceId": "ws-abc...",
+#     "viewName": "LegacyWorkspace-smk-..."
+#   },
+#   "assertions": {
+#     "preFallbackWorked": true,
+#     "namePreserved": true,
+#     "viewsArrayPreserved": true,
+#     "typeIsWorkspace": true,
+#     "sharedPreserved": true,
+#     "ownerPreserved": true,
+#     "entityTypePreserved": true,
+#     "descriptionPreserved": true
+#   }
+# }
+
+# Expected Output (SKIP):
+# {
+#   "test": "smoke:migrate-legacy-workspaces:creates-workspace",
+#   "result": "SKIP",
+#   "reason": "AWS credentials not available; cannot run migration tool in CI",
+#   "detail": "Run this smoke locally with AWS credentials to test migration",
+#   "legacyViewId": "view-xyz..."
+# }
+```
+
+**What It Tests:**
+1. Creates legacy workspace-shaped view (type="view" with name, views[], shared, ownerId, entityType)
+2. Verifies GET /workspaces/:id returns it via fallback
+3. Runs migration tool: `ops/tools/migrate-legacy-workspaces.mjs --confirm`
+4. Verifies GET /workspaces/:id now returns canonical workspace (type="workspace")
+5. Asserts all fields preserved (name, views[], type, shared, owner, entityType, description)
+6. Records artifacts in manifest for cleanup
+
+**Troubleshooting:**
+
+| Result | Possible Cause | Fix |
+|--------|---|---|
+| FAIL - create-legacy-view | POST /views blocked or failed | Check `/views` endpoint is live; verify auth token |
+| FAIL - pre-migration-fallback-get | Fallback read doesn't work | Verify legacy view was created; check workspace GET fallback logic |
+| FAIL - migration-tool-execution | Tool failed | Check tool exit code + stderr; verify `--confirm --confirm-tenant` match |
+| FAIL - post-migration-workspace-read | Workspace record not readable | Verify migration tool created workspace; check workspace GET endpoint |
+| FAIL - field-preservation | Fields don't match | Compare expected vs actual fields; check copy logic in migration tool |
+| SKIP | No AWS credentials | Set `AWS_ACCESS_KEY_ID`, `AWS_SESSION_TOKEN`, or `AWS_PROFILE` env vars |
+
+---
+
 ### Cleanup Controls (Reference)
+
 
 - **Env: `SMOKE_RUN_ID`**: Required. Selects which manifest to use for cleanup.
 - **Env: `MBAPP_SMOKE_CLEANUP`**: Required (set to `1`) to perform deletions. Without this, cleanup operates in dry-run mode regardless of `DRY_RUN` setting.

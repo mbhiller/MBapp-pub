@@ -15,14 +15,6 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const auth = await getAuth(event);
     requirePerm(auth, "workspace:write");
 
-    if (DUALWRITE_LEGACY) {
-      console.warn(JSON.stringify({
-        event: "workspaces:dualwrite_enabled",
-        tenantId: auth.tenantId,
-        op: "create",
-      }));
-    }
-
     const body = JSON.parse(event.body || "{}");
 
     // Validate name (workspace spec: 1–200 chars)
@@ -82,6 +74,18 @@ export async function handle(event: APIGatewayProxyEventV2) {
       workspace: { ...body, views },
       dualWriteLegacy: DUALWRITE_LEGACY,
     });
+
+    // Emit dualwrite telemetry with workspaceId (now available post-creation)
+    if (DUALWRITE_LEGACY && result.id) {
+      console.warn(JSON.stringify({
+        event: "workspaces:dualwrite_enabled",
+        tenantId: auth.tenantId,
+        op: "create",
+        workspaceId: result.id,
+        flagName: "MBAPP_WORKSPACES_DUALWRITE_LEGACY",
+        flagValue: "true",
+      }));
+    }
 
     return ok(result, 201);
   } catch (e: any) {
