@@ -100,6 +100,19 @@ Smokes write a manifest locally to `ops/smoke/.manifests/` containing details ab
 **Local Debugging:**
 Manifest path is printed at run start: `ops/smoke/.manifests/smk-{timestamp}-{random}.json`
 
+**Downloading CI Artifacts:**
+1. Navigate to the failed GitHub Actions run
+2. Scroll to the bottom "Artifacts" section
+3. Download the `smoke-manifests-core-*` or `smoke-manifests-nightly-*` zip
+
+**Using Manifests Locally:**
+- Extract the zip contents into `ops/smoke/.manifests/` (preserves expected directory structure)
+- Each `smk-*.json` file contains:
+  - `created[]`: Array of created entities with type, id, route, and metadata
+  - `outcome`, `smokeRunId`, `tenant`, `timestamp`, `flow` metadata
+- **Inspect failures:** Review `created[]` to see what entities were created before failure
+- **Rerun tier:** Use `npm run smokes:run:core` or `npm run smokes:run:extended` to reproduce locally
+
 ---
 
 ## Overview (Continued)
