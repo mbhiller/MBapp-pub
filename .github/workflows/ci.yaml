@@ -4,6 +4,10 @@ on:
   pull_request:
   push:
     branches: [ main ]
+  schedule:
+    # Nightly smoke suite (full) at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -93,9 +97,10 @@ jobs:
         run: echo "Infra typecheck soft-run complete (found=${{ steps.detect.outputs.found }})"
 
   ci-smokes:
-    name: ci-smokes
+    name: ci-smokes (core)
     runs-on: ubuntu-latest
     needs: [ typecheck ]
+    if: github.event_name != 'schedule'
     env:
       MBAPP_API_BASE: ${{ secrets.MBAPP_API_BASE }}
       MBAPP_TENANT_ID: "SmokeTenant"
@@ -114,5 +119,31 @@ jobs:
       - name: Install deps
         run: npm ci
 
-      - name: Run curated smokes
+      - name: Run core smokes (PR/push)
+        run: npm run smokes:run:core
+
+  ci-smokes-nightly:
+    name: ci-smokes (nightly full)
+    runs-on: ubuntu-latest
+    needs: [ typecheck ]
+    if: github.event_name == 'schedule'
+    env:
+      MBAPP_API_BASE: ${{ secrets.MBAPP_API_BASE }}
+      MBAPP_TENANT_ID: "SmokeTenant"
+      MBAPP_SMOKE_TENANT_ID: "SmokeTenant"
+      MBAPP_SMOKE_EMAIL: "dev@example.com"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Run full smoke suite (nightly)
         run: npm run smokes:run:ci

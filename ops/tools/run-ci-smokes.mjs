@@ -155,14 +155,39 @@ if (!Array.isArray(flows) || flows.length === 0) {
   process.exit(1);
 }
 
+// Read SMOKE_TIER env var to filter flows: "core" | "extended" | "all" | undefined (defaults to "all")
+const smokeTier = (process.env.SMOKE_TIER || "all").toLowerCase().trim();
+const validTiers = ["core", "extended", "all"];
+if (!validTiers.includes(smokeTier)) {
+  console.error(`[ci-smokes] Invalid SMOKE_TIER="${smokeTier}". Must be one of: ${validTiers.join(", ")}`);
+  process.exit(1);
+}
+
+// Normalize flows to array of {name, tier} objects (backward compatible with string array)
+const normalizedFlows = flows.map(f => 
+  typeof f === "string" ? { name: f, tier: "all" } : f
+);
+
+// Filter by tier
+let selectedFlows = normalizedFlows;
+if (smokeTier !== "all") {
+  selectedFlows = normalizedFlows.filter(f => f.tier === smokeTier || f.tier === "all");
+}
+
+console.log(`[ci-smokes] Selected tier: "${smokeTier}" (${selectedFlows.length}/${normalizedFlows.length} flows)`);
+if (selectedFlows.length === 0) {
+  console.error(`[ci-smokes] No flows found for tier "${smokeTier}"`);
+  process.exit(1);
+}
+
 // Extended/opt-in smokes (manual only; keep out of CI):
 //   - smoke:close-the-loop-multi-vendor (excluded below)
 //   - smoke:close-the-loop-partial-receive (run manually via ops/smoke/smoke.mjs)
 //   - smoke:po-receive-after-close-guard (run manually via ops/smoke/smoke.mjs)
 //   - smoke:po-receive-after-cancel-guard (run manually via ops/smoke/smoke.mjs)
 // Prevent churn: exclude multi-vendor flow from CI by default
-const filteredFlows = flows.filter((f) => f !== "smoke:close-the-loop-multi-vendor");
-if (filteredFlows.length !== flows.length) {
+const filteredFlows = selectedFlows.filter((f) => f.name !== "smoke:close-the-loop-multi-vendor");
+if (filteredFlows.length !== selectedFlows.length) {
   console.log("[ci-smokes] Excluding opt-in flow: smoke:close-the-loop-multi-vendor");
 }
 
@@ -211,7 +236,7 @@ console.log(JSON.stringify({
 }));
 
 console.log(`[ci-smokes] Running ${filteredFlows.length} flows:`);
-filteredFlows.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));
+filteredFlows.forEach((f, i) => console.log(`  ${i + 1}. ${f.name}${f.tier && f.tier !== "all" ? ` (${f.tier})` : ""}`));
 // Prepare child env with requestedTenant (final) and unique SMOKE_RUN_ID
 const childEnv = {
   ...process.env,
@@ -220,7 +245,8 @@ const childEnv = {
 };
 
 const isCI = Boolean(process.env.GITHUB_ACTIONS);
-for (const flow of filteredFlows) {
+for (const flowObj of filteredFlows) {
+  const flow = flowObj.name;
   if (isCI) {
     const npxCmd = process.platform === "win32" ? "npx.cmd" : "npx";
     console.log(`[ci-smokes] → npx tsx ops/smoke/smoke.mjs ${flow}`);
