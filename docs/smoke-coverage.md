@@ -615,7 +615,7 @@ npm run smokes:cleanup
 | Flow | Steps | Assertions | Endpoints |
 |------|-------|-----------|-----------|
 | **smoke:ping** | 1. GET /ping | 200 OK, text response | `/ping` |
-| **smoke:wipe-tool:safety-guards** | 1. Invoke `ops/tools/wipe-tenant.mjs` with missing `--confirm-tenant` (expect exit 2) 2. Invoke with mismatched `--confirm-tenant` (expect exit 2) 3. Invoke with non-allowlisted tenant (expect exit 2) 4. Invoke in dry-run mode (no `--confirm`, expect exit 0) | All 4 safety guards enforce correctly: confirm-tenant match required, allowlist enforced (SmokeTenant/DemoTenant only), dry-run succeeds with no deletes. **Non-destructive**: never runs a command capable of deleting tenant data. | `ops/tools/wipe-tenant.mjs` (CLI tool) |
+| **smoke:wipe-tool:safety-guards** | 1. Invoke `ops/tools/wipe-tenant.mjs` with missing `--confirm-tenant` (expect exit 2) 2. Invoke with mismatched `--confirm-tenant` (expect exit 2) 3. Invoke with non-allowlisted tenant (expect exit 2) 4. Invoke in dry-run mode (no `--confirm`, expect exit 0) — **skipped in CI when AWS credentials unavailable** | All 4 safety guards enforce correctly: confirm-tenant match required, allowlist enforced (SmokeTenant/DemoTenant only), dry-run succeeds with no deletes. Dry-run subtest runs only when AWS credentials are present; skipped in CI (which intentionally lacks AWS creds). **Non-destructive**: never performs deletes. | `ops/tools/wipe-tenant.mjs` (CLI tool) |
 
 ### Parties & Entities
 

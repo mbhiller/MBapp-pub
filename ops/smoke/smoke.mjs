@@ -13070,6 +13070,13 @@ const tests = {
   "smoke:wipe-tool:safety-guards": async () => {
     // Foundation smoke: Validates wipe-tenant.mjs safety guards (NO ACTUAL DELETES)
     const testResults = [];
+    
+    // Check for AWS credentials (needed for dry-run test only)
+    const hasAwsCreds = Boolean(
+      process.env.AWS_ACCESS_KEY_ID || 
+      process.env.AWS_SESSION_TOKEN || 
+      process.env.AWS_PROFILE
+    );
 
     // Test 1: Missing --confirm-tenant (should reject with exit 2)
     const test1 = spawnSync("node", [
@@ -13158,38 +13165,49 @@ const tests = {
     }
 
     // Test 4: Dry-run succeeds (no --confirm = safe list-only mode)
-    const test4 = spawnSync("node", [
-      "ops/tools/wipe-tenant.mjs",
-      "--tenant", "SmokeTenant"
-    ], { encoding: "utf8", env: process.env });
-    
-    const test4Output = (test4.stderr || "") + (test4.stdout || "");
-    const test4Pass = test4.status === 0 && test4Output.includes("Dry run complete");
-    testResults.push({
-      name: "dry-run-succeeds",
-      pass: test4Pass,
-      exitCode: test4.status,
-      expectedExit: 0,
-      output: test4Output.slice(0, 200)
-    });
-    
-    if (!test4Pass) {
-      return {
-        test: "wipe-tool:safety-guards",
-        result: "FAIL",
-        step: "dry-run-succeeds",
+    // NOTE: Dry-run queries DynamoDB, so skip if no AWS credentials (e.g., CI)
+    if (hasAwsCreds) {
+      const test4 = spawnSync("node", [
+        "ops/tools/wipe-tenant.mjs",
+        "--tenant", "SmokeTenant"
+      ], { encoding: "utf8", env: process.env });
+      
+      const test4Output = (test4.stderr || "") + (test4.stdout || "");
+      const test4Pass = test4.status === 0 && test4Output.includes("Dry run complete");
+      testResults.push({
+        name: "dry-run-succeeds",
+        pass: test4Pass,
+        exitCode: test4.status,
         expectedExit: 0,
-        actualExit: test4.status,
-        output: test4Output
-      };
+        output: test4Output.slice(0, 200)
+      });
+      
+      if (!test4Pass) {
+        return {
+          test: "wipe-tool:safety-guards",
+          result: "FAIL",
+          step: "dry-run-succeeds",
+          expectedExit: 0,
+          actualExit: test4.status,
+          output: test4Output
+        };
+      }
+    } else {
+      // Skip dry-run test when AWS credentials not available (CI-safe)
+      testResults.push({
+        name: "dry-run-succeeds",
+        status: "SKIP",
+        reason: "no AWS credentials in environment"
+      });
     }
 
     // All safety guards validated
     return {
       test: "wipe-tool:safety-guards",
       result: "PASS",
-      summary: "Wipe tool correctly enforces all safety guards (confirm-tenant match, allowlist, dry-run default)",
-      testResults
+      summary: `Wipe tool correctly enforces all safety guards (confirm-tenant match, allowlist, dry-run default). Dry-run test ${hasAwsCreds ? "executed" : "skipped (no AWS creds)"}`,
+      testResults,
+      awsCredsAvailable: hasAwsCreds
     };
   }
 };
