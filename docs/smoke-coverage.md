@@ -733,6 +733,7 @@ npm run smokes:cleanup
 
 | Flow | Steps | Assertions | Endpoints |
 |------|-------|-----------|-----------|
+| **smoke:objects:list-simple-key-cursor** | 1. Create 5 parties 2. GET /objects/party?limit=2 (page1, 2 items) 3. Decode cursor, assert pk+sk present, no offset field 4. GET page2 with cursor (2 items) 5. GET page3 with cursor 6. Verify no overlap across pages, all unique | Cursor is DynamoDB key format (pk+sk), not offset; pagination works; no duplicates across pages; all page IDs unique | `/objects/party?limit=...` | **Protects:** Simple path (no filters/q) uses efficient key cursors |
 | **smoke:objects:list-pagination** | 1. GET /objects/purchaseOrder?limit=2&sort=desc 2. If next cursor, fetch second page | pageInfo or legacy `next` present; cursor works | `/objects/purchaseOrder` |
 | **smoke:objects:list-filter-soId** | 1. Create SO with 2 lines, shortage qty 2. Commit to trigger backorder requests 3. GET /objects/backorderRequest?filter.soId={soId}&limit=1 4. If next cursor, fetch page 2 with same filter | All returned items have soId matching filter; pagination respects filter on both pages | `/objects/backorderRequest?filter.soId=...` |
 | **smoke:objects:list-filter-itemId** | *(Planned Sprint XXI)* 1. Create SO with backorders 2. GET /objects/backorderRequest?filter.itemId={itemId} | All returned items have itemId matching filter | `/objects/backorderRequest?filter.itemId=...` |

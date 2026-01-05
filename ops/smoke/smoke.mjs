@@ -7029,6 +7029,201 @@ const tests = {
     };
   },
 
+  // === Sprint AS E3: Simple path key cursor validation (no filters, no q) ===
+  "smoke:objects:list-simple-key-cursor": async () => {
+    await ensureBearer();
+
+    // Create exactly 5 party records to ensure multi-page results with limit=2
+    // This gives us: page1 (2 items), page2 (2 items), page3 (1 item)
+    // We'll verify the specific pattern works for at least one full page cycle.
+    const parties = [];
+    for (let i = 1; i <= 5; i++) {
+      const res = await post(
+        `/objects/party`,
+        { type: "party", name: smokeTag(`SimpleCursorParty${i}-${SMOKE_RUN_ID}`) },
+        { "Idempotency-Key": idem() }
+      );
+      if (!res.ok) {
+        return {
+          test: "objects:list-simple-key-cursor",
+          result: "FAIL",
+          step: `party-creation-${i}`,
+          res,
+        };
+      }
+      parties.push(res.body?.id);
+    }
+
+    const createdPartyIds = parties.filter(Boolean);
+    if (createdPartyIds.length < 5) {
+      return {
+        test: "objects:list-simple-key-cursor",
+        result: "FAIL",
+        reason: "party-creation-incomplete",
+        created: createdPartyIds.length,
+        expected: 5,
+      };
+    }
+
+    // List with limit=2, no filters, no q (triggers simple path with DynamoDB key cursor)
+    const firstPage = await get(`/objects/party`, { limit: 2 });
+    if (!firstPage.ok) {
+      return { test: "objects:list-simple-key-cursor", result: "FAIL", step: "list-first-page", firstPage };
+    }
+
+    const items1 = Array.isArray(firstPage.body?.items) ? firstPage.body.items : [];
+    const page1Ids = items1.map(i => i?.id).filter(Boolean);
+    const nextCursor = firstPage.body?.pageInfo?.nextCursor ?? firstPage.body?.next ?? null;
+    const page1NextPresent = !!nextCursor;
+
+    // Assert: page1 must have exactly 2 items
+    if (items1.length !== 2) {
+      return {
+        test: "objects:list-simple-key-cursor",
+        result: "FAIL",
+        reason: "first-page-count-mismatch",
+        expectedCount: 2,
+        actualCount: items1.length,
+        page1Ids: page1Ids.slice(0, 5),
+      };
+    }
+
+    // Assert: page1.next must be present (we're paginating)
+    if (!page1NextPresent) {
+      return {
+        test: "objects:list-simple-key-cursor",
+        result: "FAIL",
+        reason: "page1-next-missing",
+        message: "First page should have a next cursor for multi-page result",
+      };
+    }
+
+    // Decode cursor and verify it's a DynamoDB key cursor (contains pk and sk), not an offset cursor
+    let cursorObj;
+    try {
+      cursorObj = JSON.parse(Buffer.from(nextCursor, "base64").toString("utf8"));
+    } catch (e) {
+      return {
+        test: "objects:list-simple-key-cursor",
+        result: "FAIL",
+        reason: "cursor-decode-failed",
+        error: String(e),
+      };
+    }
+
+    // Assert: cursor must be DynamoDB key format (pk and sk)
+    const haspk = "pk" in cursorObj;
+    const hassk = "sk" in cursorObj;
+    const hasOffset = "offset" in cursorObj;
+
+    if (!haspk || !hassk) {
+      return {
+        test: "objects:list-simple-key-cursor",
+        result: "FAIL",
+        reason: "cursor-not-dynamo-key-format",
+        expectedKeys: ["pk", "sk"],
+        actualKeys: Object.keys(cursorObj),
+      };
+    }
+
+    // Assert: cursor must NOT be offset-based
+    if (hasOffset) {
+      return {
+        test: "objects:list-simple-key-cursor",
+        result: "FAIL",
+        reason: "cursor-is-offset-not-key",
+        message: "Simple path (no filters/q) should use DynamoDB key cursor, not offset cursor",
+      };
+    }
+
+    // Fetch second page using next cursor
+    const secondPage = await get(`/objects/party`, { limit: 2, next: nextCursor });
+    if (!secondPage.ok) {
+      return { test: "objects:list-simple-key-cursor", result: "FAIL", step: "list-second-page", secondPage };
+    }
+
+    const items2 = Array.isArray(secondPage.body?.items) ? secondPage.body.items : [];
+    const page2Ids = items2.map(i => i?.id).filter(Boolean);
+    const page2Next = secondPage.body?.pageInfo?.nextCursor ?? secondPage.body?.next ?? null;
+    const page2NextPresent = !!page2Next;
+
+    // Assert: page2 must have exactly 2 items (same limit)
+    if (items2.length !== 2) {
+      return {
+        test: "objects:list-simple-key-cursor",
+        result: "FAIL",
+        reason: "second-page-count-mismatch",
+        expectedCount: 2,
+        actualCount: items2.length,
+        page2Ids: page2Ids.slice(0, 5),
+      };
+    }
+
+    // Assert: page2.next must be present (we have 5 items total, 2 on each of first two pages)
+    if (!page2NextPresent) {
+      return {
+        test: "objects:list-simple-key-cursor",
+        result: "FAIL",
+        reason: "page2-next-missing",
+        message: "Second page should have next cursor (5 items total, 2 per page)",
+      };
+    }
+
+    // Fetch third page to verify completion
+    const thirdPage = await get(`/objects/party`, { limit: 2, next: page2Next });
+    if (!thirdPage.ok) {
+      return { test: "objects:list-simple-key-cursor", result: "FAIL", step: "list-third-page", thirdPage };
+    }
+
+    const items3 = Array.isArray(thirdPage.body?.items) ? thirdPage.body.items : [];
+    const page3Ids = items3.map(i => i?.id).filter(Boolean);
+    const page3Next = thirdPage.body?.pageInfo?.nextCursor ?? thirdPage.body?.next ?? null;
+    const page3NextPresent = !!page3Next;
+
+    // Assert: page3 should have at least 1 item
+    if (items3.length < 1) {
+      return {
+        test: "objects:list-simple-key-cursor",
+        result: "FAIL",
+        reason: "third-page-empty",
+        expectedAtLeast: 1,
+        actualCount: items3.length,
+      };
+    }
+
+    // Assert: NO OVERLAP between any pages
+    const allPageIds = [...page1Ids, ...page2Ids, ...page3Ids];
+    const uniqueIds = new Set(allPageIds);
+    if (uniqueIds.size !== allPageIds.length) {
+      return {
+        test: "objects:list-simple-key-cursor",
+        result: "FAIL",
+        reason: "overlap-between-pages",
+        totalIds: allPageIds.length,
+        uniqueCount: uniqueIds.size,
+        page1Ids: page1Ids.slice(0, 3),
+        page2Ids: page2Ids.slice(0, 3),
+        page3Ids: page3Ids.slice(0, 3),
+      };
+    }
+
+    return {
+      test: "objects:list-simple-key-cursor",
+      result: "PASS",
+      page1Count: items1.length,
+      page2Count: items2.length,
+      page3Count: items3.length,
+      page1Ids: page1Ids.slice(0, 3),
+      page2Ids: page2Ids.slice(0, 3),
+      page3Ids: page3Ids.slice(0, 3),
+      page1NextPresent,
+      page2NextPresent,
+      page3NextPresent,
+      cursorFormat: { haspk, hassk, hasOffset: false },
+      totalUniqueAcrossPages: uniqueIds.size,
+    };
+  },
+
   // === Sprint XXI: backorder status filter ===
   "smoke:objects:list-filter-status": async () => {
     await ensureBearer();
