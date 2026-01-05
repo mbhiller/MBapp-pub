@@ -153,10 +153,39 @@ Keep smoke parity with backend guardrails.
 - Use focus-refetch hooks on detail→list returns so status badges & totals update.
 - Keyboard behavior: dismiss on navigate; preserve filter text unless an explicit reset is triggered.
 
-### QA / Dev Menu
-Add one-tap entries for:
-- Identity/roles seed
-- SO flow, PO flow
-- Staff→Labor→Payroll
+### Web Development Proxy (CORS-Free Local Dev)
+
+**Location:** [apps/web/vite.config.ts](../apps/web/vite.config.ts)
+
+To eliminate CORS preflight requests during local development, use the Vite dev server proxy:
+
+```bash
+# apps/web/.env
+VITE_API_BASE=/api
+VITE_API_PROXY_TARGET=https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com
+```
+
+**How it works:**
+- Vite proxies `/api/*` → API Gateway
+- Browser makes same-origin requests (no OPTIONS preflight)
+- Faster dev experience, cleaner network logs
+
+**Verification:**
+```bash
+cd apps/web
+npm run dev
+# Open http://localhost:5173
+# DevTools → Network: Zero OPTIONS requests ✓
+```
+
+**For direct API testing** (with CORS):
+```bash
+VITE_API_BASE=https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com
+```
+
+See [apps/web/README.md](../apps/web/README.md) for complete configuration guide.
+
+**List-page enrichment:** When enriching rows with vendor/party names, use the batching helper in [apps/web/src/lib/concurrency.ts](../apps/web/src/lib/concurrency.ts) and avoid unbounded `Promise.all(...apiFetch...)` fan-out to prevent burst-related 503s.
+
 - Lease Billing Run
 - Auction self-bid smoke

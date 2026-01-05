@@ -5,6 +5,11 @@
 **Workflow & DoD:** See [MBapp-Cadence.md](MBapp-Cadence.md) for canonical workflow, Definition of Done, and testing rules.
 
 ---
+### Recent Foundations — Fan-Out Guardrail — ✅ Complete (2026-01-05)
+- Fixed intermittent 503s on PurchaseOrders/VendorPortal list-page enrichment by batching vendor/party lookups (no unbounded fan-out).
+- Added guardrail tool: [ops/tools/check-no-unbounded-fanout.mjs](../ops/tools/check-no-unbounded-fanout.mjs) (`npm run check:no-unbounded-fanout`).
+- Verification: typecheck green; core and extended smokes green.
+
 ### Workspaces Legacy Sunset — Phase 1 — ✅ Complete (Sprint AU, 2026-01-05)
 
 **Epic Summary:** Add telemetry to track legacy workspace usage, create migration tool to copy `type="view"` workspace-shaped records to canonical `type="workspace"` records, establish 3-phase sunset plan.
