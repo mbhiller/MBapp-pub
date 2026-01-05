@@ -36,6 +36,7 @@ import * as ObjCreate from "./objects/create";
 import * as ObjUpdate from "./objects/update";
 import * as ObjDelete from "./objects/delete";
 import * as ObjSearch from "./objects/search";
+import * as PartyBatch from "./objects/party-batch";
 // Dev auth
 import * as DevLogin from "./auth/dev-login";
 
@@ -359,6 +360,14 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
         requirePerm(auth, "inventory:read");
         return InvOnHandByLocation.handle({ ...event, pathParameters: { ...(event.pathParameters||{}), id } });
       }
+    }
+
+    // Objects — party batch
+    if (method === "POST" && path === "/objects/party:batch") {
+      requirePerm(auth, "party:read");
+      const body = JSON.parse(event.body || "{}");
+      const partyIds = Array.isArray(body?.partyIds) ? body.partyIds : [];
+      return PartyBatch.handle({ ...event, body: JSON.stringify({ partyIds }) });
     }
 
     // Inventory — onhand batch (computed)

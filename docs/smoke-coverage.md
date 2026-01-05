@@ -774,6 +774,7 @@ node ops/smoke/smoke.mjs smoke:migrate-legacy-workspaces:creates-workspace
 | Flow | Steps | Assertions | Endpoints |
 |------|-------|-----------|-----------|
 | **smoke:parties:happy** | 1. Create party (person, customer role) 2. Search by name 3. Update notes | All 3 ops return 200; search finds created party; update succeeds | `/objects/party`, `/objects/party/search`, `/objects/party/{id}` |
+| **smoke:parties:batch** | 1. Create 3 parties (person/customer, org/vendor, person with both roles) 2. POST /objects/party:batch with 3 IDs + 1 bogus ID | Response contains all 3 parties with id+name; bogus ID absent (missing tolerated); count === 3 | `/objects/party:batch` |
 
 ### Inventory Management
 

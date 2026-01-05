@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { apiFetch } from "../lib/http";
+import { batchGetParties } from "../lib/api";
 import { useAuth } from "../providers/AuthProvider";
 import { hasPerm } from "../lib/permissions";
 import { PERM_SALES_WRITE, PERM_SALES_COMMIT, PERM_SALES_RESERVE, PERM_SALES_FULFILL, PERM_SALES_CLOSE, PERM_SALES_CANCEL } from "../generated/permissions";
@@ -93,7 +94,6 @@ export default function SalesOrderDetailPage() {
   const [backordersLoading, setBackordersLoading] = useState(false);
   const [backordersError, setBackordersError] = useState<string | null>(null);
   const [vendorNameById, setVendorNameById] = useState<Record<string, string>>({});
-    const inflightVendorIdsRef = useRef<Set<string>>(new Set());
   const [prefillFromReserve, setPrefillFromReserve] = useState<Record<string, { locationId?: string; lot?: string }>>({});
 
   // Track screen view on mount
@@ -240,49 +240,25 @@ export default function SalesOrderDetailPage() {
       )
     );
 
-    const missing = preferredVendorIds.filter(
-      (v) => !(v in vendorNameById) && !inflightVendorIdsRef.current.has(v)
-    );
+    const missing = preferredVendorIds.filter((v) => !(v in vendorNameById));
     if (missing.length === 0) return;
 
     let cancelled = false;
-    const CONCURRENCY_LIMIT = 5;
 
     (async () => {
-      for (let i = 0; i < missing.length; i += CONCURRENCY_LIMIT) {
-        if (cancelled) return;
-
-        const batch = missing.slice(i, i + CONCURRENCY_LIMIT);
-        batch.forEach((id) => inflightVendorIdsRef.current.add(id));
-
-        const results = await Promise.all(
-          batch.map(async (vendorId) => {
-            try {
-              const res = await apiFetch<{ name?: string; displayName?: string }>(
-                `/objects/party/${vendorId}`,
-                {
-                  token: token || undefined,
-                  tenantId,
-                }
-              );
-              const name = (res as any)?.name ?? (res as any)?.displayName ?? vendorId;
-              return { vendorId, name };
-            } catch {
-              return { vendorId, name: vendorId };
-            } finally {
-              inflightVendorIdsRef.current.delete(vendorId);
-            }
-          })
-        );
-
+      try {
+        const partyMap = await batchGetParties(missing, { token: token || undefined, tenantId });
         if (!cancelled) {
-          setVendorNameById((prev) => {
-            const next = { ...prev };
-            for (const result of results) {
-              next[result.vendorId] = result.name;
-            }
-            return next;
-          });
+          const entries: Record<string, string> = {};
+          for (const vendorId of missing) {
+            const party = partyMap.get(vendorId);
+            entries[vendorId] = party?.name ?? party?.displayName ?? vendorId;
+          }
+          setVendorNameById((prev) => ({ ...prev, ...entries }));
+        }
+      } catch (err) {
+        if (import.meta.env.DEV) {
+          console.debug("[SalesOrderDetailPage] Vendor batch fetch error", err);
         }
       }
     })();

@@ -18,6 +18,7 @@ import {
   suggestPurchaseOrders,
   createPurchaseOrdersFromSuggestion,
   getInventoryByEitherType,
+  batchGetParties,
   type SuggestPoResponse,
   type PurchaseOrderDraft,
 } from "../lib/api";
@@ -73,7 +74,6 @@ export default function BackordersListPage() {
   const [validating, setValidating] = useState(false);
   const [appliedView, setAppliedView] = useState<ViewConfig | null>(null);
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
-  const inflightVendorIdsRef = useRef<Set<string>>(new Set());
 
   // Helper to update URL search params
   const updateSearchParams = useCallback(
@@ -342,49 +342,25 @@ export default function BackordersListPage() {
       new Set(items.map((bo) => bo.preferredVendorId).filter((v): v is string => Boolean(v)))
     );
 
-    const missing = preferredVendorIds.filter(
-      (v) => !(v in vendorNameById) && !inflightVendorIdsRef.current.has(v)
-    );
+    const missing = preferredVendorIds.filter((v) => !(v in vendorNameById));
     if (missing.length === 0) return;
 
     let cancelled = false;
-    const CONCURRENCY_LIMIT = 5;
 
     (async () => {
-      for (let i = 0; i < missing.length; i += CONCURRENCY_LIMIT) {
-        if (cancelled) return;
-
-        const batch = missing.slice(i, i + CONCURRENCY_LIMIT);
-        batch.forEach((id) => inflightVendorIdsRef.current.add(id));
-
-        const results = await Promise.all(
-          batch.map(async (vendorId) => {
-            try {
-              const res = await apiFetch<{ name?: string; displayName?: string }>(
-                `/objects/party/${vendorId}`,
-                {
-                  token: token || undefined,
-                  tenantId,
-                }
-              );
-              const name = res?.name ?? res?.displayName ?? vendorId;
-              return { vendorId, name };
-            } catch {
-              return { vendorId, name: vendorId };
-            } finally {
-              inflightVendorIdsRef.current.delete(vendorId);
-            }
-          })
-        );
-
+      try {
+        const partyMap = await batchGetParties(missing, { token: token || undefined, tenantId });
         if (!cancelled) {
-          setVendorNameById((prev) => {
-            const next = { ...prev };
-            for (const result of results) {
-              next[result.vendorId] = result.name;
-            }
-            return next;
-          });
+          const entries: Record<string, string> = {};
+          for (const vendorId of missing) {
+            const party = partyMap.get(vendorId);
+            entries[vendorId] = party?.name ?? party?.displayName ?? vendorId;
+          }
+          setVendorNameById((prev) => ({ ...prev, ...entries }));
+        }
+      } catch (err) {
+        if (import.meta.env.DEV) {
+          console.debug("[BackordersListPage] Vendor batch fetch error", err);
         }
       }
     })();

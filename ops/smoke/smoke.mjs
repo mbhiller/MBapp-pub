@@ -2302,6 +2302,69 @@ const tests = {
     return { test: "parties-crud", result: pass ? "PASS" : "FAIL", create, get1, update, get2, searchOrList, found };
   },
 
+  "smoke:parties:batch": async ()=>{
+    await ensureBearer();
+    
+    // Create 3 parties with different roles
+    const partyA = await post(`/objects/${encodeURIComponent(PARTY_TYPE)}`,
+      { kind: "person", name: `SmokePartyBatch-A-${Date.now()}`, roles: ["customer"] },
+      { "Idempotency-Key": idem() }
+    );
+    const partyB = await post(`/objects/${encodeURIComponent(PARTY_TYPE)}`,
+      { kind: "org", name: `SmokePartyBatch-B-${Date.now()}`, roles: ["vendor"] },
+      { "Idempotency-Key": idem() }
+    );
+    const partyC = await post(`/objects/${encodeURIComponent(PARTY_TYPE)}`,
+      { kind: "person", name: `SmokePartyBatch-C-${Date.now()}`, roles: ["customer", "vendor"] },
+      { "Idempotency-Key": idem() }
+    );
+
+    const idA = partyA.body?.id;
+    const idB = partyB.body?.id;
+    const idC = partyC.body?.id;
+
+    if (!partyA.ok || !idA || !partyB.ok || !idB || !partyC.ok || !idC) {
+      return { test: "parties-batch", result: "FAIL", step: "create", partyA, partyB, partyC };
+    }
+
+    // Call batch endpoint with all 3 IDs + 1 bogus ID
+    const bogusId = "nonexistent-party-id-12345";
+    const batch = await post(`/objects/party:batch`, { partyIds: [idA, idB, idC, bogusId] });
+
+    if (!batch.ok) {
+      return { test: "parties-batch", result: "FAIL", step: "batch-call", batch };
+    }
+
+    const items = Array.isArray(batch.body?.items) ? batch.body.items : [];
+
+    // Verify: all 3 created parties are returned, bogus ID is absent
+    const foundA = items.find(p => p.id === idA);
+    const foundB = items.find(p => p.id === idB);
+    const foundC = items.find(p => p.id === idC);
+    const foundBogus = items.find(p => p.id === bogusId);
+
+    const ok = batch.ok
+      && items.length === 3
+      && foundA && foundA.name && foundA.id
+      && foundB && foundB.name && foundB.id
+      && foundC && foundC.name && foundC.id
+      && !foundBogus;
+
+    return {
+      test: "parties-batch",
+      result: ok ? "PASS" : "FAIL",
+      partyA,
+      partyB,
+      partyC,
+      batch,
+      foundA,
+      foundB,
+      foundC,
+      itemsLength: items.length,
+      hasBogus: !!foundBogus
+    };
+  },
+
   "smoke:products:crud": async ()=>{
     await ensureBearer();
     const baseSku = `SMOKE-SKU-${Date.now()}`;

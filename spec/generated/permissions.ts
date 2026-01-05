@@ -23,6 +23,7 @@ export const PERMISSIONS_BY_ENDPOINT = {
   "POST /inventory/onhand:batch": "inventory:read",
   "POST /objects/backorderRequest/{id}:convert": "objects:write",
   "POST /objects/backorderRequest/{id}:ignore": "objects:write",
+  "POST /objects/party:batch": "party:read",
   "POST /purchasing/po:create-from-suggestion": "purchase:write",
   "POST /purchasing/po/{id}:approve": "purchase:approve",
   "POST /purchasing/po/{id}:cancel": "purchase:cancel",
@@ -69,6 +70,7 @@ export const PERM_INVENTORY_ADJUST = "inventory:adjust" as const;
 export const PERM_INVENTORY_READ = "inventory:read" as const;
 export const PERM_INVENTORY_WRITE = "inventory:write" as const;
 export const PERM_OBJECTS_WRITE = "objects:write" as const;
+export const PERM_PARTY_READ = "party:read" as const;
 export const PERM_PURCHASE_APPROVE = "purchase:approve" as const;
 export const PERM_PURCHASE_CANCEL = "purchase:cancel" as const;
 export const PERM_PURCHASE_CLOSE = "purchase:close" as const;
@@ -93,6 +95,7 @@ export const PERMISSION_KEYS = [
   "inventory:read",
   "inventory:write",
   "objects:write",
+  "party:read",
   "purchase:approve",
   "purchase:cancel",
   "purchase:close",

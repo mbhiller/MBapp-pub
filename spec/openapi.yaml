@@ -286,6 +286,53 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
       summary: Delete Objects
+  /objects/party:batch:
+    post:
+      tags:
+        - Objects
+      operationId: batchGetParties
+      summary: Batch get parties by IDs
+      x-mbapp-permission: party:read
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - partyIds
+              properties:
+                partyIds:
+                  type: array
+                  items:
+                    type: string
+                  minItems: 1
+                  maxItems: 100
+                  description: Array of party IDs to fetch (server may cap to 100 per request)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Party'
+                    description: Found parties (order may differ from input; missing IDs omitted)
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /auth/policy:
     get:
       tags:

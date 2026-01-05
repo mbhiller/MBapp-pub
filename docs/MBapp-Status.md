@@ -5,6 +5,26 @@
 **Workflow & DoD:** See [MBapp-Cadence.md](MBapp-Cadence.md) for canonical workflow, Definition of Done, and testing rules.
 
 ---
+### Sprint AX — Party Batch Primitive — ✅ Complete (2026-01-05)
+**Summary:** Implemented `/objects/party:batch` endpoint to permanently eliminate N+1 party enrichment fan-out patterns across web.
+
+**Deliverables:**
+- **Spec (E1):** Added `POST /objects/party:batch` endpoint ([spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml#L2745-L2778))
+  - Request: `{ partyIds: string[] }` (1-100 items)
+  - Response: `{ items: Party[] }` (found parties only, missing IDs tolerated)
+  - Permission: `party:read`
+- **API (E2):** Implemented handler with DynamoDB BatchGetCommand ([apps/api/src/objects/party-batch.ts](../apps/api/src/objects/party-batch.ts))
+  - Auto-chunks requests >100 items
+  - Returns only `type === "party"` items
+- **Web (E3-E4):** Created `batchGetParties()` helper ([apps/web/src/lib/api.ts](../apps/web/src/lib/api.ts#L201-L241)) and refactored 4 components:
+  - SuggestPoChooserModal: Batch-first with concurrency-limited fallback
+  - PurchaseOrdersListPage, BackordersListPage, SalesOrderDetailPage: Single batch call replaces manual loops
+  - Removed 3 `inflightVendorIdsRef` variables (reduced complexity)
+- **Smoke (E5):** Added `smoke:parties:batch` to core tier ([ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs#L2304-L2365), [ops/ci-smokes.json](../ops/ci-smokes.json#L23))
+- **Docs (E6):** Updated [Frontend Guide](MBapp-Frontend-Guide.md), [smoke-coverage.md](smoke-coverage.md), and this status doc
+
+**Impact:** Reduced worst-case N+1 fan-out from 10-20+ concurrent requests to 1 batch request per page load. All typechecks + smokes pass.
+
 ### Recent Foundations — Fan-Out Guardrail — ✅ Complete (2026-01-05)
 - Fixed intermittent 503s on PurchaseOrders/VendorPortal list-page enrichment by batching vendor/party lookups (no unbounded fan-out).
 - Added guardrail tool: [ops/tools/check-no-unbounded-fanout.mjs](../ops/tools/check-no-unbounded-fanout.mjs) (`npm run check:no-unbounded-fanout`).

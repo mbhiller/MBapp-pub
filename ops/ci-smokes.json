@@ -20,6 +20,7 @@
     { "name": "smoke:objects:search-filter-cursor-roundtrip", "tier": "core" },
     { "name": "smoke:objects:list-simple-key-cursor", "tier": "core" },
     { "name": "smoke:parties:crud", "tier": "core" },
+    { "name": "smoke:parties:batch", "tier": "core" },
     { "name": "smoke:products:crud", "tier": "core" },
     { "name": "smoke:inventory:crud", "tier": "core" },
     { "name": "smoke:inventory:canonical-write-legacy-compat", "tier": "core" },
