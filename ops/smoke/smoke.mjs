@@ -959,6 +959,109 @@ const tests = {
       };
     },
 
+    "smoke:cors:preflight-objects-party": async () => {
+      // Test: CORS preflight (OPTIONS) returns 200/204 with correct headers, no auth required
+      
+      // Setup: create a party to get a valid ID for testing
+      await ensureBearer();
+      const party = await post(`/objects/party`, {
+        type: "party",
+        name: `CORS-Test-${SMOKE_RUN_ID}`,
+        roles: ["customer"]
+      });
+      
+      if (!party.ok) {
+        return {
+          test: "cors:preflight-objects-party",
+          result: "FAIL",
+          step: "setup-party",
+          party
+        };
+      }
+      
+      const partyId = party.body?.id;
+      if (!partyId) {
+        return {
+          test: "cors:preflight-objects-party",
+          result: "FAIL",
+          step: "extract-party-id",
+          party
+        };
+      }
+      
+      // Test 1: OPTIONS on detail endpoint (no auth, should succeed)
+      const detailUrl = `${API}/objects/party/${encodeURIComponent(partyId)}`;
+      const detailRes = await fetch(detailUrl, {
+        method: "OPTIONS",
+        headers: {
+          "Origin": "http://localhost:5173",
+          "Access-Control-Request-Method": "GET",
+          "Access-Control-Request-Headers": "authorization,x-tenant-id"
+        }
+      });
+      
+      const detailStatus = detailRes.status;
+      const detailHeaders = {
+        allowOrigin: detailRes.headers.get("access-control-allow-origin"),
+        allowMethods: detailRes.headers.get("access-control-allow-methods"),
+        allowHeaders: detailRes.headers.get("access-control-allow-headers"),
+        maxAge: detailRes.headers.get("access-control-max-age")
+      };
+      
+      const detailPass = (detailStatus === 200 || detailStatus === 204)
+        && detailHeaders.allowOrigin 
+        && detailHeaders.allowMethods 
+        && detailHeaders.allowHeaders;
+      
+      // Test 2: OPTIONS on list endpoint (optional)
+      const listUrl = `${API}/objects/party?limit=1`;
+      const listRes = await fetch(listUrl, {
+        method: "OPTIONS",
+        headers: {
+          "Origin": "http://localhost:5173",
+          "Access-Control-Request-Method": "GET",
+          "Access-Control-Request-Headers": "authorization,x-tenant-id"
+        }
+      });
+      
+      const listStatus = listRes.status;
+      const listHeaders = {
+        allowOrigin: listRes.headers.get("access-control-allow-origin"),
+        allowMethods: listRes.headers.get("access-control-allow-methods"),
+        allowHeaders: listRes.headers.get("access-control-allow-headers"),
+        maxAge: listRes.headers.get("access-control-max-age")
+      };
+      
+      const listPass = (listStatus === 200 || listStatus === 204)
+        && listHeaders.allowOrigin 
+        && listHeaders.allowMethods 
+        && listHeaders.allowHeaders;
+      
+      const allPass = detailPass && listPass;
+      
+      return {
+        test: "cors:preflight-objects-party",
+        result: allPass ? "PASS" : "FAIL",
+        summary: allPass 
+          ? "OPTIONS requests return 200/204 with correct CORS headers (no auth required)"
+          : "OPTIONS preflight failed - missing status 200/204 or CORS headers",
+        tests: {
+          detail: {
+            pass: detailPass,
+            url: detailUrl,
+            status: detailStatus,
+            headers: detailHeaders
+          },
+          list: {
+            pass: listPass,
+            url: listUrl,
+            status: listStatus,
+            headers: listHeaders
+          }
+        }
+      };
+    },
+
     "smoke:close-the-loop-multi-vendor": async () => {
       await ensureBearer();
       

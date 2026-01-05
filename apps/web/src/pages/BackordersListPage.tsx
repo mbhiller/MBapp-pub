@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../providers/AuthProvider";
 import { hasPerm } from "../lib/permissions";
@@ -73,6 +73,7 @@ export default function BackordersListPage() {
   const [validating, setValidating] = useState(false);
   const [appliedView, setAppliedView] = useState<ViewConfig | null>(null);
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
+  const inflightVendorIdsRef = useRef<Set<string>>(new Set());
 
   // Helper to update URL search params
   const updateSearchParams = useCallback(
@@ -341,27 +342,56 @@ export default function BackordersListPage() {
       new Set(items.map((bo) => bo.preferredVendorId).filter((v): v is string => Boolean(v)))
     );
 
-    const missing = preferredVendorIds.filter((v) => !(v in vendorNameById));
+    const missing = preferredVendorIds.filter(
+      (v) => !(v in vendorNameById) && !inflightVendorIdsRef.current.has(v)
+    );
     if (missing.length === 0) return;
 
+    let cancelled = false;
+    const CONCURRENCY_LIMIT = 5;
+
     (async () => {
-      const entries: Record<string, string> = {};
-      await Promise.all(
-        missing.map(async (vendorId) => {
-          try {
-            const res = await apiFetch<{ name?: string; displayName?: string }>(`/objects/party/${vendorId}`, {
-              token: token || undefined,
-              tenantId,
-            });
-            const name = res?.name ?? res?.displayName ?? vendorId;
-            entries[vendorId] = name;
-          } catch {
-            entries[vendorId] = vendorId;
-          }
-        })
-      );
-      setVendorNameById((prev) => ({ ...prev, ...entries }));
+      for (let i = 0; i < missing.length; i += CONCURRENCY_LIMIT) {
+        if (cancelled) return;
+
+        const batch = missing.slice(i, i + CONCURRENCY_LIMIT);
+        batch.forEach((id) => inflightVendorIdsRef.current.add(id));
+
+        const results = await Promise.all(
+          batch.map(async (vendorId) => {
+            try {
+              const res = await apiFetch<{ name?: string; displayName?: string }>(
+                `/objects/party/${vendorId}`,
+                {
+                  token: token || undefined,
+                  tenantId,
+                }
+              );
+              const name = res?.name ?? res?.displayName ?? vendorId;
+              return { vendorId, name };
+            } catch {
+              return { vendorId, name: vendorId };
+            } finally {
+              inflightVendorIdsRef.current.delete(vendorId);
+            }
+          })
+        );
+
+        if (!cancelled) {
+          setVendorNameById((prev) => {
+            const next = { ...prev };
+            for (const result of results) {
+              next[result.vendorId] = result.name;
+            }
+            return next;
+          });
+        }
+      }
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [items, tenantId, token, vendorNameById]);
 
   const toggleSelect = (id: string) => {

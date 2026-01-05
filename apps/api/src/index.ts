@@ -125,7 +125,7 @@ function withId(event: APIGatewayProxyEventV2, id: string): APIGatewayProxyEvent
   return e;
 }
 
-/** Preflight CORS */
+/** Preflight CORS - universal fast-path (no auth required) */
 function isPreflight(e: APIGatewayProxyEventV2) {
   return e.requestContext.http.method === "OPTIONS";
 }
@@ -133,10 +133,11 @@ const corsOk = (): APIGatewayProxyResultV2 => ({
   statusCode: 204,
   headers: {
     "access-control-allow-origin": "*",
-    "access-control-allow-methods": "OPTIONS,GET,POST,PUT,DELETE",
-    "access-control-allow-headers": "Authorization,Content-Type,Idempotency-Key,X-Tenant-Id,Accept,X-Feature-Enforce-Vendor,X-Feature-Views-Enabled,X-Feature-Registrations-Enabled,X-Feature-Events-Enabled,X-Feature-Events-Simulate,X-Feature-Reservations-Enabled",
-    
+    "access-control-allow-methods": "GET,POST,OPTIONS,PUT,DELETE",
+    "access-control-allow-headers": "*",
+    "access-control-max-age": "600",
   },
+  body: "",
 });
 
 /** Inject pre-auth */

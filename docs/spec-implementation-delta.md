@@ -396,10 +396,17 @@ Returns `{ message, code?, details? }` — matches spec when code is present, bu
 **Spec:**
 - No explicit OPTIONS method documented
 
-**Code** ([index.ts](../apps/api/src/index.ts) line 202):
-- Handles OPTIONS preflight; returns CORS headers  
-- **Sprint IV:** Added `X-Feature-Registrations-Enabled` to allowed headers in CORS config  
-- ✓ Not required by spec, but good practice
+**Code** ([index.ts](../apps/api/src/index.ts) line 128-141):
+- Universal preflight fast-path: OPTIONS requests return 204 immediately (before auth/routing)
+- CORS headers: `Allow-Origin: *`, `Allow-Methods: GET,POST,OPTIONS,PUT,DELETE`, `Allow-Headers: *`, `Max-Age: 600`
+- **Sprint AU:** Updated to status 204, simplified headers to `*`, added max-age
+- ✓ Not required by spec, but essential for browser CORS compliance
+
+**Infrastructure** ([API_GATEWAY_CORS_CONFIG.md](../infra/API_GATEWAY_CORS_CONFIG.md)):
+- API Gateway (`ki8kgivz1f`) managed outside Terraform (manual configuration required)
+- Recommended: Configure gateway-level CORS for optimal performance (bypasses Lambda invocation)
+- Recommended: Set OPTIONS route authorization to NONE (avoid authorizer overhead)
+- Smoke test: `smoke:cors:preflight-objects-detail` validates CORS behavior
 
 ---
 

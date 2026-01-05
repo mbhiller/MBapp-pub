@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
@@ -93,6 +93,7 @@ export default function SalesOrderDetailPage() {
   const [backordersLoading, setBackordersLoading] = useState(false);
   const [backordersError, setBackordersError] = useState<string | null>(null);
   const [vendorNameById, setVendorNameById] = useState<Record<string, string>>({});
+    const inflightVendorIdsRef = useRef<Set<string>>(new Set());
   const [prefillFromReserve, setPrefillFromReserve] = useState<Record<string, { locationId?: string; lot?: string }>>({});
 
   // Track screen view on mount
@@ -239,27 +240,56 @@ export default function SalesOrderDetailPage() {
       )
     );
 
-    const missing = preferredVendorIds.filter((v) => !(v in vendorNameById));
+    const missing = preferredVendorIds.filter(
+      (v) => !(v in vendorNameById) && !inflightVendorIdsRef.current.has(v)
+    );
     if (missing.length === 0) return;
 
+    let cancelled = false;
+    const CONCURRENCY_LIMIT = 5;
+
     (async () => {
-      const entries: Record<string, string> = {};
-      await Promise.all(
-        missing.map(async (vendorId) => {
-          try {
-            const res = await apiFetch<{ name?: string; displayName?: string }>(`/objects/party/${vendorId}`, {
-              token: token || undefined,
-              tenantId,
-            });
-            const name = (res as any)?.name ?? (res as any)?.displayName ?? vendorId;
-            entries[vendorId] = name;
-          } catch {
-            entries[vendorId] = vendorId;
-          }
-        })
-      );
-      setVendorNameById((prev) => ({ ...prev, ...entries }));
+      for (let i = 0; i < missing.length; i += CONCURRENCY_LIMIT) {
+        if (cancelled) return;
+
+        const batch = missing.slice(i, i + CONCURRENCY_LIMIT);
+        batch.forEach((id) => inflightVendorIdsRef.current.add(id));
+
+        const results = await Promise.all(
+          batch.map(async (vendorId) => {
+            try {
+              const res = await apiFetch<{ name?: string; displayName?: string }>(
+                `/objects/party/${vendorId}`,
+                {
+                  token: token || undefined,
+                  tenantId,
+                }
+              );
+              const name = (res as any)?.name ?? (res as any)?.displayName ?? vendorId;
+              return { vendorId, name };
+            } catch {
+              return { vendorId, name: vendorId };
+            } finally {
+              inflightVendorIdsRef.current.delete(vendorId);
+            }
+          })
+        );
+
+        if (!cancelled) {
+          setVendorNameById((prev) => {
+            const next = { ...prev };
+            for (const result of results) {
+              next[result.vendorId] = result.name;
+            }
+            return next;
+          });
+        }
+      }
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [backorders, tenantId, token, vendorNameById]);
 
   useEffect(() => {

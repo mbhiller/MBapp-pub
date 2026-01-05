@@ -71,6 +71,14 @@ VITE_TENANT=DemoTenant
 **Status:** ⚠️ **Missing .env handling** — Web requires manual .env setup; no sample file present  
 **Auth:** No auth implementation detected in web client (uses plain fetch, no bearer token)
 
+### Web List-Page Enrichment: Avoid N+1 Fan-Out
+- **Symptom:** Parallel detail-enrichment calls on list pages can spike Lambda/API concurrency and surface intermittent 503s.
+- **Rule:** Do not use unbounded `Promise.all(missing.map(...apiFetch...))` for vendor/party enrichments; cap concurrency.
+- **Pattern:** Use the shared batching helper [apps/web/src/lib/concurrency.ts](../apps/web/src/lib/concurrency.ts) (`forEachBatched`) or equivalent fixed-width batching for list-page enrichments.
+- **Guardrail:** Tool [ops/tools/check-no-unbounded-fanout.mjs](../ops/tools/check-no-unbounded-fanout.mjs) fails if obvious fan-out patterns reappear in PurchaseOrdersListPage.
+  - Run manually: `npm run check:no-unbounded-fanout` (or `node ops/tools/check-no-unbounded-fanout.mjs`).
+  - Keep list enrichments within the batching helper to avoid regression.
+
 ---
 
 ### 1.3 Smoke Tests (ops/smoke)

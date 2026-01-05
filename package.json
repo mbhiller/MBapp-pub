@@ -13,6 +13,7 @@
     "lint:ci": "eslint . --ext .ts,.tsx --max-warnings=0",
     "test": "npm run test -ws --if-present",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "check:no-unbounded-fanout": "node ops/tools/check-no-unbounded-fanout.mjs",
     "expo:demo": "npm -w apps/mobile run expo:demo",
     "expo:smoke": "npm -w apps/mobile run expo:smoke",
     "expo:android": "npm -w apps/mobile run android",
