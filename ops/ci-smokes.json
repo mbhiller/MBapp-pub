@@ -52,6 +52,7 @@
     { "name": "smoke:views:apply-to-product-list", "tier": "extended" },
     { "name": "smoke:views:apply-to-inventory-list", "tier": "extended" },
     { "name": "smoke:views:apply-to-party-list", "tier": "extended" },
+    { "name": "smoke:views:apply-to-backorders-list", "tier": "extended" },
     { "name": "smoke:views:save-then-update", "tier": "extended" },
     { "name": "smoke:events:enabled-noop", "tier": "extended" },
     { "name": "smoke:salesOrders:patch-lines:validation", "tier": "extended" },

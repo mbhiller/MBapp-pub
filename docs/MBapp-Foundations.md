@@ -1275,7 +1275,7 @@ Artifacts are committed to the repo and should be regenerated whenever spec anno
 - **Workspaces v1 model:** `/workspaces` endpoints currently read/write `type="view"` items (a “views hub” wrapper in v1); no distinct workspace storage yet.
 - **Feature flags:** `FEATURE_VIEWS_ENABLED` / `X-Feature-Views-Enabled` are historical/client gating. Handlers use RBAC; no server-side flag guard today.
 
-- **List pages:** Sales Orders, Purchase Orders, Inventory, Parties, and Products can apply `?viewId` and save current filters as a View (optional shared flag) directly from the list UI.
+- **List pages:** Sales Orders, Purchase Orders, Inventory, Parties, Backorders, and Products can apply `?viewId` and save current filters as a View (optional shared flag) directly from the list UI.
 
 **Sprint Q Hardening (2025-12-30):**
 - ✅ **Server-side filter validation:** `/views` POST and PATCH endpoints validate filter shape (field: non-empty string, op: enum, value: type-appropriate). Returns 400 with clear message for invalid filters. No deep field-existence validation (deferred).

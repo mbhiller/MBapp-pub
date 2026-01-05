@@ -151,6 +151,7 @@
     "smoke:views-workspaces:permissions": "node ops/smoke/smoke.mjs smoke:views-workspaces:permissions",
     "smoke:views:apply-to-inventory-list": "node ops/smoke/smoke.mjs smoke:views:apply-to-inventory-list",
     "smoke:views:apply-to-party-list": "node ops/smoke/smoke.mjs smoke:views:apply-to-party-list",
+    "smoke:views:apply-to-backorders-list": "node ops/smoke/smoke.mjs smoke:views:apply-to-backorders-list",
     "smoke:views:save-then-update": "node ops/smoke/smoke.mjs smoke:views:save-then-update",
     "smoke:wipe-tool:safety-guards": "node ops/smoke/smoke.mjs smoke:wipe-tool:safety-guards",
     "smoke:workspaces:default-view-validation": "node ops/smoke/smoke.mjs smoke:workspaces:default-view-validation"
