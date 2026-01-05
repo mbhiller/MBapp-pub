@@ -68,6 +68,12 @@ const SK_ATTR = process.env.MBAPP_TABLE_SK || "sk";
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
+// -------- Telemetry config --------
+const METRICS_ENABLED = process.env.MBAPP_OBJECTS_QUERY_METRICS === "1";
+const DEEP_OFFSET_THRESHOLD = 500;
+const HIGH_COST_PAGES_THRESHOLD = 20;
+const HIGH_COST_ITEMS_THRESHOLD = 5000;
+
 // -------- Utilities --------
 function nowIso() {
   return new Date().toISOString();
@@ -166,11 +172,16 @@ export async function listObjects({
   limit = 20,
   fields,
 }: ListArgs) {
+  const startTime = Date.now();
   const canonicalType = normalizeTypeParam(type) ?? type;
   // If no filters and no q, use simple path
   const hasFilters = filters && Object.keys(filters).length > 0;
+  const pathType = (!hasFilters && !q) ? "simple" : "filtered";
+
   if (!hasFilters && !q) {
+    // Simple path: efficient DynamoDB key cursor
     const ExclusiveStartKey = decodeNext(next);
+    const dbStart = Date.now();
     const res = await ddb.send(
       new QueryCommand({
         TableName: TABLE,
@@ -182,14 +193,31 @@ export async function listObjects({
         ConsistentRead: true,
       })
     );
+    const dbMs = Date.now() - dbStart;
     const items = (res.Items || []) as AnyRecord[];
+    const totalMs = Date.now() - startTime;
+
+    if (METRICS_ENABLED) {
+      console.log(JSON.stringify({
+        event: "objects:list:path",
+        pathType,
+        tenantId,
+        type: canonicalType,
+        limit,
+        hasNext: !!next,
+        itemsReturned: items.length,
+        dbMs,
+        totalMs,
+      }));
+    }
+
     return {
       items: items.map((o) => project(o, fields)),
       next: encodeNext(res.LastEvaluatedKey),
     };
   }
 
-  // Pagination-aware filtering: for filtered/q paths, we need to:
+  // Filtered path: Pagination-aware filtering
   // 1) Fetch all matching items (up to a reasonable cap)
   // 2) Sort deterministically (updatedAt desc, then id asc)
   // 3) Use offset-based pagination (cursor encodes offset, not DynamoDB key)
@@ -208,12 +236,28 @@ export async function listObjects({
     }
   }
 
+  // Warn on deep offset pagination
+  if (offset >= DEEP_OFFSET_THRESHOLD) {
+    console.warn(JSON.stringify({
+      event: "objects:list:deep-offset",
+      tenantId,
+      type: canonicalType,
+      offset,
+      filters,
+      q,
+      message: "Deep pagination with offset cursor - consider UI redesign or cursor limit",
+    }));
+  }
+
   // Fetch all matching items (up to a cap to prevent runaway queries)
   let collected: AnyRecord[] = [];
   let ExclusiveStartKey: AnyRecord | undefined = undefined;
   const maxFetch = 10000; // Safety cap
+  const maxPages = 50;
 
-  for (let pageIdx = 0; pageIdx < 50; pageIdx++) {
+  const dbFetchStart = Date.now();
+  let pageIdx = 0;
+  for (pageIdx = 0; pageIdx < maxPages; pageIdx++) {
     if (collected.length >= maxFetch) break;
 
     const queryRes: QueryCommandOutput = await ddb.send(
@@ -231,6 +275,7 @@ export async function listObjects({
     const rawItems = (queryRes.Items || []) as AnyRecord[];
 
     // Apply filters and q to each item
+    const filterStart = Date.now();
     for (const item of rawItems) {
       // Apply structured filters (exact match)
       if (hasFilters) {
@@ -259,9 +304,14 @@ export async function listObjects({
     if (!queryRes.LastEvaluatedKey) break;
     ExclusiveStartKey = queryRes.LastEvaluatedKey;
   }
+  const dbFetchMs = Date.now() - dbFetchStart;
+  const pagesFetched = pageIdx + 1;
+  const itemsFetched = collected.length;
+  const capHit = collected.length >= maxFetch || pageIdx >= maxPages - 1;
 
   // Apply deterministic ordering:
   // 1) Deduplicate by id (defensive guard)
+  const dedupStart = Date.now();
   const dedupMap = new Map<string, AnyRecord>();
   for (const item of collected) {
     const itemId = item?.id as string | undefined;
@@ -270,8 +320,11 @@ export async function listObjects({
     }
   }
   const deduped = Array.from(dedupMap.values());
+  const dedupeMs = Date.now() - dedupStart;
+  const itemsMatched = deduped.length;
 
   // 2) Sort: updatedAt desc, then id asc
+  const sortStart = Date.now();
   deduped.sort((a, b) => {
     const aUpdated = (a?.updatedAt as string) || "";
     const bUpdated = (b?.updatedAt as string) || "";
@@ -282,6 +335,7 @@ export async function listObjects({
     const bId = (b?.id as string) || "";
     return aId.localeCompare(bId);
   });
+  const sortMs = Date.now() - sortStart;
 
   // 3) Slice for current page
   const finalItems = deduped.slice(offset, offset + limit);
@@ -295,6 +349,49 @@ export async function listObjects({
     outgoingCursor = Buffer.from(JSON.stringify(cursorObj)).toString("base64");
   }
 
+  const totalMs = Date.now() - startTime;
+
+  // Telemetry: filtered path cost metrics
+  const highCost = pagesFetched >= HIGH_COST_PAGES_THRESHOLD || 
+                   itemsFetched >= HIGH_COST_ITEMS_THRESHOLD || 
+                   capHit;
+
+  if (METRICS_ENABLED) {
+    console.log(JSON.stringify({
+      event: "objects:list:filtered-cost",
+      tenantId,
+      type: canonicalType,
+      pagesFetched,
+      itemsFetched,
+      itemsMatched,
+      offset,
+      limit,
+      hasMore,
+      capHit,
+      dbFetchMs,
+      dedupeMs,
+      sortMs,
+      totalMs,
+      hasFilters,
+      hasQ: !!q,
+    }));
+  }
+
+  if (highCost) {
+    console.warn(JSON.stringify({
+      event: "objects:list:high-cost",
+      tenantId,
+      type: canonicalType,
+      pagesFetched,
+      itemsFetched,
+      itemsMatched,
+      capHit,
+      filters,
+      q,
+      totalMs,
+    }));
+  }
+
   return {
     items: finalItems.map((o) => project(o, fields)),
     next: outgoingCursor,
@@ -302,8 +399,32 @@ export async function listObjects({
 }
 
 // For now identical to list; wire richer predicates as needed.
+// Telemetry uses search-specific event names for tracking.
 export async function searchObjects(args: ListArgs) {
-  return listObjects(args);
+  const startTime = Date.now();
+  const canonicalType = normalizeTypeParam(args.type) ?? args.type;
+  const hasFilters = args.filters && Object.keys(args.filters).length > 0;
+  const pathType = (!hasFilters && !args.q) ? "simple" : "filtered";
+
+  // Call base implementation
+  const result = await listObjects(args);
+  const totalMs = Date.now() - startTime;
+
+  // Override event names for search tracking (mirrors list telemetry)
+  if (METRICS_ENABLED) {
+    console.log(JSON.stringify({
+      event: "objects:search:path",
+      pathType,
+      tenantId: args.tenantId,
+      type: canonicalType,
+      limit: args.limit || 20,
+      hasNext: !!args.next,
+      itemsReturned: result.items.length,
+      totalMs,
+    }));
+  }
+
+  return result;
 }
 
 export async function replaceObject({ tenantId, type, id, body }: ReplaceArgs) {

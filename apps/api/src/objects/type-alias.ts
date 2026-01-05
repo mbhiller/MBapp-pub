@@ -3,6 +3,9 @@
 
 import { getObjectById, listObjects, searchObjects, type GetArgs, type ListArgs } from "./repo";
 
+// Telemetry
+const METRICS_ENABLED = process.env.MBAPP_OBJECTS_QUERY_METRICS === "1";
+
 /**
  * Map of lowercase type strings to their canonical (properly-cased) forms.
  * Includes all core object types used in SK prefixes, routes, and business logic.
@@ -130,20 +133,33 @@ export async function resolveObjectByIdWithAliases({ tenantId, type, id, fields 
 
 type ListWithAliasesArgs = Omit<ListArgs, "type"> & { type: string };
 export async function listObjectsWithAliases(args: ListWithAliasesArgs) {
-  const { type, next, limit = 20 } = args;
+  const { type, next, limit = 20, tenantId } = args;
   const aliases = expandTypeAliases(type);
 
   // If no aliases, defer to base list behavior.
   if (aliases.length === 1) return await listObjects(args);
 
   // Minimal union support: only when not paginating (no next token) and small limits.
-  if (next) return await listObjects(args);
+  if (next) {
+    console.warn(JSON.stringify({
+      event: "objects:list:union-pagination-rejected",
+      tenantId,
+      type,
+      aliases,
+      message: "Union queries do not support pagination; falling back to single-type list",
+    }));
+    return await listObjects(args);
+  }
+
   const maxUnion = Math.max(50, limit);
   const collected: any[] = [];
+  const fetchedCounts: Record<string, number> = {};
 
   for (const t of aliases) {
     const res = await listObjects({ ...args, type: t, limit: maxUnion });
-    if (Array.isArray(res?.items)) collected.push(...res.items);
+    const itemCount = Array.isArray(res?.items) ? res.items.length : 0;
+    fetchedCounts[t] = itemCount;
+    if (itemCount > 0) collected.push(...res.items);
   }
 
   // Deduplicate by id (defensive guard against data corruption with both SK forms)
@@ -155,6 +171,7 @@ export async function listObjectsWithAliases(args: ListWithAliasesArgs) {
     }
   }
   const deduped = Array.from(dedupedMap.values());
+  const dedupedCount = deduped.length;
 
   // Deterministic ordering: updatedAt desc if present, else id asc.
   deduped.sort((a, b) => {
@@ -166,8 +183,24 @@ export async function listObjectsWithAliases(args: ListWithAliasesArgs) {
     return aId.localeCompare(bId);
   });
 
+  const finalItems = deduped.slice(0, limit);
+
+  if (METRICS_ENABLED) {
+    console.log(JSON.stringify({
+      event: "objects:list:union",
+      tenantId,
+      type,
+      aliases,
+      maxUnion,
+      limit,
+      fetchedCounts,
+      dedupedCount,
+      returnedCount: finalItems.length,
+    }));
+  }
+
   return {
-    items: deduped.slice(0, limit),
+    items: finalItems,
     next: null, // union paging not supported in minimal helper
     unionApplied: true,
   } as const;
@@ -184,18 +217,31 @@ type SearchWithAliasesArgs = {
 };
 
 export async function searchObjectsWithAliases(args: SearchWithAliasesArgs) {
-  const { type, next, limit = 20 } = args;
+  const { type, next, limit = 20, tenantId } = args;
   const aliases = expandTypeAliases(type);
   if (aliases.length === 1) return await searchObjects(args);
 
   // Minimal union: only when not paginating (no next cursor). Suitable for smokes and small lists.
-  if (next) return await searchObjects(args);
+  if (next) {
+    console.warn(JSON.stringify({
+      event: "objects:search:union-pagination-rejected",
+      tenantId,
+      type,
+      aliases,
+      message: "Union queries do not support pagination; falling back to single-type search",
+    }));
+    return await searchObjects(args);
+  }
+
   const maxUnion = Math.max(50, limit);
   const collected: any[] = [];
+  const fetchedCounts: Record<string, number> = {};
 
   for (const t of aliases) {
     const page = await searchObjects({ ...args, type: t, limit: maxUnion });
-    if (Array.isArray(page?.items)) collected.push(...page.items);
+    const itemCount = Array.isArray(page?.items) ? page.items.length : 0;
+    fetchedCounts[t] = itemCount;
+    if (itemCount > 0) collected.push(...page.items);
   }
 
   // Deduplicate by id (defensive guard against data corruption with both SK forms)
@@ -207,6 +253,7 @@ export async function searchObjectsWithAliases(args: SearchWithAliasesArgs) {
     }
   }
   const deduped = Array.from(dedupedMap.values());
+  const dedupedCount = deduped.length;
 
   deduped.sort((a, b) => {
     const aUpdated = (a?.updatedAt as string) || "";
@@ -217,8 +264,24 @@ export async function searchObjectsWithAliases(args: SearchWithAliasesArgs) {
     return aId.localeCompare(bId);
   });
 
+  const finalItems = deduped.slice(0, limit);
+
+  if (METRICS_ENABLED) {
+    console.log(JSON.stringify({
+      event: "objects:search:union",
+      tenantId,
+      type,
+      aliases,
+      maxUnion,
+      limit,
+      fetchedCounts,
+      dedupedCount,
+      returnedCount: finalItems.length,
+    }));
+  }
+
   return {
-    items: deduped.slice(0, limit),
+    items: finalItems,
     next: null,
     unionApplied: true,
   } as const;

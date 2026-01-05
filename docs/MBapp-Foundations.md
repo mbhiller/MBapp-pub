@@ -740,6 +740,69 @@ return Array.from(dedupMap.values()).sort((a, b) => a.id.localeCompare(b.id));
 - Smoke tests: [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) — `smoke:objects:type-casing-and-alias`, `smoke:inventory:onhand`
 - CI integration: [ops/ci-smokes.json](../ops/ci-smokes.json)
 
+### 2.10 Objects Pagination Contracts & Telemetry (Sprint AS, 2026-01-05)
+
+**Context:** Objects list/search operations support two distinct pagination strategies with different performance characteristics and cursor semantics. Sprint AS adds structured telemetry (optional logging) and cost visibility without changing behavior.
+
+**Pagination Paths:**
+
+1. **Simple Path (No Filters, No q):**
+   - **Cursor Type:** DynamoDB key cursor (`{pk, sk}`), base64-encoded
+   - **Operation:** Single DynamoDB Query per page; native pagination via ExclusiveStartKey
+   - **Cost:** ~5-10 RCUs per page (depends on item size)
+   - **Latency:** 10-50ms typical
+   - **Efficiency:** ✅ Excellent — Each page operation minimal; no re-fetches
+   - **Example:** `GET /objects/salesOrder?limit=20` returns DynamoDB SK order (`salesOrder#id` ascending)
+
+2. **Filtered Path (Filters OR q Present):**
+   - **Cursor Type:** Offset cursor (`{offset: N}`), base64-encoded
+   - **Operation:** Full result set fetch (up to 10,000 items), then in-memory filter, sort, and slice
+   - **Cost:** 100-500+ RCUs per page (depends on total items scanned)
+   - **Latency:** 500ms - 5s+ (increases with dataset size)
+   - **Efficiency:** ⚠️ Costly — Every paginated request re-fetches all matching items
+   - **Example:** `GET /objects/backorderRequest?filter.soId=SO123&limit=20` scans all backorderRequests, filters in-memory, returns page 1
+   - **Ordering:** Deterministic via in-memory sort: `updatedAt desc` (recent first), then `id asc` (tiebreaker)
+   - **Rationale:** Consistent ordering across paginated requests when filtering is applied
+
+3. **Union Path (Inventory Alias, No Pagination):**
+   - **Cursor Type:** None (returns `next: null`)
+   - **Operation:** Up to 2 DynamoDB Queries (one per alias type), fetch ≤50 items each, deduplicate, sort
+   - **Cost:** 10-30 RCUs (limited blast radius)
+   - **Latency:** 100-200ms typical
+   - **Efficiency:** ✅ Bounded — Hard cap at 50 items/type
+
+**Telemetry (Sprint AS):**
+
+Structured telemetry logs JSON events to stdout for cost analysis and performance monitoring. Disabled by default; enable via:
+```bash
+export MBAPP_OBJECTS_QUERY_METRICS=1
+node ops/smoke/smoke.mjs smoke:objects:list-filter-cursor-roundtrip
+# Logs: {"event": "objects:list:filtered-cost", "pagesFetched": 3, "itemsFetched": 150, ...}
+```
+
+**Log Events (when MBAPP_OBJECTS_QUERY_METRICS=1):**
+- `objects:list:path` / `objects:search:path`: Path selection (simple vs filtered), limit, timing
+- `objects:list:filtered-cost` / `objects:search:filtered-cost`: DynamoDB pages fetched, items scanned, matched, offset depth, timing breakdown (dbFetchMs, dedupeMs, sortMs, totalMs)
+- `objects:list:union` / `objects:search:union`: Union queries, items fetched per alias, deduped count
+
+**Warning Thresholds (Always Logged, No Flag Required):**
+- `objects:*:high-cost`: pagesFetched ≥20 OR itemsFetched ≥5,000 OR cap hit — identifies expensive queries
+- `objects:*:deep-offset`: offset ≥500 — warns on deep pagination patterns
+- `objects:*:union-pagination-rejected`: Union query with pagination cursor — falls back to single-type (logs why)
+
+**Files:**
+- Telemetry implementation: [apps/api/src/objects/repo.ts](../apps/api/src/objects/repo.ts) (listObjects/searchObjects), [apps/api/src/objects/type-alias.ts](../apps/api/src/objects/type-alias.ts) (union path)
+- Env flag: `MBAPP_OBJECTS_QUERY_METRICS` (defaults to "0")
+- Thresholds: Deep offset 500, high cost pages 20, high cost items 5,000
+- Smoke test: [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) `smoke:objects:list-simple-key-cursor` validates simple-path key cursor behavior
+
+**Developer Notes:**
+- Simple path queries are efficient; use them by omitting filters and q
+- Filtered queries are costly; consider adding GSI for hot filters (future optimization)
+- Offset pagination works but is inefficient; clients should avoid deep offsets (100+ pages)
+- Enable telemetry during load testing to identify cost drivers
+- Review `high-cost` warnings in production logs to guide optimization priorities
+
 ---
 
 

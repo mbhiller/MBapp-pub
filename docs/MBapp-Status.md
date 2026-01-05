@@ -98,6 +98,78 @@
 - **Guarantees:** 
   - Developers get guidance on every smoke failure (rerun command + manifest location)
   - Performance regressions visible via slowest list (e.g., close-the-loop jumping from 3s → 5s)
+
+---
+
+### Objects List/Search Guardrails & Telemetry — ✅ Complete (Sprint AS, 2026-01-05)
+
+**Epic Summary:** Add structured telemetry and cost visibility for Objects list/search operations without changing behavior. Distinguish simple path (efficient DynamoDB key cursors) from filtered path (costly offset cursors). Add smoke to protect simple-path cursor behavior.
+
+- **E1: Objects Repo Telemetry (list/search):** [apps/api/src/objects/repo.ts](../apps/api/src/objects/repo.ts) instrumented:
+  - **Path Detection:** Identifies simple vs filtered at function entry; logs path type when metrics enabled
+  - **Simple Path Metrics (when MBAPP_OBJECTS_QUERY_METRICS=1):**
+    - Event: `objects:list:path` / `objects:search:path`
+    - Fields: pathType, tenantId, type, limit, hasNext, itemsReturned, dbMs, totalMs
+  - **Filtered Path Metrics (when enabled):**
+    - Event: `objects:list:filtered-cost` / `objects:search:filtered-cost`
+    - Fields: pagesFetched, itemsFetched, itemsMatched, offset, limit, hasMore, capHit, timing breakdown (dbFetchMs, dedupeMs, sortMs, totalMs)
+  - **Warnings (always logged, no flag):**
+    - `objects:*:high-cost` when pagesFetched ≥20 OR itemsFetched ≥5,000 OR capHit=true
+    - `objects:*:deep-offset` when offset ≥500
+  - **searchObjects() Extension:** Wraps `listObjects()` result with search-specific event names for tracking
+  - **Impact:** Zero behavior change; all cursor semantics, ordering, deduplication preserved
+
+- **E2: Union Path Telemetry:** [apps/api/src/objects/type-alias.ts](../apps/api/src/objects/type-alias.ts) instrumented:
+  - **Path Detection:** Identifies union queries (aliases.length > 1)
+  - **Info Event (when metrics enabled):**
+    - Event: `objects:list:union` / `objects:search:union`
+    - Fields: type, aliases, maxUnion, limit, fetchedCounts (items per alias), dedupedCount, returnedCount
+  - **Warn Event (always logged):**
+    - `objects:list:union-pagination-rejected` / `objects:search:union-pagination-rejected` when pagination cursor present
+    - Explains fallback to single-type query (union doesn't support pagination)
+  - **Impact:** Zero behavior change; union dedup/sort/limit preserved
+
+- **E3: Simple Path Smoke Test:** [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) new test:
+  - **smoke:objects:list-simple-key-cursor** — validates simple-path (no filters/q) cursor behavior
+    - Creates 5 parties, lists with limit=2 (spans 3 pages)
+    - Asserts page counts: 2, 2, 2+ items (pagination works)
+    - Validates cursor format: contains `pk` and `sk`, NOT `offset` (key cursor, not offset)
+    - Confirms next cursor semantics: page1.next present, page2.next present, page3.next indicates more
+    - Verifies no overlap: all page IDs unique across pages
+    - Result: PASS with debug output (page1Ids, page2Ids, page3Ids, cursorFormat)
+  - **Registered:** [ops/ci-smokes.json](../ops/ci-smokes.json) tier `core` — protects critical performance invariant
+  - **Impact:** Guards against regression to offset cursors in simple path
+
+- **E4: Documentation:** 
+  - **MBapp-Foundations.md § Objects Pagination Contracts & Telemetry (2.10):** Documents simple/filtered/union paths, cost characteristics, cursor types, telemetry events, warning thresholds, and developer notes
+  - **MBapp-Status.md (this section):** Sprint AS summary with E1-E4 outcomes
+  - **smoke-coverage.md:** Added `smoke:objects:list-simple-key-cursor` to Pagination & Filtering table; documented invariant protection
+
+- **Verification:**
+  - TypeScript compilation clean: `npm run typecheck -w apps/api` ✓
+  - Individual smoke tests:
+    - `smoke:objects:list-simple-key-cursor` → PASS (validates key cursor format across 3 pages, no overlap)
+    - `smoke:objects:list-filter-cursor-roundtrip` → PASS (validates filtered path offset cursor, ordering, no duplicates)
+    - `smoke:objects:search-filter-cursor-roundtrip` → PASS (validates search union + offset pagination)
+  - Core smokes: `npm run smokes:run:core` → All 43 core flows PASS (42 existing + new simple-cursor)
+  - Telemetry validation (MBAPP_OBJECTS_QUERY_METRICS=1): Events logged as JSON with expected fields
+  - Threshold warnings: high-cost and deep-offset events logged when thresholds exceeded
+
+- **Definition of Done:**
+  - ✅ E1: listObjects() and searchObjects() instrumented with path detection, timing, cost metrics, warnings
+  - ✅ E2: listObjectsWithAliases() and searchObjectsWithAliases() instrumented with union metrics and pagination warnings
+  - ✅ E3: New smoke `smoke:objects:list-simple-key-cursor` validates key cursor format, pagination semantics, no overlap
+  - ✅ E4: Documentation updated (Foundations 2.10, Status Sprint AS, smoke-coverage table)
+  - ✅ Typecheck clean, all individual smokes PASS, core suite PASS (43 flows)
+  - ✅ No behavior changes: cursor semantics, ordering, deduplication, limits all preserved
+  - ✅ Telemetry disabled by default (no noise); warnings logged always; env flag enables info logs
+
+- **Guarantees:**
+  - Simple path (no filters/q) uses efficient DynamoDB key cursors (protected by smoke)
+  - Filtered path (filters/q present) uses cost-visible offset cursors with logging
+  - Union queries bounded (50 items/type, deduped, sorted deterministically)
+  - Telemetry enables data-driven optimization (which filters are hot, which queries are expensive)
+  - Warnings catch performance anti-patterns (deep pagination, high-cost queries) without breaking existing clients
   - Manifest path always visible (at start + on failure) for cleanup reference
   - Comprehensive docs reduce debugging time and support questions
 

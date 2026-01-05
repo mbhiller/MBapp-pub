@@ -17,6 +17,7 @@
     { "name": "smoke:close-the-loop", "tier": "core" },
     { "name": "smoke:objects:list-filter-cursor-roundtrip", "tier": "core" },
     { "name": "smoke:objects:search-filter-cursor-roundtrip", "tier": "core" },
+    { "name": "smoke:objects:list-simple-key-cursor", "tier": "core" },
     { "name": "smoke:parties:crud", "tier": "core" },
     { "name": "smoke:products:crud", "tier": "core" },
     { "name": "smoke:inventory:crud", "tier": "core" },
