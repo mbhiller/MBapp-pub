@@ -69,7 +69,16 @@ export async function getWorkspaceById({ tenantId, id, fields }: GetWorkspaceArg
   if (primary) return projectWorkspace(primary);
 
   const legacy = await getObjectById({ tenantId, type: "view", id, fields });
-  if (legacy) return projectWorkspace(legacy);
+  if (legacy) {
+    // Emit telemetry for legacy fallback hit
+    console.log(JSON.stringify({
+      event: "workspaces:legacy_fallback_get",
+      workspaceId: id,
+      tenantId,
+      sourceType: "view",
+    }));
+    return projectWorkspace(legacy);
+  }
 
   return null;
 }
@@ -94,6 +103,7 @@ export async function listWorkspaces({
   const seen = new Set<string>();
   let outgoing: CursorState | undefined;
   const maxPagesPerSource = 25;
+  let legacyCount = 0;
 
   for (let si = startIdx; si < sources.length; si++) {
     const source = sources[si];
@@ -136,6 +146,10 @@ export async function listWorkspaces({
         seen.add(id);
         collected.push(applyFields(projected, fields));
         uniquesAdded += 1;
+        // Track legacy items in returned list
+        if (source === "view") {
+          legacyCount += 1;
+        }
         if (collected.length >= limit) break;
       }
 
@@ -163,6 +177,17 @@ export async function listWorkspaces({
     } else {
       outgoing = undefined;
     }
+  }
+
+  // Emit telemetry if any legacy items were returned
+  if (legacyCount > 0) {
+    console.log(JSON.stringify({
+      event: "workspaces:legacy_fallback_list",
+      tenantId,
+      returnedLegacyCount: legacyCount,
+      requestedLimit: limit,
+      hasCursor: !!next,
+    }));
   }
 
   const nextCursor = encodeCursor(outgoing);

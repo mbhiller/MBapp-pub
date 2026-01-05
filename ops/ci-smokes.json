@@ -67,6 +67,7 @@
     { "name": "smoke:salesOrders:fulfill-idempotency-replay", "tier": "extended" },
     { "name": "smoke:salesOrders:fulfill-idempotency-key-reuse-different-payload", "tier": "extended" },
     { "name": "smoke:suggest-po:skip-reasons", "tier": "extended" },
-    { "name": "smoke:views-workspaces:permissions", "tier": "extended" }
+    { "name": "smoke:views-workspaces:permissions", "tier": "extended" },
+    { "name": "smoke:migrate-legacy-workspaces:safety-guards", "tier": "extended" }
   ]
 }

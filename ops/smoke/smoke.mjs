@@ -13657,6 +13657,124 @@ const tests = {
       testResults,
       awsCredsAvailable: hasAwsCreds
     };
+  },
+
+  "smoke:migrate-legacy-workspaces:safety-guards": async () => {
+    // Foundation smoke: Validates migrate-legacy-workspaces.mjs safety guards (NO ACTUAL MIGRATIONS)
+    const testResults = [];
+    
+    // Check for AWS credentials (needed for dry-run test only)
+    const hasAwsCreds = Boolean(
+      process.env.AWS_ACCESS_KEY_ID || 
+      process.env.AWS_SESSION_TOKEN || 
+      process.env.AWS_PROFILE
+    );
+
+    // Test 1: Missing --confirm-tenant (should reject with exit 2)
+    const test1 = spawnSync("node", [
+      "ops/tools/migrate-legacy-workspaces.mjs",
+      "--tenant", "SmokeTenant",
+      "--confirm"
+    ], { encoding: "utf8", env: process.env });
+    
+    const test1Output = (test1.stderr || "") + (test1.stdout || "");
+    const test1Pass = test1.status === 2 && test1Output.includes("--confirm requires --confirm-tenant");
+    testResults.push({
+      name: "missing-confirm-tenant",
+      pass: test1Pass,
+      exitCode: test1.status,
+      expectedExit: 2,
+      output: test1Output.slice(0, 200)
+    });
+    
+    if (!test1Pass) {
+      return {
+        test: "migrate-legacy-workspaces:safety-guards",
+        result: "FAIL",
+        step: "missing-confirm-tenant",
+        expectedExit: 2,
+        actualExit: test1.status,
+        output: test1Output
+      };
+    }
+
+    // Test 2: Mismatched --confirm-tenant (should reject with exit 2)
+    const test2 = spawnSync("node", [
+      "ops/tools/migrate-legacy-workspaces.mjs",
+      "--tenant", "SmokeTenant",
+      "--confirm",
+      "--confirm-tenant", "WrongTenant"
+    ], { encoding: "utf8", env: process.env });
+    
+    const test2Output = (test2.stderr || "") + (test2.stdout || "");
+    const test2Pass = test2.status === 2 && test2Output.includes("does not match target tenant");
+    testResults.push({
+      name: "mismatched-confirm-tenant",
+      pass: test2Pass,
+      exitCode: test2.status,
+      expectedExit: 2,
+      output: test2Output.slice(0, 200)
+    });
+    
+    if (!test2Pass) {
+      return {
+        test: "migrate-legacy-workspaces:safety-guards",
+        result: "FAIL",
+        step: "mismatched-confirm-tenant",
+        expectedExit: 2,
+        actualExit: test2.status,
+        output: test2Output
+      };
+    }
+
+    // Test 3: Dry-run succeeds (no --confirm = safe list-only mode)
+    // NOTE: Dry-run queries DynamoDB, so skip if no AWS credentials (e.g., CI)
+    if (hasAwsCreds) {
+      const test3 = spawnSync("node", [
+        "ops/tools/migrate-legacy-workspaces.mjs",
+        "--tenant", "SmokeTenant"
+      ], { encoding: "utf8", env: process.env });
+      
+      const test3Output = (test3.stderr || "") + (test3.stdout || "");
+      const test3Pass = test3.status === 0 && (
+        test3Output.includes("Dry run") || 
+        test3Output.includes("dryRun")
+      );
+      testResults.push({
+        name: "dry-run-succeeds",
+        pass: test3Pass,
+        exitCode: test3.status,
+        expectedExit: 0,
+        output: test3Output.slice(0, 200)
+      });
+      
+      if (!test3Pass) {
+        return {
+          test: "migrate-legacy-workspaces:safety-guards",
+          result: "FAIL",
+          step: "dry-run-succeeds",
+          expectedExit: 0,
+          actualExit: test3.status,
+          output: test3Output
+        };
+      }
+    } else {
+      // Skip dry-run test when AWS credentials not available (CI-safe)
+      testResults.push({
+        name: "dry-run-succeeds",
+        status: "SKIP",
+        reason: "no AWS credentials in environment"
+      });
+    }
+
+    // All safety guards validated
+    return {
+      test: "migrate-legacy-workspaces:safety-guards",
+      result: "PASS",
+      summary: `Migration tool correctly enforces all safety guards (confirm-tenant match, dry-run default). Dry-run test ${hasAwsCreds ? "executed" : "skipped (no AWS creds)"}`,
+      testResults,
+      awsCredsAvailable: hasAwsCreds
+    };
   }
 };
 

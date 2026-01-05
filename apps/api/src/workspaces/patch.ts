@@ -26,6 +26,14 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const auth = await getAuth(event);
     requirePerm(auth, "workspace:write");
 
+    if (DUALWRITE_LEGACY) {
+      console.warn(JSON.stringify({
+        event: "workspaces:dualwrite_enabled",
+        tenantId: auth.tenantId,
+        op: "patch",
+      }));
+    }
+
     const id = event.pathParameters?.id;
     if (!id) return notFound();
 
