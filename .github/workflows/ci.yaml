@@ -122,6 +122,14 @@ jobs:
       - name: Run core smokes (PR/push)
         run: npm run smokes:run:core
 
+      - name: Upload smoke manifests on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-manifests-core-${{ github.run_id }}
+          path: ops/smoke/.manifests/
+          retention-days: 7
+
   ci-smokes-nightly:
     name: ci-smokes (nightly full)
     runs-on: ubuntu-latest
@@ -147,3 +155,11 @@ jobs:
 
       - name: Run full smoke suite (nightly)
         run: npm run smokes:run:ci
+
+      - name: Upload smoke manifests (nightly)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-manifests-nightly-${{ github.run_id }}
+          path: ops/smoke/.manifests/
+          retention-days: 14
