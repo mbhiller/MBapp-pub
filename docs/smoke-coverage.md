@@ -7,7 +7,36 @@
 
 ## Overview
 
-Smoke tests are integration tests for critical API flows. All tests use idempotency keys for safe retry and include party/vendor seeding. Run with `node ops/smoke/smoke.mjs <test-name>`.
+Smoke tests are integration tests for critical API flows. All tests use idempotency keys for safe retry and include party/vendor seeding.
+
+---
+
+## 🚀 Quick Start
+
+**Before submitting a PR (PR parity — matches CI gating):**
+```bash
+npm run typecheck --workspaces --if-present
+npm run smokes:run:core          # 41 core flows (~3-4 min)
+```
+
+**Run one smoke:**
+```bash
+node ops/smoke/smoke.mjs smoke:inventory:crud
+```
+
+**Run all smokes (local or full suite):**
+```bash
+npm run smokes:run:ci            # All 65 flows (~8-10 min)
+```
+
+**See all blessed commands:**
+```bash
+npm run smokes:help
+```
+
+---
+
+## Overview (Continued)
 
 Sprint I (2026-01-02): No new smokes added; existing backorder → suggest-po → receive loops remain covered via `npm run smokes:run:ci`.
 
@@ -159,23 +188,66 @@ CI will prefer `MBAPP_BEARER_SMOKE` and run under `SmokeTenant` without mismatch
 
 ## How to Run Smokes & Cleanup (Canonical)
 
-### Local-Friendly Run (Current Tenant)
-Run a single smoke flow using your currently logged-in tenant (no SmokeTenant guard). Pass the flow name after `--`.
+### Blessed Commands (Local & CI)
 
-```powershell
+**Before submitting a PR (matches CI PR gating):**
+```bash
+npm run typecheck --workspaces --if-present
+npm run smokes:run:core
+```
+
+**Run single smoke:**
+```bash
+node ops/smoke/smoke.mjs smoke:inventory:crud
+node ops/smoke/smoke.mjs smoke:views:crud
+node ops/smoke/smoke.mjs smoke:workspaces:list
+```
+
+**Run full smoke suite (local or manual CI trigger):**
+```bash
+npm run smokes:run:ci
+```
+
+**Run extended smokes only:**
+```bash
+npm run smokes:run:extended
+```
+
+**Typecheck single workspace:**
+```bash
+npm run typecheck -w apps/api
+```
+
+**See all blessed commands:**
+```bash
+npm run smokes:help
+```
+
+### CI Behavior
+
+| Trigger | Smokes Job | Flows | Time |
+|---------|-----------|-------|------|
+| Pull Request | ci-smokes (core) | 41/65 | ~3-4 min |
+| Push to main | ci-smokes (core) | 41/65 | ~3-4 min |
+| Nightly (2 AM UTC) | ci-smokes-nightly (full) | 65/65 | ~8-10 min |
+
+### Local-Friendly Run (Current Tenant)
+Run a single smoke flow using your currently logged-in tenant (no SmokeTenant guard). Pass the flow name to the smoke runner.
+
+```bash
 # Example: run inventory CRUD against current tenant
-npm run smokes:run -- smoke:inventory:crud
+node ops/smoke/smoke.mjs smoke:inventory:crud
 
 # Or any other flow:
-npm run smokes:run -- smoke:views:crud
-npm run smokes:run -- smoke:workspaces:list
+node ops/smoke/smoke.mjs smoke:views:crud
+node ops/smoke/smoke.mjs smoke:workspaces:list
 ```
 
 Notes:
 - This path uses whatever is in `MBAPP_TENANT_ID` and your current bearer.
 - If your bearer decodes to a different tenant than `MBAPP_TENANT_ID`, you must explicitly opt in:
   - Set `MBAPP_SMOKE_ALLOW_TENANT_MISMATCH=1` to allow running with mismatched token/header.
-- Prefer `smokes:run:ci` for strict `SmokeTenant` runs; it enforces tenant alignment and fails fast if a `SmokeTenant` JWT is not supplied.
+- Prefer `npm run smokes:run:ci` for strict `SmokeTenant` runs; it enforces tenant alignment and fails fast if a `SmokeTenant` JWT is not supplied.
 
 **1) Run CI-style smokes locally (SmokeTenant header, DemoTenant JWT)**
 ```powershell
