@@ -7,6 +7,7 @@
     { "name": "smoke:auth:policy-derivation", "tier": "core" },
     { "name": "smoke:auth:legacy-plural-policy-products-read", "tier": "core" },
     { "name": "smoke:auth:perm-keys-are-lowercase", "tier": "core" },
+    { "name": "smoke:wipe-tool:safety-guards", "tier": "core" },
     { "name": "smoke:line-identity:id-canonical", "tier": "core" },
     { "name": "smoke:salesOrders:patch-lines", "tier": "core" },
     { "name": "smoke:salesOrders:patch-lines-after-submit", "tier": "core" },

@@ -3,6 +3,7 @@ import process from "node:process";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "child_process";
 import { baseGraph } from "./seed/routing.ts";
 import { seedParties, seedVendor, seedCustomer } from "./seed/parties.ts";
 
@@ -13063,6 +13064,132 @@ const tests = {
       summary: "All SO/PO lines have canonical 'id' field; action endpoints accept id-based payloads",
       tests,
       artifacts: { poId, soId, itemId, vendorId }
+    };
+  },
+
+  "smoke:wipe-tool:safety-guards": async () => {
+    // Foundation smoke: Validates wipe-tenant.mjs safety guards (NO ACTUAL DELETES)
+    const testResults = [];
+
+    // Test 1: Missing --confirm-tenant (should reject with exit 2)
+    const test1 = spawnSync("node", [
+      "ops/tools/wipe-tenant.mjs",
+      "--tenant", "SmokeTenant",
+      "--confirm"
+    ], { encoding: "utf8", env: process.env });
+    
+    const test1Output = (test1.stderr || "") + (test1.stdout || "");
+    const test1Pass = test1.status === 2 && test1Output.includes("--confirm requires --confirm-tenant");
+    testResults.push({
+      name: "missing-confirm-tenant",
+      pass: test1Pass,
+      exitCode: test1.status,
+      expectedExit: 2,
+      output: test1Output.slice(0, 200)
+    });
+    
+    if (!test1Pass) {
+      return {
+        test: "wipe-tool:safety-guards",
+        result: "FAIL",
+        step: "missing-confirm-tenant",
+        expectedExit: 2,
+        actualExit: test1.status,
+        output: test1Output
+      };
+    }
+
+    // Test 2: Mismatched --confirm-tenant (should reject with exit 2)
+    const test2 = spawnSync("node", [
+      "ops/tools/wipe-tenant.mjs",
+      "--tenant", "SmokeTenant",
+      "--confirm",
+      "--confirm-tenant", "WrongTenant"
+    ], { encoding: "utf8", env: process.env });
+    
+    const test2Output = (test2.stderr || "") + (test2.stdout || "");
+    const test2Pass = test2.status === 2 && test2Output.includes("does not match target tenant");
+    testResults.push({
+      name: "mismatched-confirm-tenant",
+      pass: test2Pass,
+      exitCode: test2.status,
+      expectedExit: 2,
+      output: test2Output.slice(0, 200)
+    });
+    
+    if (!test2Pass) {
+      return {
+        test: "wipe-tool:safety-guards",
+        result: "FAIL",
+        step: "mismatched-confirm-tenant",
+        expectedExit: 2,
+        actualExit: test2.status,
+        output: test2Output
+      };
+    }
+
+    // Test 3: Non-allowlisted tenant (should reject with exit 2)
+    const test3 = spawnSync("node", [
+      "ops/tools/wipe-tenant.mjs",
+      "--tenant", "HackerTenant",
+      "--confirm",
+      "--confirm-tenant", "HackerTenant"
+    ], { encoding: "utf8", env: process.env });
+    
+    const test3Output = (test3.stderr || "") + (test3.stdout || "");
+    const test3Pass = test3.status === 2 && test3Output.includes("not in allowlist");
+    testResults.push({
+      name: "non-allowlisted-tenant",
+      pass: test3Pass,
+      exitCode: test3.status,
+      expectedExit: 2,
+      output: test3Output.slice(0, 200)
+    });
+    
+    if (!test3Pass) {
+      return {
+        test: "wipe-tool:safety-guards",
+        result: "FAIL",
+        step: "non-allowlisted-tenant",
+        expectedExit: 2,
+        actualExit: test3.status,
+        output: test3Output
+      };
+    }
+
+    // Test 4: Dry-run succeeds (no --confirm = safe list-only mode)
+    const test4 = spawnSync("node", [
+      "ops/tools/wipe-tenant.mjs",
+      "--tenant", "SmokeTenant"
+    ], { encoding: "utf8", env: process.env });
+    
+    const test4Output = (test4.stderr || "") + (test4.stdout || "");
+    const test4Pass = test4.status === 0 && test4Output.includes("Dry run complete");
+    testResults.push({
+      name: "dry-run-succeeds",
+      pass: test4Pass,
+      exitCode: test4.status,
+      expectedExit: 0,
+      output: test4Output.slice(0, 200)
+    });
+    
+    if (!test4Pass) {
+      return {
+        test: "wipe-tool:safety-guards",
+        result: "FAIL",
+        step: "dry-run-succeeds",
+        expectedExit: 0,
+        actualExit: test4.status,
+        output: test4Output
+      };
+    }
+
+    // All safety guards validated
+    return {
+      test: "wipe-tool:safety-guards",
+      result: "PASS",
+      summary: "Wipe tool correctly enforces all safety guards (confirm-tenant match, allowlist, dry-run default)",
+      testResults
     };
   }
 };
