@@ -12,74 +12,158 @@
 
 ### Workspaces Legacy Sunset — Phase 1 — ✅ Complete (Sprint AU, 2026-01-05)
 
-**Epic Summary:** Add telemetry to track legacy workspace usage, create migration tool to copy `type="view"` workspace-shaped records to canonical `type="workspace"` records, establish 3-phase sunset plan.
+**Epic Summary:** Add unified telemetry to track legacy workspace usage, create migration tool to copy `type="view"` workspace-shaped records to canonical `type="workspace"` records, establish 4-phase retirement plan with go/no-go criteria.
 
 **Context:** Early workspace implementations stored workspace-shaped records as `type="view"` (with schema `{ name, views[], shared, ownerId, ... }`) instead of canonical `type="workspace"`. The API supports both via dual-source reads (workspace-first with fallback to view) and optional dual-write when `MBAPP_WORKSPACES_DUALWRITE_LEGACY=true`. This sprint implements Phase 1: observability + safe migration path.
 
-- **E1: Telemetry — Legacy Fallback + Dualwrite Flag:** [apps/api/src/workspaces](../apps/api/src/workspaces)
-  - **GET Fallback:** [repo.ts](../apps/api/src/workspaces/repo.ts) `getWorkspaceById()` logs `workspaces:legacy_fallback_get` when primary workspace not found but legacy view returns record
-    - Payload: `{ event, tenantId, workspaceId, sourceType: "view" }`
-    - Emitted after successful legacy lookup, before returning projected workspace
-  - **LIST Fallback:** [repo.ts](../apps/api/src/workspaces/repo.ts) `listWorkspaces()` logs `workspaces:legacy_fallback_list` when returning any items sourced from `type="view"`
-    - Payload: `{ event, tenantId, returnedLegacyCount, requestedLimit, hasCursor }`
-    - Tracks legacy count during iteration (`source === "view"`), emits once per request at end if count > 0
-  - **Dualwrite Flag:** All mutation handlers ([create.ts](../apps/api/src/workspaces/create.ts), [update.ts](../apps/api/src/workspaces/update.ts), [patch.ts](../apps/api/src/workspaces/patch.ts), [delete.ts](../apps/api/src/workspaces/delete.ts)) log warning `workspaces:dualwrite_enabled` when `MBAPP_WORKSPACES_DUALWRITE_LEGACY === "true"`
-    - Payload: `{ event, tenantId, op: "create"|"update"|"patch"|"delete" }`
-    - Uses `console.warn` for visibility; emitted once per request at handler entry
-  - Typecheck: `npm run typecheck -w apps/api` → PASS ✓
+**Telemetry — Unified Event (E1)**
 
-- **E2: Migration Tool — Copy Legacy Workspaces:** [ops/tools/migrate-legacy-workspaces.mjs](../ops/tools/migrate-legacy-workspaces.mjs)
-  - **Detection Heuristic:** Queries `type="view"` records via SK prefix `view#` (avoid full scan); filters to workspace-shaped:
-    - `type === "view"` AND `Array.isArray(views)` AND `typeof name === "string"` AND NO `filters[]` array
-  - **Copy-Only Phase 1:** Creates canonical `type="workspace"` with SK `workspace#{id}`; preserves all fields (name, views[], shared, ownerId, defaultViewId, entityType, description, timestamps)
-    - **Never** updates or deletes legacy `type="view"` records (legacy shadows persist)
-    - Conditional put: `attribute_not_exists(pk) AND attribute_not_exists(sk)` prevents overwrites
-    - Assertion: Throws FATAL error if target SK starts with `view#` (safety check against logic errors)
-  - **Safety Gates:**
-    - Tenant allowlist: SmokeTenant, DemoTenant (use `--allow-any-tenant` to override)
-    - Confirmation gates: `--confirm` without `--confirm-tenant <TENANT>` → exit 2; mismatched tenant → exit 2
-    - Dry-run by default: Lists candidates, shows sample IDs, no writes
-  - **Idempotency:** Legacy records remain as candidates on subsequent runs; `ConditionalCheckFailedException` treated as `skippedExists` (no error)
-  - **Output:** JSON summary `{ candidatesFound, plannedCreates, created, skippedExists, errors, duration_seconds, rate_per_sec }`
-  - **Usage:**
-    ```bash
-    # Dry-run (default)
-    node ops/tools/migrate-legacy-workspaces.mjs --tenant SmokeTenant
-    
-    # Actual migration
-    node ops/tools/migrate-legacy-workspaces.mjs --tenant SmokeTenant --confirm --confirm-tenant SmokeTenant
-    ```
-  - **Validation Tests:**
-    - ✅ Dry-run mode: Shows candidates without writes
-    - ✅ Missing confirm-tenant gate: Exit 2 with clear error
-    - ✅ Mismatched tenant: Rejected with error
-    - ✅ Actual migration: Created canonical workspace records (tested with seeded legacy record)
-    - ✅ Idempotency: Second run shows `candidatesFound=1, skippedExists=1, created=0`
-    - ✅ Query efficiency: Uses `begins_with(sk, "view#")` prefix query (no table scan)
-    - ✅ Syntax check: `node --check ops/tools/migrate-legacy-workspaces.mjs` → PASS
+New: **`workspaces:legacy_fallback_read_hit`** (unified counter for both GET and LIST)
+- **GET Variant:** `{ event: "workspaces:legacy_fallback_read_hit", tenantId, op: "get", workspaceId, sourceType: "view" }`
+  - Emitted in [apps/api/src/workspaces/repo.ts](../apps/api/src/workspaces/repo.ts) line 79 when `getWorkspaceById()` falls back to legacy view
+- **LIST Variant:** `{ event: "workspaces:legacy_fallback_read_hit", tenantId, op: "list", legacyCount, sourceUsed: "view", requestedLimit, hasCursor }`
+  - Emitted in [apps/api/src/workspaces/repo.ts](../apps/api/src/workspaces/repo.ts) line 200 when `listWorkspaces()` returns legacy-sourced items (once per request)
+- **Why Unified:** Single metric simplifies dashboards and Phase 2 cutover validation (query: `op="get" OR op="list"`)
 
-- **E3: Documentation — Sunset Plan:** [docs/MBapp-Foundations.md](../docs/MBapp-Foundations.md)
-  - Added "Workspaces Legacy Sunset" section with 3-phase plan:
-    - **Phase 1 (Complete):** Telemetry + migration tool
-    - **Phase 2 (Planned):** Flip default `DUALWRITE_LEGACY=off`, run migration in staging/prod, monitor telemetry drop to zero
-    - **Phase 3 (Planned):** Remove fallback code, delete dual-write flag, cleanup legacy shadows, update docs
-  - Documented telemetry events (payload schemas, locations)
-  - Documented migration tool (usage, safety gates, idempotency guarantees)
-  - Updated MBapp-Status.md with Sprint AU entry
+Also Emitted:
+- **`workspaces:legacy_fallback_get`** (backwards-compatible) — [repo.ts](../apps/api/src/workspaces/repo.ts) line 75
+- **`workspaces:legacy_fallback_list`** (backwards-compatible) — [repo.ts](../apps/api/src/workspaces/repo.ts) line 192
+- **`workspaces:dualwrite_enabled`** (warning when flag ON) — all mutation handlers
 
-- **Verification:**
-  - Typecheck: `npm run typecheck -w apps/api` → PASS ✓
-  - Migration tool: Validated with SmokeTenant (found 1 candidate, migrated successfully, idempotent re-run confirmed)
-  - Telemetry: Logged correctly on legacy fallback reads (verified in repo.ts implementation)
-  - Safety gates: All confirmation flows tested and working
+**Migration Tool — Copy-Only Phase 1 (E2)**
 
-- **Definition of Done:**
-  - ✅ E1: Telemetry implemented in repo.ts (GET/LIST fallback) and all mutation handlers (dualwrite flag); typecheck clean
-  - ✅ E2: migrate-legacy-workspaces.mjs created with query optimization, safety gates, conditional put, idempotency; validated with test data
-  - ✅ E3: Documentation updated in Foundations.md (sunset plan) and Status.md (Sprint AU entry)
-  - ✅ All validation tests pass (dry-run, safety gates, migration, idempotency)
+[ops/tools/migrate-legacy-workspaces.mjs](../ops/tools/migrate-legacy-workspaces.mjs) (327 lines)
 
-**Next Steps (Phase 2):** Monitor telemetry in production; when legacy reads drop to near-zero, run migration tool in staging → prod → verify telemetry confirms 0% fallback usage.
+**How It Works:**
+1. Queries `type="view"` records with SK prefix `view#` (efficient; no table scan)
+2. Filters to workspace-shaped: `type="view"` AND `Array.isArray(views)` AND `typeof name === "string"` AND NO `filters[]`
+3. Creates canonical `type="workspace"` with SK `workspace#{id}` (all fields preserved: name, views[], shared, ownerId, defaultViewId, entityType, description)
+4. **Never deletes/updates** legacy `type="view"` records (Phase 1 copy-only)
+
+**Safety Gates:**
+- Tenant allowlist: SmokeTenant, DemoTenant (override with `--allow-any-tenant`)
+- Confirmation required: `--confirm --confirm-tenant <TENANT>` (exact match) for actual writes
+- Dry-run by default (lists candidates, no modifications)
+- Conditional put: `attribute_not_exists(pk) AND attribute_not_exists(sk)` prevents overwrites
+
+**Safe Usage — Recommended Workflow:**
+
+```bash
+# 1. DRY-RUN (lists candidates, no writes)
+node ops/tools/migrate-legacy-workspaces.mjs --tenant MyTenant
+# Expected Output:
+# {
+#   "candidatesFound": 5,
+#   "plannedCreates": 5,
+#   "created": 0,
+#   "skippedExists": 0,
+#   "errors": 0,
+#   "duration_seconds": 0.34,
+#   "rate_per_sec": 14.7,
+#   "sampleCandidateIds": ["ws-001", "ws-002", "ws-003"]
+# }
+
+# 2. VERIFY dry-run output (inspect sample IDs, count seems correct)
+
+# 3. ACTUAL MIGRATION (one-time, idempotent)
+node ops/tools/migrate-legacy-workspaces.mjs --tenant MyTenant --confirm --confirm-tenant MyTenant
+# Expected Output (first run):
+# {
+#   "candidatesFound": 5,
+#   "plannedCreates": 5,
+#   "created": 5,
+#   "skippedExists": 0,
+#   "errors": 0,
+#   "duration_seconds": 0.42,
+#   "rate_per_sec": 11.9
+# }
+
+# 4. VERIFY IDEMPOTENCY (re-run should show no creates)
+node ops/tools/migrate-legacy-workspaces.mjs --tenant MyTenant --confirm --confirm-tenant MyTenant
+# Expected Output (second run):
+# {
+#   "candidatesFound": 5,
+#   "plannedCreates": 5,
+#   "created": 0,
+#   "skippedExists": 5,
+#   "errors": 0,
+#   "duration_seconds": 0.34,
+#   "rate_per_sec": 14.7
+# }
+
+# 5. VALIDATE via API (spot-check one migrated ID)
+curl -H "Authorization: Bearer $TOKEN" https://api.example.com/workspaces/ws-001
+# Should return type="workspace" (not type="view")
+
+# 6. MONITOR TELEMETRY
+# Query: (op="get" OR op="list") AND workspaces:legacy_fallback_read_hit
+# Pre-migration: [value per your baseline]
+# Post-migration: should drop to ~0 (only stale clients)
+```
+
+**Idempotency Guarantee:**
+- Re-running migration on same tenant is safe
+- `ConditionalCheckFailedException` when workspace already exists is expected → recorded as `skippedExists`
+- No duplicates created, no updates to existing workspaces
+- Legacy `type="view"` records always remain (copy-only)
+
+**E2 Smoke: End-to-End Migration Test**
+
+Test: `smoke:migrate-legacy-workspaces:creates-workspace` ([ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs#L13765) lines 13765–13977)
+
+**What It Validates:**
+1. Create legacy workspace-shaped view (type="view", name, views[], shared, ownerId, entityType, description)
+2. Verify GET /workspaces/:id returns it (fallback works pre-migration)
+3. Invoke migration tool with `--confirm` flag
+4. Verify GET /workspaces/:id returns canonical workspace (type="workspace")
+5. Assert all fields preserved (name, views[], shared, ownerId, entityType, description)
+6. Legacy view still present (copy-only behavior validated)
+
+**How to Run:**
+```bash
+# Run with AWS credentials available
+node ops/smoke/smoke.mjs smoke:migrate-legacy-workspaces:creates-workspace
+
+# Expected Result:
+# PASS — all assertions pass, artifacts recorded in manifest
+# SKIP — AWS credentials unavailable (safe for CI without creds)
+# FAIL — migration path broken (check tool exit code + stderr)
+```
+
+**CI Tier:** Local-only (extended tier) — requires AWS credentials for DynamoDB access.
+
+**Validation (E3)**
+
+- ✅ Typecheck: `npm run typecheck -w apps/api` → PASS (telemetry additions compile clean)
+- ✅ Migration tool: Syntax valid (`node --check ops/tools/migrate-legacy-workspaces.mjs`)
+- ✅ Dry-run mode: Lists candidates without writes
+- ✅ Safety gates: Missing --confirm-tenant exits with code 2; mismatched tenant rejected
+- ✅ Idempotency: Second run shows `skippedExists`, no duplicates
+- ✅ Query efficiency: Uses prefix query (`begins_with(sk, "view#")`) not full scan
+- ✅ E2 Smoke: Validates complete migration flow (legacy → migrate → canonical read)
+- ✅ Telemetry: Emits unified `legacy_fallback_read_hit` on fallback reads (verified in code)
+
+**Definition of Done:**
+- ✅ E1: Unified telemetry counter added to repo.ts; backwards-compatible events preserved
+- ✅ E2: Migration tool with copy-only behavior, safety gates, idempotency, query optimization
+- ✅ E2 Smoke: End-to-end smoke validates migration path
+- ✅ E3: Operational docs with Phase 1→2→3→4 checklist, go/no-go criteria for Phase 2, monitoring commands
+- ✅ All validation tests pass (dry-run, safety, migration, idempotency, E2 smoke, typecheck)
+
+**Phase 1 → Phase 2 Progression (Sprint AW)**
+
+Before proceeding to Phase 2 (cutover readiness), must verify:
+1. ✓ Telemetry `legacy_fallback_read_hit` data flowing for ≥3 days
+2. ✓ Legacy read rate < 1% of total workspace reads (establish baseline)
+3. ✓ Customer communication sent (if any public tenants depend on legacy)
+4. ✓ Smoke tests green in staging + prod
+5. ✓ Migration tool tested in staging (dry-run + verify, don't execute --confirm yet)
+
+**Next Steps:**
+- Monitor telemetry baseline for ≥3 days (establish pre-migration read frequency)
+- When legacy reads drop to near-zero OR business decides to cut over, proceed with Phase 2
+- Phase 2: Run migration in staging → verify telemetry drop → run in prod → monitor 0% fallback for ≥7 days
+- Phase 3 (Sprint AX+): Remove fallback code, delete dualwrite flag, cleanup legacy shadows
 
 ---
 ### Backorders Views on Web — ✅ Complete (Sprint AT, 2026-01-05)

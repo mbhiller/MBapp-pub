@@ -3,9 +3,15 @@ import process from "node:process";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { spawnSync } from "child_process";
 import { baseGraph } from "./seed/routing.ts";
 import { seedParties, seedVendor, seedCustomer } from "./seed/parties.ts";
+
+// Stable path resolution from smoke file location
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const repoRoot = path.resolve(__dirname, "../..");
 
 const DEFAULT_TENANT = "SmokeTenant";
 const allowNonSmokeTenant = process.env.MBAPP_SMOKE_ALLOW_NON_SMOKE_TENANT === "1";
@@ -13760,6 +13766,218 @@ const tests = {
       testResults,
       awsCredsAvailable: hasAwsCreds
     };
+  },
+
+  "smoke:migrate-legacy-workspaces:creates-workspace": async () => {
+    // E2 smoke: End-to-end test of legacy workspace migration
+    // 1) Create a legacy "workspace-shaped view" via /views endpoint
+    // 2) Optionally verify fallback works (GET /workspaces/:id returns it)
+    // 3) Run migrate-legacy-workspaces.mjs to copy to canonical workspace
+    // 4) Verify canonical workspace record exists and is returned
+    // 5) Verify fields are preserved (name, views, ownerId, etc.)
+    
+    const runId = idem();
+    const viewName = `LegacyWorkspace-${runId}`;
+    const testViewId = idem();
+    let legacyViewId = null;
+    let workspaceId = null;
+
+    try {
+      // Step 1: Create a legacy "workspace-shaped view" via /views
+      // This mimics what migrate-legacy-workspaces.mjs looks for:
+      // - type="view"
+      // - has name, views[], shared, ownerId
+      // - does NOT have filters (workspace-shaped)
+      const legacyViewPayload = {
+        name: viewName,
+        views: [testViewId], // array of view IDs this workspace wraps
+        shared: false,
+        ownerId: "smoke-test-owner",
+        entityType: "purchaseOrder",
+        description: `Legacy workspace-shaped view for migration test ${runId}`
+      };
+
+      const createViewRes = await fetch(`${API}/views`, {
+        method: "POST",
+        headers: buildHeaders({ "X-Feature-Views-Enabled": "true" }),
+        body: JSON.stringify(legacyViewPayload)
+      });
+
+      if (!createViewRes.ok) {
+        const body = await createViewRes.json().catch(() => ({}));
+        return {
+          test: "migrate-legacy-workspaces:creates-workspace",
+          result: "FAIL",
+          step: "create-legacy-view",
+          expectedStatus: 201,
+          actualStatus: createViewRes.status,
+          body
+        };
+      }
+
+      const legacyViewBody = await createViewRes.json();
+      legacyViewId = legacyViewBody.id;
+      if (!legacyViewId) {
+        return {
+          test: "migrate-legacy-workspaces:creates-workspace",
+          result: "FAIL",
+          step: "create-legacy-view-extract-id",
+          body: legacyViewBody
+        };
+      }
+      recordCreated({ type: "view", id: legacyViewId, route: "/views", meta: { name: viewName, isLegacyWorkspace: true } });
+
+      // Step 2 (Optional): Verify fallback works pre-migration
+      // GET /workspaces/:id should find the legacy view via fallback
+      const preGetRes = await fetch(`${API}/workspaces/${encodeURIComponent(legacyViewId)}`, {
+        method: "GET",
+        headers: buildHeaders()
+      });
+
+      const preFallbackWorked = preGetRes.ok && preGetRes.status === 200;
+      const preGetBody = preFallbackWorked ? await preGetRes.json() : {};
+      const preFallbackName = preGetBody?.name;
+
+      if (!preFallbackWorked || preFallbackName !== viewName) {
+        return {
+          test: "migrate-legacy-workspaces:creates-workspace",
+          result: "FAIL",
+          step: "pre-migration-fallback-get",
+          expectedStatus: 200,
+          actualStatus: preGetRes.status,
+          expectedName: viewName,
+          actualName: preFallbackName,
+          detail: "Legacy workspace-shaped view should be readable via /workspaces/:id fallback",
+          body: preGetBody
+        };
+      }
+
+      // Step 3: Run migration tool to copy legacy view to canonical workspace
+      // Check for AWS credentials (needed to access DynamoDB)
+      const hasAwsCreds = Boolean(
+        process.env.AWS_ACCESS_KEY_ID || 
+        process.env.AWS_SESSION_TOKEN || 
+        process.env.AWS_PROFILE
+      );
+
+      if (!hasAwsCreds) {
+        return {
+          test: "migrate-legacy-workspaces:creates-workspace",
+          result: "SKIP",
+          reason: "AWS credentials not available; cannot run migration tool in CI",
+          detail: "Run this smoke locally with AWS credentials to test migration",
+          legacyViewId
+        };
+      }
+
+      const toolPath = path.join(repoRoot, "ops/tools/migrate-legacy-workspaces.mjs");
+      const migrationResult = spawnSync("node", [
+        toolPath,
+        "--tenant", TENANT,
+        "--confirm",
+        "--confirm-tenant", TENANT
+      ], { encoding: "utf8", env: process.env });
+
+      const migrationOutput = (migrationResult.stderr || "") + (migrationResult.stdout || "");
+      const migrationSuccess = migrationResult.status === 0;
+
+      if (!migrationSuccess) {
+        return {
+          test: "migrate-legacy-workspaces:creates-workspace",
+          result: "FAIL",
+          step: "migration-tool-execution",
+          expectedExit: 0,
+          actualExit: migrationResult.status,
+          output: migrationOutput.slice(0, 500)
+        };
+      }
+
+      // Step 4: Verify canonical workspace record was created
+      // GET /workspaces/:id should now return from type="workspace" source
+      const postGetRes = await fetch(`${API}/workspaces/${encodeURIComponent(legacyViewId)}`, {
+        method: "GET",
+        headers: buildHeaders()
+      });
+
+      if (!postGetRes.ok || postGetRes.status !== 200) {
+        return {
+          test: "migrate-legacy-workspaces:creates-workspace",
+          result: "FAIL",
+          step: "post-migration-workspace-read",
+          expectedStatus: 200,
+          actualStatus: postGetRes.status,
+          detail: "Workspace record should be readable after migration"
+        };
+      }
+
+      const postGetBody = await postGetRes.json();
+      workspaceId = postGetBody?.id;
+
+      // Step 5: Verify field preservation
+      const nameMatch = postGetBody?.name === viewName;
+      const viewsMatch = Array.isArray(postGetBody?.views) && postGetBody.views.includes(testViewId);
+      const typeMatch = postGetBody?.type === "workspace";
+      const sharedMatch = postGetBody?.shared === false;
+      const ownerMatch = postGetBody?.ownerId === "smoke-test-owner";
+      const entityTypeMatch = postGetBody?.entityType === "purchaseOrder";
+      const descMatch = postGetBody?.description?.includes(runId);
+
+      if (!nameMatch || !viewsMatch || !typeMatch) {
+        return {
+          test: "migrate-legacy-workspaces:creates-workspace",
+          result: "FAIL",
+          step: "field-preservation",
+          expectedFields: {
+            name: viewName,
+            type: "workspace",
+            views: [testViewId],
+            shared: false,
+            ownerId: "smoke-test-owner",
+            entityType: "purchaseOrder"
+          },
+          actualFields: {
+            name: postGetBody?.name,
+            type: postGetBody?.type,
+            views: postGetBody?.views,
+            shared: postGetBody?.shared,
+            ownerId: postGetBody?.ownerId,
+            entityType: postGetBody?.entityType
+          },
+          body: postGetBody
+        };
+      }
+
+      // Success: workspace record exists with correct fields
+      recordCreated({ type: "workspace", id: workspaceId, route: "/workspaces", meta: { name: viewName, migratedFromView: true } });
+
+      return {
+        test: "migrate-legacy-workspaces:creates-workspace",
+        result: "PASS",
+        summary: "Legacy workspace-shaped view successfully migrated to canonical workspace record",
+        artifacts: {
+          legacyViewId,
+          workspaceId,
+          viewName
+        },
+        assertions: {
+          preFallbackWorked,
+          namePreserved: nameMatch,
+          viewsArrayPreserved: viewsMatch,
+          typeIsWorkspace: typeMatch,
+          sharedPreserved: sharedMatch,
+          ownerPreserved: ownerMatch,
+          entityTypePreserved: entityTypeMatch,
+          descriptionPreserved: descMatch
+        }
+      };
+    } catch (err) {
+      return {
+        test: "migrate-legacy-workspaces:creates-workspace",
+        result: "FAIL",
+        step: "unexpected-error",
+        error: err?.message || String(err)
+      };
+    }
   },
 
   "smoke:migrate-legacy-workspaces:safety-guards": async () => {

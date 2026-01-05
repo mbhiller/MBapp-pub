@@ -70,11 +70,20 @@ export async function getWorkspaceById({ tenantId, id, fields }: GetWorkspaceArg
 
   const legacy = await getObjectById({ tenantId, type: "view", id, fields });
   if (legacy) {
-    // Emit telemetry for legacy fallback hit
+    // Emit legacy fallback counters on GET hit
+    // 1. Backwards-compatible event
     console.log(JSON.stringify({
       event: "workspaces:legacy_fallback_get",
       workspaceId: id,
       tenantId,
+      sourceType: "view",
+    }));
+    // 2. Unified fallback counter (across get/list)
+    console.log(JSON.stringify({
+      event: "workspaces:legacy_fallback_read_hit",
+      tenantId,
+      op: "get",
+      workspaceId: id,
       sourceType: "view",
     }));
     return projectWorkspace(legacy);
@@ -181,12 +190,23 @@ export async function listWorkspaces({
 
   // Emit telemetry if any legacy items were returned
   if (legacyCount > 0) {
+    // 1. Backwards-compatible event
     console.log(JSON.stringify({
       event: "workspaces:legacy_fallback_list",
       tenantId,
       returnedLegacyCount: legacyCount,
       requestedLimit: limit,
       hasCursor: !!next,
+    }));
+    // 2. Unified fallback counter (across get/list)
+    console.log(JSON.stringify({
+      event: "workspaces:legacy_fallback_read_hit",
+      tenantId,
+      op: "list",
+      legacyCount,
+      requestedLimit: limit,
+      hasCursor: !!next,
+      sourceUsed: "view",
     }));
   }
 
