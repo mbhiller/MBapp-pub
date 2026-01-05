@@ -5,6 +5,78 @@
 **Workflow & DoD:** See [MBapp-Cadence.md](MBapp-Cadence.md) for canonical workflow, Definition of Done, and testing rules.
 
 ---
+### Workspaces Legacy Sunset — Phase 1 — ✅ Complete (Sprint AU, 2026-01-05)
+
+**Epic Summary:** Add telemetry to track legacy workspace usage, create migration tool to copy `type="view"` workspace-shaped records to canonical `type="workspace"` records, establish 3-phase sunset plan.
+
+**Context:** Early workspace implementations stored workspace-shaped records as `type="view"` (with schema `{ name, views[], shared, ownerId, ... }`) instead of canonical `type="workspace"`. The API supports both via dual-source reads (workspace-first with fallback to view) and optional dual-write when `MBAPP_WORKSPACES_DUALWRITE_LEGACY=true`. This sprint implements Phase 1: observability + safe migration path.
+
+- **E1: Telemetry — Legacy Fallback + Dualwrite Flag:** [apps/api/src/workspaces](../apps/api/src/workspaces)
+  - **GET Fallback:** [repo.ts](../apps/api/src/workspaces/repo.ts) `getWorkspaceById()` logs `workspaces:legacy_fallback_get` when primary workspace not found but legacy view returns record
+    - Payload: `{ event, tenantId, workspaceId, sourceType: "view" }`
+    - Emitted after successful legacy lookup, before returning projected workspace
+  - **LIST Fallback:** [repo.ts](../apps/api/src/workspaces/repo.ts) `listWorkspaces()` logs `workspaces:legacy_fallback_list` when returning any items sourced from `type="view"`
+    - Payload: `{ event, tenantId, returnedLegacyCount, requestedLimit, hasCursor }`
+    - Tracks legacy count during iteration (`source === "view"`), emits once per request at end if count > 0
+  - **Dualwrite Flag:** All mutation handlers ([create.ts](../apps/api/src/workspaces/create.ts), [update.ts](../apps/api/src/workspaces/update.ts), [patch.ts](../apps/api/src/workspaces/patch.ts), [delete.ts](../apps/api/src/workspaces/delete.ts)) log warning `workspaces:dualwrite_enabled` when `MBAPP_WORKSPACES_DUALWRITE_LEGACY === "true"`
+    - Payload: `{ event, tenantId, op: "create"|"update"|"patch"|"delete" }`
+    - Uses `console.warn` for visibility; emitted once per request at handler entry
+  - Typecheck: `npm run typecheck -w apps/api` → PASS ✓
+
+- **E2: Migration Tool — Copy Legacy Workspaces:** [ops/tools/migrate-legacy-workspaces.mjs](../ops/tools/migrate-legacy-workspaces.mjs)
+  - **Detection Heuristic:** Queries `type="view"` records via SK prefix `view#` (avoid full scan); filters to workspace-shaped:
+    - `type === "view"` AND `Array.isArray(views)` AND `typeof name === "string"` AND NO `filters[]` array
+  - **Copy-Only Phase 1:** Creates canonical `type="workspace"` with SK `workspace#{id}`; preserves all fields (name, views[], shared, ownerId, defaultViewId, entityType, description, timestamps)
+    - **Never** updates or deletes legacy `type="view"` records (legacy shadows persist)
+    - Conditional put: `attribute_not_exists(pk) AND attribute_not_exists(sk)` prevents overwrites
+    - Assertion: Throws FATAL error if target SK starts with `view#` (safety check against logic errors)
+  - **Safety Gates:**
+    - Tenant allowlist: SmokeTenant, DemoTenant (use `--allow-any-tenant` to override)
+    - Confirmation gates: `--confirm` without `--confirm-tenant <TENANT>` → exit 2; mismatched tenant → exit 2
+    - Dry-run by default: Lists candidates, shows sample IDs, no writes
+  - **Idempotency:** Legacy records remain as candidates on subsequent runs; `ConditionalCheckFailedException` treated as `skippedExists` (no error)
+  - **Output:** JSON summary `{ candidatesFound, plannedCreates, created, skippedExists, errors, duration_seconds, rate_per_sec }`
+  - **Usage:**
+    ```bash
+    # Dry-run (default)
+    node ops/tools/migrate-legacy-workspaces.mjs --tenant SmokeTenant
+    
+    # Actual migration
+    node ops/tools/migrate-legacy-workspaces.mjs --tenant SmokeTenant --confirm --confirm-tenant SmokeTenant
+    ```
+  - **Validation Tests:**
+    - ✅ Dry-run mode: Shows candidates without writes
+    - ✅ Missing confirm-tenant gate: Exit 2 with clear error
+    - ✅ Mismatched tenant: Rejected with error
+    - ✅ Actual migration: Created canonical workspace records (tested with seeded legacy record)
+    - ✅ Idempotency: Second run shows `candidatesFound=1, skippedExists=1, created=0`
+    - ✅ Query efficiency: Uses `begins_with(sk, "view#")` prefix query (no table scan)
+    - ✅ Syntax check: `node --check ops/tools/migrate-legacy-workspaces.mjs` → PASS
+
+- **E3: Documentation — Sunset Plan:** [docs/MBapp-Foundations.md](../docs/MBapp-Foundations.md)
+  - Added "Workspaces Legacy Sunset" section with 3-phase plan:
+    - **Phase 1 (Complete):** Telemetry + migration tool
+    - **Phase 2 (Planned):** Flip default `DUALWRITE_LEGACY=off`, run migration in staging/prod, monitor telemetry drop to zero
+    - **Phase 3 (Planned):** Remove fallback code, delete dual-write flag, cleanup legacy shadows, update docs
+  - Documented telemetry events (payload schemas, locations)
+  - Documented migration tool (usage, safety gates, idempotency guarantees)
+  - Updated MBapp-Status.md with Sprint AU entry
+
+- **Verification:**
+  - Typecheck: `npm run typecheck -w apps/api` → PASS ✓
+  - Migration tool: Validated with SmokeTenant (found 1 candidate, migrated successfully, idempotent re-run confirmed)
+  - Telemetry: Logged correctly on legacy fallback reads (verified in repo.ts implementation)
+  - Safety gates: All confirmation flows tested and working
+
+- **Definition of Done:**
+  - ✅ E1: Telemetry implemented in repo.ts (GET/LIST fallback) and all mutation handlers (dualwrite flag); typecheck clean
+  - ✅ E2: migrate-legacy-workspaces.mjs created with query optimization, safety gates, conditional put, idempotency; validated with test data
+  - ✅ E3: Documentation updated in Foundations.md (sunset plan) and Status.md (Sprint AU entry)
+  - ✅ All validation tests pass (dry-run, safety gates, migration, idempotency)
+
+**Next Steps (Phase 2):** Monitor telemetry in production; when legacy reads drop to near-zero, run migration tool in staging → prod → verify telemetry confirms 0% fallback usage.
+
+---
 ### Backorders Views on Web — ✅ Complete (Sprint AT, 2026-01-05)
 
 **Epic Summary:** Enable Backorders list to support Views (apply/save filters); implement forward and reverse mappers for view-to-state conversions; validate end-to-end with smoke test.

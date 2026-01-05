@@ -278,6 +278,64 @@ See [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) for full OpenAPI defin
 - **API RBAC:** All 12 Views/Workspaces endpoints annotated with `x-mbapp-permission` (view:read, view:write, workspace:read, workspace:write); enforced at API layer.
 - **Generated Permissions:** `PERM_VIEW_READ`, `PERM_VIEW_WRITE`, `PERM_WORKSPACE_READ`, `PERM_WORKSPACE_WRITE` exported in web/mobile/spec generated files.
 - **Web UX:** SaveViewButton and ViewSelector permission-gated by `PERM_VIEW_WRITE`; disabled when `!canWriteViews`, 403 errors show "Access denied — required: view:write".
+
+**Workspaces Legacy Sunset — Phase 1 Complete (Sprint AU):**
+
+*Context:* Early workspace implementations stored workspace-shaped records as `type="view"` with schema `{ name, views[], shared, ownerId, ... }` instead of canonical `type="workspace"`. Current API supports both via dual-source reads (workspace-first, fallback to view) and optional dual-write when `MBAPP_WORKSPACES_DUALWRITE_LEGACY=true`.
+
+**Phase 1: Telemetry + Migration Tool (2026-01-05)**
+- **Telemetry Added:**
+  - `workspaces:legacy_fallback_get` — Logged when GET workspace falls back to `type="view"` record
+    - Payload: `{ event, tenantId, workspaceId, sourceType: "view" }`
+    - Location: [apps/api/src/workspaces/repo.ts](../apps/api/src/workspaces/repo.ts) `getWorkspaceById()`
+  - `workspaces:legacy_fallback_list` — Logged when LIST returns any legacy-sourced items
+    - Payload: `{ event, tenantId, returnedLegacyCount, requestedLimit, hasCursor }`
+    - Location: [apps/api/src/workspaces/repo.ts](../apps/api/src/workspaces/repo.ts) `listWorkspaces()`
+    - Emits once per request (not per item)
+  - `workspaces:dualwrite_enabled` — Warning logged when dual-write flag is ON
+    - Payload: `{ event, tenantId, op: "create"|"update"|"patch"|"delete" }`
+    - Location: All mutation handlers (create.ts, update.ts, patch.ts, delete.ts)
+    - Uses `console.warn` for visibility
+
+- **Migration Tool:** [ops/tools/migrate-legacy-workspaces.mjs](../ops/tools/migrate-legacy-workspaces.mjs)
+  - **Purpose:** Copy-only migration of legacy `type="view"` workspace-shaped records → canonical `type="workspace"` records
+  - **Detection Heuristic:** `type="view"` AND `Array.isArray(views)` AND `typeof name === "string"` AND NO `filters[]` array (excludes pure view records)
+  - **Query Optimization:** Uses SK prefix `view#` to avoid full table scans
+  - **Safety Gates:**
+    - Tenant allowlist: SmokeTenant, DemoTenant (use `--allow-any-tenant` to override)
+    - Confirm requirement: `--confirm` AND `--confirm-tenant <TENANT>` (exact match) required for writes
+    - Dry-run by default: Lists candidates without modifications
+  - **Copy-Only Enforcement:**
+    - Creates `type="workspace"` record with SK `workspace#{id}` (preserves all fields: name, views[], shared, ownerId, defaultViewId, etc.)
+    - **Never** updates or deletes legacy `type="view"` records (Phase 1 only creates canonical records)
+    - Conditional put: `attribute_not_exists(pk) AND attribute_not_exists(sk)` prevents overwrites
+    - Assertion: Throws FATAL error if target SK starts with `view#`
+  - **Idempotency:** Legacy records persist as candidates; subsequent runs show `skippedExists` count when workspace already exists
+  - **Usage:**
+    ```bash
+    # Dry-run (list candidates, no changes)
+    node ops/tools/migrate-legacy-workspaces.mjs --tenant SmokeTenant
+    
+    # Actual migration (requires confirmation)
+    node ops/tools/migrate-legacy-workspaces.mjs --tenant SmokeTenant --confirm --confirm-tenant SmokeTenant
+    ```
+  - **Output:** JSON summary with `{ candidatesFound, plannedCreates, created, skippedExists, errors, duration_seconds, rate_per_sec }`
+
+**Phase 2: Deprecation + Migration (Planned)**
+- Flip default: Set `MBAPP_WORKSPACES_DUALWRITE_LEGACY=off` by default (currently OFF, document enforcement)
+- Run migration tool in staging/prod (after telemetry confirms low/zero legacy reads)
+- Monitor telemetry post-migration: `workspaces:legacy_fallback_*` events should drop to zero
+- Timeline: 1–2 sprints after Phase 1
+
+**Phase 3: Cleanup (Planned)**
+- Remove fallback code: Delete dual-source logic from `getWorkspaceById()` and `listWorkspaces()`
+- Remove dual-write: Delete `MBAPP_WORKSPACES_DUALWRITE_LEGACY` flag and conditional writes from all mutation handlers
+- Delete legacy records: Run cleanup script to remove `type="view"` workspace-shaped shadows (after confirming 0% fallback reads)
+- Update docs: Remove legacy compatibility notes from Foundations
+- Timeline: 1 sprint after Phase 2 telemetry confirms migration success
+
+**Current State:** Phase 1 complete. Telemetry active; migration tool validated. No legacy reads detected in SmokeTenant after migration.
+
 - **Mobile UX:** ViewsManageScreen rename/delete permission-gated by `PERM_VIEW_WRITE`; disabled buttons (opacity 0.5), 403 errors show clear permission messaging.
 - **Web Workspace Hub:** Polished with view count, default view indicator, and "Open" buttons (WorkspacesListPage + WorkspaceDetailPage).
 - **Filter Mapping:** Remains best-effort per entityType; unsupported filters warned in UI (e.g., "Some filters may not be supported for this entity type").
