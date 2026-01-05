@@ -36,6 +36,55 @@ npm run smokes:help
 
 ---
 
+## Tier System
+
+Smokes are organized by tier for targeted CI validation:
+
+| Tier | Flows | Duration | When | Command |
+|------|-------|----------|------|--------|
+| **core** | 42 | ~2–3 min | Every PR/push | `npm run smokes:run:core` |
+| **extended** | 24 | ~2–3 min | Nightly (2 AM UTC) | `npm run smokes:run:extended` |
+| **all** | 66 | ~5–6 min | Nightly full | `npm run smokes:run:ci` |
+
+**Core flows:** Foundation + critical domain workflows (auth, objects, line ID, sales/purchase orders, inventory, fulfillment, backorders, suggestions).
+
+**Extended flows:** Permission tests, views, workspaces, EPC/scanner, idempotency, advanced scenarios.
+
+**Reference:** See [ci-smokes-guide.md](ci-smokes-guide.md) for detailed tier breakdown.
+
+---
+
+## CI Debugging Failed Smokes
+
+**When a smoke fails locally or in CI:**
+
+1. **Find the failing smoke name** in logs: `[ci-smokes] → node ops/smoke/smoke.mjs smoke:workspaces:list`
+
+2. **Read the failure summary** (runner prints before exiting) with rerun command + manifest path.
+
+3. **Rerun the specific smoke:** `node ops/smoke/smoke.mjs smoke:workspaces:list`
+
+4. **Check the manifest** for cleanup details: Location is `ops/smoke/.manifests/{SMOKE_RUN_ID}.json` (printed at run start).
+
+**Reference:** Full debugging guide and common issues at [ci-smokes-guide.md](ci-smokes-guide.md).
+
+---
+
+## Observability: Timing & Performance
+
+**As of Sprint AR (2026-01-04):** The runner collects per-smoke wall-clock timing and prints slowest smokes on success:
+
+```json
+{
+  "summary": {"totalFlows": 42, "totalElapsedMs": 79315, "totalElapsedSec": "79.31", "tier": "core"},
+  "slowest": [{"rank": 1, "name": "smoke:close-the-loop", "elapsedMs": 4261, "elapsedSec": "4.26"}, ...top 10...]
+}
+```
+
+**Use for:** Identifying performance regressions, bottleneck flows, and optimization targets.
+
+---
+
 ## Overview (Continued)
 
 Sprint I (2026-01-02): No new smokes added; existing backorder → suggest-po → receive loops remain covered via `npm run smokes:run:ci`.

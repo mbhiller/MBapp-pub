@@ -237,6 +237,7 @@ console.log(JSON.stringify({
 
 console.log(`[ci-smokes] Running ${filteredFlows.length} flows:`);
 filteredFlows.forEach((f, i) => console.log(`  ${i + 1}. ${f.name}${f.tier && f.tier !== "all" ? ` (${f.tier})` : ""}`));
+
 // Prepare child env with requestedTenant (final) and unique SMOKE_RUN_ID
 const childEnv = {
   ...process.env,
@@ -244,9 +245,37 @@ const childEnv = {
   SMOKE_RUN_ID: smokeRunId
 };
 
+// Print manifest path for this run
+const manifestPath = `ops/smoke/.manifests/${smokeRunId}.json`;
+console.log(`[ci-smokes] Manifest path: ${manifestPath}`);
+
+// Helper function to print failure summary
+function printFailureSummary(smokeName, exitCode, manifestPath) {
+  console.log(
+    `\n[ci-smokes] ✘ SMOKE FAILED\n` +
+    `  name: ${smokeName}\n` +
+    `  exit code: ${exitCode}\n` +
+    `\n  Rerun this smoke:\n` +
+    `    node ops/smoke/smoke.mjs ${smokeName}\n` +
+    `\n  Manifest (debug details):\n` +
+    `    ${manifestPath}\n` +
+    `\n  Rerun all ${smokeTier} smokes:\n` +
+    `    npm run smokes:run:core        (42 core foundational flows)\n` +
+    `    npm run smokes:run:extended    (24 extended scenario flows)\n` +
+    `    npm run smokes:run:ci          (all 66 flows)\n`
+  );
+}
+
+// Collect per-smoke timing results
+const timings = [];
+const overallStartTime = Date.now();
+
 const isCI = Boolean(process.env.GITHUB_ACTIONS);
 for (const flowObj of filteredFlows) {
   const flow = flowObj.name;
+  const flowStartTime = Date.now();
+  let exitCode = 1;
+  
   if (isCI) {
     const npxCmd = process.platform === "win32" ? "npx.cmd" : "npx";
     console.log(`[ci-smokes] → npx tsx ops/smoke/smoke.mjs ${flow}`);
@@ -255,17 +284,59 @@ for (const flowObj of filteredFlows) {
       console.error("[ci-smokes] tsx is not available in CI. Falling back to node (may fail on .ts imports).");
       const nodeCmd = process.execPath || (process.platform === "win32" ? "node.exe" : "node");
       const res = spawnSync(nodeCmd, ["ops/smoke/smoke.mjs", flow], { stdio: "inherit", env: childEnv });
-      if (res.status !== 0) process.exit(res.status ?? 1);
-      continue;
+      exitCode = res.status ?? 1;
+      if (exitCode !== 0) {
+        const elapsedMs = Date.now() - flowStartTime;
+        timings.push({ name: flow, tier: flowObj.tier, elapsedMs, exitCode });
+        printFailureSummary(flow, exitCode, manifestPath);
+        process.exit(exitCode);
+      }
+    } else {
+      const res = spawnSync(npxCmd, ["tsx", "ops/smoke/smoke.mjs", flow], { stdio: "inherit", env: childEnv });
+      exitCode = res.status ?? 1;
+      if (exitCode !== 0) {
+        const elapsedMs = Date.now() - flowStartTime;
+        timings.push({ name: flow, tier: flowObj.tier, elapsedMs, exitCode });
+        printFailureSummary(flow, exitCode, manifestPath);
+        process.exit(exitCode);
+      }
     }
-    const res = spawnSync(npxCmd, ["tsx", "ops/smoke/smoke.mjs", flow], { stdio: "inherit", env: childEnv });
-    if (res.status !== 0) process.exit(res.status ?? 1);
   } else {
     const nodeCmd = process.execPath || (process.platform === "win32" ? "node.exe" : "node");
     console.log(`[ci-smokes] → node ops/smoke/smoke.mjs ${flow}`);
     const res = spawnSync(nodeCmd, ["ops/smoke/smoke.mjs", flow], { stdio: "inherit", env: childEnv });
-    if (res.status !== 0) process.exit(res.status ?? 1);
+    exitCode = res.status ?? 1;
+    if (exitCode !== 0) {
+      const elapsedMs = Date.now() - flowStartTime;
+      timings.push({ name: flow, tier: flowObj.tier, elapsedMs, exitCode });
+      printFailureSummary(flow, exitCode, manifestPath);
+      process.exit(exitCode);
+    }
   }
+  
+  const elapsedMs = Date.now() - flowStartTime;
+  timings.push({ name: flow, tier: flowObj.tier, elapsedMs, exitCode });
 }
 
+const overallElapsedMs = Date.now() - overallStartTime;
+
+// Print summary
 console.log("[ci-smokes] ✔ all flows passed");
+console.log(JSON.stringify({
+  summary: {
+    totalFlows: filteredFlows.length,
+    totalElapsedMs: overallElapsedMs,
+    totalElapsedSec: (overallElapsedMs / 1000).toFixed(2),
+    tier: smokeTier
+  },
+  slowest: timings
+    .sort((a, b) => b.elapsedMs - a.elapsedMs)
+    .slice(0, 10)
+    .map((t, i) => ({
+      rank: i + 1,
+      name: t.name,
+      tier: t.tier,
+      elapsedMs: t.elapsedMs,
+      elapsedSec: (t.elapsedMs / 1000).toFixed(2)
+    }))
+}, null, 2));

@@ -42,6 +42,66 @@
 - **Guarantee:** Wipe tool safety guards now protected by CI smoke coverage; any regression in confirm-tenant matching, allowlist enforcement, or dry-run default behavior will fail CI builds.
 
 ---
+### CI/Smokes Observability & Developer Experience — ✅ Complete (Sprint AR, 2026-01-04)
+
+**Epic Summary:** Add runner-level observability (per-smoke timing, slowest list), failure guidance (rerun command + manifest path), and comprehensive CI smokes documentation for faster debugging and performance profiling.
+
+- **Per-Smoke Timing Collection (E1):** [ops/tools/run-ci-smokes.mjs](../ops/tools/run-ci-smokes.mjs) refactored execution loop:
+  - Each smoke wrapped with `Date.now()` before/after `spawnSync`; collects `{name, tier, elapsedMs, exitCode}` 
+  - On success: prints JSON summary with `summary` object (totalFlows, totalElapsedMs, totalElapsedSec, tier) + sorted `slowest` array (top 10 smokes ranked by elapsedMs desc)
+  - Example output shows 42 core flows, 79.31 sec total; slowest: close-the-loop (4.26s), type-casing (3.29s), reserve-fulfill-release (3.06s), etc.
+  - **No behavior change:** Sequential execution maintained, stdio inherited, exit-on-first-fail preserved
+
+- **Failure Summary + Rerun Guidance (E2):** New `printFailureSummary()` function called before every `process.exit()` on smoke failure:
+  - Prints smoke name, exit code, exact rerun command: `node ops/smoke/smoke.mjs smoke:<name>`
+  - Prints manifest location: `ops/smoke/.manifests/{SMOKE_RUN_ID}.json` (also printed at run start)
+  - Prints tier rerun hints: `npm run smokes:run:core|extended|ci`
+  - Exits immediately after summary (preserves first-fail behavior, adds guidance)
+  - Covers all 3 execution paths: CI with tsx, CI with node fallback, local node
+
+- **Manifest Path Announcements (E2 Continuation):** Runner now prints manifest path at start of run:
+  - `[ci-smokes] Manifest path: ops/smoke/.manifests/smk-{timestamp}-{random}.json`
+  - Visible before first smoke runs; helps developers find cleanup artifacts even on success
+  - Manifest contains: smokeRunId, entries count, created types (party, product, inventory, etc.)
+
+- **Comprehensive Documentation (E3):**
+  - **New doc:** [docs/ci-smokes-guide.md](ci-smokes-guide.md) — Complete guide covering:
+    - What CI smokes are + how they run (runner → smoke.mjs)
+    - Tier system breakdown: core 42 flows (~3 min), extended 24 flows (~3 min), all 66 flows (~6 min)
+    - How to run locally (blessed commands + single smoke example)
+    - Where manifests live and what they contain (cleanup reference)
+    - Debugging failures: 5-step guide (identify → read summary → rerun → check manifest → rerun tier)
+    - Observability: timing output format, interpreting slowest list, performance expectations
+    - Environment variables, file paths, common issues & solutions
+  - **Updated:** [docs/smoke-coverage.md](smoke-coverage.md) added 3 sections:
+    - Tier System table: core/extended/all flows, duration, when, command
+    - CI Debugging Failed Smokes: 4-step quick reference (find → read summary → rerun → check manifest)
+    - Observability: Timing & Performance: example JSON output, use cases
+  - **Updated:** [docs/MBapp-Status.md](MBapp-Status.md) Sprint AR entry (this section): E1–E3 complete, DoD checklist
+
+- **Verification:**
+  - TypeScript compilation clean: `npm run typecheck --workspaces --if-present` ✓
+  - Core suite execution: `npm run smokes:run:core` (42 flows, 79.31 sec total) → All PASS
+    - Manifest path announced at start: `[ci-smokes] Manifest path: ops/smoke/.manifests/smk-1767580987362-057v.json` ✓
+    - Success summary prints with slowest array (top 10 ranked) ✓
+  - Extended suite execution: `npm run smokes:run:extended` (24 flows) → Failure block prints on smoke failure with rerun command + manifest path ✓
+  - Single smoke: `node ops/smoke/smoke.mjs smoke:objects:type-casing-and-alias` → PASS (no failure block) ✓
+  - Timing accuracy: slowest smokes match manual wall-clock observations
+
+- **Definition of Done:**
+  - ✅ E1: Per-smoke timing collection + JSON summary with slowest list (top 10 ranked)
+  - ✅ E2: Failure summary block before exit (name, code, rerun, manifest path, tier hints); manifest path announced at run start
+  - ✅ E3: New ci-smokes-guide.md + smoke-coverage.md updates + MBapp-Status.md Sprint AR entry
+  - ✅ Typecheck clean, core/extended suites pass, timing output validated
+  - ✅ No behavior changes: sequential execution, stdio inherit, first-fail exit preserved
+
+- **Guarantees:** 
+  - Developers get guidance on every smoke failure (rerun command + manifest location)
+  - Performance regressions visible via slowest list (e.g., close-the-loop jumping from 3s → 5s)
+  - Manifest path always visible (at start + on failure) for cleanup reference
+  - Comprehensive docs reduce debugging time and support questions
+
+---
 ### Objects Contract Hardening — ✅ Complete (Sprint AM, 2026-01-04)
 
 **Epic Summary:** Eliminate type normalization gaps in Objects API; ensure canonical type usage across all handlers; add comprehensive smoke coverage for type casing + inventory alias invariants.
