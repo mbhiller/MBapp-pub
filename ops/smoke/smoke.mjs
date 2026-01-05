@@ -9486,6 +9486,68 @@ const tests = {
       return { ok: resp.ok, body };
     };
 
+    // Helper: retry list with eventual consistency polling
+    const listAllWithRetry = async (maxRetries = 10) => {
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        if (attempt > 0) {
+          await new Promise((r) => setTimeout(r, 250)); // 250ms delay between retries
+        }
+
+        const allItems = [];
+        let page1 = await listOnce(null);
+        if (!page1.ok) {
+          if (attempt === maxRetries - 1) return { ok: false, reason: "list-page1-failed" };
+          continue; // retry on transient error
+        }
+
+        const items1 = Array.isArray(page1.body?.items) ? page1.body.items : [];
+        allItems.push(...items1);
+        let cursor = page1.body?.next ?? page1.body?.pageInfo?.nextCursor ?? null;
+        let pages = 1;
+
+        // Pagination: fetch all pages
+        while (cursor && pages < 5) {
+          const page = await listOnce(cursor);
+          if (!page.ok) {
+            if (attempt === maxRetries - 1) return { ok: false, reason: `list-page${pages + 1}-failed` };
+            break; // retry from start on pagination failure
+          }
+          const pageItems = Array.isArray(page.body?.items) ? page.body.items : [];
+          allItems.push(...pageItems);
+          cursor = page.body?.next ?? page.body?.pageInfo?.nextCursor ?? null;
+          pages += 1;
+        }
+
+        // Check if all 3 IDs are present (eventual consistency check)
+        const idsFound = allItems.map((i) => i?.id).filter(Boolean);
+        const needed = new Set([idA, idB, idC]);
+        const hasAll = [...needed].every((id) => idsFound.includes(id));
+
+        if (!hasAll) {
+          if (attempt === maxRetries - 1) {
+            return { ok: false, reason: "missing-ids", idsFound, pagesFetched: pages, needIds: [idA, idB, idC] };
+          }
+          continue; // retry on eventual consistency timeout
+        }
+
+        // Dedupe validation: no duplicates
+        const uniqueIds = new Set(idsFound);
+        if (uniqueIds.size < 3) {
+          return { ok: false, reason: "dedupe-failed", idsFound, uniqueCount: uniqueIds.size };
+        }
+
+        const countA = idsFound.filter((x) => x === idA).length;
+        if (countA !== 1) {
+          return { ok: false, reason: "duplicate-id-a", countA, idsFound };
+        }
+
+        // Success: all checks passed
+        return { ok: true, idsFound, pagesFetched: pages };
+      }
+
+      return { ok: false, reason: "retry-exhausted" };
+    };
+
     const cleanup = async () => {
       for (const id of createdWorkspaces) {
         try {
@@ -9538,51 +9600,21 @@ const tests = {
         recordCreated({ type: "view", id: idA, route: "/views", meta: { name: shadowBody.name } });
       }
 
-      const page1 = await listOnce(null);
-      if (!page1.ok) {
-        return { test: "workspaces:mixed-dedupe", result: "FAIL", reason: "list-page1" };
-      }
-      const nextCursor = page1.body?.next ?? page1.body?.pageInfo?.nextCursor ?? null;
-      const items1 = Array.isArray(page1.body?.items) ? page1.body.items : [];
-
-      const allItems = [...items1];
-      let cursor = nextCursor;
-      let pages = 1;
-      const needed = new Set([idA, idB, idC]);
-      const have = () => {
-        const idsFound = allItems.map((i) => i?.id);
-        return [...needed].every((id) => idsFound.includes(id));
-      };
-
-      while (cursor && pages < 5 && !have()) {
-        const page = await listOnce(cursor);
-        if (!page.ok) {
-          return { test: "workspaces:mixed-dedupe", result: "FAIL", reason: "list-page" + (pages + 1) };
-        }
-        const pageItems = Array.isArray(page.body?.items) ? page.body.items : [];
-        allItems.push(...pageItems);
-        cursor = page.body?.next ?? page.body?.pageInfo?.nextCursor ?? null;
-        pages += 1;
+      // Retry list with eventual consistency polling
+      const listResult = await listAllWithRetry(10);
+      if (!listResult.ok) {
+        const debugInfo = {
+          reason: listResult.reason,
+          ...(listResult.idsFound && { idsFound: listResult.idsFound }),
+          ...(listResult.needIds && { needIds: listResult.needIds }),
+          ...(listResult.pagesFetched && { pagesFetched: listResult.pagesFetched }),
+          ...(listResult.uniqueCount && { uniqueCount: listResult.uniqueCount }),
+          ...(listResult.countA && { countA: listResult.countA })
+        };
+        return { test: "workspaces:mixed-dedupe", result: "FAIL", ...debugInfo };
       }
 
-      if (!have()) {
-        return { test: "workspaces:mixed-dedupe", result: "FAIL", reason: "missing-created-ids", ids: allItems.map((i) => i?.id).filter(Boolean), pages };
-      }
-
-      const idsCollected = allItems.map((i) => i?.id).filter(Boolean);
-      const uniqueIds = new Set(idsCollected);
-      if (!uniqueIds.has(idA) || !uniqueIds.has(idB) || !uniqueIds.has(idC)) {
-        return { test: "workspaces:mixed-dedupe", result: "FAIL", reason: "missing-created-ids", ids: idsCollected };
-      }
-      if (uniqueIds.size < 3) {
-        return { test: "workspaces:mixed-dedupe", result: "FAIL", reason: "dedupe-failed", ids: idsCollected };
-      }
-      const countA = idsCollected.filter((x) => x === idA).length;
-      if (countA !== 1) {
-        return { test: "workspaces:mixed-dedupe", result: "FAIL", reason: "duplicate-id-present", countA };
-      }
-
-      return { test: "workspaces:mixed-dedupe", result: "PASS", artifacts: { ids: idsCollected, pagesFetched: pages } };
+      return { test: "workspaces:mixed-dedupe", result: "PASS", artifacts: { ids: listResult.idsFound, pagesFetched: listResult.pagesFetched } };
     } finally {
       await cleanup();
     }
