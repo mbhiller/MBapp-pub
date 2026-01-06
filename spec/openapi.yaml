@@ -1087,6 +1087,109 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /events:public:
+    get:
+      tags:
+        - Events
+        - Public
+      operationId: listPublicEvents
+      summary: List public events (no auth required) - Sprint AU
+      description: |
+        Public endpoint for listing events. Intended for anonymous/guest users.
+        Defaults to filtering for status=open events.
+      security: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum:
+              - draft
+              - scheduled
+              - open
+              - closed
+              - completed
+              - cancelled
+              - archived
+            default: open
+          description: Filter by event status (defaults to open)
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List of public events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Event'
+                  next:
+                    type: string
+                    nullable: true
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+  /registrations:public:
+    post:
+      tags:
+        - Registrations
+        - Public
+      operationId: createPublicRegistration
+      summary: Create a public registration (no auth required) - Sprint AU
+      description: |
+        Public endpoint for creating event registrations. Intended for anonymous/guest users.
+        Returns a temporary publicToken for use in subsequent checkout.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublicRegistrationRequest'
+      responses:
+        '201':
+          description: Registration created with public token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicRegistrationResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '409':
+          description: Event capacity exceeded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    enum:
+                      - capacity_exceeded
+                  message:
+                    type: string
+                  details:
+                    type: object
+                    properties:
+                      eventId:
+                        type: string
+                      capacity:
+                        type: number
+                      currentRegistrations:
+                        type: number
   /reservations:check-conflicts:
     post:
       tags:
@@ -2337,21 +2440,131 @@ paths:
                 $ref: '#/components/schemas/Registration'
   /events/registration/{id}:checkout:
     post:
-      summary: Check out a registration
+      tags:
+        - Registrations
+        - Public
+      operationId: checkoutRegistration
+      summary: Create Stripe PaymentIntent for registration - Sprint AU
+      description: |
+        Public endpoint to initiate payment for a registration.
+        Requires X-MBapp-Public-Token header (obtained from POST /registrations:public).
+        Creates or retrieves a Stripe PaymentIntent and returns the clientSecret for frontend payment confirmation.
+        Idempotent via Idempotency-Key header.
+      security: []
       parameters:
         - in: path
           name: id
           required: true
           schema:
             type: string
+          description: Registration ID
         - $ref: '#/components/parameters/IdempotencyKey'
+        - in: header
+          name: X-MBapp-Public-Token
+          required: true
+          schema:
+            type: string
+          description: Public token from registration creation
       responses:
         '200':
-          description: Updated registration
+          description: PaymentIntent created or retrieved
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Registration'
+                $ref: '#/components/schemas/PaymentIntentResponse'
+        '400':
+          description: Validation error (invalid token or missing fields)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '401':
+          description: Invalid or expired public token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Registration not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Registration already confirmed or cancelled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    enum:
+                      - invalid_status
+                  message:
+                    type: string
+                  details:
+                    type: object
+                    properties:
+                      currentStatus:
+                        type: string
+  /webhooks/stripe:
+    post:
+      tags:
+        - Webhooks
+        - Public
+      operationId: stripeWebhook
+      summary: Stripe webhook handler - Sprint AU
+      description: |
+        Public endpoint for Stripe webhook events (checkout.session.completed, payment_intent.*, etc.).
+        Validates webhook signature using STRIPE_WEBHOOK_SECRET.
+        Idempotent: processes each event exactly once based on event ID.
+      security: []
+      parameters:
+        - in: header
+          name: Stripe-Signature
+          required: true
+          schema:
+            type: string
+          description: Stripe webhook signature for verification
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Stripe event object (signature validated server-side)
+              properties:
+                id:
+                  type: string
+                  description: Stripe event ID
+                type:
+                  type: string
+                  description: Event type (e.g., checkout.session.completed)
+                data:
+                  type: object
+                  description: Event data payload
+      responses:
+        '200':
+          description: Webhook processed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  received:
+                    type: boolean
+                    example: true
+        '400':
+          description: Invalid signature or malformed payload
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: invalid_signature
   /resources/reservation/{id}:cancel:
     post:
       summary: Cancel a reservation
@@ -4080,6 +4293,32 @@ components:
               type: string
               nullable: true
               description: Additional notes
+            paymentIntentId:
+              type: string
+              nullable: true
+              description: Stripe PaymentIntent ID (Sprint AU)
+            paymentStatus:
+              type: string
+              nullable: true
+              enum:
+                - pending
+                - succeeded
+                - failed
+              description: Payment status (Sprint AU)
+            submittedAt:
+              type: string
+              format: date-time
+              nullable: true
+              description: Timestamp when status changed to submitted (Sprint AU)
+            confirmedAt:
+              type: string
+              format: date-time
+              nullable: true
+              description: Timestamp when status changed to confirmed (Sprint AU)
+            publicTokenHash:
+              type: string
+              nullable: true
+              description: Server-side hash of public token for guest checkout (Sprint AU)
             clientId:
               type: string
               nullable: true
@@ -4154,6 +4393,77 @@ components:
       required:
         - classId
         - qty
+    PaymentIntentResponse:
+      type: object
+      description: Response from checkout endpoint containing Stripe PaymentIntent details (Sprint AU)
+      required:
+        - paymentIntentId
+        - clientSecret
+      properties:
+        paymentIntentId:
+          type: string
+          description: Stripe PaymentIntent ID
+        clientSecret:
+          type: string
+          description: Client secret for Stripe.js to confirm payment
+    PublicRegistrationRequest:
+      type: object
+      description: Request body for public registration creation (Sprint AU)
+      required:
+        - eventId
+      properties:
+        eventId:
+          type: string
+          description: ID of the event to register for
+        party:
+          type: object
+          nullable: true
+          description: Guest party information (for anonymous users)
+          properties:
+            name:
+              type: string
+              nullable: true
+            email:
+              type: string
+              nullable: true
+        fees:
+          type: array
+          nullable: true
+          description: Registration fees
+          items:
+            type: object
+            required:
+              - code
+              - amount
+            properties:
+              code:
+                type: string
+              amount:
+                type: number
+              description:
+                type: string
+                nullable: true
+        division:
+          type: string
+          nullable: true
+        class:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+    PublicRegistrationResponse:
+      type: object
+      description: Response from public registration creation including guest token (Sprint AU)
+      required:
+        - registration
+        - publicToken
+      properties:
+        registration:
+          $ref: '#/components/schemas/Registration'
+        publicToken:
+          type: string
+          description: Temporary token for guest to complete checkout (single-use, short TTL)
     Reservation:
       allOf:
         - $ref: '#/components/schemas/ObjectBase'

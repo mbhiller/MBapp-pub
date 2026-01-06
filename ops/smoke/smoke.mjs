@@ -11950,6 +11950,252 @@ const tests = {
     };
   },
 
+  "smoke:registrations:public-checkout": async ()=>{
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true"
+    };
+
+    // Create an open event (capacity 1)
+    const eventName = smokeTag("public_evt");
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 1,
+      reservedCount: 0
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test:"registrations:public-checkout", result:"FAIL", reason:"event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+    // Create public registration
+    const regCreate = await post(`/registrations:public`, { eventId }, featureHeaders, { auth: "none" });
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test:"registrations:public-checkout", result:"FAIL", reason:"reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+
+    // Checkout with idempotency + public token
+    const idemKey = idem();
+    const checkout = await post(`/events/registration/${encodeURIComponent(regId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": publicToken,
+      "Idempotency-Key": idemKey
+    }, { auth: "none" });
+
+    const pass = checkout.ok && checkout.body?.paymentIntentId && checkout.body?.clientSecret;
+    return {
+      test: "registrations:public-checkout",
+      result: pass ? "PASS" : "FAIL",
+      status: checkout.status,
+      paymentIntentId: checkout.body?.paymentIntentId,
+      clientSecret: checkout.body?.clientSecret,
+      steps: { eventId, regId }
+    };
+  },
+
+  "smoke:registrations:public-checkout-idempotent": async ()=>{
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true"
+    };
+
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: smokeTag("public_idem_evt"),
+      capacity: 1,
+      reservedCount: 0
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test:"registrations:public-checkout-idempotent", result:"FAIL", reason:"event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event" });
+
+    const regCreate = await post(`/registrations:public`, { eventId }, featureHeaders, { auth: "none" });
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test:"registrations:public-checkout-idempotent", result:"FAIL", reason:"reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+
+    const idemKey = idem();
+    const first = await post(`/events/registration/${encodeURIComponent(regId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": publicToken,
+      "Idempotency-Key": idemKey
+    }, { auth: "none" });
+
+    const second = await post(`/events/registration/${encodeURIComponent(regId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": publicToken,
+      "Idempotency-Key": idemKey
+    }, { auth: "none" });
+
+    const samePi = first.ok && second.ok && first.body?.paymentIntentId && first.body?.paymentIntentId === second.body?.paymentIntentId;
+
+    return {
+      test: "registrations:public-checkout-idempotent",
+      result: samePi ? "PASS" : "FAIL",
+      first: { status: first.status, pi: first.body?.paymentIntentId },
+      second: { status: second.status, pi: second.body?.paymentIntentId },
+      steps: { eventId, regId }
+    };
+  },
+
+  "smoke:events:capacity-guard": async ()=>{
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true"
+    };
+
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: smokeTag("cap_evt"),
+      capacity: 1,
+      reservedCount: 0
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test:"events:capacity-guard", result:"FAIL", reason:"event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event" });
+
+    const r1 = await post(`/registrations:public`, { eventId }, featureHeaders, { auth: "none" });
+    const r2 = await post(`/registrations:public`, { eventId }, featureHeaders, { auth: "none" });
+
+    if (!r1.ok || !r1.body?.registration?.id || !r1.body?.publicToken) {
+      return { test:"events:capacity-guard", result:"FAIL", reason:"reg1-create-failed", r1 };
+    }
+    if (!r2.ok || !r2.body?.registration?.id || !r2.body?.publicToken) {
+      return { test:"events:capacity-guard", result:"FAIL", reason:"reg2-create-failed", r2 };
+    }
+
+    const idem1 = idem();
+    const c1 = await post(`/events/registration/${encodeURIComponent(r1.body.registration.id)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": r1.body.publicToken,
+      "Idempotency-Key": idem1
+    }, { auth: "none" });
+
+    const idem2 = idem();
+    const c2 = await post(`/events/registration/${encodeURIComponent(r2.body.registration.id)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": r2.body.publicToken,
+      "Idempotency-Key": idem2
+    }, { auth: "none" });
+
+    const pass = c1.ok && c2.status === 409;
+    return {
+      test: "events:capacity-guard",
+      result: pass ? "PASS" : "FAIL",
+      c1: { status: c1.status, pi: c1.body?.paymentIntentId },
+      c2: { status: c2.status, body: c2.body },
+      steps: { eventId, reg1: r1.body.registration.id, reg2: r2.body.registration.id }
+    };
+  },
+
+  "smoke:webhooks:stripe-payment-intent-succeeded": async ()=>{
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true"
+    };
+
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: smokeTag("wh_evt"),
+      capacity: 1,
+      reservedCount: 0
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test:"webhooks:stripe-payment-intent-succeeded", result:"FAIL", reason:"event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event" });
+
+    const regCreate = await post(`/registrations:public`, { eventId }, featureHeaders, { auth: "none" });
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test:"webhooks:stripe-payment-intent-succeeded", result:"FAIL", reason:"reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+
+    const checkout = await post(`/events/registration/${encodeURIComponent(regId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+
+    if (!checkout.ok || !checkout.body?.paymentIntentId) {
+      return { test:"webhooks:stripe-payment-intent-succeeded", result:"FAIL", reason:"checkout-failed", checkout };
+    }
+
+    const piId = checkout.body.paymentIntentId;
+
+    // Send simulated webhook with known signature pattern
+    const webhookBody = {
+      id: `evt_${SMOKE_RUN_ID}`,
+      type: "payment_intent.succeeded",
+      data: {
+        object: {
+          id: piId,
+          status: "succeeded",
+          metadata: {
+            registrationId: regId,
+            eventId
+          }
+        }
+      }
+    };
+
+    const whRes = await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "Stripe-Signature": "sim_valid_signature",
+        ...featureHeaders,
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify(webhookBody)
+    });
+    const whBody = await whRes.json().catch(() => ({}));
+    if (!whRes.ok) {
+      return { test:"webhooks:stripe-payment-intent-succeeded", result:"FAIL", reason:"webhook-failed", whStatus: whRes.status, whBody };
+    }
+
+    // Poll registration until confirmed
+    const confirmed = await waitForStatus("registration", regId, ["confirmed"], { tries: 20, delayMs: 300 });
+
+    const reg = await get(`/objects/registration/${encodeURIComponent(regId)}`);
+    const status = reg?.body?.status;
+    const payStatus = reg?.body?.paymentStatus;
+
+    const pass = confirmed.ok && status === "confirmed" && payStatus === "paid";
+    return {
+      test: "webhooks:stripe-payment-intent-succeeded",
+      result: pass ? "PASS" : "FAIL",
+      status,
+      paymentStatus: payStatus,
+      webhookStatus: whRes.status,
+      steps: { eventId, regId, piId }
+    };
+  },
+
   /* ===================== Reservations: CRUD Resources ===================== */
   "smoke:resources:crud": async ()=>{
     await ensureBearer();

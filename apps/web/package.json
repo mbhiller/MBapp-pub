@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@sentry/browser": "^7.114.0",
+    "@stripe/react-stripe-js": "^3.10.0",
+    "@stripe/stripe-js": "^4.10.0",
     "posthog-js": "^1.169.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

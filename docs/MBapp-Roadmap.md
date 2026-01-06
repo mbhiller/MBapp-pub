@@ -1,7 +1,7 @@
 # MBapp — Master Roadmap (Tiers 1 → 10)
 
 **Navigation:** [Status/Working](MBapp-Status.md) · [Foundations](MBapp-Foundations.md) · [Cadence](MBapp-Cadence.md) · [Verification](smoke-coverage.md)  
-**Last Updated:** 2025-12-28
+**Last Updated:** 2026-01-06
 
 This is the **living**, presentation‑ready roadmap for MBapp. It consolidates and supersedes prior versions (v3.2, v3.3, v4.0, v5.0).  
 Each Tier uses the same structure so we can later expand any Phase into a detailed sprint plan.
@@ -65,9 +65,10 @@ Each Tier uses the same structure so we can later expand any Phase into a detail
 ### 2.0 Events & Registrations v1 ✅ Implemented (Feature-Gated)
 - 🎯 Mobile wizard; capacity & duplicate checks; fee rules.
 - 🧱 Schemas: Event (+EventLine), Registration.
-- 🧪 Smokes: `smoke:registrations:crud`, `smoke:registrations:filters` (in CI).
+- 🧪 Smokes: `smoke:registrations:crud`, `smoke:registrations:filters` (CI) + `smoke:registrations:public-checkout`, `smoke:registrations:public-checkout-idempotent`, `smoke:events:capacity-guard`, `smoke:webhooks:stripe-payment-intent-succeeded` (simulate Stripe, opt-in runner).
 - 🕓 Sprints: IV, IX, XI (Shipped with feature flag: `FEATURE_REGISTRATIONS_ENABLED`).
 - 💡 **Status:** EventsList/EventDetail + RegistrationsList/RegistrationDetail operational; tiles gated by permission + flag.
+- 💡 **Sprint AU:** Public booking slice with unauthenticated event list + registration create (public token), Stripe PaymentIntent checkout (simulate mode), webhook confirmation, and public web booking page using Stripe Elements; smokes added (simulate-only, not yet in ci-smokes.json).
 
 ### 2.1 Resources & Reservations v1 ✅ Implemented (Feature-Gated)
 - 🎯 Conflict detection; per‑resource day grid.

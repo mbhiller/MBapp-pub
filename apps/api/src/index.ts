@@ -105,6 +105,14 @@ import * as PoCreateFromSuggestion from "./purchasing/po-create-from-suggestion"
 import * as BoIgnore  from "./backorders/request-ignore";
 import * as BoConvert from "./backorders/request-convert";
 
+// Webhooks
+import * as StripeWebhook from "./webhooks/stripe-handler";
+
+// Public endpoints (Sprint AU)
+import * as EventsPublicList from "./events/public-list";
+import * as RegPublicCreate from "./registrations/public-create";
+import * as RegCheckout from "./registrations/checkout";
+
 /* Helpers */
 const json = (statusCode: number, body: unknown): APIGatewayProxyResultV2 => ({
   statusCode,
@@ -247,6 +255,26 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
     }
     if (method === "POST" && path === "/auth/dev-login") {
       return DevLogin.handle(event); // gated by DEV_LOGIN_ENABLED
+    }
+    // Stripe webhook (public, no auth - signature verified in handler)
+    if (method === "POST" && path === "/webhooks/stripe") {
+      return StripeWebhook.handle(event);
+    }
+    // Public event listing (Sprint AU)
+    if (method === "GET" && path === "/events:public") {
+      return EventsPublicList.handle(event);
+    }
+    // Public registration create (Sprint AU)
+    if (method === "POST" && path === "/registrations:public") {
+      return RegPublicCreate.handle(event);
+    }
+    // Public registration checkout (Sprint AU)
+    {
+      const m = path.match(/^\/events\/registration\/([^/]+):checkout$/i);
+      if (method === "POST" && m) {
+        const [, id] = m;
+        return RegCheckout.handle(withId(event, id));
+      }
     }
 
     // Authenticated

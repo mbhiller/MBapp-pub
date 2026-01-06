@@ -1,4 +1,5 @@
 import { Link, Route, Routes } from "react-router-dom";
+import { lazy, Suspense } from "react";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Layout } from "./components/Layout";
 import { ProtectedRoute } from "./components/ProtectedRoute";
@@ -35,6 +36,8 @@ import LocationDetailPage from "./pages/LocationDetailPage";
 import InventoryMovementsPage from "./pages/InventoryMovementsPage";
 import DocsPage from "./pages/DocsPage";
 import NotAuthorizedPage from "./pages/NotAuthorizedPage";
+
+const PublicBookingPage = lazy(() => import("./pages/PublicBookingPage"));
 
 function HomePage() {
   return (
@@ -94,6 +97,7 @@ export default function App() {
           <Route path="/locations" element={<LocationsListPage />} />
           <Route path="/locations/:id" element={<LocationDetailPage />} />
           <Route path="/docs" element={<DocsPage />} />
+          <Route path="/public/book" element={<Suspense fallback={<div>Loading public booking...</div>}><PublicBookingPage /></Suspense>} />
         </Routes>
       </Layout>
     </ErrorBoundary>

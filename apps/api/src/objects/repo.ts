@@ -61,6 +61,11 @@ export type DeleteArgs = {
   id: string;
 };
 
+  export type ReserveEventSeatArgs = {
+    tenantId?: string;
+    eventId: string;
+  };
+
 // -------- Dynamo config --------
 const TABLE   = process.env.MBAPP_OBJECTS_TABLE || process.env.MBAPP_TABLE || "mbapp_objects";
 const PK_ATTR = process.env.MBAPP_TABLE_PK || "pk";
@@ -517,6 +522,49 @@ export async function updateObject({ tenantId, type, id, body }: UpdateArgs) {
 
   const item = { ...(res.Attributes || {}), id } as AnyRecord;
   return item;
+}
+
+/**
+ * Atomically reserve one seat for an event by incrementing reservedCount.
+ * Condition: allow when capacity is missing/null/zero (treated as unlimited) OR reservedCount < capacity.
+ * Throws ConditionalCheckFailedException when capacity would be exceeded.
+ */
+export async function reserveEventSeat({ tenantId, eventId }: ReserveEventSeatArgs) {
+  const Key: AnyRecord = {
+    [PK_ATTR]: tenantId,
+    [SK_ATTR]: `${normalizeTypeParam("event") ?? "event"}#${eventId}`,
+  };
+
+  const names = {
+    "#reserved": "reservedCount",
+    "#updatedAt": "updatedAt",
+    "#cap": "capacity",
+  };
+
+  const values = {
+    ":one": 1,
+    ":zero": 0,
+    ":now": nowIso(),
+  };
+
+  try {
+    const res = await ddb.send(new UpdateCommand({
+      TableName: TABLE,
+      Key,
+      UpdateExpression: "SET #reserved = if_not_exists(#reserved, :zero) + :one, #updatedAt = :now",
+      ConditionExpression: "(attribute_not_exists(#cap) OR #cap = :zero) OR (attribute_not_exists(#reserved) OR #reserved < #cap)",
+      ExpressionAttributeNames: names,
+      ExpressionAttributeValues: values,
+      ReturnValues: "ALL_NEW",
+    }));
+
+    return res.Attributes as AnyRecord;
+  } catch (err: any) {
+    if (err?.name === "ConditionalCheckFailedException") {
+      throw Object.assign(new Error("Event capacity full"), { code: "capacity_full", statusCode: 409 });
+    }
+    throw err;
+  }
 }
 
 export async function deleteObject({ tenantId, type, id }: DeleteArgs) {

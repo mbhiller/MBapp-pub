@@ -223,6 +223,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/events:public": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List public events (no auth required) - Sprint AU
+         * @description Public endpoint for listing events. Intended for anonymous/guest users.
+         *     Defaults to filtering for status=open events.
+         *
+         */
+        get: operations["listPublicEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/registrations:public": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a public registration (no auth required) - Sprint AU
+         * @description Public endpoint for creating event registrations. Intended for anonymous/guest users.
+         *     Returns a temporary publicToken for use in subsequent checkout.
+         *
+         */
+        post: operations["createPublicRegistration"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/reservations:check-conflicts": {
         parameters: {
             query?: never;
@@ -1788,32 +1832,38 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Check out a registration */
-        post: {
-            parameters: {
-                query?: never;
-                header?: {
-                    /** @description Optional idempotency key for safe retries. */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Updated registration */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Registration"];
-                    };
-                };
-            };
+        /**
+         * Create Stripe PaymentIntent for registration - Sprint AU
+         * @description Public endpoint to initiate payment for a registration.
+         *     Requires X-MBapp-Public-Token header (obtained from POST /registrations:public).
+         *     Creates or retrieves a Stripe PaymentIntent and returns the clientSecret for frontend payment confirmation.
+         *     Idempotent via Idempotency-Key header.
+         *
+         */
+        post: operations["checkoutRegistration"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/webhooks/stripe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
         };
+        get?: never;
+        put?: never;
+        /**
+         * Stripe webhook handler - Sprint AU
+         * @description Public endpoint for Stripe webhook events (checkout.session.completed, payment_intent.*, etc.).
+         *     Validates webhook signature using STRIPE_WEBHOOK_SECRET.
+         *     Idempotent: processes each event exactly once based on event ID.
+         *
+         */
+        post: operations["stripeWebhook"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2798,6 +2848,25 @@ export interface components {
             }[] | null;
             /** @description Additional notes */
             notes?: string | null;
+            /** @description Stripe PaymentIntent ID (Sprint AU) */
+            paymentIntentId?: string | null;
+            /**
+             * @description Payment status (Sprint AU)
+             * @enum {string|null}
+             */
+            paymentStatus?: "pending" | "succeeded" | "failed" | null;
+            /**
+             * Format: date-time
+             * @description Timestamp when status changed to submitted (Sprint AU)
+             */
+            submittedAt?: string | null;
+            /**
+             * Format: date-time
+             * @description Timestamp when status changed to confirmed (Sprint AU)
+             */
+            confirmedAt?: string | null;
+            /** @description Server-side hash of public token for guest checkout (Sprint AU) */
+            publicTokenHash?: string | null;
             /** @description Legacy field (use partyId instead) */
             clientId?: string | null;
             /** @description Legacy field */
@@ -2846,6 +2915,38 @@ export interface components {
             /** @default 1 */
             qty: number;
             note?: string | null;
+        };
+        /** @description Response from checkout endpoint containing Stripe PaymentIntent details (Sprint AU) */
+        PaymentIntentResponse: {
+            /** @description Stripe PaymentIntent ID */
+            paymentIntentId: string;
+            /** @description Client secret for Stripe.js to confirm payment */
+            clientSecret: string;
+        };
+        /** @description Request body for public registration creation (Sprint AU) */
+        PublicRegistrationRequest: {
+            /** @description ID of the event to register for */
+            eventId: string;
+            /** @description Guest party information (for anonymous users) */
+            party?: {
+                name?: string | null;
+                email?: string | null;
+            } | null;
+            /** @description Registration fees */
+            fees?: {
+                code: string;
+                amount: number;
+                description?: string | null;
+            }[] | null;
+            division?: string | null;
+            class?: string | null;
+            notes?: string | null;
+        };
+        /** @description Response from public registration creation including guest token (Sprint AU) */
+        PublicRegistrationResponse: {
+            registration: components["schemas"]["Registration"];
+            /** @description Temporary token for guest to complete checkout (single-use, short TTL) */
+            publicToken: string;
         };
         Reservation: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
@@ -4691,6 +4792,99 @@ export interface operations {
             };
         };
     };
+    listPublicEvents: {
+        parameters: {
+            query?: {
+                /** @description Filter by event status (defaults to open) */
+                status?: "draft" | "scheduled" | "open" | "closed" | "completed" | "cancelled" | "archived";
+                /** @description Maximum number of items to return */
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque pagination cursor for next page */
+                next?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List of public events */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items?: components["schemas"]["Event"][];
+                        next?: string | null;
+                    };
+                };
+            };
+            /** @description Validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationError"];
+                };
+            };
+        };
+    };
+    createPublicRegistration: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional idempotency key for safe retries. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublicRegistrationRequest"];
+            };
+        };
+        responses: {
+            /** @description Registration created with public token */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicRegistrationResponse"];
+                };
+            };
+            /** @description Validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationError"];
+                };
+            };
+            /** @description Event capacity exceeded */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        code?: "capacity_exceeded";
+                        message?: string;
+                        details?: {
+                            eventId?: string;
+                            capacity?: number;
+                            currentRegistrations?: number;
+                        };
+                    };
+                };
+            };
+        };
+    };
     checkReservationConflicts: {
         parameters: {
             query?: never;
@@ -5052,6 +5246,126 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RoutePlan"];
+                };
+            };
+        };
+    };
+    checkoutRegistration: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Optional idempotency key for safe retries. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description Public token from registration creation */
+                "X-MBapp-Public-Token": string;
+            };
+            path: {
+                /** @description Registration ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description PaymentIntent created or retrieved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentIntentResponse"];
+                };
+            };
+            /** @description Validation error (invalid token or missing fields) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationError"];
+                };
+            };
+            /** @description Invalid or expired public token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Registration not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Registration already confirmed or cancelled */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        code?: "invalid_status";
+                        message?: string;
+                        details?: {
+                            currentStatus?: string;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    stripeWebhook: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Stripe webhook signature for verification */
+                "Stripe-Signature": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Stripe event ID */
+                    id?: string;
+                    /** @description Event type (e.g., checkout.session.completed) */
+                    type?: string;
+                    /** @description Event data payload */
+                    data?: Record<string, never>;
+                };
+            };
+        };
+        responses: {
+            /** @description Webhook processed successfully */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @example true */
+                        received?: boolean;
+                    };
+                };
+            };
+            /** @description Invalid signature or malformed payload */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @example invalid_signature */
+                        error?: string;
+                    };
                 };
             };
         };

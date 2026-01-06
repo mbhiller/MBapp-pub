@@ -1,7 +1,7 @@
 # MBapp Foundations Report
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Status/Working](MBapp-Status.md) · [Cadence](MBapp-Cadence.md) · [Verification](smoke-coverage.md)  
-**Last Updated:** 2025-12-30
+**Last Updated:** 2026-01-06
 
 ---
 
@@ -16,6 +16,19 @@ This document defines the **structural standards and invariants** for the MBapp 
 
 **For roadmap planning:** See [MBapp-Roadmap.md](MBapp-Roadmap.md)  
 **For current status & coverage:** See [MBapp-Status.md](MBapp-Status.md)
+
+---
+
+## Canonical Docs Policy
+
+These **5 documents are the canonical source of truth (SSOT)** for MBapp:
+- [MBapp-Roadmap.md](MBapp-Roadmap.md) — Feature roadmap and delivery phases
+- [MBapp-Foundations.md](MBapp-Foundations.md) — Structural standards (this doc)
+- [MBapp-Status.md](MBapp-Status.md) — Current implementation status and sprint summaries
+- [MBapp-Cadence.md](MBapp-Cadence.md) — Workflow cadence and Definition of Done
+- [smoke-coverage.md](smoke-coverage.md) — Smoke test organization and coverage
+
+**Archived docs** (in `docs/archive/2026-01-06/`) are **reference-only** and may be stale or incorrect. Do not cite them as truth. If you find useful information in an archived doc, copy it forward into a canonical doc (and update it), rather than linking to it as truth.
 
 ---
 
@@ -105,6 +118,35 @@ const TENANT = process.env.MBAPP_TENANT_ID ?? "DemoTenant";
 **API & Backend:**
 - `/auth/policy` endpoint returns full permission map for authenticated user; fails closed (no token → empty policy).
 - Permission checks use `hasPerm(policy, permission)` wildcard resolver (exact → type:* → *:action → *:* → *).
+
+---
+
+## 2. Integration Defaults (Sprint AU)
+
+**Chosen providers (defaults unless explicitly overridden):**
+- **Payments:** Stripe (PaymentIntent flow). Rationale: best-in-class docs, SDKs, idempotency, test mode, webhooks; fast to ship vertical slices.
+- **File storage:** S3 (existing AWS footprint; lifecycle + presign supported).
+- **Email:** Postmark (reliable deliverability, minimal setup; transactional first).
+- **SMS/voice:** Twilio (ubiquitous API, good simulator tooling).
+- **Accounting export-first:** QuickBooks Online (QBO) for outbound sync; no inbound writeback yet.
+- **Corporate cards/expenses:** Ramp (export-first; no inbound accounting yet).
+- **Hardware:** Zebra (scanners/printers) where device control is required; MBapp-native merch for simple swag.
+
+**Principles:**
+- Prefer export-first integrations (push our data out) before attempting ingest.
+- Keep simulate/dev headers/envs for all external calls to allow CI smokes without vendor traffic.
+- Idempotency everywhere (keys passed through to providers when supported).
+
+## 3. Payments (Stripe) Contract
+
+- **Flow:** PaymentIntent (not Checkout Session). Client receives `clientSecret` from `/events/registration/{id}:checkout` and calls Stripe.js `confirmCardPayment`.
+- **Public auth:** `X-MBapp-Public-Token` header hashes to `registration.publicTokenHash`. No JWT required for public checkout.
+- **Idempotency:**
+  - API honors `Idempotency-Key` header and reuses existing PaymentIntent if already created.
+  - Stripe call passes the same key to avoid duplicate charges.
+- **Webhooks:** `/webhooks/stripe` verifies signature (real) or simulate signature (`Stripe-Signature: sim_valid_signature`) in smokes. On `payment_intent.succeeded`, sets `registration.status=confirmed`, `paymentStatus=paid`, `confirmedAt=now`.
+- **Metadata:** PaymentIntent metadata includes `registrationId` and `eventId` for webhook correlation.
+- **Capacity guard:** Checkout enforces atomic `reservedCount` increment on Event with condition `reservedCount < capacity` (null/0 treated as unlimited). Failure → 409 `capacity_full`.
 
 **Mobile:**
 - Fetches `/auth/policy` on app startup via `useAuthContext()` in [apps/mobile/src/features/_shared/AuthContext.tsx](../apps/mobile/src/features/_shared/AuthContext.tsx).
