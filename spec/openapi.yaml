@@ -3772,6 +3772,10 @@ components:
               nullable: true
             body:
               type: string
+            to:
+              type: string
+              nullable: true
+              description: Recipient address for email/sms channels; optional for segmented push
             segment:
               type: object
               additionalProperties: true
@@ -3784,6 +3788,11 @@ components:
               type: string
               format: date-time
               nullable: true
+            lastAttemptAt:
+              type: string
+              format: date-time
+              nullable: true
+              description: Timestamp of last send attempt
             status:
               type: string
               enum:
@@ -3793,6 +3802,18 @@ components:
                 - failed
                 - cancelled
               default: queued
+            provider:
+              type: string
+              nullable: true
+              description: Email provider name (e.g., "postmark", "sendgrid")
+            providerMessageId:
+              type: string
+              nullable: true
+              description: Provider-assigned message identifier (e.g., Postmark MessageID)
+            errorMessage:
+              type: string
+              nullable: true
+              description: Last provider error message if status is failed
             notes:
               type: string
               nullable: true

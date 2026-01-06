@@ -2618,6 +2618,8 @@ export interface components {
             channel: "push" | "sms" | "email";
             subject?: string | null;
             body: string;
+            /** @description Recipient address for email/sms channels; optional for segmented push */
+            to?: string | null;
             segment?: {
                 [key: string]: unknown;
             } | null;
@@ -2626,10 +2628,21 @@ export interface components {
             /** Format: date-time */
             sentAt?: string | null;
             /**
+             * Format: date-time
+             * @description Timestamp of last send attempt
+             */
+            lastAttemptAt?: string | null;
+            /**
              * @default queued
              * @enum {string}
              */
             status: "queued" | "sending" | "sent" | "failed" | "cancelled";
+            /** @description Email provider name (e.g., "postmark", "sendgrid") */
+            provider?: string | null;
+            /** @description Provider-assigned message identifier (e.g., Postmark MessageID) */
+            providerMessageId?: string | null;
+            /** @description Last provider error message if status is failed */
+            errorMessage?: string | null;
             notes?: string | null;
         };
         MoneyTotals: {
