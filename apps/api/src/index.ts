@@ -38,7 +38,9 @@ import * as ObjDelete from "./objects/delete";
 import * as ObjSearch from "./objects/search";
 import * as PartyBatch from "./objects/party-batch";
 // Messages
+import * as MessageList from "./messages/list";
 import * as MessageRetry from "./messages/retry";
+import * as MessageRetryFailed from "./messages/retry-failed";
 // Dev auth
 import * as DevLogin from "./auth/dev-login";
 
@@ -359,6 +361,18 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
         requirePerm(auth, "message:write");
         return MessageRetry.handle(withId(event, id));
       }
+    }
+
+    // Messages: batch retry failed
+    if (method === "POST" && path === "/messages:retry-failed") {
+      requirePerm(auth, "message:write");
+      return MessageRetryFailed.handle(event);
+    }
+
+    // Messages: list
+    if (method === "GET" && path === "/messages") {
+      requirePerm(auth, "message:read");
+      return MessageList.handle(event);
     }
 
     /* ========= Actions ========= */

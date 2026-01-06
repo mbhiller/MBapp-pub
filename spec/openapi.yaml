@@ -2619,6 +2619,132 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /messages:
+    get:
+      tags:
+        - Messages
+      operationId: listMessages
+      summary: List Messages
+      description: List messages with optional filters and cursor-based pagination.
+      security:
+        - bearerAuth: []
+      x-mbapp-permission: message:read
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum:
+              - queued
+              - sending
+              - sent
+              - failed
+              - cancelled
+          description: Optional status filter
+        - name: channel
+          in: query
+          schema:
+            type: string
+            enum:
+              - email
+              - sms
+              - push
+          description: Optional channel filter
+        - name: provider
+          in: query
+          schema:
+            type: string
+          description: Optional provider filter (e.g., postmark, twilio)
+        - name: to
+          in: query
+          schema:
+            type: string
+          description: Optional recipient filter
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List of messages
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Message'
+                  next:
+                    type: string
+                    nullable: true
+                required:
+                  - items
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /messages:retry-failed:
+    post:
+      tags:
+        - Messages
+      operationId: retryFailedMessages
+      summary: Retry failed messages in batch
+      description: Retry up to the specified limit of failed messages, optionally filtered by channel or provider.
+      security:
+        - bearerAuth: []
+      x-mbapp-permission: message:write
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            maximum: 200
+            default: 25
+          description: Maximum number of failed messages to retry (bounded server-side)
+        - name: channel
+          in: query
+          schema:
+            type: string
+            enum:
+              - email
+              - sms
+              - push
+          description: Optional channel filter when retrying failed messages
+        - name: provider
+          in: query
+          schema:
+            type: string
+          description: Optional provider filter when retrying failed messages
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Batch retry attempt results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MessageRetryResult'
+                  next:
+                    type: string
+                    nullable: true
+                required:
+                  - items
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /webhooks/stripe:
     post:
       tags:
@@ -3923,6 +4049,34 @@ components:
             notes:
               type: string
               nullable: true
+    MessageRetryResult:
+      type: object
+      description: Summary of a message after a retry attempt
+      required:
+        - id
+        - status
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+        retryCount:
+          type: integer
+          nullable: true
+        lastAttemptAt:
+          type: string
+          format: date-time
+          nullable: true
+        sentAt:
+          type: string
+          format: date-time
+          nullable: true
+        provider:
+          type: string
+          nullable: true
+        errorMessage:
+          type: string
+          nullable: true
     MoneyTotals:
       type: object
       properties:

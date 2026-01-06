@@ -63,6 +63,15 @@
   - **Real send:** Calls Postmark/Twilio; on success marks `sent` with provider ID; on failure marks `failed` with `errorMessage` and refreshed `lastAttemptAt`.
 - **Idempotency guard:** If another retry already transitioned the message out of `failed`, the handler returns a validation error instead of duplicating send.
 
+### Messages — list + batch retry (Sprint BB)
+
+- **Endpoints:**
+  - `GET /messages` (authed, `message:read`): supports filters `status`, `channel`, `provider`, `to`; cursor pagination (`next`) and `limit` (default 25, max per spec).
+  - `POST /messages:retry-failed` (authed, `message:write`): retries up to `limit` failed messages (default 25, max 50); optional filters `channel`, `provider`; accepts `next` cursor for deterministic continuation.
+- **Ordering & pagination:** Uses shared `listObjects` filtered path: deterministic sort by `updatedAt desc, id asc`; cursor encodes offset for filtered queries. Always echo the returned `next` cursor when paginating.
+- **Safety & bounds:** Batch clamps `limit` server-side and only processes messages currently `status=failed`; skips others without failing the batch. Simulate header `X-Feature-Notify-Simulate: true` (or env flag) is honored during retry, mirroring single retry behavior.
+- **Projection:** Batch response returns lightweight `MessageRetryResult` (id, status, retryCount, lastAttemptAt, sentAt, provider, errorMessage) to keep payload minimal; subject/body not returned.
+
 ### Message Templates v1 (Sprint BA)
 
 - **Template System:** Minimal, deterministic template renderer with no external deps. Validates required vars at render time.

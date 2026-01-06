@@ -125,6 +125,13 @@ Smokes are organized by tier for targeted CI validation:
   - Asserts the message transitions to `status=sent`, sets `sentAt` and `lastAttemptAt`, increments `retryCount`, and sets a provider value (postmark in simulate path).
   - Flags/Headers: `X-Feature-Notify-Simulate: true` (CI-safe; no external provider calls).
 
+## Recent Additions (Sprint BB)
+
+- **Messages list + batch retry (simulate):** `smoke:messages:list-and-batch-retry`
+  - Seeds two failed messages (email + sms) and one sent control via `/objects/message`, then lists with `status=failed` to ensure only failed are returned.
+  - Calls `POST /messages:retry-failed?limit=1` with `X-Feature-Notify-Simulate: true`, asserts exactly one failed message is retried to `sent` with retryCount increment, and confirms it no longer appears in the failed list.
+  - Flags/Headers: `X-Feature-Notify-Simulate: true` (simulate-safe); uses cursor-friendly list + bounded batch.
+
 ## Recent Additions (Sprint BA)
 
 - **Confirmation Email (templated):** `smoke:registrations:confirmation-message`
