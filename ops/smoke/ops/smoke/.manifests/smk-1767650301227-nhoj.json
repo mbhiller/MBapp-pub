@@ -1,0 +1,28 @@
+{
+  "smokeRunId": "smk-1767650301227-nhoj",
+  "base": "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com",
+  "tenantHeader": "SmokeTenant",
+  "jwtTenant": null,
+  "startedAt": "2026-01-05T21:58:21.227Z",
+  "finishedAt": "2026-01-05T21:58:23.103Z",
+  "entries": [
+    {
+      "type": "view",
+      "id": "dyvnmakpopvm1y6joh99f",
+      "route": "/views",
+      "meta": {
+        "entityType": "purchaseOrder"
+      },
+      "createdAt": "2026-01-05T21:58:22.078Z"
+    },
+    {
+      "type": "workspace",
+      "id": "569tuo2gto86hr3stmrk8w",
+      "route": "/workspaces",
+      "meta": {
+        "entityType": "purchaseOrder"
+      },
+      "createdAt": "2026-01-05T21:58:22.170Z"
+    }
+  ]
+}

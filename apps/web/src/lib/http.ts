@@ -62,8 +62,11 @@ export async function apiFetch<T>(path: string, opts: ApiFetchOptions = {}): Pro
     return (isJson ? res.json() : Promise.resolve(undefined)) as Promise<T>;
   }
 
+  // Error response: extract details for diagnostics (without logging tokens)
   const err: ApiError = new Error("API request failed");
   err.status = res.status;
+  (err as any).method = method;
+  (err as any).path = path;
 
   if (isJson) {
     try {
@@ -80,7 +83,9 @@ export async function apiFetch<T>(path: string, opts: ApiFetchOptions = {}): Pro
 
   try {
     const text = await res.text();
-    err.message = `${res.status} ${text || res.statusText}`;
+    // Limit body snippet to 200 chars to avoid huge error messages
+    const snippet = text.length > 200 ? text.slice(0, 200) + "..." : text;
+    err.message = `${res.status} ${snippet || res.statusText}`;
   } catch {
     err.message = `${res.status} ${res.statusText}`;
   }

@@ -12,7 +12,7 @@
 
 import process from "process";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { QueryCommand, PutCommand, DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
+import { QueryCommand, PutCommand, GetCommand, DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 
 function parseArgs(argv) {
   const opts = {
@@ -166,6 +166,11 @@ async function createWorkspaceFromLegacy(tenantId, legacyRecord) {
     throw new Error("Legacy record has no id");
   }
 
+  // E13: Diagnostic logging - show source keys
+  const sourceSk = legacyRecord[SK] || `view#${id}`;
+  console.log(`[migrate-legacy-workspaces] [DEBUG] Processing candidate id=${id}`);
+  console.log(`[migrate-legacy-workspaces] [DEBUG]   Source key: pk=${tenantId}, sk=${sourceSk}`);
+
   // Build workspace record with same fields
   const workspaceRecord = {
     ...legacyRecord,
@@ -174,14 +179,49 @@ async function createWorkspaceFromLegacy(tenantId, legacyRecord) {
 
   // Clear view-specific fields that should not be in workspace
   delete workspaceRecord.filters;
+  // E17: Ensure we don't accidentally copy the view SK into the workspace record
+  delete workspaceRecord[SK];
+  delete workspaceRecord[PK];
 
   // SK for workspace type
   const sk = `workspace#${id}`;
+
+  // E13: Diagnostic logging - show target keys
+  console.log(`[migrate-legacy-workspaces] [DEBUG]   Target key: pk=${tenantId}, sk=${sk}`);
 
   // ASSERTION: never target a view SK (safety check against logic errors)
   if (sk.startsWith("view#")) {
     throw new Error(`FATAL: Target SK is view-type (${sk}). This is copy-only migration; never write to view SKs.`);
   }
+
+  // E16: EXPLICIT existence check before attempting write
+  const targetKey = { [PK]: tenantId, [SK]: sk };
+  console.log(`[migrate-legacy-workspaces] [DEBUG]   Existence check key: ${JSON.stringify(targetKey)}`);
+  
+  let existingItem = null;
+  try {
+    const getResult = await ddb.send(
+      new GetCommand({
+        TableName: TABLE,
+        Key: targetKey,
+      })
+    );
+    existingItem = getResult.Item;
+    const itemPresent = Boolean(existingItem);
+    console.log(`[migrate-legacy-workspaces] [DEBUG]   Existence check result: itemPresent=${itemPresent}`);
+    if (itemPresent) {
+      console.log(`[migrate-legacy-workspaces] [DEBUG]   Existing item.sk=${existingItem[SK]}, item.type=${existingItem.type}`);
+      console.log(`[migrate-legacy-workspaces] [DEBUG]   Result: SKIPPED (workspace target already exists)`);
+      console.log(`[migrate-legacy-workspaces] workspace target exists for ${id}, skipping`);
+      return { success: true, id, created: false, reason: "workspace_exists" };
+    }
+  } catch (getErr) {
+    console.error(`[migrate-legacy-workspaces] [DEBUG]   Existence check ERROR: ${getErr.message}`);
+    // Continue to attempt write even if GetItem fails
+  }
+
+  // E16: PutItem with explicit key logging
+  console.log(`[migrate-legacy-workspaces] [DEBUG]   PutItem key: ${JSON.stringify(targetKey)}`);
 
   try {
     await ddb.send(
@@ -192,17 +232,47 @@ async function createWorkspaceFromLegacy(tenantId, legacyRecord) {
           [SK]: sk,
           ...workspaceRecord,
         },
-        // Conditional: only succeed if the workspace record does not already exist
+        // Conditional: only succeed if the workspace target does not already exist
         ConditionExpression: "attribute_not_exists(#pk) AND attribute_not_exists(#sk)",
         ExpressionAttributeNames: { "#pk": PK, "#sk": SK },
       })
     );
+    console.log(`[migrate-legacy-workspaces] [DEBUG]   Result: CREATED workspace target for ${id}`);
+    console.log(`[migrate-legacy-workspaces] created workspace target for ${id}`);
     return { success: true, id, created: true };
   } catch (err) {
-    // Check if the error is due to condition failure (already exists)
+    // Check if the error is due to condition failure (workspace target already exists)
     if (err.name === "ConditionalCheckFailedException") {
-      console.log(`[migrate-legacy-workspaces] workspace record already exists for ${id}, skipping`);
+      console.log(`[migrate-legacy-workspaces] [DEBUG]   Result: ConditionalCheckFailedException - verifying item existence`);
+      
+      // E16: On conditional failure, verify the item ACTUALLY exists
+      try {
+        const verifyResult = await ddb.send(
+          new GetCommand({
+            TableName: TABLE,
+            Key: targetKey,
+          })
+        );
+        const verifyItem = verifyResult.Item;
+        const verifyPresent = Boolean(verifyItem);
+        console.log(`[migrate-legacy-workspaces] [DEBUG]   Post-failure verification: itemPresent=${verifyPresent}`);
+        if (verifyPresent) {
+          console.log(`[migrate-legacy-workspaces] [DEBUG]   Verified item.sk=${verifyItem[SK]}, item.type=${verifyItem.type}`);
+        } else {
+          console.error(`[migrate-legacy-workspaces] [DEBUG]   WARNING: ConditionalCheckFailedException but GetItem returned NO item!`);
+        }
+      } catch (verifyErr) {
+        console.error(`[migrate-legacy-workspaces] [DEBUG]   Post-failure verification ERROR: ${verifyErr.message}`);
+      }
+      
+      console.log(`[migrate-legacy-workspaces] workspace target exists for ${id}, skipping`);
       return { success: true, id, created: false, reason: "workspace_exists" };
+    }
+    // E13: Log conditional failure details
+    console.error(`[migrate-legacy-workspaces] [DEBUG]   Result: ERROR (${err.name})`);
+    console.error(`[migrate-legacy-workspaces] [DEBUG]   Error message: ${err.message}`);
+    if (err.$metadata) {
+      console.error(`[migrate-legacy-workspaces] [DEBUG]   HTTP status: ${err.$metadata.httpStatusCode}`);
     }
     console.error(`[migrate-legacy-workspaces] ERROR: Failed to create workspace ${id}: ${err.message}`);
     throw err;
@@ -211,8 +281,9 @@ async function createWorkspaceFromLegacy(tenantId, legacyRecord) {
 
 (async function main() {
   const startTime = Date.now();
+  // E20: Enhanced startup log with region and table
   console.log(
-    `[migrate-legacy-workspaces] table=${TABLE} tenant=${TENANT} dryRun=${argv.dryRun} confirm=${argv.confirm}`
+    `[migrate-legacy-workspaces] region=${REGION} table=${TABLE} tenant=${TENANT} dryRun=${argv.dryRun}`
   );
 
   let candidates;
@@ -237,6 +308,8 @@ async function createWorkspaceFromLegacy(tenantId, legacyRecord) {
       );
     }
     const summary = {
+      region: REGION,
+      table: TABLE,
       tenant: TENANT,
       dryRun: true,
       candidatesFound,
@@ -296,6 +369,8 @@ async function createWorkspaceFromLegacy(tenantId, legacyRecord) {
 
   // Summary with improved field names
   const summary = {
+    region: REGION,
+    table: TABLE,
     tenant: TENANT,
     dryRun: false,
     candidatesFound,

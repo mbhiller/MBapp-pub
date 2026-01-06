@@ -22,11 +22,7 @@ export type ListWorkspaceArgs = {
 export type WriteWorkspaceArgs = {
   tenantId: string;
   workspace: WorkspaceRecord;
-  dualWriteLegacy?: boolean;
 };
-
-type Source = "workspace" | "view";
-type CursorState = { src: Source; cursor?: string | null };
 
 function projectWorkspace(obj: any): WorkspaceRecord {
   const views = Array.isArray(obj?.views) ? obj.views : [];
@@ -42,54 +38,9 @@ function applyFields(item: WorkspaceRecord, fields?: string[]) {
   return projected as WorkspaceRecord;
 }
 
-function decodeCursor(token?: string | null): CursorState {
-  if (!token) return { src: "workspace", cursor: undefined };
-  try {
-    const decoded = Buffer.from(token, "base64").toString("utf8");
-    const parsed = JSON.parse(decoded) as { src?: Source; cursor?: string | null };
-    if (parsed && (parsed.src === "workspace" || parsed.src === "view")) {
-      return { src: parsed.src, cursor: parsed.cursor ?? undefined };
-    }
-  } catch {
-    // fall through to legacy format
-  }
-  return { src: "view", cursor: token };
-}
-
-function encodeCursor(state?: CursorState): string | undefined {
-  if (!state) return undefined;
-  // If we are still using legacy view pagination, return raw cursor for compatibility
-  if (state.src === "view" && state.cursor) return state.cursor;
-  const payload = { src: state.src, cursor: state.cursor ?? null };
-  return Buffer.from(JSON.stringify(payload), "utf8").toString("base64");
-}
-
 export async function getWorkspaceById({ tenantId, id, fields }: GetWorkspaceArgs) {
-  const primary = await getObjectById({ tenantId, type: "workspace", id, fields });
-  if (primary) return projectWorkspace(primary);
-
-  const legacy = await getObjectById({ tenantId, type: "view", id, fields });
-  if (legacy) {
-    // Emit legacy fallback counters on GET hit
-    // 1. Backwards-compatible event
-    console.log(JSON.stringify({
-      event: "workspaces:legacy_fallback_get",
-      workspaceId: id,
-      tenantId,
-      sourceType: "view",
-    }));
-    // 2. Unified fallback counter (across get/list)
-    console.log(JSON.stringify({
-      event: "workspaces:legacy_fallback_read_hit",
-      tenantId,
-      op: "get",
-      workspaceId: id,
-      sourceType: "view",
-    }));
-    return projectWorkspace(legacy);
-  }
-
-  return null;
+  const workspace = await getObjectById({ tenantId, type: "workspace", id, fields });
+  return workspace ? projectWorkspace(workspace) : null;
 }
 
 export async function listWorkspaces({
@@ -102,128 +53,52 @@ export async function listWorkspaces({
   next,
   fields,
 }: ListWorkspaceArgs) {
-  const decoded = decodeCursor(next);
-  const sources: Source[] = ["workspace", "view"];
-  const startIdx = Math.max(0, sources.indexOf(decoded.src));
-  const cursors: Record<Source, string | undefined | null> = { workspace: undefined, view: undefined };
-  cursors[decoded.src] = decoded.cursor ?? undefined;
+  // Workspace-only list (no legacy view fallback)
+  const page = await listObjects({
+    tenantId,
+    type: "workspace",
+    q,
+    next,
+    limit,
+    fields,
+  });
 
-  const collected: WorkspaceRecord[] = [];
-  const seen = new Set<string>();
-  let outgoing: CursorState | undefined;
-  const maxPagesPerSource = 25;
-  let legacyCount = 0;
-
-  for (let si = startIdx; si < sources.length; si++) {
-    const source = sources[si];
-    let pageCursor = cursors[source];
-    let pagesFetched = 0;
-
-    while (collected.length < limit && pagesFetched < maxPagesPerSource) {
-      pagesFetched += 1;
-      const page = await listObjects({
-        tenantId,
-        type: source,
-        q,
-        next: pageCursor || undefined,
-        limit,
-        fields,
-      });
-
-      const qLower = q ? q.toLowerCase() : undefined;
-      const filtered = (page.items || []).filter((item: any) => {
-        if (qLower) {
-          const name = item?.name ? String(item.name).toLowerCase() : "";
-          const desc = item?.description ? String(item.description).toLowerCase() : "";
-          if (!name.includes(qLower) && !desc.includes(qLower)) return false;
-        }
-        if (entityType && item?.entityType !== entityType) return false;
-        if (ownerId && item?.ownerId !== ownerId) return false;
-        if (typeof shared === "boolean") {
-          const val = typeof item?.shared === "boolean" ? item.shared : false;
-          if (val !== shared) return false;
-        }
-        return true;
-      });
-
-      let uniquesAdded = 0;
-      for (const raw of filtered) {
-        const projected = projectWorkspace(raw);
-        const id = projected.id;
-        if (!id) continue;
-        if (seen.has(id)) continue; // duplicates do not consume limit
-        seen.add(id);
-        collected.push(applyFields(projected, fields));
-        uniquesAdded += 1;
-        // Track legacy items in returned list
-        if (source === "view") {
-          legacyCount += 1;
-        }
-        if (collected.length >= limit) break;
-      }
-
-      const pageNext = (page as any).next ?? (page as any).nextCursor ?? (page as any).pageInfo?.nextCursor;
-
-      if (collected.length >= limit) {
-        outgoing = pageNext ? { src: source, cursor: pageNext } : undefined;
-        break;
-      }
-
-      // If no more pages in this source, stop and move to next source (if any)
-      if (!pageNext || pageNext === pageCursor) {
-        break;
-      }
-
-      // Continue paging current source to find more uniques
-      pageCursor = pageNext;
+  // Apply additional filters not natively supported by listObjects
+  const qLower = q ? q.toLowerCase() : undefined;
+  const filtered = (page.items || []).filter((item: any) => {
+    if (qLower) {
+      const name = item?.name ? String(item.name).toLowerCase() : "";
+      const desc = item?.description ? String(item.description).toLowerCase() : "";
+      if (!name.includes(qLower) && !desc.includes(qLower)) return false;
     }
-
-    if (collected.length >= limit) break;
-
-    // Move to next source if it exists
-    if (si < sources.length - 1) {
-      outgoing = { src: sources[si + 1], cursor: undefined };
-    } else {
-      outgoing = undefined;
+    if (entityType && item?.entityType !== entityType) return false;
+    if (ownerId && item?.ownerId !== ownerId) return false;
+    if (typeof shared === "boolean") {
+      const val = typeof item?.shared === "boolean" ? item.shared : false;
+      if (val !== shared) return false;
     }
-  }
+    return true;
+  });
 
-  // Emit telemetry if any legacy items were returned
-  if (legacyCount > 0) {
-    // 1. Backwards-compatible event
-    console.log(JSON.stringify({
-      event: "workspaces:legacy_fallback_list",
-      tenantId,
-      returnedLegacyCount: legacyCount,
-      requestedLimit: limit,
-      hasCursor: !!next,
-    }));
-    // 2. Unified fallback counter (across get/list)
-    console.log(JSON.stringify({
-      event: "workspaces:legacy_fallback_read_hit",
-      tenantId,
-      op: "list",
-      legacyCount,
-      requestedLimit: limit,
-      hasCursor: !!next,
-      sourceUsed: "view",
-    }));
-  }
+  const items = filtered.map((raw) => {
+    const projected = projectWorkspace(raw);
+    return applyFields(projected, fields);
+  });
 
-  const nextCursor = encodeCursor(outgoing);
+  const nextCursor = (page as any).next ?? (page as any).nextCursor ?? (page as any).pageInfo?.nextCursor ?? null;
   const hasNext = !!nextCursor;
 
   return {
-    items: collected,
+    items,
     ...(nextCursor ? { next: nextCursor } : {}),
     pageInfo: {
       hasNext,
-      nextCursor: nextCursor ?? null,
+      nextCursor,
     },
   };
 }
 
-export async function writeWorkspace({ tenantId, workspace, dualWriteLegacy }: WriteWorkspaceArgs) {
+export async function writeWorkspace({ tenantId, workspace }: WriteWorkspaceArgs) {
   const base = projectWorkspace({ ...workspace, type: "workspace" });
   const views = Array.isArray(base.views) ? base.views : [];
   base.views = views;
@@ -232,15 +107,6 @@ export async function writeWorkspace({ tenantId, workspace, dualWriteLegacy }: W
   const saved = hasId
     ? await replaceObject({ tenantId, type: "workspace", id: base.id!, body: base })
     : await createObject({ tenantId, type: "workspace", body: base });
-
-  if (dualWriteLegacy) {
-    const legacyBody = { ...base, type: "view" };
-    if (hasId) {
-      await replaceObject({ tenantId, type: "view", id: legacyBody.id!, body: legacyBody });
-    } else {
-      await createObject({ tenantId, type: "view", body: legacyBody });
-    }
-  }
 
   return projectWorkspace(saved);
 }

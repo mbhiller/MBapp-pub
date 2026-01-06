@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "child_process";
 import { baseGraph } from "./seed/routing.ts";
 import { seedParties, seedVendor, seedCustomer } from "./seed/parties.ts";
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { DynamoDBDocumentClient, PutCommand } from "@aws-sdk/lib-dynamodb";
 
 // Stable path resolution from smoke file location
 const __filename = fileURLToPath(import.meta.url);
@@ -9987,12 +9989,12 @@ const tests = {
     }
   },
 
-  "smoke:workspaces:get-fallback": async () => {
+  "smoke:workspaces:get-no-fallback": async () => {
     await ensureBearer();
     const featureHeaders = { "X-Feature-Views-Enabled": "true" };
     const headers = { ...baseHeaders(), ...featureHeaders };
 
-    const tag = smokeTag(`ws-fallback-${Date.now()}`);
+    const tag = smokeTag(`ws-no-fallback-${Date.now()}`);
     const id = `ws-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
     // Create workspace primary
@@ -10003,9 +10005,16 @@ const tests = {
     });
     const wsBody = await createWs.json().catch(() => ({}));
     if (!createWs.ok || wsBody?.id !== id) {
-      return { test: "workspaces:get-fallback", result: "FAIL", reason: "create-workspace" };
+      return { test: "workspaces:get-no-fallback", result: "FAIL", reason: "create-workspace" };
     }
     recordCreated({ type: "workspace", id, route: "/workspaces", meta: { name: wsBody.name } });
+
+    // Test 1: GET workspace should return workspace when it exists
+    const getWsFirst = await fetch(`${API}/workspaces/${encodeURIComponent(id)}`, { headers });
+    const wsFirstBody = await getWsFirst.json().catch(() => ({}));
+    if (!getWsFirst.ok || wsFirstBody?.id !== id || wsFirstBody?.type !== "workspace") {
+      return { test: "workspaces:get-no-fallback", result: "FAIL", reason: "get-workspace-failed", status: getWsFirst.status };
+    }
 
     // Create legacy view shadow with same id
     const createView = await fetch(`${API}/views`, {
@@ -10015,23 +10024,94 @@ const tests = {
     });
     const viewBody = await createView.json().catch(() => ({}));
     if (!createView.ok || viewBody?.id !== id) {
-      return { test: "workspaces:get-fallback", result: "FAIL", reason: "create-view-shadow" };
+      return { test: "workspaces:get-no-fallback", result: "FAIL", reason: "create-view-shadow" };
     }
     recordCreated({ type: "view", id, route: "/views", meta: { name: viewBody.name } });
+
+    // Test 2: GET workspace should still return workspace (not fallback to view)
+    const getWsSecond = await fetch(`${API}/workspaces/${encodeURIComponent(id)}`, { headers });
+    const wsSecondBody = await getWsSecond.json().catch(() => ({}));
+    if (!getWsSecond.ok || wsSecondBody?.id !== id || wsSecondBody?.type !== "workspace") {
+      return { test: "workspaces:get-no-fallback", result: "FAIL", reason: "get-workspace-with-view-shadow-failed", status: getWsSecond.status };
+    }
 
     // Delete workspace only; legacy view should remain
     const delWs = await fetch(`${API}/workspaces/${encodeURIComponent(id)}`, { method: "DELETE", headers });
     if (!delWs.ok && delWs.status !== 204 && delWs.status !== 200) {
-      return { test: "workspaces:get-fallback", result: "FAIL", reason: "delete-workspace" };
+      return { test: "workspaces:get-no-fallback", result: "FAIL", reason: "delete-workspace" };
     }
 
+    // Test 3: GET workspace should now return 404 (NO FALLBACK to view)
+    const getWsAfterDelete = await fetch(`${API}/workspaces/${encodeURIComponent(id)}`, { headers });
+    if (getWsAfterDelete.ok || getWsAfterDelete.status !== 404) {
+      const body = await getWsAfterDelete.json().catch(() => ({}));
+      return { test: "workspaces:get-no-fallback", result: "FAIL", reason: "fallback-not-removed", status: getWsAfterDelete.status, body };
+    }
+
+    return { test: "workspaces:get-no-fallback", result: "PASS", artifacts: { id, validated: "no-fallback" } };
+  },
+
+  "smoke:workspaces:cutover-validation": async () => {
+    await ensureBearer();
+    const featureHeaders = { "X-Feature-Views-Enabled": "true" };
+    const headers = { ...baseHeaders(), ...featureHeaders };
+
+    const tag = smokeTag(`ws-cutover-${Date.now()}`);
+    const id = `ws-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+    // Step 1: Create canonical workspace
+    const createWs = await fetch(`${API}/workspaces`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ id, name: `${tag}-canonical`, entityType: "salesOrder", views: [] })
+    });
+    const wsBody = await createWs.json().catch(() => ({}));
+    if (!createWs.ok || wsBody?.id !== id) {
+      return { test: "workspaces:cutover-validation", result: "FAIL", step: "create-workspace" };
+    }
+    recordCreated({ type: "workspace", id, route: "/workspaces", meta: { name: wsBody.name } });
+
+    // Step 2: Create legacy view "shadow" with same id
+    const createView = await fetch(`${API}/views`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ id, name: `${tag}-legacy-shadow`, entityType: "salesOrder", views: [] })
+    });
+    const viewBody = await createView.json().catch(() => ({}));
+    if (!createView.ok || viewBody?.id !== id) {
+      return { test: "workspaces:cutover-validation", result: "FAIL", step: "create-legacy-view" };
+    }
+    recordCreated({ type: "view", id, route: "/views", meta: { name: viewBody.name } });
+
+    // Step 3: GET /workspaces/:id should return workspace (not view)
     const getWs = await fetch(`${API}/workspaces/${encodeURIComponent(id)}`, { headers });
-    const body = await getWs.json().catch(() => ({}));
-    if (!getWs.ok || body?.id !== id) {
-      return { test: "workspaces:get-fallback", result: "FAIL", reason: "get-fallback-failed", status: getWs.status, body };
+    const getWsBody = await getWs.json().catch(() => ({}));
+    if (!getWs.ok || getWsBody?.id !== id || getWsBody?.type !== "workspace") {
+      return { test: "workspaces:cutover-validation", result: "FAIL", step: "get-workspace", status: getWs.status };
     }
 
-    return { test: "workspaces:get-fallback", result: "PASS", artifacts: { id, source: "legacy" } };
+    // Step 4: DELETE /workspaces/:id
+    const delWs = await fetch(`${API}/workspaces/${encodeURIComponent(id)}`, { method: "DELETE", headers });
+    if (!delWs.ok && delWs.status !== 204 && delWs.status !== 200) {
+      return { test: "workspaces:cutover-validation", result: "FAIL", step: "delete-workspace", status: delWs.status };
+    }
+
+    // Step 5: GET /workspaces/:id should return 404 (NO FALLBACK to legacy view)
+    const getWsAfterDel = await fetch(`${API}/workspaces/${encodeURIComponent(id)}`, { headers });
+    if (getWsAfterDel.ok || getWsAfterDel.status !== 404) {
+      return { test: "workspaces:cutover-validation", result: "FAIL", step: "get-after-delete-should-404", status: getWsAfterDel.status };
+    }
+
+    // Step 6: LIST /workspaces should NOT include the deleted record
+    const listRes = await fetch(`${API}/workspaces?q=${encodeURIComponent(tag)}`, { headers });
+    const listBody = await listRes.json().catch(() => ({ items: [] }));
+    const items = Array.isArray(listBody?.items) ? listBody.items : [];
+    const foundItem = items.find((item) => item.id === id);
+    if (foundItem) {
+      return { test: "workspaces:cutover-validation", result: "FAIL", step: "list-should-not-include-deleted", foundItem };
+    }
+
+    return { test: "workspaces:cutover-validation", result: "PASS", artifacts: { id, validated: "full-cutover" } };
   },
 
   "smoke:workspaces:default-view-validation": async () => {
@@ -13832,9 +13912,10 @@ const tests = {
   },
 
   "smoke:migrate-legacy-workspaces:creates-workspace": async () => {
-    // E2 smoke: End-to-end test of legacy workspace migration
-    // 1) Create a legacy "workspace-shaped view" via /views endpoint
-    // 2) Optionally verify fallback works (GET /workspaces/:id returns it)
+    // E2 smoke: End-to-end test of legacy workspace migration (post-Sprint AY cutover)
+    // E15: Step 1 creates legacy view DIRECTLY in DynamoDB (ensures isWorkspaceShaped() match)
+    // 1) Create a legacy "workspace-shaped view" via DynamoDB PutItem (NO filters field)
+    // 2) Verify GET /workspaces/:id returns 404 (no fallback post-cutover)
     // 3) Run migrate-legacy-workspaces.mjs to copy to canonical workspace
     // 4) Verify canonical workspace record exists and is returned
     // 5) Verify fields are preserved (name, views, ownerId, etc.)
@@ -13846,72 +13927,75 @@ const tests = {
     let workspaceId = null;
 
     try {
-      // Step 1: Create a legacy "workspace-shaped view" via /views
-      // This mimics what migrate-legacy-workspaces.mjs looks for:
-      // - type="view"
-      // - has name, views[], shared, ownerId
-      // - does NOT have filters (workspace-shaped)
-      const legacyViewPayload = {
+      // Step 1: Create a legacy "workspace-shaped view" directly in DynamoDB
+      // E15: Write view#<id> record WITHOUT filters field to match isWorkspaceShaped() heuristic
+      // This ensures the migration tool will definitely find and process this record
+      legacyViewId = idem();
+      const TABLE = process.env.OBJECTS_TABLE || `${process.env.PROJECT_NAME ?? "mbapp"}_objects`;
+      const REGION = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || "us-east-1";
+      const PK = process.env.MBAPP_TABLE_PK || "pk";
+      const SK = process.env.MBAPP_TABLE_SK || "sk";
+      
+      const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }), {
+        marshallOptions: { convertClassInstanceToMap: true, removeUndefinedValues: true, convertEmptyValues: false },
+        unmarshallOptions: { wrapNumbers: false },
+      });
+
+      const now = new Date().toISOString();
+      const legacyViewRecord = {
+        [PK]: TENANT,
+        [SK]: `view#${legacyViewId}`,
+        type: "view",
+        id: legacyViewId,
         name: viewName,
-        views: [testViewId], // array of view IDs this workspace wraps
+        views: [testViewId],
         shared: false,
         ownerId: "smoke-test-owner",
         entityType: "purchaseOrder",
-        description: `Legacy workspace-shaped view for migration test ${runId}`
+        description: `Legacy workspace-shaped view for migration test ${runId}`,
+        createdAt: now,
+        updatedAt: now,
+        // CRITICAL: NO filters field - this is what makes it workspace-shaped
       };
 
-      const createViewRes = await fetch(`${API}/views`, {
-        method: "POST",
-        headers: buildHeaders({ "X-Feature-Views-Enabled": "true" }),
-        body: JSON.stringify(legacyViewPayload)
-      });
-
-      if (!createViewRes.ok) {
-        const body = await createViewRes.json().catch(() => ({}));
+      try {
+        await ddb.send(
+          new PutCommand({
+            TableName: TABLE,
+            Item: legacyViewRecord,
+          })
+        );
+      } catch (err) {
         return {
           test: "migrate-legacy-workspaces:creates-workspace",
           result: "FAIL",
-          step: "create-legacy-view",
-          expectedStatus: 201,
-          actualStatus: createViewRes.status,
-          body
+          step: "create-legacy-view-dynamodb",
+          error: err.message,
+          detail: "Failed to write legacy workspace-shaped view to DynamoDB"
         };
       }
 
-      const legacyViewBody = await createViewRes.json();
-      legacyViewId = legacyViewBody.id;
-      if (!legacyViewId) {
-        return {
-          test: "migrate-legacy-workspaces:creates-workspace",
-          result: "FAIL",
-          step: "create-legacy-view-extract-id",
-          body: legacyViewBody
-        };
-      }
       recordCreated({ type: "view", id: legacyViewId, route: "/views", meta: { name: viewName, isLegacyWorkspace: true } });
 
-      // Step 2 (Optional): Verify fallback works pre-migration
-      // GET /workspaces/:id should find the legacy view via fallback
+      // Step 2 (Post-Sprint AY): Verify no fallback exists
+      // After Phase 3 cutover, GET /workspaces/:id should return 404 when only legacy view exists
+      // (no fallback to type="view" anymore)
       const preGetRes = await fetch(`${API}/workspaces/${encodeURIComponent(legacyViewId)}`, {
         method: "GET",
         headers: buildHeaders()
       });
 
-      const preFallbackWorked = preGetRes.ok && preGetRes.status === 200;
-      const preGetBody = preFallbackWorked ? await preGetRes.json() : {};
-      const preFallbackName = preGetBody?.name;
+      const preGetReturns404 = !preGetRes.ok && preGetRes.status === 404;
 
-      if (!preFallbackWorked || preFallbackName !== viewName) {
+      if (!preGetReturns404) {
         return {
           test: "migrate-legacy-workspaces:creates-workspace",
           result: "FAIL",
-          step: "pre-migration-fallback-get",
-          expectedStatus: 200,
+          step: "pre-migration-no-fallback-assert-404",
+          expectedStatus: 404,
           actualStatus: preGetRes.status,
-          expectedName: viewName,
-          actualName: preFallbackName,
-          detail: "Legacy workspace-shaped view should be readable via /workspaces/:id fallback",
-          body: preGetBody
+          detail: "POST-CUTOVER: Legacy workspace-shaped view should NOT be readable via /workspaces/:id (no fallback after Phase 3)",
+          body: preGetRes.ok ? await preGetRes.json() : {}
         };
       }
 
@@ -13934,12 +14018,21 @@ const tests = {
       }
 
       const toolPath = path.join(repoRoot, "ops/tools/migrate-legacy-workspaces.mjs");
+      // E19: Respect AWS region from environment, fallback to us-east-1
+      const awsRegionUsed = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || "us-east-1";
       const migrationResult = spawnSync("node", [
         toolPath,
         "--tenant", TENANT,
         "--confirm",
         "--confirm-tenant", TENANT
-      ], { encoding: "utf8", env: process.env });
+      ], { 
+        encoding: "utf8", 
+        env: {
+          ...process.env, 
+          AWS_REGION: awsRegionUsed, 
+          AWS_DEFAULT_REGION: awsRegionUsed
+        }
+      });
 
       const migrationOutput = (migrationResult.stderr || "") + (migrationResult.stdout || "");
       const migrationSuccess = migrationResult.status === 0;
@@ -13951,12 +14044,87 @@ const tests = {
           step: "migration-tool-execution",
           expectedExit: 0,
           actualExit: migrationResult.status,
+          awsRegionUsed,
+          legacyViewId,
           output: migrationOutput.slice(0, 500)
         };
       }
 
+      // Parse migration tool output: tool prints final JSON summary
+      // Expected format: { candidatesFound: N, plannedCreates: N, created: N, skippedExists: N, errors: N }
+      // E18: Robust line-by-line parsing from bottom up
+      let toolSummary = null;
+      let parseError = null;
+      let candidateLine = null;
+      
+      try {
+        const lines = migrationOutput.split('\n');
+        // Search from bottom up for a line containing '{' and '"created"'
+        for (let i = lines.length - 1; i >= 0; i--) {
+          const line = lines[i];
+          if (line.includes('{') && line.includes('"created"')) {
+            candidateLine = line;
+            // Extract substring from first '{' to last '}'
+            const firstBrace = line.indexOf('{');
+            const lastBrace = line.lastIndexOf('}');
+            if (firstBrace >= 0 && lastBrace > firstBrace) {
+              const jsonStr = line.substring(firstBrace, lastBrace + 1);
+              toolSummary = JSON.parse(jsonStr);
+              break;
+            }
+          }
+        }
+      } catch (parseErr) {
+        parseError = parseErr.message;
+      }
+
+      // E18: Enhanced parsing failure diagnostics
+      if (!toolSummary && parseError) {
+        return {
+          test: "migrate-legacy-workspaces:creates-workspace",
+          result: "FAIL",
+          step: "migration-tool-json-parse-failure",
+          parseError,
+          candidateLine,
+          outputLastLines: migrationOutput.split('\n').slice(-30).join('\n')
+        };
+      }
+
+      // Verify tool processed at least one workspace record
+      // PASS if: (created + skippedExists) > 0 (idempotent: first run creates, rerun skips)
+      const totalProcessed = (toolSummary?.created || 0) + (toolSummary?.skippedExists || 0);
+      
+      // Verify that the tool output contains an explicit action line for THIS specific legacyViewId
+      // Build regexes for skip and create patterns
+      const escapedViewId = legacyViewId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const skipRegex = new RegExp(`workspace record already exists for\\s+${escapedViewId}`, 'i');
+      const createRegex = new RegExp(`(created|wrote|put).*${escapedViewId}`, 'i');
+      const toolProcessedThisView = skipRegex.test(migrationOutput) || createRegex.test(migrationOutput);
+      
+      if (!toolSummary || totalProcessed <= 0 || !toolProcessedThisView) {
+        return {
+          test: "migrate-legacy-workspaces:creates-workspace",
+          result: "FAIL",
+          step: toolProcessedThisView 
+            ? "migration-tool-verify-created-or-skipped" 
+            : "migration-tool-did-not-process-this-id",
+          detail: toolProcessedThisView 
+            ? `Tool processed records but (created + skippedExists) = ${totalProcessed}, expected > 0`
+            : `Migration tool did not process the legacy view created by this smoke (${legacyViewId}). No explicit create/skip line found in output. Likely no workspace-shaped view candidates matched isWorkspaceShaped(), or tool is pointed at a different table/account/region.`,
+          expectedOutcome: "(created + skippedExists) > 0 AND tool output contains explicit action line for legacyViewId",
+          actualCreated: toolSummary?.created ?? 0,
+          actualSkippedExists: toolSummary?.skippedExists ?? 0,
+          totalProcessed,
+          toolProcessedThisView,
+          awsRegionUsed,
+          legacyViewId,
+          toolSummary,
+          outputLastLines: migrationOutput.split('\n').slice(-40).join('\n')
+        };
+      }
+
       // Step 4: Verify canonical workspace record was created
-      // GET /workspaces/:id should now return from type="workspace" source
+      // After migration, GET /workspaces/:id should now return from type="workspace" source
       const postGetRes = await fetch(`${API}/workspaces/${encodeURIComponent(legacyViewId)}`, {
         method: "GET",
         headers: buildHeaders()
@@ -14016,14 +14184,24 @@ const tests = {
       return {
         test: "migrate-legacy-workspaces:creates-workspace",
         result: "PASS",
-        summary: "Legacy workspace-shaped view successfully migrated to canonical workspace record",
+        summary: "Legacy workspace-shaped view successfully migrated to canonical workspace record (post-cutover)",
         artifacts: {
           legacyViewId,
           workspaceId,
           viewName
         },
+        debug: {
+          awsRegionUsed,
+          legacyViewId
+        },
+        toolSummary: {
+          candidatesFound: toolSummary?.candidatesFound ?? 0,
+          created: toolSummary?.created ?? 0,
+          skippedExists: toolSummary?.skippedExists ?? 0,
+          errors: toolSummary?.errors ?? 0
+        },
         assertions: {
-          preFallbackWorked,
+          preGetReturns404: preGetReturns404,
           namePreserved: nameMatch,
           viewsArrayPreserved: viewsMatch,
           typeIsWorkspace: typeMatch,

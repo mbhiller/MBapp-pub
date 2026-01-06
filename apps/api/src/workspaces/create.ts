@@ -4,11 +4,8 @@ import { getAuth, requirePerm } from "../auth/middleware";
 import { writeWorkspace } from "./repo";
 import { getObjectById } from "../objects/repo";
 
-const DUALWRITE_LEGACY = process.env.MBAPP_WORKSPACES_DUALWRITE_LEGACY === "true";
-
 /**
- * POST /workspaces — creates a saved View.
- * Mirrors /views behavior: same validation, RBAC guards, creates type='view'.
+ * POST /workspaces — creates a workspace.
  */
 export async function handle(event: APIGatewayProxyEventV2) {
   try {
@@ -72,20 +69,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const result = await writeWorkspace({
       tenantId: auth.tenantId,
       workspace: { ...body, views },
-      dualWriteLegacy: DUALWRITE_LEGACY,
     });
-
-    // Emit dualwrite telemetry with workspaceId (now available post-creation)
-    if (DUALWRITE_LEGACY && result.id) {
-      console.warn(JSON.stringify({
-        event: "workspaces:dualwrite_enabled",
-        tenantId: auth.tenantId,
-        op: "create",
-        workspaceId: result.id,
-        flagName: "MBAPP_WORKSPACES_DUALWRITE_LEGACY",
-        flagValue: "true",
-      }));
-    }
 
     return ok(result, 201);
   } catch (e: any) {
