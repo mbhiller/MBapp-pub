@@ -6,6 +6,28 @@
 
 ---
 
+### Sprint BA — Message Templates v1 — ✅ Complete (2026-01-06)
+
+**Summary:** Introduced a minimal, deterministic template system for email/SMS with zero external deps. Stores rendered copy + template metadata for audit/versioning.
+
+**Deliverables (E1-E5):**
+- **Spec (E1):** Updated [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) Message schema: added optional fields `templateKey`, `templateVars`, `queuedAt`, `metadata`; ran `spec:lint`, `spec:bundle`, `spec:types:api`, `spec:types:mobile` ✅
+- **Templates (E2):** Created [apps/api/src/common/templates.ts](../apps/api/src/common/templates.ts): defined `TemplateKey` union type, `RenderResult` interface, `renderTemplate(key, vars)` function with var validation; two templates: `registration.confirmed.email` (vars: registrationId, paymentIntentId), `registration.confirmed.sms` (vars: registrationId).
+- **API Enqueue (E3):** Updated [apps/api/src/common/notify.ts](../apps/api/src/common/notify.ts): added `enqueueTemplatedEmail()` and `enqueueTemplatedSMS()` functions that render template, validate vars, store rendered copy + template metadata, then send (simulate or real via Postmark/Twilio).
+- **Webhook (E4):** Updated [apps/api/src/webhooks/stripe-handler.ts](../apps/api/src/webhooks/stripe-handler.ts): replaced hardcoded `enqueueEmail/enqueueSMS` calls with templated versions; registration confirmation now uses `registration.confirmed.email` and `registration.confirmed.sms` templates.
+- **Smokes (E5):** Updated [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs): `smoke:registrations:confirmation-message` and `smoke:registrations:confirmation-sms` now assert `templateKey` and required `templateVars` keys exist (non-brittle, no rendered text assertions).
+
+**Verification:**
+- ✅ Typecheck: `npm run typecheck -w apps/api`
+- ✅ Spec: lint/bundle/types regenerated
+- ✅ Smokes: confirmation-message PASS, confirmation-sms PASS
+
+**Design Notes:**
+- Template metadata (templateKey/templateVars) stored alongside rendered copy for audit trail and future re-rendering.
+- Rendered copy (subject/body) sent to providers; template metadata is for observability/migration only.
+- No external templating engine; uses string interpolation (minimal, deterministic).
+- Var validation on render (missing required vars throw clear error).
+
 ### Sprint AZ — Message Retry Endpoint — ✅ Complete (2026-01-06)
 
 **Summary:** Added a manual retry endpoint for failed messages with simulate/real parity and smoke coverage.

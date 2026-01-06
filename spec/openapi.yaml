@@ -3901,6 +3901,25 @@ components:
               type: integer
               nullable: true
               description: Number of retry attempts after failures
+            templateKey:
+              type: string
+              nullable: true
+              description: Template identifier for rendering subject/body (Sprint BA)
+            templateVars:
+              type: object
+              additionalProperties: true
+              nullable: true
+              description: Variables for template rendering (Sprint BA)
+            queuedAt:
+              type: string
+              format: date-time
+              nullable: true
+              description: Timestamp when message was queued
+            metadata:
+              type: object
+              additionalProperties: true
+              nullable: true
+              description: Additional metadata (e.g., registrationId, paymentIntentId)
             notes:
               type: string
               nullable: true

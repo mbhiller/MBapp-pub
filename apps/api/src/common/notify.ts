@@ -3,6 +3,7 @@ import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { createObject, updateObject, getObjectById } from "../objects/repo";
 import { sendPostmarkEmail } from "./postmark";
 import { sendTwilioSms } from "./twilio";
+import { renderTemplate, type TemplateKey } from "./templates";
 
 export type EnqueueEmailArgs = {
   tenantId: string;
@@ -222,6 +223,248 @@ export async function enqueueSMS({ tenantId, to, body, metadata, event }: Enqueu
     });
 
     console.error(`[notify] SMS send failed for ${msgId}: ${errorMessage}`);
+  }
+
+  return created;
+}
+
+export type EnqueueTemplatedEmailArgs = {
+  tenantId: string;
+  to: string;
+  templateKey: TemplateKey;
+  templateVars: Record<string, any>;
+  metadata?: Record<string, any>;
+  event?: APIGatewayProxyEventV2;
+};
+
+/**
+ * Enqueue a templated email message.
+ * Renders the template, stores both rendered copy and template metadata, then sends.
+ */
+export async function enqueueTemplatedEmail({
+  tenantId,
+  to,
+  templateKey,
+  templateVars,
+  metadata,
+  event,
+}: EnqueueTemplatedEmailArgs) {
+  // Render the template (throws if vars are missing)
+  const rendered = renderTemplate(templateKey, templateVars);
+
+  // For email, we expect rendered to have subject and body
+  if (rendered.channel !== "email" || !rendered.subject || !rendered.body) {
+    throw new Error(
+      `[notify] Template "${templateKey}" did not render valid email (missing subject or body)`
+    );
+  }
+
+  const now = new Date().toISOString();
+  const msgBody: any = {
+    type: "message",
+    channel: "email",
+    to,
+    subject: rendered.subject,
+    body: rendered.body,
+    status: "queued",
+    queuedAt: now,
+    templateKey,
+    templateVars,
+    ...(metadata && { metadata }),
+  };
+
+  const created = await createObject({ tenantId, type: "message", body: msgBody });
+  const msgId = (created as any).id as string;
+
+  // In simulate mode, mark as sent immediately
+  if (simulateNotifyEnabled(event)) {
+    await updateObject({
+      tenantId,
+      type: "message",
+      id: msgId,
+      body: { status: "sent", sentAt: new Date().toISOString() },
+    });
+    return created;
+  }
+
+  // Real send mode: send via Postmark
+  // Defensive check: don't re-send if already sent
+  const current = await getObjectById({ tenantId, type: "message", id: msgId });
+  if ((current as any)?.status === "sent") {
+    console.log(`[notify] Message ${msgId} already sent, skipping duplicate send`);
+    return created;
+  }
+
+  // Mark as sending
+  await updateObject({
+    tenantId,
+    type: "message",
+    id: msgId,
+    body: { status: "sending", lastAttemptAt: new Date().toISOString() },
+  });
+
+  try {
+    // Send via Postmark
+    const result = await sendPostmarkEmail({
+      to,
+      subject: rendered.subject,
+      textBody: rendered.body,
+      event,
+    });
+
+    // Success: mark as sent with provider details
+    await updateObject({
+      tenantId,
+      type: "message",
+      id: msgId,
+      body: {
+        status: "sent",
+        sentAt: new Date().toISOString(),
+        provider: "postmark",
+        providerMessageId: result.messageId,
+        notes: result.message,
+      },
+    });
+
+    console.log(`[notify] Templated email sent via Postmark: ${msgId} → ${result.messageId}`);
+  } catch (err: any) {
+    // Failure: mark as failed with error details
+    const errorMessage = err.message || String(err);
+    await updateObject({
+      tenantId,
+      type: "message",
+      id: msgId,
+      body: {
+        status: "failed",
+        provider: "postmark",
+        errorMessage,
+        lastAttemptAt: new Date().toISOString(),
+      },
+    });
+
+    console.error(`[notify] Templated email send failed for ${msgId}: ${errorMessage}`);
+  }
+
+  return created;
+}
+
+export type EnqueueTemplatedSmsArgs = {
+  tenantId: string;
+  to: string;
+  templateKey: TemplateKey;
+  templateVars: Record<string, any>;
+  metadata?: Record<string, any>;
+  event?: APIGatewayProxyEventV2;
+};
+
+/**
+ * Enqueue a templated SMS message.
+ * Renders the template, stores both rendered copy and template metadata, then sends.
+ */
+export async function enqueueTemplatedSMS({
+  tenantId,
+  to,
+  templateKey,
+  templateVars,
+  metadata,
+  event,
+}: EnqueueTemplatedSmsArgs) {
+  // Render the template (throws if vars are missing)
+  const rendered = renderTemplate(templateKey, templateVars);
+
+  // For SMS, we expect rendered to have body
+  if (rendered.channel !== "sms" || !rendered.body) {
+    throw new Error(
+      `[notify] Template "${templateKey}" did not render valid SMS (missing body)`
+    );
+  }
+
+  const now = new Date().toISOString();
+  const msgBody: any = {
+    type: "message",
+    channel: "sms",
+    to,
+    body: rendered.body,
+    status: "queued",
+    queuedAt: now,
+    templateKey,
+    templateVars,
+    ...(metadata && { metadata }),
+  };
+
+  const created = await createObject({ tenantId, type: "message", body: msgBody });
+  const msgId = (created as any).id as string;
+
+  // In simulate mode, mark as sent immediately
+  if (simulateNotifyEnabled(event)) {
+    await updateObject({
+      tenantId,
+      type: "message",
+      id: msgId,
+      body: {
+        status: "sent",
+        sentAt: new Date().toISOString(),
+        provider: "twilio",
+        providerMessageId: `sim_sms_${Math.random().toString(36).substring(2, 11)}`,
+      },
+    });
+    return created;
+  }
+
+  // Real send mode: send via Twilio
+  // Defensive check: don't re-send if already sent
+  const current = await getObjectById({ tenantId, type: "message", id: msgId });
+  if ((current as any)?.status === "sent") {
+    console.log(`[notify] Message ${msgId} already sent, skipping duplicate send`);
+    return created;
+  }
+
+  // Mark as sending
+  await updateObject({
+    tenantId,
+    type: "message",
+    id: msgId,
+    body: { status: "sending", lastAttemptAt: new Date().toISOString() },
+  });
+
+  try {
+    // Send via Twilio
+    const result = await sendTwilioSms({
+      to,
+      body: rendered.body,
+      event: event as any,
+    });
+
+    // Success: mark as sent with provider details
+    await updateObject({
+      tenantId,
+      type: "message",
+      id: msgId,
+      body: {
+        status: "sent",
+        sentAt: new Date().toISOString(),
+        provider: "twilio",
+        providerMessageId: result.sid,
+      },
+    });
+
+    console.log(`[notify] Templated SMS sent via Twilio: ${msgId} → ${result.sid}`);
+  } catch (err: any) {
+    // Failure: mark as failed with error details
+    const errorMessage = err.message || String(err);
+    await updateObject({
+      tenantId,
+      type: "message",
+      id: msgId,
+      body: {
+        status: "failed",
+        provider: "twilio",
+        errorMessage,
+        lastAttemptAt: new Date().toISOString(),
+      },
+    });
+
+    console.error(`[notify] Templated SMS send failed for ${msgId}: ${errorMessage}`);
   }
 
   return created;
