@@ -1,8 +1,14 @@
+// apps/api/src/shared/ensureLineIds.ts
+// Assign stable line ids where missing.
+//
 // Usage expectation:
 // - Callers should run ensureLineIds() AFTER applying any line patch operations.
 // - patchLines (apps/api/src/shared/patchLines.ts) does not assign ids; ensureLineIds
 //   assigns stable `L{n}` IDs where missing, preserves existing ids, and avoids reuse.
-export type LineLike = { id?: string } & Record<string, unknown>;
+
+import { lineKey } from "./lineKey";
+
+export type LineLike = { id?: string; cid?: string } & Record<string, unknown>;
 
 type EnsureOptions = {
   /** Reserve these ids so they are never reused (e.g., removed lines). */
@@ -20,11 +26,11 @@ export function ensureLineIds<T extends LineLike>(lines: T[] | unknown, opts: En
     if (typeof id === "string" && id.trim()) used.add(id.trim());
   }
 
-  // Collect existing ids from incoming lines to avoid collisions
+  // Collect existing stable line keys to avoid collisions
   for (const line of lines) {
-    const id = (line as LineLike)?.id;
-    if (typeof id === "string" && id.trim()) {
-      used.add(id.trim());
+    const key = lineKey(line as LineLike);
+    if (key) {
+      used.add(key);
     }
   }
 
@@ -42,8 +48,10 @@ export function ensureLineIds<T extends LineLike>(lines: T[] | unknown, opts: En
 
   return lines.map((line) => {
     if (!line || typeof line !== "object") return line;
-    const id = (line as LineLike).id;
-    if (typeof id === "string" && id.trim()) return line;
+    const key = lineKey(line as LineLike);
+    // If line already has a stable key (server id or cid), keep it as-is
+    if (key) return line;
+    // No key: assign stable id
     return { ...(line as Record<string, unknown>), id: nextId() } as T;
   });
 }

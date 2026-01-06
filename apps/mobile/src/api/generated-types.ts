@@ -794,7 +794,17 @@ export interface paths {
         put?: never;
         /**
          * Apply patch operations to purchase order lines (draft-only)
-         * @description Patch lines for draft purchase orders only. Non-draft states reject with 409 (PO_NOT_EDITABLE). Server preserves existing line ids and assigns stable ids (e.g., L1, L2, ...) for new lines.
+         * @description Patch lines for draft purchase orders only. Non-draft states reject with 409 (PO_NOT_EDITABLE).
+         *
+         *     Supports minimal patch operations:
+         *     - **upsert**: Create or update line by `id` (existing) or `cid` (new). Server assigns stable ids (L1, L2, ...) for new lines.
+         *     - **remove**: Delete line by `id` or `cid`.
+         *
+         *     **Error Codes:**
+         *     - 400: Invalid ops (missing op, invalid cid format, cid starts with reserved L\d+ pattern)
+         *     - 404: Purchase order not found
+         *     - 409: PO_NOT_EDITABLE (non-draft status), or validation error (invalid ops format)
+         *
          */
         post: operations["patchPurchaseOrderLines"];
         delete?: never;
@@ -1394,8 +1404,18 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Apply patch operations to sales order lines (draft/submitted/approved)
-         * @description Patch lines while the sales order is editable (draft, submitted, or approved). Non-editable states reject with 409. Server preserves existing line ids and assigns stable ids (e.g., L1, L2, ...) for new lines.
+         * Apply patch operations to sales order lines (draft/submitted/committed)
+         * @description Patch lines while the sales order is editable (draft, submitted, or committed). Non-editable states reject with 409 (SO_NOT_EDITABLE).
+         *
+         *     Supports minimal patch operations:
+         *     - **upsert**: Create or update line by `id` (existing) or `cid` (new). Server assigns stable ids (L1, L2, ...) for new lines.
+         *     - **remove**: Delete line by `id` or `cid`.
+         *
+         *     **Error Codes:**
+         *     - 400: Invalid ops (missing op, invalid cid format, cid starts with reserved L\d+ pattern)
+         *     - 404: Sales order not found
+         *     - 409: SO_NOT_EDITABLE (non-editable status), or validation error (invalid ops format)
+         *
          */
         post: operations["patchSalesOrderLines"];
         delete?: never;
@@ -4817,6 +4837,7 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description Purchase order id */
                 id: string;
             };
             cookie?: never;
@@ -4827,7 +4848,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Updated purchase order */
+            /** @description Updated purchase order with normalized lines (server-assigned ids) */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4836,7 +4857,25 @@ export interface operations {
                     "application/json": components["schemas"]["PurchaseOrder"];
                 };
             };
-            /** @description Guardrail violation (e.g., invalid status for patch) */
+            /** @description Bad request (invalid ops, missing required fields) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Purchase order not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflict or guardrail violation (e.g., PO_NOT_EDITABLE) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -4887,6 +4926,7 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
+                /** @description Sales order id */
                 id: string;
             };
             cookie?: never;
@@ -4897,7 +4937,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Updated sales order */
+            /** @description Updated sales order with normalized lines (server-assigned ids) */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4906,7 +4946,25 @@ export interface operations {
                     "application/json": components["schemas"]["SalesOrder"];
                 };
             };
-            /** @description Guardrail violation (e.g., invalid status for patch) */
+            /** @description Bad request (invalid ops, missing required fields) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Sales order not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflict or guardrail violation (e.g., SO_NOT_EDITABLE) */
             409: {
                 headers: {
                     [name: string]: unknown;

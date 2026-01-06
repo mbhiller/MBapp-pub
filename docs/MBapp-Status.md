@@ -5,6 +5,67 @@
 **Workflow & DoD:** See [MBapp-Cadence.md](MBapp-Cadence.md) for canonical workflow, Definition of Done, and testing rules.
 
 ---
+
+### Sprint AZ — Line Editor Hardening: Centralized Key Logic + Expanded Coverage — ✅ Complete (2026-01-05)
+
+**Summary:** Consolidated line identity resolution into shared `lineKey()` helper; expanded patch-lines smokes to cover multi-op + status guard scenarios. Made "how we edit lines" foundation discoverable and hard to accidentally bypass.
+
+**Deliverables:**
+
+- **Spec (E1):** Enhanced OpenAPI paths for patch-lines endpoints
+  - `/sales/so/{id}:patch-lines` — Added 400/404/409 error responses with full semantics
+  - `/purchasing/po/{id}:patch-lines` — Added 400/404/409 error responses + missing `x-mbapp-permission: purchase:write`
+  - Both paths now document operation semantics (upsert by id/cid, remove by id/cid) and patchable fields
+  - Ran spec validation: `npm run spec:lint`, `spec:bundle`, `spec:types:api`, `spec:types:mobile` ✅
+
+- **API Refactor (E2):** Centralized line identity logic
+  - Created [apps/api/src/shared/lineKey.ts](../apps/api/src/shared/lineKey.ts) — Single source of truth for id/cid matching
+  - Exported: `lineKey(line)` (stable key), `isClientOnlyId(id)`, `trimId(id)`
+  - Refactored [patchLines.ts](../apps/api/src/shared/patchLines.ts) — Uses `lineKey()` for all remove/upsert op matching
+  - Refactored [ensureLineIds.ts](../apps/api/src/shared/ensureLineIds.ts) — Uses `lineKey()` for existing line collection
+  - Refactored [patchLinesEngine.ts](../apps/api/src/shared/patchLinesEngine.ts) — Uses `lineKey()` for reserved ID tracking
+  - **Guarantee:** Identical line identity logic across all 3 helpers; refactoring requires only one change to lineKey.ts
+  - API typecheck ✅, API build (1.6mb) ✅
+
+- **Smoke Hardening (E3):** Expanded patch-lines coverage (no new smoke names, ci-smokes.json stable)
+  - `smoke:so:patch-lines:cid` — **NEW:** Multi-op patch (add via cid, update via id, remove via id), 409 guard on cancelled status
+    - Assertions: `multiOp_ok`, `multiOp_newLineAdded`, `multiOp_removedLineGone`, `multiOp_newLineHasL_n_Id`, `multiOp_noTmpIdsRemain`, `statusGuard_409_on_cancelled`, `statusGuard_actual_status`
+    - Result: ✅ PASS
+  - `smoke:po:patch-lines:cid` — **NEW:** Same coverage as SO (multi-op, 409 guard on cancelled)
+    - Same 7 assertions as SO smoke
+    - Result: ✅ PASS
+  - Syntax validated: `node -c ops/smoke/smoke.mjs` ✅
+
+- **Docs (E4):** Updated foundation + verification docs
+  - [MBapp-Foundations.md](MBapp-Foundations.md#L653) — Added "Line Identity Resolution (Sprint AZ E2)" subsection documenting lineKey.ts usage pattern and where applied
+  - [smoke-coverage.md](smoke-coverage.md#L136) — Updated patch-lines smoke descriptions noting E3 hardening (multi-op, status guard)
+  - [MBapp-Status.md](MBapp-Status.md) — This entry (Sprint AZ summary)
+
+**Verification:**
+- ✅ Spec validation: lint, bundle, type generation all clean
+- ✅ Typecheck: API, Mobile, Web all clean
+- ✅ Build: API bootstrap.js (1.6mb, 1822ms)
+- ✅ Smoke syntax: node -c ops/smoke/smoke.mjs clean
+- ✅ Smokes execute: both SO and PO patch-lines smokes ✅ PASS with 7 assertions each
+- ✅ No breaking changes: Behavior is refactor-only; API contracts unchanged
+
+**Key Invariants Validated:**
+1. Client-only ids must use `tmp-{uuid}` pattern (never `L{n}`)
+2. Server-assigned ids must match `L{n}` pattern (never `tmp-*`)
+3. Removed line ids are reserved and never reused
+4. Multi-op patches (add, update, remove) work atomically in single request
+5. Status guards enforce patch-lines only in draft/submitted/committed (SO) or draft-only (PO)
+
+**Files Modified/Created:**
+- **Created:** [apps/api/src/shared/lineKey.ts](../apps/api/src/shared/lineKey.ts) (60 lines)
+- **Modified:** [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) (SO path lines 4362–4403, PO path lines 4040–4081)
+- **Modified:** [apps/api/src/shared/patchLines.ts](../apps/api/src/shared/patchLines.ts) (import + 2 blocks)
+- **Modified:** [apps/api/src/shared/ensureLineIds.ts](../apps/api/src/shared/ensureLineIds.ts) (import + collection logic)
+- **Modified:** [apps/api/src/shared/patchLinesEngine.ts](../apps/api/src/shared/patchLinesEngine.ts) (import + collectReservedIds)
+- **Modified:** [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) (lines 13278–13413 SO, 4875–4992 PO — expanded smokes)
+- **Modified:** [docs/MBapp-Foundations.md](MBapp-Foundations.md), [docs/smoke-coverage.md](smoke-coverage.md)
+
+---
 ### Sprint AY — Workspaces Legacy Cutover (Phase 3) — ✅ Complete (2026-01-05)
 **Summary:** Removed workspace legacy fallback reads, dualwrite flag, and all conditional write logic. Updated smokes to validate post-cutover contract (no fallback, single-source reads/writes).
 

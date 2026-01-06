@@ -650,7 +650,47 @@ This allows responses from legacy systems or test fixtures to still work. **Clie
 - Spec: [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) lines 4315–4325 (SO), 3993–4003 (PO)
 - Shared: [apps/api/src/shared/line-editing.ts](../apps/api/src/shared/line-editing.ts), [patchLinesEngine.ts](../apps/api/src/shared/patchLinesEngine.ts), [ensureLineIds.ts](../apps/api/src/shared/ensureLineIds.ts)
 - Handlers: [so-patch-lines.ts](../apps/api/src/sales/so-patch-lines.ts), [po-patch-lines.ts](../apps/api/src/purchasing/po-patch-lines.ts)
-- Smokes: [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) — `smoke:patch-lines:status-gates-and-ids`, `smoke:salesOrders:patch-lines`, `smoke:purchaseOrders:patch-lines`
+- Smokes: [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) — `smoke:so:patch-lines:cid`, `smoke:po:patch-lines:cid` (expanded coverage: multi-op, status guard)
+
+**Line Identity Resolution (Sprint AZ E2):**
+
+**Canonical Helper:** [apps/api/src/shared/lineKey.ts](../apps/api/src/shared/lineKey.ts)
+
+**Purpose:** Single source of truth for line id/cid matching across `patchLines.ts`, `ensureLineIds.ts`, and `patchLinesEngine.ts`. Prevents drift if line identity logic needs to change.
+
+**Exported Functions:**
+
+```typescript
+// Prefer stable server id (non-tmp-*), fallback to cid, return null if neither
+export function lineKey(line: LineLike | null | undefined): string | null
+
+// Check if id matches client-only tmp-* pattern  
+export function isClientOnlyId(id: string | undefined | null): boolean
+
+// Trim and validate id value
+export function trimId(id: unknown): string | undefined
+```
+
+**Usage Pattern:**
+
+Instead of inline id/cid matching:
+```typescript
+// ❌ Before (duplicated across helpers)
+const id = String(line.id || "").trim();
+const cid = String(line.cid || "").trim();
+if (id && !id.startsWith("tmp-")) return id;
+if (cid) return cid;
+
+// ✅ After (centralized)
+const key = lineKey(line);  // Returns stable id, cid, or null
+```
+
+**Where Applied (Sprint AZ E2):**
+- ✅ `patchLines.ts` — All remove/upsert op matching uses `lineKey()`
+- ✅ `ensureLineIds.ts` — Existing line collection uses `lineKey()`
+- ✅ `patchLinesEngine.ts` — Reserved ID collection uses `lineKey()`
+
+**Guarantee:** All 3 helpers now use identical line identity logic; refactoring line identity semantics requires only one change (lineKey.ts)
 
 ---
 

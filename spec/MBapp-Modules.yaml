@@ -4040,13 +4040,25 @@ paths:
   /purchasing/po/{id}:patch-lines:
     post:
       summary: Apply patch operations to purchase order lines (draft-only)
-      description: Patch lines for draft purchase orders only. Non-draft states reject with 409 (PO_NOT_EDITABLE). Server preserves existing line ids and assigns stable ids (e.g., L1, L2, ...) for new lines.
+      x-mbapp-permission: purchase:write
+      description: |
+        Patch lines for draft purchase orders only. Non-draft states reject with 409 (PO_NOT_EDITABLE).
+        
+        Supports minimal patch operations:
+        - **upsert**: Create or update line by `id` (existing) or `cid` (new). Server assigns stable ids (L1, L2, ...) for new lines.
+        - **remove**: Delete line by `id` or `cid`.
+        
+        **Error Codes:**
+        - 400: Invalid ops (missing op, invalid cid format, cid starts with reserved L\d+ pattern)
+        - 404: Purchase order not found
+        - 409: PO_NOT_EDITABLE (non-draft status), or validation error (invalid ops format)
       operationId: patchPurchaseOrderLines
       parameters:
         - in: path
           name: id
           required: true
           schema: { type: string }
+          description: Purchase order id
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
@@ -4055,10 +4067,16 @@ paths:
             schema: { $ref: '#/components/schemas/PatchLinesRequest' }
       responses:
         '200':
-          description: Updated purchase order
+          description: Updated purchase order with normalized lines (server-assigned ids)
           content: { application/json: { schema: { $ref: '#/components/schemas/PurchaseOrder' } } }
+        '400':
+          description: Bad request (invalid ops, missing required fields)
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '404':
+          description: Purchase order not found
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
         '409':
-          description: Guardrail violation (e.g., invalid status for patch)
+          description: Conflict or guardrail violation (e.g., PO_NOT_EDITABLE)
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
 
   /purchasing/po/{id}:receive:
@@ -4361,15 +4379,26 @@ paths:
 
   /sales/so/{id}:patch-lines:
     post:
-      summary: Apply patch operations to sales order lines (draft/submitted/approved)
+      summary: Apply patch operations to sales order lines (draft/submitted/committed)
       x-mbapp-permission: sales:write
-      description: Patch lines while the sales order is editable (draft, submitted, or approved). Non-editable states reject with 409. Server preserves existing line ids and assigns stable ids (e.g., L1, L2, ...) for new lines.
+      description: |
+        Patch lines while the sales order is editable (draft, submitted, or committed). Non-editable states reject with 409 (SO_NOT_EDITABLE).
+        
+        Supports minimal patch operations:
+        - **upsert**: Create or update line by `id` (existing) or `cid` (new). Server assigns stable ids (L1, L2, ...) for new lines.
+        - **remove**: Delete line by `id` or `cid`.
+        
+        **Error Codes:**
+        - 400: Invalid ops (missing op, invalid cid format, cid starts with reserved L\d+ pattern)
+        - 404: Sales order not found
+        - 409: SO_NOT_EDITABLE (non-editable status), or validation error (invalid ops format)
       operationId: patchSalesOrderLines
       parameters:
         - in: path
           name: id
           required: true
           schema: { type: string }
+          description: Sales order id
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
@@ -4378,10 +4407,16 @@ paths:
             schema: { $ref: '#/components/schemas/PatchLinesRequest' }
       responses:
         '200':
-          description: Updated sales order
+          description: Updated sales order with normalized lines (server-assigned ids)
           content: { application/json: { schema: { $ref: '#/components/schemas/SalesOrder' } } }
+        '400':
+          description: Bad request (invalid ops, missing required fields)
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '404':
+          description: Sales order not found
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
         '409':
-          description: Guardrail violation (e.g., invalid status for patch)
+          description: Conflict or guardrail violation (e.g., SO_NOT_EDITABLE)
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
 
   /sales/so/{id}:fulfill:
