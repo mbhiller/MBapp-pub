@@ -104,6 +104,20 @@ Smokes are organized by tier for targeted CI validation:
   - Runs public checkout in simulate mode, posts a simulated Stripe `payment_intent.succeeded` webhook, asserts registration status `confirmed` and a `message` exists with `status=sent` under notify simulate.
   - Flags/Headers: `X-Feature-Registrations-Enabled: true`, `X-Feature-Stripe-Simulate: true`, `X-Feature-Notify-Simulate: true`.
 
+- **SMS Confirmation (simulate):** `smoke:registrations:confirmation-sms`
+  - Creates public registration with `party.phone`, runs checkout + Stripe webhook, asserts `confirmationSmsMessageId` exists and message has `channel=sms`, `status=sent`, and `provider=twilio` or simulated provider.
+  - Flags/Headers: `X-Feature-Registrations-Enabled: true`, `X-Feature-Stripe-Simulate: true`, `X-Feature-Notify-Simulate: true`.
+
+- **Public Status Endpoint (confirmed):** `smoke:registrations:public-status-confirmed`
+  - Creates public registration with email + phone, runs checkout + webhook to confirm, then calls `GET /registrations/{id}:public` with `X-MBapp-Public-Token` and asserts: `status=confirmed`, `paymentStatus=paid|succeeded`, `confirmedAt` set, `emailStatus.status=sent`, `smsStatus.status=sent`.
+  - Validates server truth after payment confirmation with delivery indicators.
+  - Flags/Headers: `X-Feature-Registrations-Enabled: true`, `X-Feature-Stripe-Simulate: true`, `X-Feature-Notify-Simulate: true`.
+
+- **Public Status Endpoint (hold expired):** `smoke:registrations:public-status-hold-expired`
+  - Creates public registration, runs checkout, forces `holdExpiresAt` to past via authenticated PUT, invokes cleanup, then calls `GET /registrations/{id}:public` and asserts: `status=cancelled`, `paymentStatus=failed`, `holdExpiresAt` in past.
+  - Validates public endpoint exposes hold expiration state correctly.
+  - Flags/Headers: `X-Feature-Registrations-Enabled: true`, `X-Feature-Stripe-Simulate: true`.
+
 ---
 
 ## CI Artifacts (Smoke Manifests)

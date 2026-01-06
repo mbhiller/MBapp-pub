@@ -75,6 +75,8 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [holdExpired, setHoldExpired] = useState(false);
   const [localRegStatus, setLocalRegStatus] = useState<string>("");
+  const [serverStatus, setServerStatus] = useState<any>(null);
+  const [holdTimeRemaining, setHoldTimeRemaining] = useState<string>("");
 
   function resetAll() {
     setSelectedEventId((prev) => prev);
@@ -104,6 +106,25 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
     })();
   }, []);
 
+  useEffect(() => {
+    if (!serverStatus?.holdExpiresAt) return;
+    const interval = setInterval(() => {
+      const expiresAt = new Date(serverStatus.holdExpiresAt).getTime();
+      const now = Date.now();
+      if (now >= expiresAt && serverStatus.status !== "confirmed") {
+        setHoldTimeRemaining("Hold expired");
+        setHoldExpired(true);
+        clearInterval(interval);
+        return;
+      }
+      const diffMs = expiresAt - now;
+      const mins = Math.floor(diffMs / 60000);
+      const secs = Math.floor((diffMs % 60000) / 1000);
+      setHoldTimeRemaining(`${mins}m ${secs}s`);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [serverStatus]);
+
   async function createRegistration() {
     if (!selectedEventId) return;
     setIsSubmitting(true);
@@ -123,6 +144,34 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  async function pollServerStatus(regId: string, token: string) {
+    let tries = 0;
+    const maxTries = 20;
+    while (tries < maxTries) {
+      tries += 1;
+      try {
+        const status = await publicFetch<any>(apiBase, publicTenant, `/registrations/${regId}:public`, {
+          method: "GET",
+          headers: { "X-MBapp-Public-Token": token },
+        });
+        setServerStatus(status);
+        setLocalRegStatus(status.status);
+        if (status.status === "confirmed") {
+          setStatusMessage("Booking confirmed!");
+          return;
+        }
+        if (status.status === "cancelled" || status.paymentStatus === "failed") {
+          setStatusMessage("Booking could not be completed. Please contact support.");
+          return;
+        }
+      } catch (err: any) {
+        // Continue polling on errors
+      }
+      await new Promise((res) => setTimeout(res, 1000));
+    }
+    setStatusMessage("Still processing... please refresh later.");
   }
 
   async function checkout(regRes: RegistrationResponse | null = null) {
@@ -179,27 +228,9 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
     setStatusMessage("Payment submitted. Waiting for confirmation...");
     setIsSubmitting(false);
 
-    // Bounded polling for confirmation via Stripe PI status (minimal)
-    try {
-      let tries = 0;
-      let confirmed = false;
-      while (tries < 10 && !confirmed) {
-        tries += 1;
-        const r = await stripe.retrievePaymentIntent(clientSecret);
-        const pi = r.paymentIntent;
-        if (pi && pi.status === "succeeded") {
-          confirmed = true;
-          setLocalRegStatus("confirmed");
-          setStatusMessage("Payment confirmed. Your booking is confirmed.");
-          break;
-        }
-        await new Promise((res) => setTimeout(res, 1000));
-      }
-      if (!confirmed) {
-        setStatusMessage("Still processing... please wait or refresh later.");
-      }
-    } catch (e: any) {
-      // Non-fatal: leave in processing state
+    // Poll server status for confirmation
+    if (registration?.id && publicToken) {
+      pollServerStatus(registration.id, publicToken);
     }
   }
 
@@ -241,6 +272,14 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
         <div style={{ padding: 12, border: "1px solid #ddd", borderRadius: 8 }}>
           <div><strong>Registration:</strong> {registration.id}</div>
           <div><strong>Status:</strong> {localRegStatus || registration.status}</div>
+          {serverStatus?.confirmedAt && <div><strong>Confirmed:</strong> {new Date(serverStatus.confirmedAt).toLocaleString()}</div>}
+          {holdTimeRemaining && <div><strong>Hold:</strong> {holdTimeRemaining}</div>}
+          {serverStatus?.emailStatus && (
+            <div><strong>Email:</strong> {serverStatus.emailStatus.status} {serverStatus.emailStatus.sentAt ? `at ${new Date(serverStatus.emailStatus.sentAt).toLocaleTimeString()}` : ""}</div>
+          )}
+          {serverStatus?.smsStatus && (
+            <div><strong>SMS:</strong> {serverStatus.smsStatus.status} {serverStatus.smsStatus.sentAt ? `at ${new Date(serverStatus.smsStatus.sentAt).toLocaleTimeString()}` : ""}</div>
+          )}
         </div>
       )}
 

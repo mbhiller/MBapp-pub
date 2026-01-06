@@ -213,6 +213,28 @@ export interface paths {
         };
         /** Get a Registration */
         get: operations["getRegistration"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/registrations/{id}:public": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get public registration status (no auth) - Sprint AY
+         * @description Public endpoint to read a registration's status using the public token issued at creation.
+         *     Returns a safe subset only; excludes PII, fees, payment details, and publicTokenHash.
+         *
+         */
+        get: operations["getPublicRegistrationStatus"];
         /** Update a Registration */
         put: operations["updateRegistration"];
         post?: never;
@@ -2954,6 +2976,37 @@ export interface components {
             /** @description Legacy field (line items) */
             lines?: components["schemas"]["RegistrationLine"][] | null;
         };
+        /** @description Public-safe registration status snapshot (no PII/financials) */
+        PublicRegistrationStatusResponse: {
+            id?: string;
+            eventId?: string;
+            /** @enum {string} */
+            status?: "draft" | "submitted" | "confirmed" | "cancelled";
+            /** @enum {string|null} */
+            paymentStatus?: "pending" | "succeeded" | "failed" | null;
+            /** Format: date-time */
+            submittedAt?: string | null;
+            /** Format: date-time */
+            confirmedAt?: string | null;
+            /** Format: date-time */
+            holdExpiresAt?: string | null;
+            emailStatus?: {
+                /** @enum {string} */
+                status?: "queued" | "sending" | "sent" | "failed" | "cancelled";
+                /** Format: date-time */
+                sentAt?: string | null;
+                provider?: string | null;
+                errorMessage?: string | null;
+            } | null;
+            smsStatus?: {
+                /** @enum {string} */
+                status?: "queued" | "sending" | "sent" | "failed" | "cancelled";
+                /** Format: date-time */
+                sentAt?: string | null;
+                provider?: string | null;
+                errorMessage?: string | null;
+            } | null;
+        };
         RegistrationLine: {
             id?: string;
             classId: string;
@@ -4706,6 +4759,49 @@ export interface operations {
             };
             /** @description Forbidden */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getPublicRegistrationStatus: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Public token returned by POST /registrations:public */
+                "X-MBapp-Public-Token": string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Public-safe registration status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicRegistrationStatusResponse"];
+                };
+            };
+            /** @description Invalid or missing public token */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

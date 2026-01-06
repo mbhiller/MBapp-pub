@@ -1001,6 +1001,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /registrations/{id}:public:
+    get:
+      tags:
+        - Registrations
+        - Public
+      operationId: getPublicRegistrationStatus
+      summary: Get public registration status (no auth) - Sprint AY
+      description: |
+        Public endpoint to read a registration's status using the public token issued at creation.
+        Returns a safe subset only; excludes PII, fees, payment details, and publicTokenHash.
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: X-MBapp-Public-Token
+          required: true
+          schema:
+            type: string
+          description: Public token returned by POST /registrations:public
+      responses:
+        '200':
+          description: Public-safe registration status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicRegistrationStatusResponse'
+        '401':
+          description: Invalid or missing public token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
     put:
       tags:
         - Registrations
@@ -4439,6 +4481,84 @@ components:
             - type
             - eventId
             - partyId
+    PublicRegistrationStatusResponse:
+      type: object
+      description: Public-safe registration status snapshot (no PII/financials)
+      properties:
+        id:
+          type: string
+        eventId:
+          type: string
+        status:
+          type: string
+          enum:
+            - draft
+            - submitted
+            - confirmed
+            - cancelled
+        paymentStatus:
+          type: string
+          nullable: true
+          enum:
+            - pending
+            - succeeded
+            - failed
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+        confirmedAt:
+          type: string
+          format: date-time
+          nullable: true
+        holdExpiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        emailStatus:
+          type: object
+          nullable: true
+          properties:
+            status:
+              type: string
+              enum:
+                - queued
+                - sending
+                - sent
+                - failed
+                - cancelled
+            sentAt:
+              type: string
+              format: date-time
+              nullable: true
+            provider:
+              type: string
+              nullable: true
+            errorMessage:
+              type: string
+              nullable: true
+        smsStatus:
+          type: object
+          nullable: true
+          properties:
+            status:
+              type: string
+              enum:
+                - queued
+                - sending
+                - sent
+                - failed
+                - cancelled
+            sentAt:
+              type: string
+              format: date-time
+              nullable: true
+            provider:
+              type: string
+              nullable: true
+            errorMessage:
+              type: string
+              nullable: true
     RegistrationLine:
       type: object
       properties:
