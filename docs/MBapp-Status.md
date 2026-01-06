@@ -6,6 +6,39 @@
 
 ---
 
+### Sprint BC — Public Booking Reliability Polish — ✅ Complete (2026-01-06)
+
+**Summary:** Improved public booking UX with better polling/backoff, delivery state visibility, and a public resend endpoint for failed confirmations.
+
+**Deliverables (E1-E5):**
+- **Spec (E1):** Added `POST /registrations/{id}:public-resend` and `PublicRegistrationResendResponse` schema to [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml): public endpoint with `X-MBapp-Public-Token` header, optional `channel` query param (email/sms/both), response includes per-channel delivery status, rate-limit flag, and attempted channels; ran `npm run spec:lint`, `spec:bundle`, `spec:types:api`, `spec:types:mobile` ✅
+- **API (E2):** Implemented [apps/api/src/registrations/public-resend.ts](../apps/api/src/registrations/public-resend.ts): validates public token, enforces rate limits (max 3 resends, min 2 min apart), loads registration's linked confirmation messages, retries only failed messages (reuses shared `retryMessageRecord` logic), returns safe projections (status/sentAt/provider/errorMessage); wired in [apps/api/src/index.ts](../apps/api/src/index.ts) ✅
+- **Web (E3):** Enhanced [apps/web/src/pages/PublicBookingPage.tsx](../apps/web/src/pages/PublicBookingPage.tsx):
+  - Replaced fixed 20x1s polling with exponential backoff (start 1s, double to cap 10s, +0–500ms jitter), max 30 attempts (~2 min total)
+  - Improved error messaging: "Having trouble checking status… retrying" on fetch errors, "Unable to reach the server…" if all retries exhausted
+  - Added hold expiration check: stop polling if holdExpiresAt passed and not confirmed, show "Hold expired" with reset button
+  - Clearer phase messages: "Payment submitted. Waiting for confirmation…" → "Checking status…" → "Booking confirmed!"
+- **Web (E4):** Added delivery indicators + resend button in [apps/web/src/pages/PublicBookingPage.tsx](../apps/web/src/pages/PublicBookingPage.tsx):
+  - Display email/SMS delivery status (queued/sending/sent/failed) with timestamp and provider
+  - Truncated error message (80 chars) in red if delivery failed
+  - "Resend Confirmation" button: appears when confirmed + any delivery failed, calls public resend endpoint, respects rate-limit, refreshes status after 1s
+  - Non-scary UI: gray background panels, clear but non-alarming language
+- **Smokes (E5):** Added `smoke:registrations:public-resend` (core) to [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs): creates public registration + failed message, links as confirmationMessageId, calls resend endpoint (simulate), asserts message transitions to sent + retryCount increments, verifies public GET reflects updated status ✅
+
+**Verification:**
+- ✅ Spec: lint, bundle, types clean
+- ✅ Web: no new dependencies, typecheck clean
+- ✅ API: resend handler reuses existing retry logic (simulate-safe, no auth bypass)
+- ✅ Smokes: new core test exercises full resend path (operator setup + public resend call)
+
+**Impact:**
+- Polling no longer gets stuck on transient errors; backoff + jitter reduce server load and give async systems time to settle
+- Users see real delivery state and reason (error message) if confirmation delayed
+- Public resend enables customers to retry failed email/SMS without contacting support
+- Rate limits (max 3, 2 min apart) prevent abuse while allowing legitimate recovery attempts
+
+---
+
 ### Sprint BB — Messages list + batch retry — ✅ Complete (2026-01-06)
 
 **Summary:** Added operator visibility and remediation for messages: list with filters/cursor and bounded batch retry of failed messages (simulate-safe).

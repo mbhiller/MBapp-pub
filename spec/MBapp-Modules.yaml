@@ -1606,6 +1606,61 @@ components:
             errorMessage:
               type: string
               nullable: true
+    PublicRegistrationResendResponse:
+      type: object
+      description: Result of public resend request (confirmation email/SMS)
+      required:
+      - registrationId
+      properties:
+        registrationId:
+          type: string
+        email:
+          type: object
+          nullable: true
+          properties:
+            status:
+              type: string
+              enum: [queued, sending, sent, failed, cancelled]
+            sentAt:
+              type: string
+              format: date-time
+              nullable: true
+            provider:
+              type: string
+              nullable: true
+            errorMessage:
+              type: string
+              nullable: true
+        sms:
+          type: object
+          nullable: true
+          properties:
+            status:
+              type: string
+              enum: [queued, sending, sent, failed, cancelled]
+            sentAt:
+              type: string
+              format: date-time
+              nullable: true
+            provider:
+              type: string
+              nullable: true
+            errorMessage:
+              type: string
+              nullable: true
+        rateLimited:
+          type: boolean
+          description: True when server skipped enqueue due to rate limit/bounds
+        attempted:
+          type: object
+          nullable: true
+          properties:
+            email:
+              type: boolean
+              description: Whether an email resend was attempted
+            sms:
+              type: boolean
+              description: Whether an SMS resend was attempted
         smsStatus:
           type: object
           nullable: true
@@ -3708,48 +3763,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-  /registrations/{id}:public:
-    get:
-      tags:
-      - Registrations
-      - Public
-      operationId: getPublicRegistrationStatus
-      summary: Get public registration status (no auth) - Sprint AY
-      description: |
-        Public endpoint to read a registration's status using the public token issued at creation.
-        Returns a safe subset only; excludes PII, fees, payment details, and publicTokenHash.
-      security: []
-      parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-      - in: header
-        name: X-MBapp-Public-Token
-        required: true
-        schema:
-          type: string
-        description: Public token returned by POST /registrations:public
-      responses:
-        '200':
-          description: Public-safe registration status
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PublicRegistrationStatusResponse'
-        '401':
-          description: Invalid or missing public token
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Not Found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
     put:
       tags:
       - Registrations
@@ -3832,6 +3845,104 @@ paths:
                 $ref: '#/components/schemas/Error'
         '403':
           description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /registrations/{id}:public:
+    get:
+      tags:
+      - Registrations
+      - Public
+      operationId: getPublicRegistrationStatus
+      summary: Get public registration status (no auth) - Sprint AY
+      description: |
+        Public endpoint to read a registration's status using the public token issued at creation.
+        Returns a safe subset only; excludes PII, fees, payment details, and publicTokenHash.
+      security: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - in: header
+        name: X-MBapp-Public-Token
+        required: true
+        schema:
+          type: string
+        description: Public token returned by POST /registrations:public
+      responses:
+        '200':
+          description: Public-safe registration status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicRegistrationStatusResponse'
+        '401':
+          description: Invalid or missing public token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /registrations/{id}:public-resend:
+    post:
+      tags:
+      - Registrations
+      - Public
+      operationId: resendPublicRegistrationMessages
+      summary: Resend confirmation email/SMS using public token - Sprint BC
+      description: |
+        Public endpoint to request a resend of confirmation messages for a registration.
+        Requires the same public token issued at creation. Server enforces bounds/rate limits and
+        only exposes safe delivery fields (status, sentAt, provider, errorMessage).
+      security: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - in: header
+        name: X-MBapp-Public-Token
+        required: true
+        schema:
+          type: string
+        description: Public token returned by POST /registrations:public
+      - name: channel
+        in: query
+        schema:
+          type: string
+          enum: [email, sms, both]
+          default: both
+        description: Channel to resend (defaults to both)
+      responses:
+        '200':
+          description: Resend attempt result (safe fields only)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicRegistrationResendResponse'
+        '400':
+          description: Validation error (invalid channel)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '401':
+          description: Invalid or missing public token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Not Found
           content:
             application/json:
               schema:

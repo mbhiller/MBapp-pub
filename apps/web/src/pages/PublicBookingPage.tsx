@@ -77,6 +77,8 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
   const [localRegStatus, setLocalRegStatus] = useState<string>("");
   const [serverStatus, setServerStatus] = useState<any>(null);
   const [holdTimeRemaining, setHoldTimeRemaining] = useState<string>("");
+  const [isResending, setIsResending] = useState(false);
+  const [resendMessage, setResendMessage] = useState<string>("");
 
   function resetAll() {
     setSelectedEventId((prev) => prev);
@@ -89,6 +91,7 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
     setIsSubmitting(false);
     setHoldExpired(false);
     setLocalRegStatus("");
+    setResendMessage("");
   }
 
   useEffect(() => {
@@ -148,7 +151,11 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
 
   async function pollServerStatus(regId: string, token: string) {
     let tries = 0;
-    const maxTries = 20;
+    const maxTries = 30;
+    let delayMs = 1000; // start at 1s
+    const maxDelayMs = 10000; // cap at 10s
+    let lastError: any = null;
+
     while (tries < maxTries) {
       tries += 1;
       try {
@@ -158,20 +165,58 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
         });
         setServerStatus(status);
         setLocalRegStatus(status.status);
+        lastError = null;
+        setErrorMessage(""); // clear any transient errors
+
+        // Check hold expiration before processing status
+        if (status.holdExpiresAt) {
+          const holdExpiresMs = new Date(status.holdExpiresAt).getTime();
+          if (Date.now() >= holdExpiresMs && status.status !== "confirmed") {
+            setStatusMessage("Hold expired. Please try again.");
+            setHoldExpired(true);
+            return;
+          }
+        }
+
+        // Success: confirmed
         if (status.status === "confirmed") {
           setStatusMessage("Booking confirmed!");
           return;
         }
+
+        // Terminal failure: cancelled or payment failed
         if (status.status === "cancelled" || status.paymentStatus === "failed") {
           setStatusMessage("Booking could not be completed. Please contact support.");
           return;
         }
+
+        // Still waiting; update progress message
+        if (tries === 1) {
+          setStatusMessage("Payment submitted. Checking status…");
+        }
       } catch (err: any) {
-        // Continue polling on errors
+        lastError = err;
+        // Show transient error message but continue polling
+        if (tries > 5) {
+          setStatusMessage("Having trouble checking status… retrying");
+        }
       }
-      await new Promise((res) => setTimeout(res, 1000));
+
+      if (tries < maxTries) {
+        // Exponential backoff with jitter to avoid thundering herd
+        const jitterMs = Math.random() * 500; // 0-500ms random jitter
+        const actualDelay = Math.min(delayMs + jitterMs, maxDelayMs);
+        await new Promise((res) => setTimeout(res, actualDelay));
+        delayMs = Math.min(delayMs * 2, maxDelayMs); // double delay, capped at 10s
+      }
     }
-    setStatusMessage("Still processing... please refresh later.");
+
+    // Exhausted all retries
+    if (lastError) {
+      setStatusMessage("Unable to reach the server. Please refresh to check status.");
+    } else {
+      setStatusMessage("Still processing… please refresh later.");
+    }
   }
 
   async function checkout(regRes: RegistrationResponse | null = null) {
@@ -206,11 +251,40 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
     }
   }
 
+  async function handleResendConfirmation() {
+    if (!registration?.id || !publicToken) return;
+    setIsResending(true);
+    setResendMessage("");
+    try {
+      const result = await publicFetch<any>(apiBase, publicTenant, `/registrations/${registration.id}:public-resend`, {
+        method: "POST",
+        headers: { "X-MBapp-Public-Token": publicToken },
+      });
+      if (result.rateLimited) {
+        setResendMessage("Please wait a bit and try again.");
+      } else {
+        setResendMessage("Resend requested. Refreshing status…");
+        // Trigger immediate refresh of status
+        await new Promise((res) => setTimeout(res, 1000));
+        const status = await publicFetch<any>(apiBase, publicTenant, `/registrations/${registration.id}:public`, {
+          method: "GET",
+          headers: { "X-MBapp-Public-Token": publicToken },
+        });
+        setServerStatus(status);
+        setResendMessage("Resend complete.");
+      }
+    } catch (err: any) {
+      setResendMessage(err?.message || "Failed to resend. Please try again.");
+    } finally {
+      setIsResending(false);
+    }
+  }
+
   async function handleConfirmPayment() {
     if (!stripe || !elements || !clientSecret) return;
     setIsSubmitting(true);
     setErrorMessage("");
-    setStatusMessage("Confirming payment...");
+    setStatusMessage("Payment submitted. Waiting for confirmation…");
     const card = elements.getElement(CardElement);
     if (!card) {
       setErrorMessage("Card element missing");
@@ -225,7 +299,6 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
       setIsSubmitting(false);
       return;
     }
-    setStatusMessage("Payment submitted. Waiting for confirmation...");
     setIsSubmitting(false);
 
     // Poll server status for confirmation
@@ -274,12 +347,57 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
           <div><strong>Status:</strong> {localRegStatus || registration.status}</div>
           {serverStatus?.confirmedAt && <div><strong>Confirmed:</strong> {new Date(serverStatus.confirmedAt).toLocaleString()}</div>}
           {holdTimeRemaining && <div><strong>Hold:</strong> {holdTimeRemaining}</div>}
+          
+          {/* Email delivery status */}
           {serverStatus?.emailStatus && (
-            <div><strong>Email:</strong> {serverStatus.emailStatus.status} {serverStatus.emailStatus.sentAt ? `at ${new Date(serverStatus.emailStatus.sentAt).toLocaleTimeString()}` : ""}</div>
+            <div style={{ marginTop: 8, padding: 8, backgroundColor: "#f5f5f5", borderRadius: 4 }}>
+              <strong>Email:</strong> {serverStatus.emailStatus.status}
+              {serverStatus.emailStatus.sentAt && (
+                <span> at {new Date(serverStatus.emailStatus.sentAt).toLocaleTimeString()}</span>
+              )}
+              {serverStatus.emailStatus.provider && (
+                <span> ({serverStatus.emailStatus.provider})</span>
+              )}
+              {serverStatus.emailStatus.status === "failed" && serverStatus.emailStatus.errorMessage && (
+                <div style={{ fontSize: 12, color: "#d32f2f", marginTop: 4 }}>
+                  Issue: {serverStatus.emailStatus.errorMessage.substring(0, 80)}
+                  {serverStatus.emailStatus.errorMessage.length > 80 ? "…" : ""}
+                </div>
+              )}
+            </div>
           )}
+
+          {/* SMS delivery status */}
           {serverStatus?.smsStatus && (
-            <div><strong>SMS:</strong> {serverStatus.smsStatus.status} {serverStatus.smsStatus.sentAt ? `at ${new Date(serverStatus.smsStatus.sentAt).toLocaleTimeString()}` : ""}</div>
+            <div style={{ marginTop: 8, padding: 8, backgroundColor: "#f5f5f5", borderRadius: 4 }}>
+              <strong>SMS:</strong> {serverStatus.smsStatus.status}
+              {serverStatus.smsStatus.sentAt && (
+                <span> at {new Date(serverStatus.smsStatus.sentAt).toLocaleTimeString()}</span>
+              )}
+              {serverStatus.smsStatus.provider && (
+                <span> ({serverStatus.smsStatus.provider})</span>
+              )}
+              {serverStatus.smsStatus.status === "failed" && serverStatus.smsStatus.errorMessage && (
+                <div style={{ fontSize: 12, color: "#d32f2f", marginTop: 4 }}>
+                  Issue: {serverStatus.smsStatus.errorMessage.substring(0, 80)}
+                  {serverStatus.smsStatus.errorMessage.length > 80 ? "…" : ""}
+                </div>
+              )}
+            </div>
           )}
+
+          {/* Resend button: show when confirmed and delivery failed */}
+          {localRegStatus === "confirmed" &&
+            (serverStatus?.emailStatus?.status === "failed" || serverStatus?.smsStatus?.status === "failed") && (
+            <button
+              onClick={handleResendConfirmation}
+              disabled={isResending}
+              style={{ marginTop: 8, backgroundColor: "#ff9800", color: "white", padding: "8px 12px", border: "none", borderRadius: 4, cursor: isResending ? "not-allowed" : "pointer" }}
+            >
+              {isResending ? "Resending…" : "Resend Confirmation"}
+            </button>
+          )}
+          {resendMessage && <div style={{ marginTop: 8, fontSize: 13, color: resendMessage.includes("complete") ? "#4caf50" : "#d32f2f" }}>{resendMessage}</div>}
         </div>
       )}
 
