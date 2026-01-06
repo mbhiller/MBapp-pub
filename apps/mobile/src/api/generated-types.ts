@@ -1912,6 +1912,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Messages
+         * @description List messages with optional filters and cursor-based pagination.
+         */
+        get: operations["listMessages"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/messages:retry-failed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry failed messages in batch
+         * @description Retry up to the specified limit of failed messages, optionally filtered by channel or provider.
+         */
+        post: operations["retryFailedMessages"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/webhooks/stripe": {
         parameters: {
             query?: never;
@@ -2706,6 +2746,18 @@ export interface components {
                 [key: string]: unknown;
             } | null;
             notes?: string | null;
+        };
+        /** @description Summary of a message after a retry attempt */
+        MessageRetryResult: {
+            id: string;
+            status: string;
+            retryCount?: number | null;
+            /** Format: date-time */
+            lastAttemptAt?: string | null;
+            /** Format: date-time */
+            sentAt?: string | null;
+            provider?: string | null;
+            errorMessage?: string | null;
         };
         MoneyTotals: {
             subtotal?: number;
@@ -5570,6 +5622,84 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    listMessages: {
+        parameters: {
+            query?: {
+                /** @description Optional status filter */
+                status?: "queued" | "sending" | "sent" | "failed" | "cancelled";
+                /** @description Optional channel filter */
+                channel?: "email" | "sms" | "push";
+                /** @description Optional provider filter (e.g., postmark, twilio) */
+                provider?: string;
+                /** @description Optional recipient filter */
+                to?: string;
+                /** @description Maximum number of items to return */
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque pagination cursor for next page */
+                next?: components["parameters"]["Cursor"];
+            };
+            header: {
+                "x-tenant-id": components["parameters"]["TenantHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List of messages */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["Message"][];
+                        next?: string | null;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    retryFailedMessages: {
+        parameters: {
+            query?: {
+                /** @description Maximum number of failed messages to retry (bounded server-side) */
+                limit?: number;
+                /** @description Optional channel filter when retrying failed messages */
+                channel?: "email" | "sms" | "push";
+                /** @description Optional provider filter when retrying failed messages */
+                provider?: string;
+                /** @description Opaque pagination cursor for next page */
+                next?: components["parameters"]["Cursor"];
+            };
+            header: {
+                "x-tenant-id": components["parameters"]["TenantHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Batch retry attempt results */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["MessageRetryResult"][];
+                        next?: string | null;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     stripeWebhook: {

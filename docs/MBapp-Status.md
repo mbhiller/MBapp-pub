@@ -6,6 +6,21 @@
 
 ---
 
+### Sprint BB — Messages list + batch retry — ✅ Complete (2026-01-06)
+
+**Summary:** Added operator visibility and remediation for messages: list with filters/cursor and bounded batch retry of failed messages (simulate-safe).
+
+**Deliverables (E1-E4):**
+- **Spec (E1):** Added `GET /messages` and `POST /messages:retry-failed` (filters: status/channel/provider/to; cursor pagination; bounded limit) plus `MessageRetryResult` projection in [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml); regenerated spec lint/bundle/types.
+- **API (E2):** Implemented [apps/api/src/messages/list.ts](../apps/api/src/messages/list.ts) and routed in [apps/api/src/index.ts](../apps/api/src/index.ts): tenant-scoped, `message:read`, supports filters/status/channel/provider/to, returns `{ items, next }` from `listObjects`.
+- **API (E3):** Implemented [apps/api/src/messages/retry-failed.ts](../apps/api/src/messages/retry-failed.ts) and reused shared retry helper from [messages/retry.ts](../apps/api/src/messages/retry.ts): `message:write`, clamps limit (default 25, max 50), filters failed + optional channel/provider, retries deterministically with cursor handoff.
+- **Smokes (E4):** Added core smoke `smoke:messages:list-and-batch-retry` in [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs): seeds failed email+sms, lists with status=failed, batch-retries one (simulate), verifies status/retryCount change and failed-list shrink.
+
+**Verification:**
+- ✅ Spec: lint/bundle/types regenerated
+- ✅ Simulate-safe: batch retry respects `X-Feature-Notify-Simulate`
+- ✅ Coverage: new core smoke exercises list + batch retry path
+
 ### Sprint BA — Message Templates v1 — ✅ Complete (2026-01-06)
 
 **Summary:** Introduced a minimal, deterministic template system for email/SMS with zero external deps. Stores rendered copy + template metadata for audit/versioning.

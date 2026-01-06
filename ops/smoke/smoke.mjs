@@ -12724,6 +12724,132 @@ const tests = {
     };
   },
 
+  "smoke:messages:list-and-batch-retry": async () => {
+    await ensureBearer();
+
+    const featureHeaders = { "X-Feature-Notify-Simulate": "true" };
+
+    const failedEmail = await post("/objects/message", {
+      type: "message",
+      channel: "email",
+      to: `smoke+${SMOKE_RUN_ID}-email@example.com`,
+      subject: `Test ${SMOKE_RUN_ID} email`,
+      body: "Hello email",
+      status: "failed",
+      errorMessage: "simulated failure",
+      retryCount: 0
+    }, featureHeaders);
+    if (!failedEmail.ok || !failedEmail.body?.id) {
+      return { test: "messages:list-and-batch-retry", result: "FAIL", reason: "create-failed-email", failedEmail };
+    }
+    const failedEmailId = failedEmail.body.id;
+    recordCreated({ type: "message", id: failedEmailId, route: "/objects/message", meta: { channel: "email" } });
+
+    const failedSms = await post("/objects/message", {
+      type: "message",
+      channel: "sms",
+      to: `+1555${Math.floor(Math.random() * 1e7)}`,
+      body: "Hello sms",
+      status: "failed",
+      errorMessage: "simulated failure",
+      retryCount: 0
+    }, featureHeaders);
+    if (!failedSms.ok || !failedSms.body?.id) {
+      return { test: "messages:list-and-batch-retry", result: "FAIL", reason: "create-failed-sms", failedSms };
+    }
+    const failedSmsId = failedSms.body.id;
+    recordCreated({ type: "message", id: failedSmsId, route: "/objects/message", meta: { channel: "sms" } });
+
+    const sentMsg = await post("/objects/message", {
+      type: "message",
+      channel: "email",
+      to: `smoke+${SMOKE_RUN_ID}-sent@example.com`,
+      subject: `Sent ${SMOKE_RUN_ID}`,
+      body: "Already sent",
+      status: "sent",
+      retryCount: 0
+    }, featureHeaders);
+    if (!sentMsg.ok || !sentMsg.body?.id) {
+      return { test: "messages:list-and-batch-retry", result: "FAIL", reason: "create-sent", sentMsg };
+    }
+    recordCreated({ type: "message", id: sentMsg.body.id, route: "/objects/message", meta: { channel: "email" } });
+
+    const failedIds = new Set([failedEmailId, failedSmsId]);
+
+    const fetchFailed = async () => {
+      const res = await get("/messages", { status: "failed", limit: 10 }, featureHeaders);
+      return res;
+    };
+
+    let listFailed = await fetchFailed();
+    for (let i = 0; i < 5; i++) {
+      const items = Array.isArray(listFailed.body?.items) ? listFailed.body.items : [];
+      const hasAll = items.some(it => it?.id === failedEmailId) && items.some(it => it?.id === failedSmsId);
+      const allFailed = items.every(it => it?.status === "failed");
+      if (listFailed.ok && allFailed && hasAll) break;
+      await sleep(400);
+      listFailed = await fetchFailed();
+    }
+
+    if (!listFailed.ok) {
+      return { test: "messages:list-and-batch-retry", result: "FAIL", reason: "list-failed", listFailed };
+    }
+    const failedItems = Array.isArray(listFailed.body?.items) ? listFailed.body.items : [];
+    const allFailedStatuses = failedItems.every(it => it?.status === "failed");
+    const containsSeeds = failedItems.some(it => it?.id === failedEmailId) && failedItems.some(it => it?.id === failedSmsId);
+    if (!allFailedStatuses || !containsSeeds) {
+      return {
+        test: "messages:list-and-batch-retry",
+        result: "FAIL",
+        reason: "failed-list-mismatch",
+        listFailed: { count: failedItems.length, sample: failedItems.slice(0, 5).map(it => ({ id: it?.id, status: it?.status })) }
+      };
+    }
+
+    const batch = await post(`/messages:retry-failed?limit=1`, {}, featureHeaders);
+    if (!batch.ok) {
+      return { test: "messages:list-and-batch-retry", result: "FAIL", reason: "batch-retry", batch };
+    }
+    const batchItems = Array.isArray(batch.body?.items) ? batch.body.items : [];
+    if (batchItems.length !== 1) {
+      return { test: "messages:list-and-batch-retry", result: "FAIL", reason: "batch-size", batchItemsCount: batchItems.length };
+    }
+    const retried = batchItems[0] || {};
+    if (!failedIds.has(retried.id)) {
+      return { test: "messages:list-and-batch-retry", result: "FAIL", reason: "unexpected-id", retried };
+    }
+
+    const getRetried = await get(`/objects/message/${encodeURIComponent(retried.id)}`, {}, featureHeaders);
+    if (!getRetried.ok) {
+      return { test: "messages:list-and-batch-retry", result: "FAIL", reason: "get-retried", getRetried };
+    }
+    const retriedBody = getRetried.body || {};
+    const retriedStatusOk = retriedBody.status === "sent";
+    const retriedCountOk = (retriedBody.retryCount ?? 0) >= 1;
+    if (!retriedStatusOk || !retriedCountOk) {
+      return { test: "messages:list-and-batch-retry", result: "FAIL", reason: "retried-not-sent", retriedBody };
+    }
+
+    const listAfter = await get("/messages", { status: "failed", limit: 10 }, featureHeaders);
+    if (!listAfter.ok) {
+      return { test: "messages:list-and-batch-retry", result: "FAIL", reason: "list-after", listAfter };
+    }
+    const afterItems = Array.isArray(listAfter.body?.items) ? listAfter.body.items : [];
+    const stillFailedIds = new Set(afterItems.map(it => it?.id));
+    const retriedStillFailed = stillFailedIds.has(retried.id);
+    if (retriedStillFailed) {
+      return { test: "messages:list-and-batch-retry", result: "FAIL", reason: "retried-still-failed", afterItems: afterItems.slice(0, 5) };
+    }
+
+    return {
+      test: "messages:list-and-batch-retry",
+      result: "PASS",
+      created: { failedEmailId, failedSmsId },
+      batch: { retriedId: retried.id, status: retried.status },
+      verified: { status: retriedBody.status, retryCount: retriedBody.retryCount }
+    };
+  },
+
   /* ===================== Reservations: CRUD Resources ===================== */
   "smoke:resources:crud": async ()=>{
     await ensureBearer();

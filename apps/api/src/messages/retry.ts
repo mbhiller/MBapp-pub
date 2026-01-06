@@ -5,7 +5,7 @@ import { getObjectById, updateObject } from "../objects/repo";
 import { sendPostmarkEmail } from "../common/postmark";
 import { sendTwilioSms } from "../common/twilio";
 
-const MESSAGE_FIELDS = [
+export const MESSAGE_FIELDS = [
   "id",
   "type",
   "channel",
@@ -34,6 +34,181 @@ function normalizeRetryCount(value: unknown): number {
   return n < 0 ? 0 : n;
 }
 
+type MessageRecord = Record<string, any>;
+
+export async function retryMessageRecord({
+  tenantId,
+  msg,
+  event,
+}: {
+  tenantId: string;
+  msg: MessageRecord;
+  event?: APIGatewayProxyEventV2;
+}) {
+  const status = (msg as any).status as string | undefined;
+  if (status !== "failed") {
+    const err: any = new Error("Message is not retryable");
+    err.statusCode = 400;
+    err.details = { currentStatus: status };
+    throw err;
+  }
+
+  const channel = (msg as any).channel as string | undefined;
+  if (channel !== "email" && channel !== "sms") {
+    const err: any = new Error("Channel not supported for retry");
+    err.statusCode = 400;
+    err.details = { channel };
+    throw err;
+  }
+
+  const to = (msg as any).to as string | undefined | null;
+  const subject = (msg as any).subject as string | undefined | null;
+  const body = (msg as any).body as string | undefined | null;
+
+  if (!to) {
+    const err: any = new Error("Recipient is required");
+    err.statusCode = 400;
+    err.details = { field: "to" };
+    throw err;
+  }
+  if (channel === "email") {
+    if (!body) {
+      const err: any = new Error("Email body is required");
+      err.statusCode = 400;
+      err.details = { field: "body" };
+      throw err;
+    }
+    if (!subject) {
+      const err: any = new Error("Email subject is required");
+      err.statusCode = 400;
+      err.details = { field: "subject" };
+      throw err;
+    }
+  }
+  if (channel === "sms") {
+    if (!body) {
+      const err: any = new Error("SMS body is required");
+      err.statusCode = 400;
+      err.details = { field: "body" };
+      throw err;
+    }
+  }
+
+  const id = (msg as any).id as string;
+  const attemptAt = new Date().toISOString();
+  const nextRetryCount = normalizeRetryCount((msg as any).retryCount) + 1;
+
+  await updateObject({
+    tenantId,
+    type: "message",
+    id,
+    body: {
+      status: "sending",
+      lastAttemptAt: attemptAt,
+      errorMessage: null,
+      retryCount: nextRetryCount,
+    },
+  });
+
+  if (simulateNotifyEnabled(event)) {
+    const sentAt = new Date().toISOString();
+    const provider = channel === "email" ? "postmark" : "twilio";
+    const providerMessageId = `${channel === "email" ? "sim_email" : "sim_sms"}_${Math.random().toString(36).slice(2, 11)}`;
+    return await updateObject({
+      tenantId,
+      type: "message",
+      id,
+      body: {
+        status: "sent",
+        sentAt,
+        provider,
+        providerMessageId,
+        errorMessage: null,
+        lastAttemptAt: attemptAt,
+        retryCount: nextRetryCount,
+      },
+    });
+  }
+
+  if (channel === "email") {
+    try {
+      const result = await sendPostmarkEmail({
+        to,
+        subject: subject!,
+        textBody: body!,
+        event,
+      });
+
+      return await updateObject({
+        tenantId,
+        type: "message",
+        id,
+        body: {
+          status: "sent",
+          sentAt: new Date().toISOString(),
+          provider: "postmark",
+          providerMessageId: result.messageId,
+          errorMessage: null,
+          lastAttemptAt: attemptAt,
+          retryCount: nextRetryCount,
+        },
+      });
+    } catch (err: any) {
+      const errorMessage = err?.message || String(err);
+      return await updateObject({
+        tenantId,
+        type: "message",
+        id,
+        body: {
+          status: "failed",
+          provider: "postmark",
+          errorMessage,
+          lastAttemptAt: new Date().toISOString(),
+          retryCount: nextRetryCount,
+        },
+      });
+    }
+  }
+
+  // channel === "sms"
+  try {
+    const result = await sendTwilioSms({
+      to,
+      body: body!,
+      event: event as any,
+    });
+
+    return await updateObject({
+      tenantId,
+      type: "message",
+      id,
+      body: {
+        status: "sent",
+        sentAt: new Date().toISOString(),
+        provider: "twilio",
+        providerMessageId: result.sid,
+        errorMessage: null,
+        lastAttemptAt: attemptAt,
+        retryCount: nextRetryCount,
+      },
+    });
+  } catch (err: any) {
+    const errorMessage = err?.message || String(err);
+    return await updateObject({
+      tenantId,
+      type: "message",
+      id,
+      body: {
+        status: "failed",
+        provider: "twilio",
+        errorMessage,
+        lastAttemptAt: new Date().toISOString(),
+        retryCount: nextRetryCount,
+      },
+    });
+  }
+}
+
 export async function handle(event: APIGatewayProxyEventV2) {
   try {
     const tenantId = getTenantId(event);
@@ -57,149 +232,12 @@ export async function handle(event: APIGatewayProxyEventV2) {
       return notFound("Not Found");
     }
 
-    const status = (msg as any).status as string | undefined;
-    if (status !== "failed") {
-      return badRequest("Message is not retryable", { currentStatus: status });
-    }
-
-    const channel = (msg as any).channel as string | undefined;
-    if (channel !== "email" && channel !== "sms") {
-      return badRequest("Channel not supported for retry", { channel });
-    }
-
-    const to = (msg as any).to as string | undefined | null;
-    const subject = (msg as any).subject as string | undefined | null;
-    const body = (msg as any).body as string | undefined | null;
-
-    if (!to) {
-      return badRequest("Recipient is required", { field: "to" });
-    }
-    if (channel === "email") {
-      if (!body) return badRequest("Email body is required", { field: "body" });
-      if (!subject) return badRequest("Email subject is required", { field: "subject" });
-    }
-    if (channel === "sms") {
-      if (!body) return badRequest("SMS body is required", { field: "body" });
-    }
-
-    const attemptAt = new Date().toISOString();
-    const nextRetryCount = normalizeRetryCount((msg as any).retryCount) + 1;
-
-    await updateObject({
-      tenantId,
-      type: "message",
-      id,
-      body: {
-        status: "sending",
-        lastAttemptAt: attemptAt,
-        errorMessage: null,
-        retryCount: nextRetryCount,
-      },
-    });
-
-    if (simulateNotifyEnabled(event)) {
-      const sentAt = new Date().toISOString();
-      const provider = channel === "email" ? "postmark" : "twilio";
-      const providerMessageId = `${channel === "email" ? "sim_email" : "sim_sms"}_${Math.random().toString(36).slice(2, 11)}`;
-      const updated = await updateObject({
-        tenantId,
-        type: "message",
-        id,
-        body: {
-          status: "sent",
-          sentAt,
-          provider,
-          providerMessageId,
-          errorMessage: null,
-          lastAttemptAt: attemptAt,
-          retryCount: nextRetryCount,
-        },
-      });
-      return ok(updated);
-    }
-
-    if (channel === "email") {
-      try {
-        const result = await sendPostmarkEmail({
-          to,
-          subject: subject!,
-          textBody: body!,
-          event,
-        });
-
-        const updated = await updateObject({
-          tenantId,
-          type: "message",
-          id,
-          body: {
-            status: "sent",
-            sentAt: new Date().toISOString(),
-            provider: "postmark",
-            providerMessageId: result.messageId,
-            errorMessage: null,
-            lastAttemptAt: attemptAt,
-            retryCount: nextRetryCount,
-          },
-        });
-        return ok(updated);
-      } catch (err: any) {
-        const errorMessage = err?.message || String(err);
-        const failed = await updateObject({
-          tenantId,
-          type: "message",
-          id,
-          body: {
-            status: "failed",
-            provider: "postmark",
-            errorMessage,
-            lastAttemptAt: new Date().toISOString(),
-            retryCount: nextRetryCount,
-          },
-        });
-        return ok(failed);
-      }
-    }
-
-    // channel === "sms"
-    try {
-      const result = await sendTwilioSms({
-        to,
-        body: body!,
-        event: event as any,
-      });
-
-      const updated = await updateObject({
-        tenantId,
-        type: "message",
-        id,
-        body: {
-          status: "sent",
-          sentAt: new Date().toISOString(),
-          provider: "twilio",
-          providerMessageId: result.sid,
-          errorMessage: null,
-          lastAttemptAt: attemptAt,
-          retryCount: nextRetryCount,
-        },
-      });
-      return ok(updated);
-    } catch (err: any) {
-      const errorMessage = err?.message || String(err);
-      const failed = await updateObject({
-        tenantId,
-        type: "message",
-        id,
-        body: {
-          status: "failed",
-          provider: "twilio",
-          errorMessage,
-          lastAttemptAt: new Date().toISOString(),
-          retryCount: nextRetryCount,
-        },
-      });
-      return ok(failed);
-    }
+    const result = await retryMessageRecord({ tenantId, msg, event });
+    return ok(result);
   } catch (err) {
+    if ((err as any)?.statusCode === 400) {
+      return badRequest((err as any)?.message || "Bad Request", (err as any)?.details);
+    }
     return internalError(err);
   }
 }
