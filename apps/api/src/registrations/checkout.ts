@@ -55,9 +55,15 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const paymentIntentId = (registration as any).paymentIntentId as string | undefined;
     const paymentIntentClientSecret = (registration as any).paymentIntentClientSecret as string | undefined;
     const storedIdempotency = (registration as any).checkoutIdempotencyKey as string | undefined;
+    const holdExpiresAt = (registration as any).holdExpiresAt as string | undefined;
+    const nowMs = Date.now();
+    const holdExpiresMs = holdExpiresAt ? new Date(holdExpiresAt).getTime() : undefined;
 
-    // Idempotent repeat: if already submitted with PI, return existing PI
+    // Submitted replay: if expired, reject; else return existing PI
     if (status === "submitted" && paymentIntentId && paymentIntentClientSecret) {
+      if (holdExpiresMs !== undefined && holdExpiresMs < nowMs) {
+        return conflictError("Registration hold expired", { code: "hold_expired" });
+      }
       return ok({ paymentIntentId, clientSecret: paymentIntentClientSecret });
     }
 
@@ -118,6 +124,9 @@ export async function handle(event: APIGatewayProxyEventV2) {
     });
 
     // Update registration to submitted with PI info
+    const ttlSecRaw = process.env.REGISTRATION_HOLD_TTL_SECONDS || "900";
+    const ttlSec = Number.isFinite(parseInt(ttlSecRaw, 10)) ? parseInt(ttlSecRaw, 10) : 900;
+    const holdUntil = new Date(Date.now() + ttlSec * 1000).toISOString();
     const updated = await updateObject({
       tenantId,
       type: "registration",
@@ -129,6 +138,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
         paymentIntentClientSecret: pi.clientSecret,
         checkoutIdempotencyKey: idempotencyKey,
         submittedAt: new Date().toISOString(),
+        holdExpiresAt: holdUntil,
       },
     });
 

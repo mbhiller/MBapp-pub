@@ -1,3 +1,18 @@
+### Registration Hold TTL (Sprint AV)
+
+- On checkout (draft → submitted), the server sets `submittedAt` and `holdExpiresAt = now + TTL`, where TTL comes from `REGISTRATION_HOLD_TTL_SECONDS` (default 900 seconds).
+- Replay behavior: if a submitted registration has `holdExpiresAt < now`, the API returns `409` with `{ code: "hold_expired" }` and does not return the existing PaymentIntent/clientSecret.
+- Expire helper: `expireRegistrationHold({ tenantId, regId })` cancels expired submitted holds, sets `paymentStatus = failed`, clears `paymentIntentClientSecret`, and safely releases the event seat via `releaseEventSeat(eventId)`.
+- Capacity release uses an atomic decrement that never allows negative `reservedCount` and is idempotent-friendly (no-op when already zero).
+- Cleanup endpoint: `POST /registrations:cleanup-expired-holds` performs bounded cleanup of expired holds. Query parameter `?limit=` bounds work (default 50, max 200). Tenant-scoped; requires `registration:write`. Returns `{ expiredCount }`.
+
+### Notifications Seam (Sprint AV)
+
+- Message objects: Email notifications enqueue as `type="message"` records with fields including `{ to, subject, template?, status }` where `status` is one of `queued|sent|failed`.
+- Simulate mode: When `FEATURE_NOTIFY_SIMULATE` is enabled or header `X-Feature-Notify-Simulate: true` is present, enqueued messages auto-transition to `status="sent"` with `sentAt` timestamp for deterministic CI behavior (no external provider).
+- Stripe webhook integration: On `payment_intent.succeeded`, after confirming a registration, the API enqueues a confirmation email when a party email exists and persists `confirmationMessageId` on the registration for idempotency. Subsequent webhook replays detect the stored `confirmationMessageId` and avoid duplicate sends.
+- Feature flags: Keep simulate defaults OFF; enable per-request via headers in smokes. Real providers (Postmark/Twilio) will reuse the same seam.
+
 # MBapp Foundations Report
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Status/Working](MBapp-Status.md) · [Cadence](MBapp-Cadence.md) · [Verification](smoke-coverage.md)  

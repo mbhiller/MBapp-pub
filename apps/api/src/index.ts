@@ -112,6 +112,7 @@ import * as StripeWebhook from "./webhooks/stripe-handler";
 import * as EventsPublicList from "./events/public-list";
 import * as RegPublicCreate from "./registrations/public-create";
 import * as RegCheckout from "./registrations/checkout";
+import * as RegCleanupExpiredHolds from "./registrations/cleanup-expired-holds";
 
 /* Helpers */
 const json = (statusCode: number, body: unknown): APIGatewayProxyResultV2 => ({
@@ -331,6 +332,12 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
         if (method === "DELETE" && id)  { return RegDelete.handle(withId(event, id)); }
         return methodNotAllowed();
       }
+    }
+
+    // Registrations: cleanup expired holds (Sprint AV)
+    if (method === "POST" && path === "/registrations:cleanup-expired-holds") {
+      requirePerm(auth, "registration:write");
+      return RegCleanupExpiredHolds.handle(event);
     }
 
     /* ========= Actions ========= */

@@ -267,6 +267,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/registrations:cleanup-expired-holds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Expire submitted holds past TTL and release capacity (Sprint AV)
+         * @description Scans submitted registrations whose holdExpiresAt is in the past, cancels them, and decrements reservedCount for the linked event.
+         */
+        post: operations["cleanupExpiredHolds"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/reservations:check-conflicts": {
         parameters: {
             query?: never;
@@ -1861,6 +1881,7 @@ export interface paths {
          * @description Public endpoint for Stripe webhook events (checkout.session.completed, payment_intent.*, etc.).
          *     Validates webhook signature using STRIPE_WEBHOOK_SECRET.
          *     Idempotent: processes each event exactly once based on event ID.
+         *     On payment_intent.succeeded, creates a confirmation Message (email) for the registration (simulate mode allowed).
          *
          */
         post: operations["stripeWebhook"];
@@ -2829,7 +2850,11 @@ export interface components {
             /** @description ID of the party (person/org) being registered */
             partyId: string;
             /**
-             * @description Registration status (Sprint IV v1)
+             * @description Registration status (Sprint IV v1).
+             *     - submitted = hold active until holdExpiresAt (seat reserved, payment pending)
+             *     - confirmed = payment succeeded; seat retained
+             *     - cancelled = hold expired or explicitly cancelled
+             *
              * @default draft
              * @enum {string}
              */
@@ -2865,6 +2890,11 @@ export interface components {
              * @description Timestamp when status changed to confirmed (Sprint AU)
              */
             confirmedAt?: string | null;
+            /**
+             * Format: date-time
+             * @description When a submitted hold should expire and be cancelled; null means no TTL
+             */
+            holdExpiresAt?: string | null;
             /** @description Server-side hash of public token for guest checkout (Sprint AU) */
             publicTokenHash?: string | null;
             /** @description Legacy field (use partyId instead) */
@@ -4883,6 +4913,35 @@ export interface operations {
                     };
                 };
             };
+        };
+    };
+    cleanupExpiredHolds: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-tenant-id": components["parameters"]["TenantHeader"];
+                /** @description Optional idempotency key for safe retries. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cleanup completed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Number of registrations expired/cancelled */
+                        expiredCount?: number;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     checkReservationConflicts: {

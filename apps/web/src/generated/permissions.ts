@@ -31,6 +31,7 @@ export const PERMISSIONS_BY_ENDPOINT = {
   "POST /purchasing/po/{id}:patch-lines": "purchase:write",
   "POST /purchasing/po/{id}:receive": "purchase:receive",
   "POST /purchasing/suggest-po": "purchase:write",
+  "POST /registrations:cleanup-expired-holds": "registration:write",
   "POST /sales/so/{id}:cancel": "sales:cancel",
   "POST /sales/so/{id}:close": "sales:close",
   "POST /sales/so/{id}:commit": "sales:commit",
@@ -77,6 +78,7 @@ export const PERM_PURCHASE_CANCEL = "purchase:cancel" as const;
 export const PERM_PURCHASE_CLOSE = "purchase:close" as const;
 export const PERM_PURCHASE_RECEIVE = "purchase:receive" as const;
 export const PERM_PURCHASE_WRITE = "purchase:write" as const;
+export const PERM_REGISTRATION_WRITE = "registration:write" as const;
 export const PERM_SALES_CANCEL = "sales:cancel" as const;
 export const PERM_SALES_CLOSE = "sales:close" as const;
 export const PERM_SALES_COMMIT = "sales:commit" as const;
@@ -102,6 +104,7 @@ export const PERMISSION_KEYS = [
   "purchase:close",
   "purchase:receive",
   "purchase:write",
+  "registration:write",
   "sales:cancel",
   "sales:close",
   "sales:commit",

@@ -69,6 +69,7 @@ Each Tier uses the same structure so we can later expand any Phase into a detail
 - 🕓 Sprints: IV, IX, XI (Shipped with feature flag: `FEATURE_REGISTRATIONS_ENABLED`).
 - 💡 **Status:** EventsList/EventDetail + RegistrationsList/RegistrationDetail operational; tiles gated by permission + flag.
 - 💡 **Sprint AU:** Public booking slice with unauthenticated event list + registration create (public token), Stripe PaymentIntent checkout (simulate mode), webhook confirmation, and public web booking page using Stripe Elements; smokes added (simulate-only, not yet in ci-smokes.json).
+ - 💡 **Sprint AV:** Hold TTL on checkout (expired → 409 hold_expired), bounded cleanup endpoint (`POST /registrations:cleanup-expired-holds`), notification seam with simulated sends, minimal web UX (hold expired restart + bounded confirmation polling). New smokes added to core: `smoke:registrations:hold-expiration`, `smoke:registrations:confirmation-message`.
 
 ### 2.1 Resources & Reservations v1 ✅ Implemented (Feature-Gated)
 - 🎯 Conflict detection; per‑resource day grid.

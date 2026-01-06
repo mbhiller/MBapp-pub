@@ -1190,6 +1190,34 @@ paths:
                         type: number
                       currentRegistrations:
                         type: number
+  /registrations:cleanup-expired-holds:
+    post:
+      tags:
+        - Registrations
+      operationId: cleanupExpiredHolds
+      summary: Expire submitted holds past TTL and release capacity (Sprint AV)
+      description: Scans submitted registrations whose holdExpiresAt is in the past, cancels them, and decrements reservedCount for the linked event.
+      x-mbapp-permission: registration:write
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Cleanup completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  expiredCount:
+                    type: integer
+                    description: Number of registrations expired/cancelled
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /reservations:check-conflicts:
     post:
       tags:
@@ -2519,6 +2547,7 @@ paths:
         Public endpoint for Stripe webhook events (checkout.session.completed, payment_intent.*, etc.).
         Validates webhook signature using STRIPE_WEBHOOK_SECRET.
         Idempotent: processes each event exactly once based on event ID.
+        On payment_intent.succeeded, creates a confirmation Message (email) for the registration (simulate mode allowed).
       security: []
       parameters:
         - in: header
@@ -4261,7 +4290,11 @@ components:
                 - submitted
                 - confirmed
                 - cancelled
-              description: Registration status (Sprint IV v1)
+              description: |
+                Registration status (Sprint IV v1).
+                - submitted = hold active until holdExpiresAt (seat reserved, payment pending)
+                - confirmed = payment succeeded; seat retained
+                - cancelled = hold expired or explicitly cancelled
             division:
               type: string
               nullable: true
@@ -4315,6 +4348,11 @@ components:
               format: date-time
               nullable: true
               description: Timestamp when status changed to confirmed (Sprint AU)
+            holdExpiresAt:
+              type: string
+              format: date-time
+              nullable: true
+              description: When a submitted hold should expire and be cancelled; null means no TTL
             publicTokenHash:
               type: string
               nullable: true

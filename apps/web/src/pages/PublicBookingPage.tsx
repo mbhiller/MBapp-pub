@@ -73,6 +73,21 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
   const [statusMessage, setStatusMessage] = useState<string>("");
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [holdExpired, setHoldExpired] = useState(false);
+  const [localRegStatus, setLocalRegStatus] = useState<string>("");
+
+  function resetAll() {
+    setSelectedEventId((prev) => prev);
+    setRegistration(null);
+    setPublicToken(null);
+    setClientSecret(null);
+    setPaymentIntentId(null);
+    setStatusMessage("");
+    setErrorMessage("");
+    setIsSubmitting(false);
+    setHoldExpired(false);
+    setLocalRegStatus("");
+  }
 
   useEffect(() => {
     (async () => {
@@ -130,7 +145,13 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
       setPaymentIntentId(res.paymentIntentId);
       setStatusMessage("Payment intent created. Please enter card details.");
     } catch (err: any) {
-      setErrorMessage(err?.message || "Checkout failed");
+      if (err?.status === 409 && err?.code === "hold_expired") {
+        setHoldExpired(true);
+        setErrorMessage("Your hold expired. Please restart to try again.");
+        setStatusMessage("");
+      } else {
+        setErrorMessage(err?.message || "Checkout failed");
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -157,6 +178,29 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
     }
     setStatusMessage("Payment submitted. Waiting for confirmation...");
     setIsSubmitting(false);
+
+    // Bounded polling for confirmation via Stripe PI status (minimal)
+    try {
+      let tries = 0;
+      let confirmed = false;
+      while (tries < 10 && !confirmed) {
+        tries += 1;
+        const r = await stripe.retrievePaymentIntent(clientSecret);
+        const pi = r.paymentIntent;
+        if (pi && pi.status === "succeeded") {
+          confirmed = true;
+          setLocalRegStatus("confirmed");
+          setStatusMessage("Payment confirmed. Your booking is confirmed.");
+          break;
+        }
+        await new Promise((res) => setTimeout(res, 1000));
+      }
+      if (!confirmed) {
+        setStatusMessage("Still processing... please wait or refresh later.");
+      }
+    } catch (e: any) {
+      // Non-fatal: leave in processing state
+    }
   }
 
   const selectedEvent = useMemo(() => events.find((e) => e.id === selectedEventId), [events, selectedEventId]);
@@ -196,7 +240,7 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
       {registration && (
         <div style={{ padding: 12, border: "1px solid #ddd", borderRadius: 8 }}>
           <div><strong>Registration:</strong> {registration.id}</div>
-          <div><strong>Status:</strong> {registration.status}</div>
+          <div><strong>Status:</strong> {localRegStatus || registration.status}</div>
         </div>
       )}
 
@@ -212,6 +256,12 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
       {paymentIntentId && <div>Payment Intent: {paymentIntentId}</div>}
       {statusMessage && <div>{statusMessage}</div>}
       {errorMessage && <div style={{ color: "red" }}>{errorMessage}</div>}
+      {holdExpired && (
+        <div style={{ display: "grid", gap: 8 }}>
+          <div>Your reservation hold expired. Please restart.</div>
+          <button onClick={resetAll} disabled={isSubmitting}>Restart</button>
+        </div>
+      )}
     </div>
   );
 }

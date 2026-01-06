@@ -94,6 +94,18 @@ Smokes are organized by tier for targeted CI validation:
 
 ---
 
+## Recent Additions (Sprint AV)
+
+- **Registrations Hold Expiration + Capacity Release:** `smoke:registrations:hold-expiration`
+  - Forces an active hold to expire by setting `holdExpiresAt` to past, invokes `POST /registrations:cleanup-expired-holds`, and asserts registration transitions to `cancelled`. Then creates a second registration and confirms checkout succeeds (capacity was released).
+  - Flags/Headers: `X-Feature-Registrations-Enabled: true` (module gate), `X-Feature-Stripe-Simulate: true` (no external Stripe).
+
+- **Confirmation Notification (simulate):** `smoke:registrations:confirmation-message`
+  - Runs public checkout in simulate mode, posts a simulated Stripe `payment_intent.succeeded` webhook, asserts registration status `confirmed` and a `message` exists with `status=sent` under notify simulate.
+  - Flags/Headers: `X-Feature-Registrations-Enabled: true`, `X-Feature-Stripe-Simulate: true`, `X-Feature-Notify-Simulate: true`.
+
+---
+
 ## CI Artifacts (Smoke Manifests)
 
 Smokes write a manifest locally to `ops/smoke/.manifests/` containing details about created entities (type, id, route, metadata) for debugging and cleanup.
