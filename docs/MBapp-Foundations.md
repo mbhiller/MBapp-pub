@@ -63,6 +63,20 @@
   - **Real send:** Calls Postmark/Twilio; on success marks `sent` with provider ID; on failure marks `failed` with `errorMessage` and refreshed `lastAttemptAt`.
 - **Idempotency guard:** If another retry already transitioned the message out of `failed`, the handler returns a validation error instead of duplicating send.
 
+### Message Templates v1 (Sprint BA)
+
+- **Template System:** Minimal, deterministic template renderer with no external deps. Validates required vars at render time.
+- **Templates:**
+  - `registration.confirmed.email`: Subject="Registration Confirmed", body contains registrationId + paymentIntentId. Required vars: `registrationId`, `paymentIntentId`.
+  - `registration.confirmed.sms`: Body contains registrationId. Required vars: `registrationId`.
+- **Storage:** Message object stores both rendered copy (`subject`/`body`) and template metadata (`templateKey`/`templateVars`):
+  - Rendered copy: used for send (provider consistency) and audit trail.
+  - Template metadata: allows future re-renders without re-fetching context vars; enables template versioning and migrations.
+  - Metadata field (optional): carries contextual data (e.g., `registrationId`, `paymentIntentId`, `eventId`) for audit/filtering.
+- **Enqueue flow:** `enqueueTemplatedEmail()` and `enqueueTemplatedSMS()` render template, validate vars, create message with rendered copy + metadata, then send (simulate or real).
+- **Retry behavior:** Retry handler reads stored `subject`/`body` verbatim; re-renders only on demand (not yet implemented). Stored template metadata preserved on retry for future audit.
+- **No brittle assertions:** Smokes assert `templateKey` and required `templateVars` keys exist, not on rendered text (allows copy updates without breaking tests).
+
 # MBapp Foundations Report
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Status/Working](MBapp-Status.md) · [Cadence](MBapp-Cadence.md) · [Verification](smoke-coverage.md)  

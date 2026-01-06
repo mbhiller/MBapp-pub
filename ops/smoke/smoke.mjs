@@ -12364,11 +12364,20 @@ const tests = {
 
     // Fetch message
     const msg = await get(`/objects/message/${encodeURIComponent(msgId)}`);
-    const pass = msg.ok && msg.body?.status === "sent";
+    const pass = msg.ok 
+      && msg.body?.status === "sent"
+      && msg.body?.templateKey === "registration.confirmed.email"
+      && msg.body?.templateVars?.registrationId
+      && msg.body?.templateVars?.paymentIntentId;
     return {
       test: "registrations:confirmation-message",
       result: pass ? "PASS" : "FAIL",
       msgStatus: msg.body?.status,
+      msgTemplateKey: msg.body?.templateKey,
+      msgTemplateVars: msg.body?.templateVars ? { 
+        registrationId: !!msg.body?.templateVars?.registrationId,
+        paymentIntentId: !!msg.body?.templateVars?.paymentIntentId
+      } : null,
       regConfirmed: reg.body?.status === "confirmed",
       webhookStatus: whRes.status,
       steps: { eventId, regId, piId, msgId }
@@ -12453,13 +12462,19 @@ const tests = {
     const pass = msg.ok 
       && msg.body?.channel === "sms"
       && msg.body?.status === "sent"
-      && (msg.body?.provider === "twilio" || String(msg.body?.providerMessageId).startsWith("sim_"));
+      && (msg.body?.provider === "twilio" || String(msg.body?.providerMessageId).startsWith("sim_"))
+      && msg.body?.templateKey === "registration.confirmed.sms"
+      && msg.body?.templateVars?.registrationId;
     return {
       test: "registrations:confirmation-sms",
       result: pass ? "PASS" : "FAIL",
       msgChannel: msg.body?.channel,
       msgStatus: msg.body?.status,
       msgProvider: msg.body?.provider,
+      msgTemplateKey: msg.body?.templateKey,
+      msgTemplateVars: msg.body?.templateVars ? { 
+        registrationId: !!msg.body?.templateVars?.registrationId
+      } : null,
       regConfirmed: reg.body?.status === "confirmed",
       webhookStatus: whRes.status,
       steps: { eventId, regId, piId, smsId }

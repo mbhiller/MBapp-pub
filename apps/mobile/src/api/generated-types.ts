@@ -2690,6 +2690,21 @@ export interface components {
             errorMessage?: string | null;
             /** @description Number of retry attempts after failures */
             retryCount?: number | null;
+            /** @description Template identifier for rendering subject/body (Sprint BA) */
+            templateKey?: string | null;
+            /** @description Variables for template rendering (Sprint BA) */
+            templateVars?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Format: date-time
+             * @description Timestamp when message was queued
+             */
+            queuedAt?: string | null;
+            /** @description Additional metadata (e.g., registrationId, paymentIntentId) */
+            metadata?: {
+                [key: string]: unknown;
+            } | null;
             notes?: string | null;
         };
         MoneyTotals: {
