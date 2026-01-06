@@ -86,6 +86,43 @@
 - **Retry behavior:** Retry handler reads stored `subject`/`body` verbatim; re-renders only on demand (not yet implemented). Stored template metadata preserved on retry for future audit.
 - **No brittle assertions:** Smokes assert `templateKey` and required `templateVars` keys exist, not on rendered text (allows copy updates without breaking tests).
 
+### Background Jobs (Sprint BD)
+
+**Purpose:** Provide a minimal, safe foundation to run bounded maintenance across tenants without introducing heavy infra. Initial jobs focus on registrations and messages.
+
+**Jobs Supported:**
+- `cleanup-expired-holds`: Expires submitted registrations whose `holdExpiresAt < now` using existing `expireRegistrationHold()`; releases capacity via `releaseEventSeat()`; returns counts `{ examined, expired }`.
+- `retry-failed-messages`: Lists failed `message` records and retries via existing `retryMessageRecord()`; returns counts `{ examined, attempted, sent, failed }`.
+
+**Dispatcher:** [apps/api/src/jobs/background.ts](../apps/api/src/jobs/background.ts)
+- Entry: `runBackgroundJobs({ jobType, limit?, tenants? })`
+- Tenants: Iterates over `MBAPP_JOB_TENANTS` (CSV; default `SmokeTenant,DemoTenant`) unless `tenantId` provided on request.
+- Bounds: Per-job limits clamped server-side; non‑prod simulates notifications; returns per-tenant results with `ok`, `counts`, and optional `errorMessage`.
+
+**Internal Endpoint (Admin-only):** [apps/api/src/jobs/run.ts](../apps/api/src/jobs/run.ts)
+- Path: `POST /internal/jobs:run` (wired in [apps/api/src/index.ts](../apps/api/src/index.ts))
+- Security: Requires permission `ops:jobs:run` (see spec `x-mbapp-permission`).
+- Request: `{ jobType: "cleanup-expired-holds" | "retry-failed-messages" | "all", tenantId?: string, limit?: number }`
+- Response: `{ results: TenantJobResult[] }` — flattened across jobs when `jobType="all"`.
+
+**Environment Variables:**
+- `MBAPP_JOB_TENANTS`: CSV of tenant IDs to include by default (e.g., `SmokeTenant,DemoTenant`).
+- `MBAPP_JOB_LIMIT_CLEANUP_HOLDS`: Max items to process per tenant for `cleanup-expired-holds` (server clamps further as needed).
+- `MBAPP_JOB_LIMIT_RETRY_FAILED`: Max items to process per tenant for `retry-failed-messages`.
+
+**EventBridge Scheduler (Feature-flagged):**
+- Module: [infra/terraform/modules/scheduler/main.tf](../infra/terraform/modules/scheduler/main.tf)
+- Wiring: [infra/terraform/app_infra.tf](../infra/terraform/app_infra.tf), [infra/terraform/variables.app.tf](../infra/terraform/variables.app.tf)
+- Flag: `enable_background_jobs` (default OFF). Schedule: `background_jobs_schedule_expression` (default e.g., `rate(10 minutes)`).
+- Payload: `{ "source": "mbapp.jobs", "jobType": "all" }` targets the API Lambda with least-privilege `aws_lambda_permission`.
+
+**Lambda Hook:** [apps/api/src/index.ts](../apps/api/src/index.ts)
+- Detects EventBridge-like invocations (non-HTTP + `source="mbapp.jobs"` or `jobType` present) and dispatches `runBackgroundJobs()` early; normal API routing remains unchanged.
+
+**Safety & Determinism:**
+- Admin-only endpoint; server clamps bounds; per-tenant iteration; simulate notifications outside prod.
+- CI smokes call `/internal/jobs:run` deterministically with simulate headers and tenant scoping.
+
 # MBapp Foundations Report
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Status/Working](MBapp-Status.md) · [Cadence](MBapp-Cadence.md) · [Verification](smoke-coverage.md)  

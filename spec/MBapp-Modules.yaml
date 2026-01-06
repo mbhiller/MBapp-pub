@@ -4070,6 +4070,70 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /internal/jobs:run:
+    post:
+      tags:
+      - Admin
+      operationId: runBackgroundJobs
+      summary: INTERNAL — Run background jobs on-demand (admin only)
+      description: |
+        Triggers bounded background jobs without a scheduler, for CI or admin use.
+        Secured endpoint — requires admin permission and authentication. Not intended for public use.
+      x-mbapp-permission: ops:jobs:run
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - jobType
+              properties:
+                jobType:
+                  type: string
+                  description: Job to run; use "all" to run both.
+                  enum: [cleanup-expired-holds, retry-failed-messages, all]
+                tenantId:
+                  type: string
+                  description: Optional tenant override for testing. Defaults to server env list.
+                limit:
+                  type: integer
+                  minimum: 1
+                  description: Optional limit override; otherwise server defaults are used per job.
+      responses:
+        '200':
+          description: Jobs executed; per-tenant results returned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      required: [jobType, tenantId, ok, counts]
+                      properties:
+                        jobType:
+                          type: string
+                          enum: [cleanup-expired-holds, retry-failed-messages]
+                        tenantId:
+                          type: string
+                        ok:
+                          type: boolean
+                        counts:
+                          type: object
+                          additionalProperties:
+                            type: integer
+                        errorMessage:
+                          type: string
+                          nullable: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /reservations:check-conflicts:
     post:
       tags:

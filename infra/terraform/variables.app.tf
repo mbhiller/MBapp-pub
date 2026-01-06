@@ -31,3 +31,17 @@ variable "extra_managed_policy_arns" {
   type        = list(string)
   default     = []
 }
+
+# Feature flag: enable creation of EventBridge schedules for background jobs
+variable "enable_background_jobs" {
+  description = "When true, creates EventBridge rule to invoke background jobs"
+  type        = bool
+  default     = false
+}
+
+# Schedule expression for background jobs (EventBridge rate or cron)
+variable "background_jobs_schedule_expression" {
+  description = "EventBridge schedule expression for background jobs"
+  type        = string
+  default     = "rate(10 minutes)"
+}

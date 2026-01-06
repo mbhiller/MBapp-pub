@@ -332,6 +332,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/internal/jobs:run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * INTERNAL — Run background jobs on-demand (admin only)
+         * @description Triggers bounded background jobs without a scheduler, for CI or admin use.
+         *     Secured endpoint — requires admin permission and authentication. Not intended for public use.
+         *
+         */
+        post: operations["runBackgroundJobs"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/reservations:check-conflicts": {
         parameters: {
             query?: never;
@@ -5248,6 +5270,53 @@ export interface operations {
                     "application/json": {
                         /** @description Number of registrations expired/cancelled */
                         expiredCount?: number;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    runBackgroundJobs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description Job to run; use "all" to run both.
+                     * @enum {string}
+                     */
+                    jobType: "cleanup-expired-holds" | "retry-failed-messages" | "all";
+                    /** @description Optional tenant override for testing. Defaults to server env list. */
+                    tenantId?: string;
+                    /** @description Optional limit override; otherwise server defaults are used per job. */
+                    limit?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Jobs executed; per-tenant results returned */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        results?: {
+                            /** @enum {string} */
+                            jobType: "cleanup-expired-holds" | "retry-failed-messages";
+                            tenantId: string;
+                            ok: boolean;
+                            counts: {
+                                [key: string]: number;
+                            };
+                            errorMessage?: string | null;
+                        }[];
                     };
                 };
             };

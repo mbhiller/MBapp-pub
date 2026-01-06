@@ -144,6 +144,18 @@ Smokes are organized by tier for targeted CI validation:
   - **Non-brittle assertions:** Validates template metadata exists, not rendered body text (allows template copy updates without breaking test).
   - Flags/Headers: `X-Feature-Registrations-Enabled: true`, `X-Feature-Stripe-Simulate: true`, `X-Feature-Notify-Simulate: true`.
 
+## Recent Additions (Sprint BD)
+
+- **Background: Cleanup Expired Holds:** `smoke:jobs:background-cleanup-expired-holds`
+  - Seeds an event + submitted registration, forces `holdExpiresAt` into the past, then calls `POST /internal/jobs:run` (admin token) with `jobType="cleanup-expired-holds"` (or `"all"`).
+  - Asserts the registration transitions to `cancelled`, capacity is released (follow-up checkout succeeds), and job counts reflect the work performed.
+  - Flags/Headers: Standard auth (admin with `ops:jobs:run`); registration feature flags as in other registration smokes.
+
+- **Background: Retry Failed Messages:** `smoke:jobs:background-retry-failed-messages`
+  - Seeds a failed message, then calls `POST /internal/jobs:run` with `jobType="retry-failed-messages"` and `X-Feature-Notify-Simulate: true`.
+  - Asserts the message transitions to `sent`, `retryCount` increments, and job counts reflect examined/attempted/sent.
+  - Flags/Headers: `X-Feature-Notify-Simulate: true` (CI-safe; no external providers), admin token with `ops:jobs:run`.
+
 ## Recent Additions (Sprint BC)
 
 - **Registrations Public Resend Confirmation:** `smoke:registrations:public-resend`

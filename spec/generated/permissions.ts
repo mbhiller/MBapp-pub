@@ -18,6 +18,7 @@ export const PERMISSIONS_BY_ENDPOINT = {
   "GET /workspaces/{id}": "workspace:read",
   "PATCH /views/{id}": "view:write",
   "PATCH /workspaces/{id}": "workspace:write",
+  "POST /internal/jobs:run": "ops:jobs:run",
   "POST /inventory/{id}:cycle-count": "inventory:adjust",
   "POST /inventory/{id}:putaway": "inventory:write",
   "POST /inventory/{id}/adjust": "inventory:write",
@@ -77,6 +78,7 @@ export const PERM_INVENTORY_WRITE = "inventory:write" as const;
 export const PERM_MESSAGE_READ = "message:read" as const;
 export const PERM_MESSAGE_WRITE = "message:write" as const;
 export const PERM_OBJECTS_WRITE = "objects:write" as const;
+export const PERM_OPS_JOBS_RUN = "ops:jobs:run" as const;
 export const PERM_PARTY_READ = "party:read" as const;
 export const PERM_PURCHASE_APPROVE = "purchase:approve" as const;
 export const PERM_PURCHASE_CANCEL = "purchase:cancel" as const;
@@ -105,6 +107,7 @@ export const PERMISSION_KEYS = [
   "message:read",
   "message:write",
   "objects:write",
+  "ops:jobs:run",
   "party:read",
   "purchase:approve",
   "purchase:cancel",

@@ -6,6 +6,33 @@
 
 ---
 
+### Sprint BD — Background Jobs Foundation — ✅ Complete (2026-01-06)
+
+**Summary:** Shipped a minimal, safe background jobs foundation: a dispatcher with bounded per-tenant execution, a secure internal endpoint to trigger jobs on-demand, a feature-flagged EventBridge scheduler, a Lambda hook for scheduled invocations, and deterministic smokes wired into core CI.
+
+**Deliverables (E1–E6):**
+- **Dispatcher (E1):** Added [apps/api/src/jobs/background.ts](../apps/api/src/jobs/background.ts) with `runBackgroundJobs({ jobType, limit?, tenants? })` supporting:
+  - `cleanup-expired-holds`: iterates submitted registrations past hold TTL and expires them via existing `expireRegistrationHold()` helper; returns counts `{ examined, expired }`.
+  - `retry-failed-messages`: lists failed messages and retries via existing `retryMessageRecord()`; returns counts `{ examined, attempted, sent, failed }`.
+  - Bounded execution using env limits; per-tenant iteration from `MBAPP_JOB_TENANTS` (default SmokeTenant, DemoTenant). Non‑prod simulates notifications.
+- **API (E2):** Created internal admin endpoint handler [apps/api/src/jobs/run.ts](../apps/api/src/jobs/run.ts) and routed in [apps/api/src/index.ts](../apps/api/src/index.ts): `POST /internal/jobs:run` (requires `ops:jobs:run`). Accepts `{ jobType: "cleanup-expired-holds" | "retry-failed-messages" | "all", tenantId?, limit? }`. Returns `{ results: TenantJobResult[] }`.
+- **Spec (E3):** Added `POST /internal/jobs:run` under Admin in [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) with `x-mbapp-permission: ops:jobs:run`; ran `npm run spec:lint`, `spec:bundle`, `spec:types:api`, `spec:types:mobile`.
+- **Infra (E4):** Introduced feature-flagged EventBridge scheduler in [infra/terraform/modules/scheduler/main.tf](../infra/terraform/modules/scheduler/main.tf); wired via [infra/terraform/app_infra.tf](../infra/terraform/app_infra.tf) and [infra/terraform/variables.app.tf](../infra/terraform/variables.app.tf). Payload: `{ "source": "mbapp.jobs", "jobType": "all" }`. Flag `enable_background_jobs` defaults OFF.
+- **Lambda Hook (E5):** Updated [apps/api/src/index.ts](../apps/api/src/index.ts) to detect EventBridge-like events (non-HTTP with `source="mbapp.jobs"` or `jobType` present) and invoke the dispatcher without affecting normal API Gateway flow.
+- **Smokes + CI (E6):** Added two core smokes in [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) and wired into [ops/ci-smokes.json](../ops/ci-smokes.json):
+  - `smoke:jobs:background-cleanup-expired-holds`: seeds a submitted hold, forces expiration, runs jobs:run, asserts cancellation + capacity release; validates counts.
+  - `smoke:jobs:background-retry-failed-messages`: seeds a failed message, runs jobs:run with simulate header, asserts retry transitions + counts.
+
+**Verification:**
+- ✅ Spec: lint/bundle clean; types regenerated (API + mobile)
+- ✅ API: typecheck clean after dispatcher, internal endpoint, and Lambda hook
+- ✅ CI: both new smokes included in core tier and pass under simulate flags
+
+**Impact:**
+- Enables safe, bounded maintenance (expired holds cleanup; failed message retries) on-demand and via schedules
+- Deterministic CI coverage using simulate headers; no external side effects
+- Schedules are feature-flagged OFF by default to avoid surprises in non‑configured environments
+
 ### Sprint BC — Public Booking Reliability Polish — ✅ Complete (2026-01-06)
 
 **Summary:** Improved public booking UX with better polling/backoff, delivery state visibility, and a public resend endpoint for failed confirmations.

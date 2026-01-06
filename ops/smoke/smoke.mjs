@@ -12967,6 +12967,153 @@ const tests = {
     };
   },
 
+  "smoke:jobs:background-cleanup-expired-holds": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true"
+    };
+
+    // Create an open event (capacity 1)
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: smokeTag("bg_cleanup_evt"),
+      capacity: 1,
+      reservedCount: 0
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "jobs:background-cleanup-expired-holds", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event" });
+
+    // Create public registration and checkout (becomes submitted with holdExpiresAt)
+    const regCreate = await post(`/registrations:public`, { eventId, party: { email: `bgcleanup+${SMOKE_RUN_ID}@example.com` } }, featureHeaders, { auth: "none" });
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test: "jobs:background-cleanup-expired-holds", result: "FAIL", reason: "reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+
+    const checkout = await post(`/events/registration/${encodeURIComponent(regId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!checkout.ok || !checkout.body?.paymentIntentId) {
+      return { test: "jobs:background-cleanup-expired-holds", result: "FAIL", reason: "checkout-failed", checkout };
+    }
+
+    // Force expiration: update via /objects/registration so we backdate the same record enumerated by the job
+    const regObjBefore = await get(`/objects/registration/${encodeURIComponent(regId)}`);
+    if (!regObjBefore.ok || !regObjBefore.body?.id) {
+      return { test: "jobs:background-cleanup-expired-holds", result: "FAIL", reason: "reg-obj-read-before-failed", regObjBefore };
+    }
+    const holdBefore = regObjBefore.body?.holdExpiresAt;
+    const submittedBefore = regObjBefore.body?.submittedAt;
+    // Clock-skew safe: set 10 minutes in the past for hold, 30 minutes for submittedAt
+    const pastHold = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const pastSubmitted = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const regObjBody = { ...regObjBefore.body, holdExpiresAt: pastHold, submittedAt: pastSubmitted, status: "submitted" };
+    const setPast = await put(`/objects/registration/${encodeURIComponent(regId)}`, regObjBody, featureHeaders);
+    if (!setPast.ok) {
+      return { test: "jobs:background-cleanup-expired-holds", result: "FAIL", reason: "set-past-failed", setPast, debug: { holdBefore, submittedBefore, forceHoldTo: pastHold, forceSubmittedTo: pastSubmitted } };
+    }
+    // Optional: brief sleep to avoid eventual consistency edges
+    await sleep(750);
+    // Sanity check using /objects: re-read and ensure timestamps are in the past
+    const regObjAfter = await get(`/objects/registration/${encodeURIComponent(regId)}`);
+    const holdIso = regObjAfter.body?.holdExpiresAt;
+    const submittedIso = regObjAfter.body?.submittedAt;
+    const holdPast = holdIso ? Date.parse(holdIso) < Date.now() : false;
+    const submittedPast = submittedIso ? Date.parse(submittedIso) < Date.now() : false;
+    const clientNowIso = new Date().toISOString();
+    const deltaSec = typeof holdIso === 'string' ? Math.round((Date.now() - Date.parse(holdIso)) / 1000) : null;
+    const deltaSubmittedSec = typeof submittedIso === 'string' ? Math.round((Date.now() - Date.parse(submittedIso)) / 1000) : null;
+    if (!regObjAfter.ok || !holdPast || !submittedPast) {
+      return { test: "jobs:background-cleanup-expired-holds", result: "FAIL", reason: "sanity-not-past", regObjAfter, holdIso, submittedIso, debug: { holdBefore, submittedBefore, holdAfter: holdIso, submittedAfter: submittedIso, clientNow: clientNowIso, deltaSec, deltaSubmittedSec } };
+    }
+
+    // Invoke internal job runner for cleanup-expired-holds
+    const job = await post(`/internal/jobs:run`, { jobType: "cleanup-expired-holds", tenantId: TENANT, limit: 50 }, featureHeaders);
+    if (!job.ok) {
+      return { test: "jobs:background-cleanup-expired-holds", result: "FAIL", reason: "job-run-failed", job, debug: { holdBefore, submittedBefore, holdAfter: holdIso, submittedAfter: submittedIso, clientNow: clientNowIso, deltaSec, deltaSubmittedSec } };
+    }
+    const results = Array.isArray(job.body?.results) ? job.body.results : [];
+    const entry = results.find(r => r?.tenantId === TENANT && r?.jobType === "cleanup-expired-holds");
+    const expiredCount = Number(entry?.counts?.expired ?? 0);
+    const jobPass = entry && entry.ok === true && expiredCount >= 1;
+
+    // Verify registration is now cancelled (and payment failed if exposed)
+    const regObj = await get(`/objects/registration/${encodeURIComponent(regId)}`);
+    const cancelled = regObj.ok && regObj.body?.status === "cancelled";
+    const paymentFailed = regObj.ok && regObj.body?.paymentStatus ? regObj.body.paymentStatus === "failed" : true;
+
+    const pass = jobPass && cancelled && paymentFailed;
+    return {
+      test: "jobs:background-cleanup-expired-holds",
+      result: pass ? "PASS" : "FAIL",
+      job: { ok: entry?.ok, counts: entry?.counts },
+      regFinalStatus: regObj.body?.status,
+      regFinalPaymentStatus: regObj.body?.paymentStatus,
+      debug: { holdBefore, submittedBefore, holdAfter: holdIso, submittedAfter: submittedIso, clientNow: clientNowIso, deltaSec, deltaSubmittedSec, jobCounts: entry?.counts },
+      steps: { eventId, regId }
+    };
+  },
+
+  "smoke:jobs:background-retry-failed-messages": async () => {
+    await ensureBearer();
+
+    const featureHeaders = { "X-Feature-Notify-Simulate": "true" };
+
+    // Create a failed message record
+    const create = await post("/objects/message", {
+      type: "message",
+      channel: "email",
+      to: `bgretry+${SMOKE_RUN_ID}@example.com`,
+      subject: `BgRetry ${SMOKE_RUN_ID}`,
+      body: "Hello from background retry",
+      status: "failed",
+      errorMessage: "simulated failure",
+      retryCount: 0
+    }, featureHeaders);
+    if (!create.ok || !create.body?.id) {
+      return { test: "jobs:background-retry-failed-messages", result: "FAIL", reason: "create-failed", create };
+    }
+    const msgId = create.body.id;
+    recordCreated({ type: "message", id: msgId, route: "/objects/message", meta: { channel: "email", status: "failed" } });
+
+    // Invoke internal job runner for retry-failed-messages
+    const job = await post(`/internal/jobs:run`, { jobType: "retry-failed-messages", tenantId: TENANT, limit: 5 }, { ...featureHeaders });
+    if (!job.ok) {
+      return { test: "jobs:background-retry-failed-messages", result: "FAIL", reason: "job-run-failed", job };
+    }
+    const results = Array.isArray(job.body?.results) ? job.body.results : [];
+    const entry = results.find(r => r?.tenantId === TENANT && r?.jobType === "retry-failed-messages");
+    const attempted = Number(entry?.counts?.attempted ?? 0);
+    const sent = Number(entry?.counts?.sent ?? 0);
+    const jobPass = entry && entry.ok === true && attempted >= 1;
+
+    // Verify the message is now sent with retryCount incremented
+    const getMsg = await get(`/objects/message/${encodeURIComponent(msgId)}`, {}, featureHeaders);
+    if (!getMsg.ok) {
+      return { test: "jobs:background-retry-failed-messages", result: "FAIL", reason: "get-msg-failed", getMsg };
+    }
+    const body = getMsg.body || {};
+    const msgPass = body.status === "sent" && (body.retryCount ?? 0) >= 1;
+
+    const pass = jobPass && msgPass;
+    return {
+      test: "jobs:background-retry-failed-messages",
+      result: pass ? "PASS" : "FAIL",
+      job: { ok: entry?.ok, counts: entry?.counts },
+      message: { status: body.status, retryCount: body.retryCount },
+      steps: { msgId }
+    };
+  },
+
   /* ===================== Reservations: CRUD Resources ===================== */
   "smoke:resources:crud": async ()=>{
     await ensureBearer();
