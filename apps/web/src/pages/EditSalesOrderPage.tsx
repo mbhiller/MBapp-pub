@@ -68,7 +68,11 @@ export default function EditSalesOrderPage() {
     // CRITICAL: Use computePatchLinesDiff (NEVER send full line arrays to API)
     // This helper correctly separates id (server) vs cid (client) in patch ops
     const current = Array.isArray(payload?.lines) ? payload.lines : [];
-    const ops = computePatchLinesDiff(originalLines, current, SALES_ORDER_PATCHABLE_LINE_FIELDS);
+    const ops = computePatchLinesDiff({
+      originalLines,
+      editedLines: current,
+      patchableFields: SALES_ORDER_PATCHABLE_LINE_FIELDS
+    });
 
     if (ops.length === 0) {
       // No changes; avoid endpoint call
