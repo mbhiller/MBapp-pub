@@ -115,7 +115,7 @@
   - PurchaseOrdersListPage, BackordersListPage, SalesOrderDetailPage: Single batch call replaces manual loops
   - Removed 3 `inflightVendorIdsRef` variables (reduced complexity)
 - **Smoke (E5):** Added `smoke:parties:batch` to core tier ([ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs#L2304-L2365), [ops/ci-smokes.json](../ops/ci-smokes.json#L23))
-- **Docs (E6):** Updated [Frontend Guide](MBapp-Frontend-Guide.md), [smoke-coverage.md](smoke-coverage.md), and this status doc
+- **Docs (E6):** Updated [smoke-coverage.md](smoke-coverage.md) and this status doc
 
 **Impact:** Reduced worst-case N+1 fan-out from 10-20+ concurrent requests to 1 batch request per page load. All typechecks + smokes pass.
 
@@ -1162,7 +1162,6 @@ Before proceeding to Phase 2 (cutover readiness), must verify:
 - **Server alias expansion:** [apps/api/src/auth/middleware.ts](../apps/api/src/auth/middleware.ts) `expandPolicyWithAliases()` now expands party↔parties and product↔products bidirectionally in addition to existing sales/purchase/inventory aliases.
 - **New smokes:** Added `smoke:auth:legacy-plural-policy-products-read` (validates legacy `products:read` grants product list access) and `smoke:auth:perm-keys-are-lowercase` (validates mixed-case `Purchase:write` is denied while lowercase `purchase:write` is allowed). Both wired into CI flows.
 - **Spec documentation:** [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) Auth tag description now documents JWT `mbapp.*` claims (userId, tenantId, roles, policy), precedence rules (explicit policy → role derivation → empty), lowercase-only permission keys, wildcard semantics, and legacy alias expansion list.
-- **Backend Guide:** [docs/MBapp-Backend-Guide.md](../docs/MBapp-Backend-Guide.md) added JWT Claims Contract subsection with claim keys, precedence, lowercase-only rule, wildcards, and alias expansion list.
 - **Verification:** ✅ CI smokes green (18 flows including new lowercase/plural tests); spec pipeline clean (spec:lint, spec:bundle, spec:types:api, spec:types:mobile).
 - **Outcome:** Permission contract is now fully documented and enforced; mixed-case keys fail fast; legacy plural/alias keys work via server expansion; backward compatibility preserved.
 
@@ -1719,8 +1718,6 @@ This section documents flags used across the backend (AWS Lambda) and mobile (Ex
   - Write permission denied: `POST /objects/product` → 403 with "Forbidden" message
   
   Registered in [ops/ci-smokes.json](../ops/ci-smokes.json); full CI smoke suite (48 tests) passes.
-
-- **E5 (Documentation):** Updated this section in MBapp-Status.md and [MBapp-Backend-Guide.md](MBapp-Backend-Guide.md) § 2 with role derivation logic, role mappings table, and wildcard semantics reference.
 
 - **Verification:** ✅ All typechecks passed (API, mobile); ✅ spec pipeline clean (lint/bundle/types); ✅ smoke suite green (48/48 including new auth test).
 

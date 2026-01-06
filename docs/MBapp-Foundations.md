@@ -19,6 +19,19 @@ This document defines the **structural standards and invariants** for the MBapp 
 
 ---
 
+## Canonical Docs Policy
+
+These **5 documents are the canonical source of truth (SSOT)** for MBapp:
+- [MBapp-Roadmap.md](MBapp-Roadmap.md) — Feature roadmap and delivery phases
+- [MBapp-Foundations.md](MBapp-Foundations.md) — Structural standards (this doc)
+- [MBapp-Status.md](MBapp-Status.md) — Current implementation status and sprint summaries
+- [MBapp-Cadence.md](MBapp-Cadence.md) — Workflow cadence and Definition of Done
+- [smoke-coverage.md](smoke-coverage.md) — Smoke test organization and coverage
+
+**Archived docs** (in `docs/archive/2026-01-06/`) are **reference-only** and may be stale or incorrect. Do not cite them as truth. If you find useful information in an archived doc, copy it forward into a canonical doc (and update it), rather than linking to it as truth.
+
+---
+
 ## 1. Config / Environment Entrypoints
 
 ### 1.1 Mobile (apps/mobile)
