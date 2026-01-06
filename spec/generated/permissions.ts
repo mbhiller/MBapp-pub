@@ -28,6 +28,7 @@ export const PERMISSIONS_BY_ENDPOINT = {
   "POST /purchasing/po/{id}:approve": "purchase:approve",
   "POST /purchasing/po/{id}:cancel": "purchase:cancel",
   "POST /purchasing/po/{id}:close": "purchase:close",
+  "POST /purchasing/po/{id}:patch-lines": "purchase:write",
   "POST /purchasing/po/{id}:receive": "purchase:receive",
   "POST /purchasing/suggest-po": "purchase:write",
   "POST /sales/so/{id}:cancel": "sales:cancel",

@@ -3,12 +3,15 @@
 // Notes:
 // - This does NOT assign ids. Callers should run ensureLineIds() after apply.
 // - Preserves original order; new lines are appended in op order.
+// - Uses lineKey() for consistent id/cid resolution.
+
+import { lineKey } from "./lineKey";
 
 export type PatchLineOp =
   | { op: "upsert"; id?: string; cid?: string; patch: Partial<any> }
   | { op: "remove"; id?: string; cid?: string };
 
-export function applyPatchLines<T extends { id?: string } & Record<string, unknown>>(
+export function applyPatchLines<T extends { id?: string; cid?: string } & Record<string, unknown>>(
   existing: T[],
   ops: PatchLineOp[]
 ): { lines: T[]; summary: { added: number; updated: number; removed: number } } {
@@ -23,41 +26,38 @@ export function applyPatchLines<T extends { id?: string } & Record<string, unkno
     if (!op || typeof (op as any).op !== "string") continue;
 
     if (op.op === "remove") {
-      // Prefer id-based match; fall back to best-effort cid match for in-memory cases.
-      if (op.id && op.id.trim()) {
-        const idx = lines.findIndex((ln) => String(ln.id || "").trim() === op.id!.trim());
-        if (idx >= 0) {
-          lines.splice(idx, 1);
-          removed += 1;
-        }
-        continue;
-      }
-      if (op.cid && op.cid.trim()) {
-        const idx = lines.findIndex((ln) => String((ln as any).cid || "").trim() === op.cid!.trim());
-        if (idx >= 0) {
-          lines.splice(idx, 1);
-          removed += 1;
-        }
+      // Build op's key from op.id/op.cid using lineKey logic
+      const opKey = lineKey({ id: op.id, cid: op.cid });
+      if (!opKey) continue; // No key to match against
+
+      const idx = lines.findIndex((ln) => lineKey(ln) === opKey);
+      if (idx >= 0) {
+        lines.splice(idx, 1);
+        removed += 1;
       }
       continue;
     }
 
     if (op.op === "upsert") {
-      // Update existing by id (preserve id even if patch includes id)
-      if (op.id && op.id.trim()) {
-        const idx = lines.findIndex((ln) => String(ln.id || "").trim() === op.id!.trim());
+      // Build op's key from op.id/op.cid
+      const opKey = lineKey({ id: op.id, cid: op.cid });
+
+      // Update existing line by key if found
+      if (opKey) {
+        const idx = lines.findIndex((ln) => lineKey(ln) === opKey);
         if (idx >= 0) {
           const current = lines[idx];
           const next = { ...current, ...(op.patch || {}) } as T;
-          // Preserve original id
+          // Preserve original id/cid
           (next as any).id = current.id;
+          (next as any).cid = current.cid;
           lines[idx] = next;
           updated += 1;
           continue;
         }
       }
 
-      // No matching id: append a new line from patch (do NOT invent id here)
+      // No matching key: append a new line from patch (do NOT invent id here)
       const newLine = ({ ...(op.patch || {}) } as unknown) as T;
       lines.push(newLine);
       added += 1;

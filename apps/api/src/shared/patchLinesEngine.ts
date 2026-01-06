@@ -2,6 +2,7 @@
 // Shared orchestration + validation for patch-lines handlers (SO/PO).
 import { applyPatchLines, type PatchLineOp } from "./patchLines";
 import { ensureLineIds } from "./ensureLineIds";
+import { lineKey } from "./lineKey";
 
 export class PatchLinesValidationError extends Error {
   code: string;
@@ -127,21 +128,32 @@ function validateAndNormalizeOps(ops: PatchLineOp[], patchableFields: readonly s
   return normalizedOps;
 }
 
-function collectReservedIds<T extends { id?: string }>(beforeLines: T[], afterLines: T[]): { reserveIds: string[]; maxCounter: number } {
-  const beforeIds = new Set<string>(beforeLines.map((l) => trimMaybe((l as any).id)).filter(isNonEmptyString) as string[]);
-  const afterIds = new Set<string>(afterLines.map((l) => trimMaybe((l as any).id)).filter(isNonEmptyString) as string[]);
+function collectReservedIds<T extends { id?: string; cid?: string }>(beforeLines: T[], afterLines: T[]): { reserveIds: string[]; maxCounter: number } {
+  const beforeKeys = new Set<string>(beforeLines.map((l) => lineKey(l)).filter((k) => k !== null) as string[]);
+  const afterKeys = new Set<string>(afterLines.map((l) => lineKey(l)).filter((k) => k !== null) as string[]);
 
-  const removedIds = Array.from(beforeIds).filter((id) => !afterIds.has(id));
+  // Collect ids that were removed (in before but not in after)
+  const removedIds: string[] = [];
+  for (const key of beforeKeys) {
+    if (!afterKeys.has(key)) {
+      // Only reserve server-assigned L{n} ids; client-only tmp-* ids are ephemeral
+      if (/^L\d+$/.test(key)) {
+        removedIds.push(key);
+      }
+    }
+  }
+
+  // Find max L{n} counter to avoid reuse
   let maxCounter = 0;
-  for (const id of beforeIds) {
-    const match = /^L(\d+)$/.exec(id);
+  for (const key of beforeKeys) {
+    const match = /^L(\d+)$/.exec(key);
     if (match) {
       const n = Number(match[1]);
       if (!Number.isNaN(n)) maxCounter = Math.max(maxCounter, n);
     }
   }
-  for (const id of afterIds) {
-    const match = /^L(\d+)$/.exec(id);
+  for (const key of afterKeys) {
+    const match = /^L(\d+)$/.exec(key);
     if (match) {
       const n = Number(match[1]);
       if (!Number.isNaN(n)) maxCounter = Math.max(maxCounter, n);
