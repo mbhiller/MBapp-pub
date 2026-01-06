@@ -4,7 +4,7 @@ import { verifyWebhook, type StripeEvent } from "../common/stripe";
 import { getObjectById, updateObject } from "../objects/repo";
 import { getTenantId } from "../common/env";
 import { badRequest, ok, error as respondError } from "../common/responses";
-import { enqueueEmail } from "../common/notify";
+import { enqueueEmail, enqueueSMS } from "../common/notify";
 
 /** 
  * Stripe webhook handler (POST /webhooks/stripe)
@@ -137,6 +137,26 @@ async function handlePaymentSucceeded(
       type: "registration",
       id: registrationId,
       body: { confirmationMessageId: msg.id },
+    });
+  }
+
+  // Enqueue confirmation SMS (idempotent: store confirmationSmsMessageId on registration)
+  const phone = (registration as any)?.party?.phone as string | undefined;
+  const existingSmsId = (registration as any)?.confirmationSmsMessageId as string | undefined;
+  if (phone && !existingSmsId) {
+    const smsMsg = await enqueueSMS({
+      tenantId: tenantId!,
+      to: phone,
+      body: `Your registration ${registrationId} is confirmed.`,
+      metadata: { registrationId, paymentIntentId: paymentIntent.id },
+      event,
+    });
+
+    await updateObject({
+      tenantId,
+      type: "registration",
+      id: registrationId,
+      body: { confirmationSmsMessageId: smsMsg.id },
     });
   }
 }

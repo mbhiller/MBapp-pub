@@ -4378,6 +4378,10 @@ components:
               type: string
               nullable: true
               description: Server-side hash of public token for guest checkout (Sprint AU)
+            confirmationSmsMessageId:
+              type: string
+              nullable: true
+              description: Message object ID created for SMS confirmation (Sprint AX)
             clientId:
               type: string
               nullable: true
@@ -4485,6 +4489,10 @@ components:
             email:
               type: string
               nullable: true
+            phone:
+              type: string
+              nullable: true
+              description: Phone number for SMS confirmation (optional)
         fees:
           type: array
           nullable: true

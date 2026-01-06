@@ -41,6 +41,60 @@
 - Message templates (deferred; use plain text for now)
 - Retry strategy for transient failures (defer to background worker or manual retry UI)
 
+### Sprint AX — Twilio SMS Provider Integration — ✅ Complete (2026-01-06)
+
+**Summary:** Added SMS confirmation for public registrations via Twilio. Uses same Message seam as email (channel="sms"), reuses simulate flag for CI determinism.
+
+**Deliverables:**
+- **Spec (E1):** Updated PublicRegistrationRequest to accept optional `party.phone` (string, nullable). Updated Registration schema to add `confirmationSmsMessageId` field (parallel to email).
+  - Ran: `npm run spec:lint`, `spec:bundle`, `spec:types:api`, `spec:types:mobile` ✅
+- **API (E2):** Created [apps/api/src/common/twilio.ts](../apps/api/src/common/twilio.ts) Twilio SMS adapter:
+  - `sendTwilioSms({ to, body, event })`
+  - HTTP Basic Auth with TWILIO_ACCOUNT_SID:TWILIO_AUTH_TOKEN
+  - Form-encoded POST to Twilio `/Messages.json` endpoint
+  - Returns `{ sid, status? }`
+  - Error handling: throws on missing env vars or non-2xx response
+- **API (E3):** Extended [apps/api/src/common/notify.ts](../apps/api/src/common/notify.ts) with `enqueueSMS()`:
+  - Creates message with `channel="sms"`, status="queued"
+  - Simulate mode: immediate `status=sent` with simulated `providerMessageId`
+  - Real mode: calls sendTwilioSms(), updates with `status=sent/failed` + SID
+  - Defensive: skips re-send if already sent
+  - Error handling: records `errorMessage` and `lastAttemptAt`
+- **API (E4):** Integrated SMS into Stripe webhook in [apps/api/src/webhooks/stripe-handler.ts](../apps/api/src/webhooks/stripe-handler.ts):
+  - On `payment_intent.succeeded`: if party.phone exists and confirmationSmsMessageId empty, calls `enqueueSMS()`
+  - Stores SMS message ID on registration for idempotency
+- **Ops (E5):** Added Twilio env var placeholders in [ops/Set-MBEnv.ps1](../ops/Set-MBEnv.ps1):
+  - `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`
+- **Docs (E6):** Updated [MBapp-Foundations.md](../docs/MBapp-Foundations.md) Notifications section:
+  - Added Twilio provider details (endpoint, auth, env vars)
+  - Updated Message contract to include `confirmationSmsMessageId`
+  - Documented SMS send flow (simulate vs real, error handling)
+  - Documented Stripe webhook integration for both email + SMS
+- **Smokes (E5):** Added `smoke:registrations:confirmation-sms` to [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs):
+  - Creates public registration with party.phone (no email)
+  - Checkout + simulated Stripe webhook
+  - Asserts registration.confirmationSmsMessageId set
+  - Fetches message, validates channel="sms", status="sent", provider="twilio"
+  - Added to core tier in [ops/ci-smokes.json](../ops/ci-smokes.json)
+
+**Verification:**
+- ✅ Typecheck: apps/api clean
+- ✅ Smoke: `smoke:registrations:confirmation-sms` passes (simulate mode with simulated Twilio provider ID)
+- ✅ Spec: lint, bundle, type generation all clean
+- ✅ No breaking changes: phone field optional; all Message fields optional
+
+**Notes:**
+- Phone validation deferred (optional for MVP; spec accepts any string)
+- SMS messages use plain text body (no templates)
+- Idempotency via confirmationSmsMessageId on registration (same pattern as email)
+- Real SMS testing: Set `FEATURE_NOTIFY_SIMULATE=0` and provide real Twilio credentials; CI always uses simulate flag
+
+**Next:**
+- Phone format validation (E.164 or custom format check)
+- SMS message templates (if needed for multi-language support)
+- Retry strategy for SMS failures (background worker or manual retry UI)
+- Additional channels: push notifications (Firebase Cloud Messaging, APNs)
+
 ### Sprint AV — Hold TTL + Cleanup + Notifications (simulate) — ✅ Complete (2026-01-06)
 
 **Summary:** Hardened public booking with hold TTL, bounded cleanup, and simulated notifications. Improved web UX to handle expired holds clearly and to surface confirmation without backend polling.

@@ -2910,6 +2910,8 @@ export interface components {
             holdExpiresAt?: string | null;
             /** @description Server-side hash of public token for guest checkout (Sprint AU) */
             publicTokenHash?: string | null;
+            /** @description Message object ID created for SMS confirmation (Sprint AX) */
+            confirmationSmsMessageId?: string | null;
             /** @description Legacy field (use partyId instead) */
             clientId?: string | null;
             /** @description Legacy field */
@@ -2974,6 +2976,8 @@ export interface components {
             party?: {
                 name?: string | null;
                 email?: string | null;
+                /** @description Phone number for SMS confirmation (optional) */
+                phone?: string | null;
             } | null;
             /** @description Registration fees */
             fees?: {
