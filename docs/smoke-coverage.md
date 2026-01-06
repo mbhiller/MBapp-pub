@@ -1,7 +1,7 @@
 # Smoke Test Coverage (Sprint S, 2025-12-31)
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Status/Working](MBapp-Status.md) · [Foundations](MBapp-Foundations.md) · [Cadence](MBapp-Cadence.md)  
-**Last Updated:** 2026-01-04
+**Last Updated:** 2026-01-06
 
 ---
 
@@ -82,6 +82,15 @@ Smokes are organized by tier for targeted CI validation:
 ```
 
 **Use for:** Identifying performance regressions, bottleneck flows, and optimization targets.
+
+---
+
+## Recent Additions (Sprint AU)
+
+- **Registrations Public Checkout (simulate Stripe):** `smoke:registrations:public-checkout` (public token auth, PaymentIntent creation, webhook confirmation path happy case; uses `X-Feature-Stripe-Simulate` to avoid external Stripe calls).
+- **Registrations Public Checkout Idempotent:** `smoke:registrations:public-checkout-idempotent` (replays same idempotency key; asserts PaymentIntent reused and no double charge/state change).
+- **Events Capacity Guard:** `smoke:events:capacity-guard` (ensures concurrent attempts respect `capacity` via atomic `reservedCount` increment and 409 on overfill).
+- **Webhooks Stripe PaymentIntent Succeeded:** `smoke:webhooks:stripe-payment-intent-succeeded` (simulated webhook with valid signature; confirms registration marked `confirmed` + `paymentStatus=paid`; idempotent replay safe).
 
 ---
 

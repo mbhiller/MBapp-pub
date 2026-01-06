@@ -1,8 +1,38 @@
 # MBapp Status / Working
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Foundations](MBapp-Foundations.md) · [Cadence](MBapp-Cadence.md) · [Verification](smoke-coverage.md)  
-**Last Updated:** 2026-01-05  
+**Last Updated:** 2026-01-06  
 **Workflow & DoD:** See [MBapp-Cadence.md](MBapp-Cadence.md) for canonical workflow, Definition of Done, and testing rules.
+
+---
+
+### Sprint AU — Public Booking + Stripe (PaymentIntent) — ✅ Complete (2026-01-06)
+
+**Summary:** Shipped public, unauthenticated booking slice with Stripe PaymentIntent, capacity guard, webhook confirmation, and smoke coverage using simulate mode (no external Stripe calls).
+
+**Deliverables:**
+- **Spec:** Added public endpoints and payment fields (registrations + events + webhook) in [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) (E1).
+- **API:**
+  - Public event list `/events:public` and public registration create `/registrations:public` (returns `publicToken`).
+  - Checkout `/events/registration/{id}:checkout`: validates `X-MBapp-Public-Token`, enforces capacity via atomic `reservedCount` increment, idempotent PaymentIntent creation, returns `{ paymentIntentId, clientSecret }`.
+  - Stripe adapter with simulate mode (`X-Feature-Stripe-Simulate` or `FEATURE_STRIPE_SIMULATE`), PaymentIntent metadata, webhook signature verification.
+  - Webhook `/webhooks/stripe`: on `payment_intent.succeeded` marks registration `confirmed` + `paymentStatus=paid`; on failed marks `paymentStatus=failed`; idempotent.
+- **Web:** Added public booking page `/public/book` (Stripe Elements) that lists open events, creates draft registration, runs checkout with idempotency key, and confirms card payment client-side.
+- **Smokes:** Added public booking flows with simulate mode (no external Stripe):
+  - `smoke:registrations:public-checkout`
+  - `smoke:registrations:public-checkout-idempotent`
+  - `smoke:events:capacity-guard`
+  - `smoke:webhooks:stripe-payment-intent-succeeded`
+
+**Verification:**
+- Typecheck: apps/api ✅, apps/web ✅
+- Spec: lint/bundle/types regenerated ✅ (E1)
+- Smokes: added to runner (simulate Stripe); not yet in ci-smokes.json by default.
+
+**Next:**
+- Hold expiration + payment timeout handling.
+- Email receipts (Postmark) and SMS notifications (Twilio) for confirmed payments.
+- Public portal polish (per-event details, fees breakdown) and webhook retry metrics.
 
 ---
 

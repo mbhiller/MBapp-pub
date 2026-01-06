@@ -1,0 +1,165 @@
+// apps/api/src/webhooks/stripe-handler.ts
+import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
+import { verifyWebhook, type StripeEvent } from "../common/stripe";
+import { getObjectById, updateObject } from "../objects/repo";
+import { getTenantId } from "../common/env";
+import { badRequest, ok, error as respondError } from "../common/responses";
+
+/** 
+ * Stripe webhook handler (POST /webhooks/stripe)
+ * Must handle raw body for signature verification
+ */
+export async function handle(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
+  try {
+    // Extract signature header
+    const signatureHeader = event.headers?.["stripe-signature"] 
+      ?? event.headers?.["Stripe-Signature"];
+    
+    if (!signatureHeader) {
+      return badRequest("Missing Stripe-Signature header", { code: "missing_signature" });
+    }
+
+    // Get raw body (handle base64 encoding if API Gateway encodes it)
+    let rawBody: string;
+    if (event.isBase64Encoded && event.body) {
+      rawBody = Buffer.from(event.body, "base64").toString("utf-8");
+    } else {
+      rawBody = event.body || "";
+    }
+
+    if (!rawBody) {
+      return badRequest("Missing request body", { code: "missing_body" });
+    }
+
+    // Verify webhook signature
+    let stripeEvent: StripeEvent;
+    try {
+      stripeEvent = await verifyWebhook({
+        rawBody,
+        signatureHeader,
+        event,
+      });
+    } catch (err: any) {
+      console.error("[stripe-webhook] Signature verification failed:", err.message);
+      return badRequest(`Webhook signature verification failed: ${err.message}`, { 
+        code: "invalid_signature" 
+      });
+    }
+
+    // Handle event types
+    const { type, data } = stripeEvent;
+    const paymentIntent = data.object;
+
+    console.log(`[stripe-webhook] Event ${stripeEvent.id} type=${type} pi=${paymentIntent.id}`);
+
+    switch (type) {
+      case "payment_intent.succeeded":
+        await handlePaymentSucceeded(event, paymentIntent);
+        break;
+      
+      case "payment_intent.payment_failed":
+        await handlePaymentFailed(event, paymentIntent);
+        break;
+      
+      default:
+        console.log(`[stripe-webhook] Unhandled event type: ${type}`);
+    }
+
+    return ok({ received: true });
+  } catch (err: any) {
+    console.error("[stripe-webhook] Handler error:", err);
+    return respondError(err);
+  }
+}
+
+/** Handle payment_intent.succeeded: confirm registration and update payment status */
+async function handlePaymentSucceeded(
+  event: APIGatewayProxyEventV2,
+  paymentIntent: StripeEvent["data"]["object"]
+) {
+  const tenantId = getTenantId(event);
+  const registrationId = paymentIntent.metadata?.registrationId;
+
+  if (!registrationId) {
+    console.warn("[stripe-webhook] payment_intent.succeeded missing registrationId in metadata");
+    return;
+  }
+
+  // Look up registration
+  const registration = await getObjectById({
+    tenantId,
+    type: "registration",
+    id: registrationId,
+  });
+
+  if (!registration) {
+    console.warn(`[stripe-webhook] Registration ${registrationId} not found`);
+    return;
+  }
+
+  // Idempotency check: already confirmed
+  if ((registration as any).paymentStatus === "paid" && (registration as any).confirmedAt) {
+    console.log(`[stripe-webhook] Registration ${registrationId} already confirmed, skipping update`);
+    return;
+  }
+
+  // Update registration: set status to confirmed, paymentStatus to paid, confirmedAt timestamp
+  await updateObject({
+    tenantId,
+    type: "registration",
+    id: registrationId,
+    body: {
+      status: "confirmed",
+      paymentStatus: "paid",
+      paymentIntentId: paymentIntent.id,
+      confirmedAt: new Date().toISOString(),
+    },
+  });
+
+  console.log(`[stripe-webhook] Registration ${registrationId} confirmed via PaymentIntent ${paymentIntent.id}`);
+}
+
+/** Handle payment_intent.payment_failed: update payment status to failed */
+async function handlePaymentFailed(
+  event: APIGatewayProxyEventV2,
+  paymentIntent: StripeEvent["data"]["object"]
+) {
+  const tenantId = getTenantId(event);
+  const registrationId = paymentIntent.metadata?.registrationId;
+
+  if (!registrationId) {
+    console.warn("[stripe-webhook] payment_intent.payment_failed missing registrationId in metadata");
+    return;
+  }
+
+  // Look up registration
+  const registration = await getObjectById({
+    tenantId,
+    type: "registration",
+    id: registrationId,
+  });
+
+  if (!registration) {
+    console.warn(`[stripe-webhook] Registration ${registrationId} not found`);
+    return;
+  }
+
+  // Idempotency check: already marked as failed
+  if ((registration as any).paymentStatus === "failed") {
+    console.log(`[stripe-webhook] Registration ${registrationId} already marked as failed, skipping update`);
+    return;
+  }
+
+  // Update registration: set paymentStatus to failed
+  await updateObject({
+    tenantId,
+    type: "registration",
+    id: registrationId,
+    body: {
+      paymentStatus: "failed",
+      paymentIntentId: paymentIntent.id,
+    },
+  });
+
+  console.log(`[stripe-webhook] Registration ${registrationId} payment failed for PaymentIntent ${paymentIntent.id}`);
+}
