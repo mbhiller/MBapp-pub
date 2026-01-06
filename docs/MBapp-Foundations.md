@@ -6,13 +6,13 @@
 - Capacity release uses an atomic decrement that never allows negative `reservedCount` and is idempotent-friendly (no-op when already zero).
 - Cleanup endpoint: `POST /registrations:cleanup-expired-holds` performs bounded cleanup of expired holds. Query parameter `?limit=` bounds work (default 50, max 200). Tenant-scoped; requires `registration:write`. Returns `{ expiredCount }`.
 
-### Notifications Seam (Sprint AW: Postmark, Sprint AV: Simulate Foundation)
+### Notifications Seam (Sprint AW: Postmark, Sprint AX: Twilio SMS, Sprint AV: Simulate Foundation)
 
 **Message Object Contract:**
 - Type: `message` with `channel: "push" | "sms" | "email"`
 - Fields: `type`, `channel`, `to` (recipient), `subject`, `body`, `status` (queued|sending|sent|failed|cancelled)
-- Provider tracking: `provider` (e.g., "postmark"), `providerMessageId`, `errorMessage`, `lastAttemptAt`
-- Idempotency: Parent object stores `confirmationMessageId` (e.g., registration.confirmationMessageId); skips duplicate enqueue if already stored.
+- Provider tracking: `provider` (e.g., "postmark", "twilio"), `providerMessageId`, `errorMessage`, `lastAttemptAt`
+- Idempotency: Parent object stores `confirmationMessageId` and `confirmationSmsMessageId`; skips duplicate enqueue if already stored.
 
 **Postmark Integration (Sprint AW):**
 - **Provider:** Postmark (https://postmarkapp.com/)
@@ -29,15 +29,29 @@
   - Messages will validate and return success, but won't be delivered to recipients
   - Use this for local/dev testing of the provider contract before using production token
 
+**Twilio Integration (Sprint AX):**
+- **Provider:** Twilio (https://www.twilio.com/)
+- **Endpoint:** `POST https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json`
+- **Auth:** HTTP Basic with `TWILIO_ACCOUNT_SID:TWILIO_AUTH_TOKEN`
+- **Body:** Form-encoded (From, To, Body)
+- **Env vars:** `TWILIO_ACCOUNT_SID` (required), `TWILIO_AUTH_TOKEN` (required), `TWILIO_FROM_NUMBER` (required, e.g., "+15551234567")
+- **Send flow:** `enqueueSMS()` creates message with `status=queued`, then:
+  - If simulate mode ON: immediately marks `status=sent` with simulated `providerMessageId` (deterministic CI)
+  - If simulate mode OFF: sends via Twilio, updates message with `status=sent/failed` + SID on success
+- **Error handling:** Failed sends set `status=failed` with `errorMessage` and `lastAttemptAt`
+- **CI:** Smokes use simulate header; no real SMS sent in CI
+- **Trigger:** `enqueueSMS()` callable from webhooks (e.g., Stripe payment success when party.phone exists)
+
 **Stripe Webhook Integration:**
-- On `payment_intent.succeeded`, enqueues confirmation email when party email exists
-- Persists `confirmationMessageId` on registration for idempotency
-- Subsequent webhook replays detect stored ID and skip duplicate send
+- On `payment_intent.succeeded`:
+  - Enqueues confirmation email when party.email exists; persists `confirmationMessageId`
+  - Enqueues confirmation SMS when party.phone exists; persists `confirmationSmsMessageId`
+  - Subsequent webhook replays detect stored IDs and skip duplicate sends
 
 **Feature Flags:**
 - `FEATURE_NOTIFY_SIMULATE`: Default `true` in CI/dev; set to `false` or omit for real provider sends
 - Header override: `X-Feature-Notify-Simulate: true` (non-prod only) to simulate in staging/prod
-- Real providers (Postmark/Twilio/SMS) reuse the same seam, toggled by this flag
+- Real providers (Postmark/Twilio) reuse the same seam, toggled by this flag
 
 # MBapp Foundations Report
 

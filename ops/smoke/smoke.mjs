@@ -12375,6 +12375,97 @@ const tests = {
     };
   },
 
+  "smoke:registrations:confirmation-sms": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: smokeTag("conf_sms_evt"),
+      capacity: 1,
+      reservedCount: 0
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test:"registrations:confirmation-sms", result:"FAIL", reason:"event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event" });
+
+    const regCreate = await post(`/registrations:public`, { eventId, party: { phone: "+15555550123" } }, featureHeaders, { auth: "none" });
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test:"registrations:confirmation-sms", result:"FAIL", reason:"reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+
+    const checkout = await post(`/events/registration/${encodeURIComponent(regId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!checkout.ok || !checkout.body?.paymentIntentId) {
+      return { test:"registrations:confirmation-sms", result:"FAIL", reason:"checkout-failed", checkout };
+    }
+    const piId = checkout.body.paymentIntentId;
+
+    // Simulated Stripe webhook
+    const webhookBody = {
+      id: `evt_${SMOKE_RUN_ID}`,
+      type: "payment_intent.succeeded",
+      data: {
+        object: {
+          id: piId,
+          status: "succeeded",
+          metadata: { registrationId: regId, eventId }
+        }
+      }
+    };
+    const whRes = await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "Stripe-Signature": "sim_valid_signature",
+        ...featureHeaders,
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify(webhookBody)
+    });
+    const whBody = await whRes.json().catch(() => ({}));
+    if (!whRes.ok) {
+      return { test:"registrations:confirmation-sms", result:"FAIL", reason:"webhook-failed", whStatus: whRes.status, whBody };
+    }
+
+    // Read registration to get confirmationSmsMessageId
+    const reg = await get(`/objects/registration/${encodeURIComponent(regId)}`);
+    const smsId = reg?.body?.confirmationSmsMessageId;
+    if (!reg.ok || !smsId) {
+      return { test:"registrations:confirmation-sms", result:"FAIL", reason:"no-confirmationSmsMessageId", reg: reg.body };
+    }
+
+    // Fetch message
+    const msg = await get(`/objects/message/${encodeURIComponent(smsId)}`);
+    const pass = msg.ok 
+      && msg.body?.channel === "sms"
+      && msg.body?.status === "sent"
+      && (msg.body?.provider === "twilio" || String(msg.body?.providerMessageId).startsWith("sim_"));
+    return {
+      test: "registrations:confirmation-sms",
+      result: pass ? "PASS" : "FAIL",
+      msgChannel: msg.body?.channel,
+      msgStatus: msg.body?.status,
+      msgProvider: msg.body?.provider,
+      regConfirmed: reg.body?.status === "confirmed",
+      webhookStatus: whRes.status,
+      steps: { eventId, regId, piId, smsId }
+    };
+  },
+
   /* ===================== Reservations: CRUD Resources ===================== */
   "smoke:resources:crud": async ()=>{
     await ensureBearer();

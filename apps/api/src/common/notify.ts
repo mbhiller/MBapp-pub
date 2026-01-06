@@ -2,6 +2,7 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { createObject, updateObject, getObjectById } from "../objects/repo";
 import { sendPostmarkEmail } from "./postmark";
+import { sendTwilioSms } from "./twilio";
 
 export type EnqueueEmailArgs = {
   tenantId: string;
@@ -113,6 +114,114 @@ export async function enqueueEmail({ tenantId, to, subject, body, metadata, even
     });
 
     console.error(`[notify] Email send failed for ${msgId}: ${errorMessage}`);
+  }
+
+  return created;
+}
+
+export type EnqueueSmsArgs = {
+  tenantId: string;
+  to: string;
+  body: string;
+  metadata?: Record<string, any>;
+  event?: APIGatewayProxyEventV2;
+};
+
+/**
+ * Create an SMS message object with status=queued.
+ * If simulate mode enabled, immediately mark as sent and set sentAt.
+ * If simulate mode disabled, send via Twilio and update message accordingly.
+ */
+export async function enqueueSMS({ tenantId, to, body, metadata, event }: EnqueueSmsArgs) {
+  // Validate required fields
+  if (!to || !body) {
+    throw new Error("Missing required fields: to and body are required");
+  }
+
+  const now = new Date().toISOString();
+  const msgBody: any = {
+    type: "message",
+    channel: "sms",
+    to,
+    body,
+    status: "queued",
+    queuedAt: now,
+    ...(metadata && { metadata }),
+  };
+
+  const created = await createObject({ tenantId, type: "message", body: msgBody });
+  const msgId = (created as any).id as string;
+
+  // In simulate mode, mark as sent immediately
+  if (simulateNotifyEnabled(event)) {
+    await updateObject({
+      tenantId,
+      type: "message",
+      id: msgId,
+      body: {
+        status: "sent",
+        sentAt: new Date().toISOString(),
+        provider: "twilio",
+        providerMessageId: `sim_sms_${Math.random().toString(36).substring(2, 11)}`,
+      },
+    });
+    return created;
+  }
+
+  // Real send mode: send via Twilio
+  // Defensive check: don't re-send if already sent
+  const current = await getObjectById({ tenantId, type: "message", id: msgId });
+  if ((current as any)?.status === "sent") {
+    console.log(`[notify] Message ${msgId} already sent, skipping duplicate send`);
+    return created;
+  }
+
+  // Mark as sending
+  await updateObject({
+    tenantId,
+    type: "message",
+    id: msgId,
+    body: { status: "sending", lastAttemptAt: new Date().toISOString() },
+  });
+
+  try {
+    // Send via Twilio
+    const result = await sendTwilioSms({
+      to,
+      body,
+      event: event as any,
+    });
+
+    // Success: mark as sent with provider details
+    await updateObject({
+      tenantId,
+      type: "message",
+      id: msgId,
+      body: {
+        status: "sent",
+        sentAt: new Date().toISOString(),
+        provider: "twilio",
+        providerMessageId: result.sid,
+      },
+    });
+
+    console.log(`[notify] SMS sent via Twilio: ${msgId} → ${result.sid}`);
+  } catch (err: any) {
+    // Failure: mark as failed with error details
+    const errorMessage = err.message || String(err);
+    await updateObject({
+      tenantId,
+      type: "message",
+      id: msgId,
+      body: {
+        status: "failed",
+        provider: "twilio",
+        errorMessage,
+        lastAttemptAt: new Date().toISOString(),
+      },
+    });
+
+    console.error(`[notify] SMS send failed for ${msgId}: ${errorMessage}`);
   }
 
   return created;

@@ -90,6 +90,11 @@ function Set-MBEnv {
   $env:POSTMARK_FROM_EMAIL = "noreply@<your-domain>"  # e.g., noreply@mbapp.dev
   $env:POSTMARK_MESSAGE_STREAM = "outbound"
 
+  # Twilio SMS provider (set for real sends; leave unset or use FEATURE_NOTIFY_SIMULATE=1 for CI)
+  $env:TWILIO_ACCOUNT_SID = "<set-me>"  # Get from https://console.twilio.com
+  $env:TWILIO_AUTH_TOKEN = "<set-me>"   # Get from https://console.twilio.com
+  $env:TWILIO_FROM_NUMBER = "+15551234567"  # Your Twilio phone number
+
   # Feature flags: Keep FEATURE_NOTIFY_SIMULATE=1 for CI/local unless testing real sends
   $env:FEATURE_NOTIFY_SIMULATE = "1"
 }
