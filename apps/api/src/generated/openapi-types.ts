@@ -1889,6 +1889,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/messages/{id}:retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry a failed message delivery
+         * @description Retries sending a message that previously failed.
+         *     Only messages with status=failed can be retried.
+         *     Increments retryCount and resets status to queued for re-delivery.
+         *
+         */
+        post: operations["retryMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/webhooks/stripe": {
         parameters: {
             query?: never;
@@ -2665,6 +2688,8 @@ export interface components {
             providerMessageId?: string | null;
             /** @description Last provider error message if status is failed */
             errorMessage?: string | null;
+            /** @description Number of retry attempts after failures */
+            retryCount?: number | null;
             notes?: string | null;
         };
         MoneyTotals: {
@@ -5491,6 +5516,45 @@ export interface operations {
                     };
                 };
             };
+        };
+    };
+    retryMessage: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-tenant-id": components["parameters"]["TenantHeader"];
+                /** @description Optional idempotency key for safe retries. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description Message ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Message queued for retry */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description Message not retryable (status not failed) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationError"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     stripeWebhook: {

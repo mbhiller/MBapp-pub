@@ -21,6 +21,7 @@ export const PERMISSIONS_BY_ENDPOINT = {
   "POST /inventory/{id}:putaway": "inventory:write",
   "POST /inventory/{id}/adjust": "inventory:write",
   "POST /inventory/onhand:batch": "inventory:read",
+  "POST /messages/{id}:retry": "message:write",
   "POST /objects/backorderRequest/{id}:convert": "objects:write",
   "POST /objects/backorderRequest/{id}:ignore": "objects:write",
   "POST /objects/party:batch": "party:read",
@@ -71,6 +72,7 @@ export type EndpointKey = keyof typeof PERMISSIONS_BY_ENDPOINT;
 export const PERM_INVENTORY_ADJUST = "inventory:adjust" as const;
 export const PERM_INVENTORY_READ = "inventory:read" as const;
 export const PERM_INVENTORY_WRITE = "inventory:write" as const;
+export const PERM_MESSAGE_WRITE = "message:write" as const;
 export const PERM_OBJECTS_WRITE = "objects:write" as const;
 export const PERM_PARTY_READ = "party:read" as const;
 export const PERM_PURCHASE_APPROVE = "purchase:approve" as const;
@@ -97,6 +99,7 @@ export const PERMISSION_KEYS = [
   "inventory:adjust",
   "inventory:read",
   "inventory:write",
+  "message:write",
   "objects:write",
   "party:read",
   "purchase:approve",

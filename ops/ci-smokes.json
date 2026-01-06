@@ -54,6 +54,7 @@
     { "name": "smoke:registrations:confirmation-sms", "tier": "core" },
     { "name": "smoke:registrations:public-status-confirmed", "tier": "core" },
     { "name": "smoke:registrations:public-status-hold-expired", "tier": "core" },
+    { "name": "smoke:messages:retry-failed", "tier": "core" },
     { "name": "smoke:inventory:onhand-permission-denied", "tier": "extended" },
     { "name": "smoke:views:validate-filters", "tier": "extended" },
     { "name": "smoke:workspaces:get-no-fallback", "tier": "core" },

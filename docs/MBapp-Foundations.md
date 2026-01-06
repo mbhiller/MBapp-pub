@@ -53,6 +53,16 @@
 - Header override: `X-Feature-Notify-Simulate: true` (non-prod only) to simulate in staging/prod
 - Real providers (Postmark/Twilio) reuse the same seam, toggled by this flag
 
+### Messages — retry (Sprint AZ)
+
+- **Endpoint:** `POST /messages/{id}:retry` (authed, `message:write`).
+- **Eligibility:** Only `status="failed"` messages are retryable; other statuses return 400 with `currentStatus` in details.
+- **Channels:** Supports `channel="email" | "sms"`; validates required fields (`to`, `subject+body` for email, `body` for sms`).
+- **Behavior:** Sets `status="sending"`, updates `lastAttemptAt`, clears `errorMessage`, and increments `retryCount` (defaults 0 → 1).
+  - **Simulate on:** (`FEATURE_NOTIFY_SIMULATE=1` or header `X-Feature-Notify-Simulate: true`) immediately marks `status="sent"`, sets `sentAt`, assigns provider (`postmark`|`twilio`) and simulated `providerMessageId`.
+  - **Real send:** Calls Postmark/Twilio; on success marks `sent` with provider ID; on failure marks `failed` with `errorMessage` and refreshed `lastAttemptAt`.
+- **Idempotency guard:** If another retry already transitioned the message out of `failed`, the handler returns a validation error instead of duplicating send.
+
 # MBapp Foundations Report
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Status/Working](MBapp-Status.md) · [Cadence](MBapp-Cadence.md) · [Verification](smoke-coverage.md)  

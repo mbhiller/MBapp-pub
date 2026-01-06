@@ -16,7 +16,7 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 **Before submitting a PR (PR parity — matches CI gating):**
 ```bash
 npm run typecheck --workspaces --if-present
-npm run smokes:run:core          # 41 core flows (~3-4 min)
+npm run smokes:run:core          # 43 core flows (~3-4 min)
 ```
 
 **Run one smoke:**
@@ -42,9 +42,9 @@ Smokes are organized by tier for targeted CI validation:
 
 | Tier | Flows | Duration | When | Command |
 |------|-------|----------|------|--------|
-| **core** | 42 | ~2–3 min | Every PR/push | `npm run smokes:run:core` |
+| **core** | 43 | ~2–3 min | Every PR/push | `npm run smokes:run:core` |
 | **extended** | 24 | ~2–3 min | Nightly (2 AM UTC) | `npm run smokes:run:extended` |
-| **all** | 66 | ~5–6 min | Nightly full | `npm run smokes:run:ci` |
+| **all** | 67 | ~5–6 min | Nightly full | `npm run smokes:run:ci` |
 
 **Core flows:** Foundation + critical domain workflows (auth, objects, line ID, sales/purchase orders, inventory, fulfillment, backorders, suggestions).
 
@@ -117,6 +117,13 @@ Smokes are organized by tier for targeted CI validation:
   - Creates public registration, runs checkout, forces `holdExpiresAt` to past via authenticated PUT, invokes cleanup, then calls `GET /registrations/{id}:public` and asserts: `status=cancelled`, `paymentStatus=failed`, `holdExpiresAt` in past.
   - Validates public endpoint exposes hold expiration state correctly.
   - Flags/Headers: `X-Feature-Registrations-Enabled: true`, `X-Feature-Stripe-Simulate: true`.
+
+## Recent Additions (Sprint AZ)
+
+- **Messages Retry (simulate):** `smoke:messages:retry-failed`
+  - Creates a failed email message directly via `/objects/message` (status=`failed`, retryCount=0), then calls `POST /messages/{id}:retry` with `X-Feature-Notify-Simulate: true`.
+  - Asserts the message transitions to `status=sent`, sets `sentAt` and `lastAttemptAt`, increments `retryCount`, and sets a provider value (postmark in simulate path).
+  - Flags/Headers: `X-Feature-Notify-Simulate: true` (CI-safe; no external provider calls).
 
 ---
 
