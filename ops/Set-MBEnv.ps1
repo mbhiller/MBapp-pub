@@ -84,6 +84,14 @@ function Set-MBEnv {
   # Optional secret + dev email
   if ($JwtSecret)  { $env:MBAPP_JWT_SECRET = $JwtSecret }
   if ($DevEmail)   { $env:MBAPP_DEV_EMAIL  = $DevEmail }
+
+  # Postmark email provider (set for real sends; leave unset or use FEATURE_NOTIFY_SIMULATE=1 for CI)
+  $env:POSTMARK_API_TOKEN = "<set-me>"  # Get from https://account.postmarkapp.com/servers
+  $env:POSTMARK_FROM_EMAIL = "noreply@<your-domain>"  # e.g., noreply@mbapp.dev
+  $env:POSTMARK_MESSAGE_STREAM = "outbound"
+
+  # Feature flags: Keep FEATURE_NOTIFY_SIMULATE=1 for CI/local unless testing real sends
+  $env:FEATURE_NOTIFY_SIMULATE = "1"
 }
 
 function Show-MBEnv {

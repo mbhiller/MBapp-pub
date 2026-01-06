@@ -6,12 +6,38 @@
 - Capacity release uses an atomic decrement that never allows negative `reservedCount` and is idempotent-friendly (no-op when already zero).
 - Cleanup endpoint: `POST /registrations:cleanup-expired-holds` performs bounded cleanup of expired holds. Query parameter `?limit=` bounds work (default 50, max 200). Tenant-scoped; requires `registration:write`. Returns `{ expiredCount }`.
 
-### Notifications Seam (Sprint AV)
+### Notifications Seam (Sprint AW: Postmark, Sprint AV: Simulate Foundation)
 
-- Message objects: Email notifications enqueue as `type="message"` records with fields including `{ to, subject, template?, status }` where `status` is one of `queued|sent|failed`.
-- Simulate mode: When `FEATURE_NOTIFY_SIMULATE` is enabled or header `X-Feature-Notify-Simulate: true` is present, enqueued messages auto-transition to `status="sent"` with `sentAt` timestamp for deterministic CI behavior (no external provider).
-- Stripe webhook integration: On `payment_intent.succeeded`, after confirming a registration, the API enqueues a confirmation email when a party email exists and persists `confirmationMessageId` on the registration for idempotency. Subsequent webhook replays detect the stored `confirmationMessageId` and avoid duplicate sends.
-- Feature flags: Keep simulate defaults OFF; enable per-request via headers in smokes. Real providers (Postmark/Twilio) will reuse the same seam.
+**Message Object Contract:**
+- Type: `message` with `channel: "push" | "sms" | "email"`
+- Fields: `type`, `channel`, `to` (recipient), `subject`, `body`, `status` (queued|sending|sent|failed|cancelled)
+- Provider tracking: `provider` (e.g., "postmark"), `providerMessageId`, `errorMessage`, `lastAttemptAt`
+- Idempotency: Parent object stores `confirmationMessageId` (e.g., registration.confirmationMessageId); skips duplicate enqueue if already stored.
+
+**Postmark Integration (Sprint AW):**
+- **Provider:** Postmark (https://postmarkapp.com/)
+- **Endpoint:** `POST https://api.postmarkapp.com/email`
+- **Headers:** `X-Postmark-Server-Token: {POSTMARK_API_TOKEN}`, `Content-Type: application/json`
+- **Env vars:** `POSTMARK_API_TOKEN` (required), `POSTMARK_FROM_EMAIL` (default: noreply@mbapp.dev), `POSTMARK_MESSAGE_STREAM` (default: "outbound")
+- **Send flow:** `enqueueEmail()` creates message with `status=queued`, then:
+  - If simulate mode ON (`FEATURE_NOTIFY_SIMULATE=1` or header `X-Feature-Notify-Simulate: true`): immediately marks `status=sent` (deterministic CI, no external calls)
+  - If simulate mode OFF: sends via Postmark, updates message with `status=sent/failed` + provider details
+- **Error handling:** Failed sends set `status=failed` with `errorMessage` and `lastAttemptAt` for observability/retry
+- **CI:** Smokes use simulate header to skip real sends; keeps CI deterministic and fast
+- **Manual testing:** Use Postmark's test server token (`POSTMARK_API_TEST`) to validate the integration without delivering real mail:
+  - Set `POSTMARK_API_TOKEN="POSTMARK_API_TEST"` and `FEATURE_NOTIFY_SIMULATE=0`
+  - Messages will validate and return success, but won't be delivered to recipients
+  - Use this for local/dev testing of the provider contract before using production token
+
+**Stripe Webhook Integration:**
+- On `payment_intent.succeeded`, enqueues confirmation email when party email exists
+- Persists `confirmationMessageId` on registration for idempotency
+- Subsequent webhook replays detect stored ID and skip duplicate send
+
+**Feature Flags:**
+- `FEATURE_NOTIFY_SIMULATE`: Default `true` in CI/dev; set to `false` or omit for real provider sends
+- Header override: `X-Feature-Notify-Simulate: true` (non-prod only) to simulate in staging/prod
+- Real providers (Postmark/Twilio/SMS) reuse the same seam, toggled by this flag
 
 # MBapp Foundations Report
 

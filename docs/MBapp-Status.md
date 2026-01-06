@@ -6,6 +6,41 @@
 
 ---
 
+### Sprint AW — Postmark Email Provider Integration — ✅ Complete (2026-01-06)
+
+**Summary:** Integrated real transactional email via Postmark behind the simulate-mode seam. CI remains deterministic; production/staging can send real emails.
+
+**Deliverables:**
+- **Spec (E1):** Updated Message schema to include provider fields: `to`, `provider`, `providerMessageId`, `errorMessage`, `lastAttemptAt`. All new fields optional/nullable, backwards-compatible.
+  - Ran: `npm run spec:lint`, `spec:bundle`, `spec:types:api`, `spec:types:mobile` ✅
+- **API (E2):** Created [apps/api/src/common/postmark.ts](../apps/api/src/common/postmark.ts) Postmark email adapter:
+  - `sendPostmarkEmail({ to, subject, textBody, htmlBody?, tag?, metadata?, messageStream? })`
+  - Calls Postmark `/email` endpoint with X-Postmark-Server-Token header
+  - Returns `{ messageId, submittedAt, to, errorCode, message }`
+  - Error handling: throws on missing env vars or non-2xx response
+- **API (E3):** Extended [apps/api/src/common/notify.ts](../apps/api/src/common/notify.ts) `enqueueEmail()`:
+  - Simulate mode ON: immediate `status=sent` (existing behavior, unchanged)
+  - Simulate mode OFF: sends via Postmark, updates message with `status=sent/failed` + provider details
+  - Defensive: skips re-send if message already sent
+  - Error resilience: failed sends recorded with `errorMessage` for observability
+- **Ops (E4):** Added env var placeholders in [ops/Set-MBEnv.ps1](../ops/Set-MBEnv.ps1):
+  - `POSTMARK_API_TOKEN`, `POSTMARK_FROM_EMAIL`, `POSTMARK_MESSAGE_STREAM`
+  - Comment: keep `FEATURE_NOTIFY_SIMULATE=1` for CI/local unless testing real sends
+- **Docs (E4):** Updated [MBapp-Foundations.md](../docs/MBapp-Foundations.md) Notifications section:
+  - Message contract, Postmark endpoint/headers, env vars
+  - Send flow (simulate vs real), error handling, CI behavior, feature flag semantics
+
+**Verification:**
+- ✅ Typecheck: apps/api, apps/mobile, apps/web all clean
+- ✅ Smoke: `smoke:registrations:confirmation-message` passes (simulate mode)
+- ✅ Spec: lint, bundle, type generation all clean
+- ✅ No breaking changes: all Message fields optional; existing code unaffected
+
+**Next:**
+- SMS/Twilio integration (reuse same seam with `channel="sms"`)
+- Message templates (deferred; use plain text for now)
+- Retry strategy for transient failures (defer to background worker or manual retry UI)
+
 ### Sprint AV — Hold TTL + Cleanup + Notifications (simulate) — ✅ Complete (2026-01-06)
 
 **Summary:** Hardened public booking with hold TTL, bounded cleanup, and simulated notifications. Improved web UX to handle expired holds clearly and to surface confirmation without backend polling.
