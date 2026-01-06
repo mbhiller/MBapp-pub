@@ -12658,6 +12658,57 @@ const tests = {
     };
   },
 
+  "smoke:messages:retry-failed": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    const createBody = {
+      type: "message",
+      channel: "email",
+      to: `smoke+${SMOKE_RUN_ID}@example.com`,
+      subject: `Test ${SMOKE_RUN_ID}`,
+      body: "Hello from retry smoke",
+      status: "failed",
+      errorMessage: "simulated failure",
+      retryCount: 0
+    };
+
+    const create = await post("/objects/message", createBody, featureHeaders);
+    if (!create.ok || !create.body?.id) {
+      return { test: "messages:retry-failed", result: "FAIL", reason: "create-failed", create };
+    }
+    const msgId = create.body.id;
+    recordCreated({ type: "message", id: msgId, route: "/objects/message", meta: { channel: "email" } });
+
+    const retry = await post(`/messages/${encodeURIComponent(msgId)}:retry`, {}, featureHeaders);
+    if (!retry.ok) {
+      return { test: "messages:retry-failed", result: "FAIL", reason: "retry-failed", retry };
+    }
+
+    const msg = retry.body || {};
+    const pass = msg.status === "sent"
+      && !!msg.sentAt
+      && !!msg.lastAttemptAt
+      && (msg.retryCount ?? 0) >= 1
+      && !!msg.provider;
+
+    return {
+      test: "messages:retry-failed",
+      result: pass ? "PASS" : "FAIL",
+      msg: {
+        status: msg.status,
+        sentAt: msg.sentAt,
+        lastAttemptAt: msg.lastAttemptAt,
+        retryCount: msg.retryCount,
+        provider: msg.provider
+      },
+      steps: { msgId }
+    };
+  },
+
   /* ===================== Reservations: CRUD Resources ===================== */
   "smoke:resources:crud": async ()=>{
     await ensureBearer();

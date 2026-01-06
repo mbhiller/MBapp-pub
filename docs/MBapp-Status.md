@@ -6,6 +6,21 @@
 
 ---
 
+### Sprint AZ — Message Retry Endpoint — ✅ Complete (2026-01-06)
+
+**Summary:** Added a manual retry endpoint for failed messages with simulate/real parity and smoke coverage.
+
+**Deliverables (E1-E4):**
+- **Spec (E1):** Added `retryCount` to Message schema and `POST /messages/{id}:retry` (authed, `message:write`) in [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml); ran `spec:lint`, `spec:bundle`, `spec:types:api`, `spec:types:mobile` ✅
+- **API (E2):** Implemented [apps/api/src/messages/retry.ts](../apps/api/src/messages/retry.ts) and routed in [apps/api/src/index.ts](../apps/api/src/index.ts): validates status=failed, channel email/sms, required fields; updates `lastAttemptAt`, increments `retryCount`, clears `errorMessage`; simulate → mark sent; real → Postmark/Twilio with success/fail handling; returns validation error if already non-failed.
+- **Smokes (E3):** Added `smoke:messages:retry-failed` (core) to [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) and [ops/ci-smokes.json](../ops/ci-smokes.json); uses `X-Feature-Notify-Simulate: true`, asserts sentAt/lastAttemptAt/retryCount/provider set.
+- **Docs (E4):** Updated [MBapp-Foundations.md](MBapp-Foundations.md#messages-—-retry-sprint-az) and [smoke-coverage.md](smoke-coverage.md#recent-additions-sprint-az) with retry rules and coverage.
+
+**Verification:**
+- ✅ Typecheck: `npm run typecheck -w apps/api`
+- ✅ Spec: lint/bundle/types regenerated
+- ✅ Smokes: new flow wired to core tier (simulate flag)
+
 ### Sprint AY — Public Registration Status Endpoint — ✅ Complete (2026-01-06)
 
 **Summary:** Added public `GET /registrations/{id}:public` endpoint to enable real-time status polling in public booking UX. Returns server truth (confirmation status, payment status, hold countdown, email/SMS delivery indicators) without exposing PII.

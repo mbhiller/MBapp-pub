@@ -37,6 +37,8 @@ import * as ObjUpdate from "./objects/update";
 import * as ObjDelete from "./objects/delete";
 import * as ObjSearch from "./objects/search";
 import * as PartyBatch from "./objects/party-batch";
+// Messages
+import * as MessageRetry from "./messages/retry";
 // Dev auth
 import * as DevLogin from "./auth/dev-login";
 
@@ -347,6 +349,16 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
     if (method === "POST" && path === "/registrations:cleanup-expired-holds") {
       requirePerm(auth, "registration:write");
       return RegCleanupExpiredHolds.handle(event);
+    }
+
+    // Messages: retry failed message
+    if (method === "POST") {
+      const m = path.match(/^\/messages\/([^/]+):retry$/i);
+      if (m) {
+        const [, id] = m;
+        requirePerm(auth, "message:write");
+        return MessageRetry.handle(withId(event, id));
+      }
     }
 
     /* ========= Actions ========= */

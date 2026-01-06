@@ -2578,6 +2578,47 @@ paths:
                     properties:
                       currentStatus:
                         type: string
+  /messages/{id}:retry:
+    post:
+      tags:
+        - Messages
+      operationId: retryMessage
+      summary: Retry a failed message delivery
+      description: |
+        Retries sending a message that previously failed.
+        Only messages with status=failed can be retried.
+        Increments retryCount and resets status to queued for re-delivery.
+      security:
+        - bearerAuth: []
+      x-mbapp-permission: message:write
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: Message ID
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Message queued for retry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+        '400':
+          description: Message not retryable (status not failed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /webhooks/stripe:
     post:
       tags:
@@ -3856,6 +3897,10 @@ components:
               type: string
               nullable: true
               description: Last provider error message if status is failed
+            retryCount:
+              type: integer
+              nullable: true
+              description: Number of retry attempts after failures
             notes:
               type: string
               nullable: true
