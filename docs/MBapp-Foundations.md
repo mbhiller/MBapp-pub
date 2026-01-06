@@ -250,6 +250,55 @@ const TENANT = process.env.MBAPP_TENANT_ID ?? "DemoTenant";
 - **Security:** Endpoint returns 401 if token missing/invalid, 404 if registration not found. Feature-guarded (`X-Feature-Registrations-Enabled`).
 - **Message privacy:** Response includes message `status`, `sentAt`, `provider`, `errorMessage` only — no `to`, `subject`, `textBody`, or `htmlBody`.
 
+### Public Booking UX (Sprint BC)
+
+**Polling behavior (exponential backoff + jitter):**
+- **Interval schedule:** Start 1s, double each attempt (1s → 2s → 4s → 8s → 10s cap), add 0–500ms jitter per attempt to avoid thundering herd.
+- **Max attempts:** 30 (approx. 2 minutes total wall time with backoff).
+- **Stop conditions (client-driven):**
+  - `status=confirmed` → success; show "Booking confirmed!"
+  - `status=cancelled` OR `paymentStatus=failed` → terminal failure; show contact support message
+  - `holdExpiresAt` in the past AND not confirmed → hold expired; show "Hold expired. Please try again." + restart button
+  - Exhausted 30 retries → show "Still processing… please refresh later" or "Unable to reach the server…" based on last error
+- **Error handling:** Transient fetch errors don't stop polling; after 5+ consecutive errors, show "Having trouble checking status… retrying" (non-blocking, reassuring).
+- **Message phases (UX clarity):**
+  - "Creating reservation" (POST /registrations:public)
+  - "Starting checkout" (POST /events/registration/{id}:checkout)
+  - "Payment submitted. Waiting for confirmation…" (Stripe confirmCardPayment)
+  - "Payment submitted. Checking status…" (first poll attempt)
+  - "Booking confirmed!" (success)
+  - "Hold expired. Please try again." (hold expiration detected)
+  - "Booking could not be completed. Please contact support." (payment failed)
+
+**Delivery state display:**
+- Email/SMS delivery shown as panels in confirmation section: status badge, timestamp, provider name, truncated error (first 80 chars) if failed.
+- No scary language; non-blocking; allows user to continue browsing while waiting.
+
+### Public Resend Confirmation (Sprint BC)
+
+- **Endpoint:** `POST /registrations/{id}:public-resend` — public endpoint, requires `X-MBapp-Public-Token` header.
+- **Query params:** `channel` (email|sms|both, default both) — scope which messages to resend.
+- **Scope safety:** Endpoint only retries registration-linked `confirmationMessageId` and `confirmationSmsMessageId`. Caller cannot supply arbitrary message IDs.
+- **Retry eligibility:** Only messages with `status=failed` are retried. Queued/sending/sent/cancelled messages are skipped (no-op).
+- **Rate limiting (server-enforced):**
+  - Max 3 resends per registration (any channel)
+  - Min 2 minutes between resend attempts
+  - Returns 200 with `rateLimited=true` when limits hit (no error; graceful degradation)
+- **Response:**
+  ```json
+  {
+    "registrationId": "reg_...",
+    "email": { "status": "sent", "sentAt": "...", "provider": "postmark" },
+    "sms": null,
+    "attempted": { "email": true, "sms": false },
+    "rateLimited": false
+  }
+  ```
+- **Simulate behavior:** Respects `X-Feature-Notify-Simulate` header; reuses shared `retryMessageRecord` logic so behavior identical to operator retry endpoints.
+- **Web UX:** "Resend Confirmation" button appears when `status=confirmed` AND (emailStatus=failed OR smsStatus=failed); disabled while loading; shows rate-limit message if hit; refreshes status after successful resend.
+
+### Public Registration Status (Sprint AY)
+
 **Mobile:**
 - Fetches `/auth/policy` on app startup via `useAuthContext()` in [apps/mobile/src/features/_shared/AuthContext.tsx](../apps/mobile/src/features/_shared/AuthContext.tsx).
 - Hides module tabs/screens based on `{type}:read` permissions (e.g., PartiesTab visible only if user has `party:read`).

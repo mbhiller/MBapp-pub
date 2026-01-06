@@ -12850,6 +12850,123 @@ const tests = {
     };
   },
 
+  "smoke:registrations:public-resend": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // 1) Create a public registration
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: smokeTag("public_resend_evt"),
+      capacity: 1,
+      reservedCount: 0
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "registrations:public-resend", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event" });
+
+    const regCreate = await post(`/registrations:public`, { eventId, party: { email: `resend+${SMOKE_RUN_ID}@example.com` } }, featureHeaders, { auth: "none" });
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test: "registrations:public-resend", result: "FAIL", reason: "reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+    recordCreated({ type: "registration", id: regId, route: "/registrations:public", meta: { eventId } });
+
+    // 2) Create a failed confirmation email message (as operator)
+    const failedMsg = await post("/objects/message", {
+      type: "message",
+      channel: "email",
+      to: `resend+${SMOKE_RUN_ID}@example.com`,
+      subject: `Confirmation ${SMOKE_RUN_ID}`,
+      body: "Booking confirmed",
+      status: "failed",
+      errorMessage: "simulated delivery failure",
+      retryCount: 0
+    }, featureHeaders);
+    if (!failedMsg.ok || !failedMsg.body?.id) {
+      return { test: "registrations:public-resend", result: "FAIL", reason: "msg-create-failed", failedMsg };
+    }
+    const msgId = failedMsg.body.id;
+    recordCreated({ type: "message", id: msgId, route: "/objects/message", meta: { channel: "email", status: "failed" } });
+
+    // 3) Link the failed message to the registration as confirmationMessageId (as operator)
+    const regRead = await get(`/registrations/${encodeURIComponent(regId)}`, undefined, { headers: featureHeaders });
+    if (!regRead.ok || !regRead.body?.id) {
+      return { test: "registrations:public-resend", result: "FAIL", reason: "reg-read-failed", regRead };
+    }
+    const regBody = { ...regRead.body, confirmationMessageId: msgId };
+    if (regBody.party) delete regBody.party;
+    if (!regBody.partyId) regBody.partyId = `party_${SMOKE_RUN_ID}`;
+    const regUpdate = await put(`/registrations/${encodeURIComponent(regId)}`, regBody, featureHeaders);
+    if (!regUpdate.ok) {
+      return { test: "registrations:public-resend", result: "FAIL", reason: "reg-update-failed", regUpdate };
+    }
+
+    // 4) Call public resend endpoint with public token
+    const resendRes = await fetch(`${API}/registrations/${encodeURIComponent(regId)}:public-resend`, {
+      method: "POST",
+      headers: {
+        "X-MBapp-Public-Token": publicToken,
+        "x-tenant-id": TENANT,
+        "X-Feature-Notify-Simulate": "true",
+        "X-Feature-Registrations-Enabled": "true"
+      }
+    });
+    const resendBody = await resendRes.json().catch(() => ({}));
+    if (!resendRes.ok) {
+      return { test: "registrations:public-resend", result: "FAIL", reason: "resend-failed", resendRes: { status: resendRes.status, body: resendBody } };
+    }
+
+    // 5) Fetch the message and assert it transitioned to sent
+    const msgCheck = await get(`/objects/message/${encodeURIComponent(msgId)}`, undefined, { headers: featureHeaders });
+    if (!msgCheck.ok) {
+      return { test: "registrations:public-resend", result: "FAIL", reason: "msg-fetch-failed", msgCheck };
+    }
+    const msgFinal = msgCheck.body;
+
+    const pass = msgFinal?.status === "sent"
+      && msgFinal?.sentAt
+      && (msgFinal?.retryCount ?? 0) >= 1;
+
+    // 6) Optional: verify public GET reflects updated status
+    const pubStatus = await fetch(`${API}/registrations/${encodeURIComponent(regId)}:public`, {
+      headers: {
+        "X-MBapp-Public-Token": publicToken,
+        "x-tenant-id": TENANT,
+        "X-Feature-Registrations-Enabled": "true"
+      }
+    });
+    const pubBody = await pubStatus.json().catch(() => ({}));
+    const pubEmailSent = pubBody?.emailStatus?.status === "sent";
+
+    return {
+      test: "registrations:public-resend",
+      result: pass && pubEmailSent ? "PASS" : "FAIL",
+      message: {
+        finalStatus: msgFinal?.status,
+        sentAt: msgFinal?.sentAt,
+        retryCount: msgFinal?.retryCount,
+        provider: msgFinal?.provider
+      },
+      publicStatus: {
+        emailStatus: pubBody?.emailStatus?.status
+      },
+      resendResponse: {
+        rateLimited: resendBody?.rateLimited,
+        attempted: resendBody?.attempted
+      },
+      steps: { eventId, regId, msgId }
+    };
+  },
+
   /* ===================== Reservations: CRUD Resources ===================== */
   "smoke:resources:crud": async ()=>{
     await ensureBearer();

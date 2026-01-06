@@ -144,6 +144,15 @@ Smokes are organized by tier for targeted CI validation:
   - **Non-brittle assertions:** Validates template metadata exists, not rendered body text (allows template copy updates without breaking test).
   - Flags/Headers: `X-Feature-Registrations-Enabled: true`, `X-Feature-Stripe-Simulate: true`, `X-Feature-Notify-Simulate: true`.
 
+## Recent Additions (Sprint BC)
+
+- **Registrations Public Resend Confirmation:** `smoke:registrations:public-resend`
+  - Creates public registration, simulates operator-created failed email confirmation message, links message to registration as `confirmationMessageId`, then calls `POST /registrations/{id}:public-resend` with `X-MBapp-Public-Token` and `X-Feature-Notify-Simulate: true`.
+  - Asserts the failed message transitions to `status=sent`, `sentAt` is set, `retryCount` is incremented, and public GET shows `emailStatus.status=sent`.
+  - **Non-brittle assertions:** Validates status/timestamp/retry counts, not message body or provider specifics (allows provider changes without breaking test).
+  - **Rate limit enforcement:** Validates server rate-limit behavior (3 max resends per registration, 2 min minimum interval between attempts).
+  - Flags/Headers: `X-MBapp-Public-Token` (public token auth), `X-Feature-Notify-Simulate: true` (CI-safe; no external provider calls).
+
 ---
 
 ## CI Artifacts (Smoke Manifests)

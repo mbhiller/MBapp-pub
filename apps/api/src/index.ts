@@ -117,6 +117,7 @@ import * as EventsPublicList from "./events/public-list";
 import * as RegPublicCreate from "./registrations/public-create";
 import * as RegCheckout from "./registrations/checkout";
 import * as RegPublicGet from "./registrations/public-get";
+import * as RegPublicResend from "./registrations/public-resend";
 import * as RegCleanupExpiredHolds from "./registrations/cleanup-expired-holds";
 
 /* Helpers */
@@ -288,6 +289,14 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
       if (method === "GET" && m) {
         const [, id] = m;
         return RegPublicGet.handle(withId(event, id));
+      }
+    }
+    // Public registration resend (Sprint BC)
+    {
+      const m = path.match(/^\/registrations\/([^/]+):public-resend$/i);
+      if (method === "POST" && m) {
+        const [, id] = m;
+        return RegPublicResend.handle(withId(event, id));
       }
     }
 

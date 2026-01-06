@@ -213,9 +213,11 @@ export interface paths {
         };
         /** Get a Registration */
         get: operations["getRegistration"];
-        put?: never;
+        /** Update a Registration */
+        put: operations["updateRegistration"];
         post?: never;
-        delete?: never;
+        /** Delete a Registration */
+        delete: operations["deleteRegistration"];
         options?: never;
         head?: never;
         patch?: never;
@@ -235,11 +237,32 @@ export interface paths {
          *
          */
         get: operations["getPublicRegistrationStatus"];
-        /** Update a Registration */
-        put: operations["updateRegistration"];
+        put?: never;
         post?: never;
-        /** Delete a Registration */
-        delete: operations["deleteRegistration"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/registrations/{id}:public-resend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resend confirmation email/SMS using public token - Sprint BC
+         * @description Public endpoint to request a resend of confirmation messages for a registration.
+         *     Requires the same public token issued at creation. Server enforces bounds/rate limits and
+         *     only exposes safe delivery fields (status, sentAt, provider, errorMessage).
+         *
+         */
+        post: operations["resendPublicRegistrationMessages"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -3090,6 +3113,34 @@ export interface components {
                 provider?: string | null;
                 errorMessage?: string | null;
             } | null;
+        };
+        /** @description Result of public resend request (confirmation email/SMS) */
+        PublicRegistrationResendResponse: {
+            registrationId: string;
+            email?: {
+                /** @enum {string} */
+                status?: "queued" | "sending" | "sent" | "failed" | "cancelled";
+                /** Format: date-time */
+                sentAt?: string | null;
+                provider?: string | null;
+                errorMessage?: string | null;
+            } | null;
+            sms?: {
+                /** @enum {string} */
+                status?: "queued" | "sending" | "sent" | "failed" | "cancelled";
+                /** Format: date-time */
+                sentAt?: string | null;
+                provider?: string | null;
+                errorMessage?: string | null;
+            } | null;
+            /** @description True when server skipped enqueue due to rate limit/bounds */
+            rateLimited?: boolean;
+            attempted?: {
+                /** @description Whether an email resend was attempted */
+                email?: boolean;
+                /** @description Whether an SMS resend was attempted */
+                sms?: boolean;
+            } | null;
             smsStatus?: {
                 /** @enum {string} */
                 status?: "queued" | "sending" | "sent" | "failed" | "cancelled";
@@ -4869,49 +4920,6 @@ export interface operations {
             };
         };
     };
-    getPublicRegistrationStatus: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description Public token returned by POST /registrations:public */
-                "X-MBapp-Public-Token": string;
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Public-safe registration status */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PublicRegistrationStatusResponse"];
-                };
-            };
-            /** @description Invalid or missing public token */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
     updateRegistration: {
         parameters: {
             query?: never;
@@ -5009,6 +5017,104 @@ export interface operations {
             };
             /** @description Forbidden */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getPublicRegistrationStatus: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Public token returned by POST /registrations:public */
+                "X-MBapp-Public-Token": string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Public-safe registration status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicRegistrationStatusResponse"];
+                };
+            };
+            /** @description Invalid or missing public token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    resendPublicRegistrationMessages: {
+        parameters: {
+            query?: {
+                /** @description Channel to resend (defaults to both) */
+                channel?: "email" | "sms" | "both";
+            };
+            header: {
+                /** @description Public token returned by POST /registrations:public */
+                "X-MBapp-Public-Token": string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resend attempt result (safe fields only) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicRegistrationResendResponse"];
+                };
+            };
+            /** @description Validation error (invalid channel) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationError"];
+                };
+            };
+            /** @description Invalid or missing public token */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };
