@@ -10,11 +10,14 @@ export type AuthContextValue = {
   policyLoading: boolean;
   policyError: string | null;
   setToken: (token: string | null) => void;
+  setTenantOverride: (tenantId: string | null) => void;
+  tenantOverride: string | null;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 const STORAGE_KEY = "mbapp_bearer";
 const TENANT_STORAGE_KEY = "mbapp_tenant";
+const TENANT_OVERRIDE_KEY = "mbapp.tenantOverride";
 
 const apiBase = import.meta.env.VITE_API_BASE;
 const fallbackTenantId = import.meta.env.VITE_TENANT;
@@ -52,6 +55,14 @@ function readInitialToken(): string | null {
 }
 
 function deriveTenantId(token: string | null): string {
+  // 0. DEV only: check for tenantOverride (useful for debugging with SmokeTenant)
+  if (import.meta.env.DEV) {
+    try {
+      const override = typeof localStorage !== "undefined" ? localStorage.getItem(TENANT_OVERRIDE_KEY) : null;
+      if (override) return override;
+    } catch {}
+  }
+
   // 1. Prefer tenant from token
   const tokenTenant = decodeJwtTenant(token);
   if (tokenTenant) return tokenTenant;
@@ -69,6 +80,14 @@ function deriveTenantId(token: string | null): string {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const initialToken = readInitialToken();
   const [token, setTokenState] = useState<string | null>(initialToken);
+  const [tenantOverride, setTenantOverrideState] = useState<string | null>(() => {
+    if (import.meta.env.DEV) {
+      try {
+        return typeof localStorage !== "undefined" ? localStorage.getItem(TENANT_OVERRIDE_KEY) : null;
+      } catch {}
+    }
+    return null;
+  });
   const [tenantId, setTenantId] = useState<string>(() => deriveTenantId(initialToken));
   const [policy, setPolicy] = useState<Record<string, boolean> | null>(null);
   const [policyLoading, setPolicyLoading] = useState(false);
@@ -89,6 +108,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Sync tenant to localStorage to keep aligned
       localStorage.setItem(TENANT_STORAGE_KEY, newTenantId);
     } catch {}
+  };
+
+  const setTenantOverride = (overrideTenantId: string | null) => {
+    if (import.meta.env.DEV) {
+      try {
+        if (overrideTenantId) {
+          localStorage.setItem(TENANT_OVERRIDE_KEY, overrideTenantId);
+          setTenantOverrideState(overrideTenantId);
+        } else {
+          localStorage.removeItem(TENANT_OVERRIDE_KEY);
+          setTenantOverrideState(null);
+        }
+        // Re-derive tenantId to pick up the override
+        const newTenantId = deriveTenantId(token);
+        setTenantId(newTenantId);
+      } catch {}
+    }
   };
 
   // Fetch /auth/policy whenever token or tenantId changes
@@ -121,8 +157,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [token, tenantId]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ token, tenantId, apiBase, policy, policyLoading, policyError, setToken }),
-    [token, tenantId, policy, policyLoading, policyError]
+    () => ({ token, tenantId, apiBase, policy, policyLoading, policyError, setToken, setTenantOverride, tenantOverride }),
+    [token, tenantId, policy, policyLoading, policyError, tenantOverride]
   );
 
   // Attach Sentry tags when auth context is available; safe if Sentry not initialized

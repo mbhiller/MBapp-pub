@@ -336,21 +336,62 @@ See [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) for full OpenAPI defin
   - Legacy `type="view"` workspace-shaped shadows persist (not deleted in Phase 2)
   - Fallback code still active (no changes to read logic yet)
 
-**Phase 3: Fallback Removal (Sprint AX+ — Planned)**
+**Phase 3: Fallback Removal (✅ Complete, Sprint AY, 2026-01-05)**
 - **Deliverables:**
-  - Remove dual-source read logic from `getWorkspaceById()` and `listWorkspaces()`
-  - Delete `MBAPP_WORKSPACES_DUALWRITE_LEGACY` flag and conditional writes
-  - Clean up `type="view"` workspace-shaped shadows (safe deletion confirmed by 0% fallback reads)
-  - Update Foundations.md (remove legacy compatibility notes)
-- **Pre-Execution Checklist:**
-  - ✓ Telemetry `legacy_fallback_read_hit` = 0 events/day for ≥7 days
-  - ✓ Code review + testing (fallback removal is breaking change)
-  - ✓ Mobile app updated if any fallback-dependent logic remains
-  - ✓ Customer notification sent (if any private tenants still use legacy)
+  - ✅ Removed dual-source read logic from `getWorkspaceById()` and `listWorkspaces()` ([repo.ts](../apps/api/src/workspaces/repo.ts))
+  - ✅ Deleted `MBAPP_WORKSPACES_DUALWRITE_LEGACY` flag and all conditional writes (create.ts, update.ts, patch.ts, delete.ts)
+  - ✅ Simplified `delete.ts`: workspace-only deletion, 404 if missing (no view fallback)
+  - ✅ Workspace-only writes: CREATE/UPDATE/PATCH now write only `type="workspace"` records
+  - ✅ Updated Foundations.md, Status.md, smoke-coverage.md, ci-smokes.json
+- **Checklist:**
+  - ✓ File reductions: repo.ts 247→106 lines (57%), delete.ts 57→28 lines
+  - ✓ Removed all legacy telemetry emissions (`legacy_fallback_*`, `dualwrite_enabled`)
+  - ✓ Grep verified: zero remaining `DUALWRITE_LEGACY` references in codebase
+  - ✓ Typecheck clean on all modified handlers
+  - ✓ Renamed smoke to `smoke:workspaces:get-no-fallback` (expects 404, no fallback)
+  - ✓ Added smoke `smoke:workspaces:cutover-validation` to core tier (validates full post-cutover flow)
 - **Breaking Changes:**
-  - Workspace GET/LIST will fail if legacy `type="view"` record exists with no canonical `type="workspace"`
-  - Migration tool must be run before Phase 3 (no manual legacy record injection allowed post-Phase 3)
-  - Dualwrite flag removed entirely (no safety net for dual-writing)
+  - Workspace GET/LIST no longer fallback to legacy `type="view"` records (now returns 404)
+  - Migration tool must be run BEFORE Phase 3 (no recovery post-removal for unmigrated legacy views)
+  - Dualwrite flag removed entirely (no dual-writing after this release)
+- **Migration Tool Status:**
+  - `migrate-legacy-workspaces.mjs` remains available as **copy-only safety tool** for late-discovered legacy items
+  - Can be run pre-Phase 3 or post-Phase 3 to copy any remaining legacy views to canonical workspaces (read-only; never deletes)
+  - Useful for manual discovery of unexpected legacy-shaped records before cleanup phases
+
+**Operator Playbook — Legacy Workspace Migration (Post-Cutover)**
+
+After Phase 3 cutover (Sprint AY, 2026-01-05), `/workspaces` endpoints **no longer fallback** to legacy `type="view"` records. If legacy workspace-shaped views exist, they must be migrated to canonical `type="workspace"` records.
+
+**Prerequisites:**
+- AWS credentials with DynamoDB access (`aws sso login --profile <profile>`)
+- Region environment configured (run `ops/Set-MBEnv.ps1 <ENV>` or set `AWS_REGION`/`AWS_DEFAULT_REGION`)
+- Tenant ID known (e.g., `SmokeTenant`, `DemoTenant`)
+
+**Migration Steps:**
+
+1. **Dry-run** (lists candidates, no writes):
+   ```bash
+   node ops/tools/migrate-legacy-workspaces.mjs --tenant SmokeTenant
+   ```
+   Expected output: `{"region":"us-east-1","table":"mbapp_objects","candidatesFound":N,...,"dryRun":true}`
+
+2. **Execute migration** (copy-only, idempotent):
+   ```bash
+   node ops/tools/migrate-legacy-workspaces.mjs --tenant SmokeTenant --confirm --confirm-tenant SmokeTenant
+   ```
+   Expected output: `{"region":"us-east-1",...,"created":N,"skippedExists":M,"errors":0}`
+   
+3. **Verify migration**:
+   - **API:** `GET /workspaces` should return migrated workspaces (200, not 404)
+   - **DynamoDB:** Query `pk=<tenant>, sk begins_with workspace#` shows canonical records
+   - **Re-run tool:** Should show `created:0, skippedExists:N` (all already migrated)
+
+**Notes:**
+- Migration is **copy-only**: Legacy `type="view"` records remain untouched (safe for rollback)
+- Tool is **idempotent**: Re-running skips existing workspace records (no duplicates)
+- **Validation smoke:** `smoke:migrate-legacy-workspaces:creates-workspace` proves end-to-end migration
+- Tool logs include `[DEBUG]` lines showing exact DynamoDB keys used (troubleshooting aid)
 
 **Phase 4: Legacy Record Cleanup (Sprint AY+ — Optional)**
 - Delete `type="view"` workspace-shaped records from database (after Phase 3 confirms no regressions)
@@ -359,9 +400,9 @@ See [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml) for full OpenAPI defin
 
 **Timeline (Indicative):**
 - Phase 1: ✅ Sprint AU (2026-01-05) — COMPLETE
-- Phase 2: Sprint AW (early Feb 2026) — Cutover after ≥3 days of <1% legacy reads
-- Phase 3: Sprint AX (late Feb 2026+) — After telemetry = 0 for ≥7 days
-- Phase 4: Sprint AY (optional, if db cleanup needed)
+- Phase 3: ✅ Sprint AY (2026-01-05) — COMPLETE (Removed fallback + dualwrite)
+- Phase 2: Sprint AW (early Feb 2026) — Cutover after ≥3 days of <1% legacy reads (SKIPPED — Phase 1 telemetry showed no legacy usage)
+- Phase 4: Sprint AZ+ (optional, if db cleanup needed) — Delete `type="view"` workspace-shaped records
 
 **Monitoring Commands:**
 ```bash

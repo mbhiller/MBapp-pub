@@ -1,0 +1,20 @@
+{
+  "smokeRunId": "smk-1767653810294-s0bl",
+  "base": "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com",
+  "tenantHeader": "SmokeTenant",
+  "jwtTenant": null,
+  "startedAt": "2026-01-05T22:56:50.294Z",
+  "finishedAt": "2026-01-05T22:56:53.863Z",
+  "entries": [
+    {
+      "type": "view",
+      "id": "x586l3wmlj4u3dslfh6b8",
+      "route": "/views",
+      "meta": {
+        "name": "LegacyWorkspace-bqbmnz5oft6p",
+        "isLegacyWorkspace": true
+      },
+      "createdAt": "2026-01-05T22:56:50.843Z"
+    }
+  ]
+}

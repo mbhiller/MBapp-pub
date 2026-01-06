@@ -5,6 +5,39 @@
 **Workflow & DoD:** See [MBapp-Cadence.md](MBapp-Cadence.md) for canonical workflow, Definition of Done, and testing rules.
 
 ---
+### Sprint AY — Workspaces Legacy Cutover (Phase 3) — ✅ Complete (2026-01-05)
+**Summary:** Removed workspace legacy fallback reads, dualwrite flag, and all conditional write logic. Updated smokes to validate post-cutover contract (no fallback, single-source reads/writes).
+
+**Deliverables:**
+- **API (E1-E2):** 
+  - Removed dual-source read logic from [apps/api/src/workspaces/repo.ts](../apps/api/src/workspaces/repo.ts): `getWorkspaceById()` and `listWorkspaces()` now query only `type="workspace"` (247→106 lines, 57% reduction)
+  - Removed `MBAPP_WORKSPACES_DUALWRITE_LEGACY` constant and all telemetry emissions from all 4 handlers (create.ts, update.ts, patch.ts, delete.ts)
+  - Simplified delete.ts: workspace-only deletion, 404 if missing, no view fallback (57→28 lines)
+  - All writes now target only `type="workspace"` records; no conditional branching on legacy flag
+  - ~91 lines removed total across 5 files
+- **Smokes (E3):**
+  - Renamed `smoke:workspaces:get-fallback` → `smoke:workspaces:get-no-fallback` with updated assertions (expects 404 when only legacy view exists)
+  - Added `smoke:workspaces:cutover-validation` to validate complete post-cutover flow: create workspace + legacy view shadow, GET returns workspace, DELETE workspace, GET returns 404 (no fallback), LIST doesn't include deleted record
+  - Moved both smokes to core tier for pre-PR validation ([ops/ci-smokes.json](../ops/ci-smokes.json#L51-L52), [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs#L9990-L10128))
+- **Docs (E4):** Updated [MBapp-Foundations.md](MBapp-Foundations.md) (marked Phase 3 complete, documented migration tool as safety net), [smoke-coverage.md](smoke-coverage.md) (updated smoke descriptions and intent)
+
+**Verification:**
+- ✅ Typecheck clean on apps/api
+- ✅ Grep verified: zero remaining `DUALWRITE_LEGACY` references
+- ✅ JavaScript syntax validated (node -c smoke.mjs)
+- ✅ JSON syntax validated (ci-smokes.json)
+
+**Breaking Changes:**
+- Workspace GET/LIST no longer fallback to legacy `type="view"` records; returns 404 if workspace not found
+- Dualwrite flag removed entirely (no dual-write mode available post-release)
+- Migration tool must be run before Phase 3 for any unmigrated legacy views
+
+**Migration Tool (Preserved):**
+- `migrate-legacy-workspaces.mjs` remains as **copy-only safety tool** for discovering/migrating late-found legacy items post-cutover
+- Can be run anytime (before or after Phase 3) to safely copy legacy views to canonical workspaces
+- No breaking changes to tool; idempotent + read-only on legacy records
+
+---
 ### Sprint AX — Party Batch Primitive — ✅ Complete (2026-01-05)
 **Summary:** Implemented `/objects/party:batch` endpoint to permanently eliminate N+1 party enrichment fan-out patterns across web.
 

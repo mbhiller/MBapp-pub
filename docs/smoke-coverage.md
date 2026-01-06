@@ -119,7 +119,7 @@ Manifest path is printed at run start: `ops/smoke/.manifests/smk-{timestamp}-{ra
 
 Sprint I (2026-01-02): No new smokes added; existing backorder → suggest-po → receive loops remain covered via `npm run smokes:run:ci`.
 
-**CI Smoke Manifest:** The definitive list of tests run in CI is maintained in [ops/ci-smokes.json](../ops/ci-smokes.json). Additional flows exist in `ops/smoke/smoke.mjs` but are opt-in only. CI includes `smoke:views:crud`, `smoke:views:validate-filters`, `smoke:views:save-then-update`, `smoke:views-workspaces:permissions`, `smoke:workspaces:list`, `smoke:workspaces:mixed-dedupe`, `smoke:workspaces:get-fallback`, `smoke:workspaces:default-view-validation`, `smoke:views:apply-to-po-list`, `smoke:views:apply-to-product-list`, `smoke:views:apply-to-inventory-list`, `smoke:views:apply-to-party-list`, `smoke:views:apply-to-backorders-list`.
+**CI Smoke Manifest:** The definitive list of tests run in CI is maintained in [ops/ci-smokes.json](../ops/ci-smokes.json). Additional flows exist in `ops/smoke/smoke.mjs` but are opt-in only. CI includes `smoke:views:crud`, `smoke:views:validate-filters`, `smoke:views:save-then-update`, `smoke:views-workspaces:permissions`, `smoke:workspaces:list`, `smoke:workspaces:get-no-fallback`, `smoke:workspaces:cutover-validation`, `smoke:workspaces:mixed-dedupe`, `smoke:workspaces:default-view-validation`, `smoke:views:apply-to-po-list`, `smoke:views:apply-to-product-list`, `smoke:views:apply-to-inventory-list`, `smoke:views:apply-to-party-list`, `smoke:views:apply-to-backorders-list`.
 
 **Scanner Actions Flows (Sprint S, E2):**
 - `smoke:scanner:actions:record` — **NEW** (E2). Validates POST /scanner/actions endpoint:
@@ -168,16 +168,20 @@ Sprint I (2026-01-02): No new smokes added; existing backorder → suggest-po �
 - `smoke:views:save-then-update` (NEW, Sprint AB) — **PATCH workflow validation.** Creates 2 POs with different statuses (PO1=draft, PO2→submitted). Creates View with `status="draft"` filter. Applies view and asserts **only PO1 (draft) matches**. PATCHes view to `status="submitted"` filter. Applies updated view and asserts **only PO2 (submitted) matches** (results flip). Validates operator leverage: update existing view without creating duplicate; filters re-evaluated correctly on reapplication. **CI:** ✅ Yes (Sprint AB E2)
 - `smoke:views-workspaces:permissions` (NEW, Sprint AB) — **RBAC boundary enforcement.** Mints admin token (operator role with view:write + workspace:write) and viewer token (read-only role). Admin creates view + workspace (expect 201). Viewer attempts POST/PATCH/DELETE on views (all expect 403). Viewer attempts POST/PATCH/DELETE on workspaces (all expect 403). Viewer confirms GET /views and GET /workspaces still succeed (read allowed). Validates permission boundaries: writes blocked for read-only roles, reads succeed. **CI:** ✅ Yes (Sprint AB E3)
 - `smoke:workspaces:mixed-dedupe` (Sprint Q) — Forces mixed-source pagination across true workspaces and legacy view-backed workspaces, asserting duplicates are deduped before counting toward `limit`, multi-page cursors stay stable, and IDs remain unique across pages. **CI:** ✅ Yes
-- `smoke:workspaces:get-fallback` (Sprint Q) — Verifies legacy view-backed workspaces still resolve via workspace GET when no dedicated workspace record exists (ensures migration fallback safety). **CI:** ✅ Yes
+- `smoke:workspaces:get-no-fallback` (Sprint AY, renamed from `get-fallback`) — **Validates post-cutover no-fallback contract.** Creates workspace + legacy view shadow with same id. Tests: (1) GET workspace when it exists returns 200 (workspace record), (2) GET workspace when both workspace and view shadow exist returns 200 (workspace takes precedence, no fallback to view), (3) After DELETE workspace, GET returns 404 (no fallback to legacy view). **Purpose:** Proves cutover-safe behavior; fallback logic fully removed. **CI:** ✅ Yes (core tier, Sprint AY)
+- `smoke:workspaces:cutover-validation` (NEW, Sprint AY) — **Complete post-cutover flow validation.** 6-step flow: (1) Create canonical workspace, (2) Create legacy view "shadow" with same id, (3) GET /workspaces/:id returns workspace (not view), (4) DELETE workspace, (5) GET returns 404 (validates no fallback), (6) LIST excludes deleted record. Validates complete workspace-only read/write contract. **Purpose:** Regression guard; ensures cutover completed successfully + no fallback/dualwrite logic accidentally re-added. **CI:** ✅ Yes (core tier, Sprint AY)
 - `smoke:migrate-legacy-workspaces:creates-workspace` (NEW, Sprint AU) — **End-to-end migration test.** Creates a legacy workspace-shaped view (type="view", with name, views[], shared, ownerId, no filters) via `/views`. Optionally verifies fallback works: GET /workspaces/:id should return it before migration. Invokes `ops/tools/migrate-legacy-workspaces.mjs --confirm` to copy the view to a canonical workspace record (type="workspace"). Validates canonical workspace created via GET /workspaces/:id and asserts fields preserved (name, views[], type, shared, ownerId, entityType, description). **Requires AWS credentials** (tool needs DynamoDB access); SKIP in CI if creds unavailable. Records both artifacts (legacy view, migrated workspace) for cleanup. **Purpose:** Prove migration tool successfully copies legacy views to workspace source; validates copy-only behavior (legacy view preserved) and field preservation across the copy operation. **CI:** ⚠️ Local only (AWS credentials required); skips in CI.
 
 **Note (2025-12-30):** No new smokes needed; `smoke:views:crud` revalidated after `/views` added server-side `entityType` filtering, and `smoke:workspaces:list` still passes with q + entityType filters across pages after pagination hardening.
 **Note (2025-12-30):** During the workspace storage migration (primary `type="workspace"` with legacy `type="view"` fallback/dual-write), `smoke:workspaces:list` continues to validate list semantics across both sources; keep it as the guardrail for pagination + filter compatibility.
 **Note (2026-01-02, Sprint J):** View apply smokes expanded from products only to include inventory and parties. All three `apply-to-*-list` smokes validate dual-entity filtering: create two entities with distinct search tokens, apply view with filter targeting one, assert only matching entity present in results. Strengthened product smoke with explicit filtering assertions per same pattern.
+**Note (2026-01-05, Sprint AY):** Workspace legacy cutover complete — Phase 3 implemented. Renamed `smoke:workspaces:get-fallback` to `smoke:workspaces:get-no-fallback` to validate no-fallback contract. Added `smoke:workspaces:cutover-validation` to core tier as regression guard; validates complete post-cutover flow (workspace-only reads, no dualwrite writes). All workspaces-related smokes moved to core tier post-cutover for pre-PR validation.
 
-**Reliability Hardening (Sprint V/U/J/AT):**
+**Reliability Hardening (Sprint V/U/J/AT/AY):**
 - `smoke:views:apply-to-po-list` now wraps cleanup in try/finally and retries DELETE up to 5× to ensure created temp view is removed, improving CI hygiene and reducing flake.
 - `smoke:workspaces:list` now paginates through all pages (up to 10) with up to 25 retry attempts to handle eventual consistency and non-deterministic ordering, ensuring created workspace IDs are found before filtering assertions.
+- `smoke:workspaces:get-no-fallback` (Sprint AY) validates 3-point contract: workspace exists returns 200, workspace+view-shadow returns workspace, workspace post-DELETE returns 404 (no fallback). Tests both positive (workspace returns) and negative (fallback doesn't happen) cases.
+- `smoke:workspaces:cutover-validation` (Sprint AY) validates complete 6-step post-cutover flow including workspace-only deletes, 404 assertions, and LIST excludes deleted records.
 - `smoke:views:apply-to-product-list` (Sprint J): Dual-entity filtering assertions added; creates Product 1 (token1) and Product 2 (token2), applies view with q filter on token1, validates Product 1 present and Product 2 absent.
 - `smoke:views:apply-to-inventory-list` (Sprint J, NEW): Dual-entity productId filtering; creates items in two different products, applies productId filter, asserts correct item present and other product's item absent.
 - `smoke:views:apply-to-party-list` (Sprint J, NEW): Dual-entity q filtering; creates parties with different search tokens, applies view with q filter on one token, asserts matching party present and non-matching absent.
@@ -656,7 +660,7 @@ npm run smokes:cleanup
 
 **Test:** `smoke:migrate-legacy-workspaces:creates-workspace` ([ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs#L13765))
 
-**Purpose:** Validates end-to-end legacy-to-canonical workspace migration (Phase 1 of retirement plan).
+**Purpose:** Validates end-to-end legacy-to-canonical workspace migration (Phase 1 of retirement plan). **Post-cutover (Sprint AY):** Proves migration tool works even after `/workspaces` endpoints no longer fallback to legacy `type="view"` records.
 
 **Requirements:**
 - AWS credentials (tool invokes DynamoDB scan/put)
@@ -672,14 +676,18 @@ node ops/smoke/smoke.mjs smoke:migrate-legacy-workspaces:creates-workspace
 # {
 #   "test": "smoke:migrate-legacy-workspaces:creates-workspace",
 #   "result": "PASS",
-#   "summary": "Legacy workspace-shaped view successfully migrated to canonical workspace record",
+#   "summary": "Legacy workspace-shaped view successfully migrated to canonical workspace record (post-cutover)",
 #   "artifacts": {
 #     "legacyViewId": "view-xyz...",
 #     "workspaceId": "ws-abc...",
 #     "viewName": "LegacyWorkspace-smk-..."
 #   },
+#   "debug": {
+#     "awsRegionUsed": "us-east-1",
+#     "legacyViewId": "view-xyz..."
+#   },
 #   "assertions": {
-#     "preFallbackWorked": true,
+#     "preGetReturns404": true,
 #     "namePreserved": true,
 #     "viewsArrayPreserved": true,
 #     "typeIsWorkspace": true,
@@ -701,12 +709,13 @@ node ops/smoke/smoke.mjs smoke:migrate-legacy-workspaces:creates-workspace
 ```
 
 **What It Tests:**
-1. Creates legacy workspace-shaped view (type="view" with name, views[], shared, ownerId, entityType)
-2. Verifies GET /workspaces/:id returns it via fallback
-3. Runs migration tool: `ops/tools/migrate-legacy-workspaces.mjs --confirm`
-4. Verifies GET /workspaces/:id now returns canonical workspace (type="workspace")
+1. Creates legacy workspace-shaped view **directly in DynamoDB** (type="view" with name, views[], shared, ownerId, entityType, **NO filters field**)
+2. Verifies GET /workspaces/:id returns **404** (post-cutover: no fallback to view records)
+3. Runs migration tool with forced AWS region: `ops/tools/migrate-legacy-workspaces.mjs --confirm --confirm-tenant <TENANT>`
+4. Verifies GET /workspaces/:id now returns **200** with canonical workspace (type="workspace")
 5. Asserts all fields preserved (name, views[], type, shared, owner, entityType, description)
-6. Records artifacts in manifest for cleanup
+6. Validates tool output contains explicit action line for the specific legacyViewId created
+7. Records artifacts in manifest for cleanup
 
 **Troubleshooting:**
 

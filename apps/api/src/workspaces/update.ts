@@ -4,11 +4,8 @@ import { getAuth, requirePerm } from "../auth/middleware";
 import { getWorkspaceById, writeWorkspace } from "./repo";
 import { getObjectById } from "../objects/repo";
 
-const DUALWRITE_LEGACY = process.env.MBAPP_WORKSPACES_DUALWRITE_LEGACY === "true";
-
 /**
- * PUT /workspaces/:id — updates a saved View.
- * Mirrors /views/:id behavior: same validation, RBAC guards, updates type='view'.
+ * PUT /workspaces/:id — updates a workspace.
  */
 export async function handle(event: APIGatewayProxyEventV2) {
   try {
@@ -17,17 +14,6 @@ export async function handle(event: APIGatewayProxyEventV2) {
 
     const id = event.pathParameters?.id;
     if (!id) return bad({ message: "id is required" });
-
-    if (DUALWRITE_LEGACY) {
-      console.warn(JSON.stringify({
-        event: "workspaces:dualwrite_enabled",
-        tenantId: auth.tenantId,
-        op: "update",
-        workspaceId: id,
-        flagName: "MBAPP_WORKSPACES_DUALWRITE_LEGACY",
-        flagValue: "true",
-      }));
-    }
 
     const body = JSON.parse(event.body || "{}");
 
@@ -96,7 +82,6 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const result = await writeWorkspace({
       tenantId: auth.tenantId,
       workspace: merged,
-      dualWriteLegacy: DUALWRITE_LEGACY,
     });
 
     return ok(result);
