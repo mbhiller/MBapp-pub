@@ -6,6 +6,29 @@
 
 ---
 
+### Sprint AV — Hold TTL + Cleanup + Notifications (simulate) — ✅ Complete (2026-01-06)
+
+**Summary:** Hardened public booking with hold TTL, bounded cleanup, and simulated notifications. Improved web UX to handle expired holds clearly and to surface confirmation without backend polling.
+
+**Deliverables:**
+- **API:**
+  - Hold TTL: On checkout, set `submittedAt` and `holdExpiresAt = now + REGISTRATION_HOLD_TTL_SECONDS` (default 900). Replay of submitted with expired hold returns `409 { code: "hold_expired" }`.
+  - Capacity release: Added `releaseEventSeat()` atomic decrement; used by expire helper to safely release seats from expired holds.
+  - Cleanup endpoint: `POST /registrations:cleanup-expired-holds` (tenant-scoped, `registration:write` required) expires up to `?limit` submitted holds that are past TTL, returns `{ expiredCount }`.
+  - Notifications seam: `enqueueEmail()` creates `message` objects; simulate mode (`FEATURE_NOTIFY_SIMULATE` or header `X-Feature-Notify-Simulate`) marks `status="sent"` with `sentAt`. Stripe webhook stores `confirmationMessageId` for idempotency.
+- **Web:** Public booking page now (1) shows a clear restart message when checkout returns `409 hold_expired` and (2) performs a bounded client-side poll (Stripe `retrievePaymentIntent`) after `confirmCardPayment` to surface "Payment confirmed" state.
+- **Smokes (Core):**
+  - `smoke:registrations:hold-expiration` — Forces `holdExpiresAt` to past, runs cleanup, asserts registration cancelled, then confirms capacity release by a successful second checkout.
+  - `smoke:registrations:confirmation-message` — Simulates `payment_intent.succeeded`, asserts registration confirmed and message exists with `status=sent` under notify simulate.
+
+**Verification:**
+- Typecheck: apps/api ✅, apps/web ✅
+- CI: Both new smokes wired into [ops/ci-smokes.json](../ops/ci-smokes.json).
+
+**Next:**
+- Integrate real providers behind the same seam: Email (Postmark) and SMS (Twilio); keep simulate headers for CI.
+- Web polish: optional server-side registration poll post-webhook for slower confirmations (keep within bounded attempts).
+
 ### Sprint AU — Public Booking + Stripe (PaymentIntent) — ✅ Complete (2026-01-06)
 
 **Summary:** Shipped public, unauthenticated booking slice with Stripe PaymentIntent, capacity guard, webhook confirmation, and smoke coverage using simulate mode (no external Stripe calls).

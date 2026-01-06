@@ -12196,6 +12196,185 @@ const tests = {
     };
   },
 
+  "smoke:registrations:hold-expiration": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true"
+    };
+
+    // Create an open event (capacity 1)
+    const eventName = smokeTag("hold_exp_evt");
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 1,
+      reservedCount: 0
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test:"registrations:hold-expiration", result:"FAIL", reason:"event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+    // Create public registration with party email
+    const regCreate = await post(`/registrations:public`, { eventId, party: { email: `smoke+${SMOKE_RUN_ID}@example.com` } }, featureHeaders, { auth: "none" });
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test:"registrations:hold-expiration", result:"FAIL", reason:"reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+
+    // Checkout (draft -> submitted; reserves seat)
+    const checkout = await post(`/events/registration/${encodeURIComponent(regId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!checkout.ok || !checkout.body?.paymentIntentId) {
+      return { test:"registrations:hold-expiration", result:"FAIL", reason:"checkout-failed", checkout };
+    }
+
+    // Force expiration deterministically: set holdExpiresAt in the past via PUT with full body
+    const regRead = await get(`/registrations/${encodeURIComponent(regId)}`, undefined, { headers: featureHeaders });
+    if (!regRead.ok || !regRead.body?.id) {
+      return { test:"registrations:hold-expiration", result:"FAIL", reason:"reg-read-failed", regRead };
+    }
+    const past = new Date(Date.now() - 5000).toISOString();
+    const updatedBody = { ...regRead.body, holdExpiresAt: past, status: "submitted" };
+    if (!updatedBody.partyId) {
+      updatedBody.partyId = `party_${SMOKE_RUN_ID}`;
+    }
+    if (updatedBody.party) {
+      delete updatedBody.party;
+    }
+    const setPast = await put(`/registrations/${encodeURIComponent(regId)}`, updatedBody, featureHeaders);
+    if (!setPast.ok) {
+      return { test:"registrations:hold-expiration", result:"FAIL", reason:"set-past-failed", setPast };
+    }
+
+    // Cleanup expired holds
+    const cleanup = await post(`/registrations:cleanup-expired-holds`, {}, { ...baseHeaders(), "X-Feature-Registrations-Enabled": "true" });
+    if (!cleanup.ok) {
+      return { test:"registrations:hold-expiration", result:"FAIL", reason:"cleanup-failed", cleanup };
+    }
+
+    // Assert registration now cancelled
+    const reg = await get(`/objects/registration/${encodeURIComponent(regId)}`);
+    const cancelled = reg.ok && reg.body?.status === "cancelled";
+
+    // Capacity release: create second registration and checkout succeeds
+    const reg2Create = await post(`/registrations:public`, { eventId }, featureHeaders, { auth: "none" });
+    if (!reg2Create.ok || !reg2Create.body?.registration?.id || !reg2Create.body?.publicToken) {
+      return { test:"registrations:hold-expiration", result:"FAIL", reason:"reg2-create-failed", reg2Create };
+    }
+    const reg2Id = reg2Create.body.registration.id;
+    const token2 = reg2Create.body.publicToken;
+    const c2 = await post(`/events/registration/${encodeURIComponent(reg2Id)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": token2,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+
+    const pass = cancelled && c2.ok;
+    return {
+      test: "registrations:hold-expiration",
+      result: pass ? "PASS" : "FAIL",
+      steps: { eventId, regId, reg2Id },
+      cleanup: { expiredCount: cleanup.body?.expiredCount },
+      regStatus: reg.body?.status,
+      reg2CheckoutStatus: c2.status
+    };
+  },
+
+  "smoke:registrations:confirmation-message": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: smokeTag("conf_msg_evt"),
+      capacity: 1,
+      reservedCount: 0
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test:"registrations:confirmation-message", result:"FAIL", reason:"event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event" });
+
+    const regCreate = await post(`/registrations:public`, { eventId, party: { email: `notify+${SMOKE_RUN_ID}@example.com` } }, featureHeaders, { auth: "none" });
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test:"registrations:confirmation-message", result:"FAIL", reason:"reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+
+    const checkout = await post(`/events/registration/${encodeURIComponent(regId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!checkout.ok || !checkout.body?.paymentIntentId) {
+      return { test:"registrations:confirmation-message", result:"FAIL", reason:"checkout-failed", checkout };
+    }
+    const piId = checkout.body.paymentIntentId;
+
+    // Simulated Stripe webhook
+    const webhookBody = {
+      id: `evt_${SMOKE_RUN_ID}`,
+      type: "payment_intent.succeeded",
+      data: {
+        object: {
+          id: piId,
+          status: "succeeded",
+          metadata: { registrationId: regId, eventId }
+        }
+      }
+    };
+    const whRes = await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "Stripe-Signature": "sim_valid_signature",
+        ...featureHeaders,
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify(webhookBody)
+    });
+    const whBody = await whRes.json().catch(() => ({}));
+    if (!whRes.ok) {
+      return { test:"registrations:confirmation-message", result:"FAIL", reason:"webhook-failed", whStatus: whRes.status, whBody };
+    }
+
+    // Read registration to get confirmationMessageId
+    const reg = await get(`/objects/registration/${encodeURIComponent(regId)}`);
+    const msgId = reg?.body?.confirmationMessageId;
+    if (!reg.ok || !msgId) {
+      return { test:"registrations:confirmation-message", result:"FAIL", reason:"no-confirmationMessageId", reg: reg.body };
+    }
+
+    // Fetch message
+    const msg = await get(`/objects/message/${encodeURIComponent(msgId)}`);
+    const pass = msg.ok && msg.body?.status === "sent";
+    return {
+      test: "registrations:confirmation-message",
+      result: pass ? "PASS" : "FAIL",
+      msgStatus: msg.body?.status,
+      regConfirmed: reg.body?.status === "confirmed",
+      webhookStatus: whRes.status,
+      steps: { eventId, regId, piId, msgId }
+    };
+  },
+
   /* ===================== Reservations: CRUD Resources ===================== */
   "smoke:resources:crud": async ()=>{
     await ensureBearer();

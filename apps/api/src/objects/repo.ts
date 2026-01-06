@@ -567,6 +567,47 @@ export async function reserveEventSeat({ tenantId, eventId }: ReserveEventSeatAr
   }
 }
 
+/**
+ * Atomically release one seat for an event by decrementing reservedCount.
+ * Safe/idempotent: if reservedCount is missing or already zero, performs no-op without throwing.
+ * Never allows reservedCount to go negative.
+ */
+export async function releaseEventSeat({ tenantId, eventId }: ReserveEventSeatArgs) {
+  const Key: AnyRecord = {
+    [PK_ATTR]: tenantId,
+    [SK_ATTR]: `${normalizeTypeParam("event") ?? "event"}#${eventId}`,
+  };
+
+  const names = {
+    "#reserved": "reservedCount",
+    "#updatedAt": "updatedAt",
+  };
+
+  const values = {
+    ":one": 1,
+    ":now": nowIso(),
+  };
+
+  try {
+    const res = await ddb.send(new UpdateCommand({
+      TableName: TABLE,
+      Key,
+      UpdateExpression: "SET #reserved = #reserved - :one, #updatedAt = :now",
+      ConditionExpression: "#reserved >= :one",
+      ExpressionAttributeNames: names,
+      ExpressionAttributeValues: values,
+      ReturnValues: "ALL_NEW",
+    }));
+    return res.Attributes as AnyRecord;
+  } catch (err: any) {
+    if (err?.name === "ConditionalCheckFailedException") {
+      // No reserved seats to release; treat as no-op.
+      return null as any;
+    }
+    throw err;
+  }
+}
+
 export async function deleteObject({ tenantId, type, id }: DeleteArgs) {
   const canonicalType = normalizeTypeParam(type) ?? type;
   const Key: AnyRecord = {
