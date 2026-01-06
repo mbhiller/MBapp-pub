@@ -203,6 +203,20 @@ const TENANT = process.env.MBAPP_TENANT_ID ?? "DemoTenant";
 - **Metadata:** PaymentIntent metadata includes `registrationId` and `eventId` for webhook correlation.
 - **Capacity guard:** Checkout enforces atomic `reservedCount` increment on Event with condition `reservedCount < capacity` (null/0 treated as unlimited). Failure → 409 `capacity_full`.
 
+### Public Registration Status (Sprint AY)
+
+- **Endpoint:** `GET /registrations/{id}:public` — public (no JWT), authenticated via `X-MBapp-Public-Token` header.
+- **Auth:** Server validates token by hashing with SHA-256 and comparing via constant-time `timingSafeEqual` against `registration.publicTokenHash`.
+- **Response:** Whitelisted fields only (no PII/financials beyond payment status):
+  - `id`, `eventId`, `status`, `paymentStatus`, `submittedAt`, `confirmedAt`, `holdExpiresAt`
+  - `emailStatus`, `smsStatus` — message delivery indicators (status/sentAt/provider/errorMessage)
+- **Use case:** Enables public booking UX to poll server truth after checkout and show:
+  - Confirmation status + timestamp
+  - Hold countdown timer (remaining time until `holdExpiresAt`)
+  - Email/SMS delivery indicators (e.g., "Email sent at 2:30 PM")
+- **Security:** Endpoint returns 401 if token missing/invalid, 404 if registration not found. Feature-guarded (`X-Feature-Registrations-Enabled`).
+- **Message privacy:** Response includes message `status`, `sentAt`, `provider`, `errorMessage` only — no `to`, `subject`, `textBody`, or `htmlBody`.
+
 **Mobile:**
 - Fetches `/auth/policy` on app startup via `useAuthContext()` in [apps/mobile/src/features/_shared/AuthContext.tsx](../apps/mobile/src/features/_shared/AuthContext.tsx).
 - Hides module tabs/screens based on `{type}:read` permissions (e.g., PartiesTab visible only if user has `party:read`).

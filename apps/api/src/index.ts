@@ -112,6 +112,7 @@ import * as StripeWebhook from "./webhooks/stripe-handler";
 import * as EventsPublicList from "./events/public-list";
 import * as RegPublicCreate from "./registrations/public-create";
 import * as RegCheckout from "./registrations/checkout";
+import * as RegPublicGet from "./registrations/public-get";
 import * as RegCleanupExpiredHolds from "./registrations/cleanup-expired-holds";
 
 /* Helpers */
@@ -275,6 +276,14 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
       if (method === "POST" && m) {
         const [, id] = m;
         return RegCheckout.handle(withId(event, id));
+      }
+    }
+    // Public registration status (Sprint AY)
+    {
+      const m = path.match(/^\/registrations\/([^/]+):public$/i);
+      if (method === "GET" && m) {
+        const [, id] = m;
+        return RegPublicGet.handle(withId(event, id));
       }
     }
 

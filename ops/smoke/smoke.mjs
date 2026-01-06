@@ -12466,6 +12466,198 @@ const tests = {
     };
   },
 
+  "smoke:registrations:public-status-confirmed": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: smokeTag("pub_status_evt"),
+      capacity: 1,
+      reservedCount: 0
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test:"registrations:public-status-confirmed", result:"FAIL", reason:"event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event" });
+
+    const regCreate = await post(`/registrations:public`, { eventId, party: { email: `pubstatus+${SMOKE_RUN_ID}@example.com`, phone: "+15555550199" } }, featureHeaders, { auth: "none" });
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test:"registrations:public-status-confirmed", result:"FAIL", reason:"reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+
+    const checkout = await post(`/events/registration/${encodeURIComponent(regId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!checkout.ok || !checkout.body?.paymentIntentId) {
+      return { test:"registrations:public-status-confirmed", result:"FAIL", reason:"checkout-failed", checkout };
+    }
+    const piId = checkout.body.paymentIntentId;
+
+    // Simulated Stripe webhook
+    const webhookBody = {
+      id: `evt_${SMOKE_RUN_ID}`,
+      type: "payment_intent.succeeded",
+      data: {
+        object: {
+          id: piId,
+          status: "succeeded",
+          metadata: { registrationId: regId, eventId }
+        }
+      }
+    };
+    const whRes = await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "Stripe-Signature": "sim_valid_signature",
+        ...featureHeaders,
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify(webhookBody)
+    });
+    if (!whRes.ok) {
+      return { test:"registrations:public-status-confirmed", result:"FAIL", reason:"webhook-failed", whStatus: whRes.status };
+    }
+
+    // GET public status
+    const pubStatus = await fetch(`${API}/registrations/${encodeURIComponent(regId)}:public`, {
+      headers: {
+        "X-MBapp-Public-Token": publicToken,
+        "x-tenant-id": TENANT,
+        "X-Feature-Registrations-Enabled": "true"
+      }
+    });
+    const pubBody = await pubStatus.json().catch(() => ({}));
+    if (!pubStatus.ok) {
+      return { test:"registrations:public-status-confirmed", result:"FAIL", reason:"public-status-failed", pubStatus: pubStatus.status, pubBody };
+    }
+
+    const pass = pubBody.status === "confirmed"
+      && (pubBody.paymentStatus === "succeeded" || pubBody.paymentStatus === "paid")
+      && pubBody.confirmedAt
+      && pubBody.emailStatus?.status === "sent"
+      && pubBody.smsStatus?.status === "sent";
+
+    return {
+      test: "registrations:public-status-confirmed",
+      result: pass ? "PASS" : "FAIL",
+      publicStatus: {
+        status: pubBody.status,
+        paymentStatus: pubBody.paymentStatus,
+        confirmedAt: pubBody.confirmedAt,
+        emailStatus: pubBody.emailStatus?.status,
+        smsStatus: pubBody.smsStatus?.status
+      },
+      steps: { eventId, regId, piId }
+    };
+  },
+
+  "smoke:registrations:public-status-hold-expired": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true"
+    };
+
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: smokeTag("pub_hold_exp_evt"),
+      capacity: 1,
+      reservedCount: 0
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test:"registrations:public-status-hold-expired", result:"FAIL", reason:"event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event" });
+
+    const regCreate = await post(`/registrations:public`, { eventId }, featureHeaders, { auth: "none" });
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test:"registrations:public-status-hold-expired", result:"FAIL", reason:"reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+
+    const checkout = await post(`/events/registration/${encodeURIComponent(regId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!checkout.ok || !checkout.body?.paymentIntentId) {
+      return { test:"registrations:public-status-hold-expired", result:"FAIL", reason:"checkout-failed", checkout };
+    }
+
+    // Force hold expiration via authenticated update
+    const regGet = await get(`/registrations/${encodeURIComponent(regId)}`, undefined, { headers: featureHeaders });
+    if (!regGet.ok || !regGet.body) {
+      return { test:"registrations:public-status-hold-expired", result:"FAIL", reason:"reg-get-failed", regGet };
+    }
+
+    const updatedBody = { ...regGet.body };
+    updatedBody.holdExpiresAt = new Date(Date.now() - 60000).toISOString();
+    if (!updatedBody.partyId) {
+      updatedBody.partyId = `party_${SMOKE_RUN_ID}`;
+    }
+    if (updatedBody.party) {
+      delete updatedBody.party;
+    }
+    const setPast = await put(`/registrations/${encodeURIComponent(regId)}`, updatedBody, featureHeaders);
+    if (!setPast.ok) {
+      return { test:"registrations:public-status-hold-expired", result:"FAIL", reason:"set-past-failed", setPast };
+    }
+
+    // Cleanup expired holds
+    const cleanup = await post(`/registrations:cleanup-expired-holds`, {}, { ...baseHeaders(), "X-Feature-Registrations-Enabled": "true" });
+    if (!cleanup.ok) {
+      return { test:"registrations:public-status-hold-expired", result:"FAIL", reason:"cleanup-failed", cleanup };
+    }
+
+    // GET public status
+    const pubStatus = await fetch(`${API}/registrations/${encodeURIComponent(regId)}:public`, {
+      headers: {
+        "X-MBapp-Public-Token": publicToken,
+        "x-tenant-id": TENANT,
+        "X-Feature-Registrations-Enabled": "true"
+      }
+    });
+    const pubBody = await pubStatus.json().catch(() => ({}));
+    if (!pubStatus.ok) {
+      return { test:"registrations:public-status-hold-expired", result:"FAIL", reason:"public-status-failed", pubStatus: pubStatus.status, pubBody };
+    }
+
+    const holdExpired = pubBody.holdExpiresAt && new Date(pubBody.holdExpiresAt).getTime() < Date.now();
+    const pass = pubBody.status === "cancelled"
+      && pubBody.paymentStatus === "failed"
+      && holdExpired;
+
+    return {
+      test: "registrations:public-status-hold-expired",
+      result: pass ? "PASS" : "FAIL",
+      publicStatus: {
+        status: pubBody.status,
+        paymentStatus: pubBody.paymentStatus,
+        holdExpiresAt: pubBody.holdExpiresAt,
+        holdExpired
+      },
+      cleanupCount: cleanup.body?.expiredCount,
+      steps: { eventId, regId }
+    };
+  },
+
   /* ===================== Reservations: CRUD Resources ===================== */
   "smoke:resources:crud": async ()=>{
     await ensureBearer();

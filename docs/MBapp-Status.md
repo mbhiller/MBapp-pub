@@ -6,6 +6,50 @@
 
 ---
 
+### Sprint AY — Public Registration Status Endpoint — ✅ Complete (2026-01-06)
+
+**Summary:** Added public `GET /registrations/{id}:public` endpoint to enable real-time status polling in public booking UX. Returns server truth (confirmation status, payment status, hold countdown, email/SMS delivery indicators) without exposing PII.
+
+**Deliverables:**
+- **Spec (E1):** Added `PublicRegistrationStatusResponse` schema and `GET /registrations/{id}:public` endpoint to [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml):
+  - Response fields (whitelisted, no PII): `id`, `eventId`, `status`, `paymentStatus`, `submittedAt`, `confirmedAt`, `holdExpiresAt`, `emailStatus`, `smsStatus`
+  - Message status shape: `{ status, sentAt, provider, errorMessage }` (no `to`, `subject`, `textBody`, `htmlBody`)
+  - Auth: public endpoint (no JWT), requires `X-MBapp-Public-Token` header
+  - Ran: `npm run spec:lint`, `spec:bundle`, `spec:types:api`, `spec:types:mobile` ✅
+- **API (E2):** Created [apps/api/src/registrations/public-get.ts](../apps/api/src/registrations/public-get.ts) handler:
+  - Token validation: SHA-256 hash + constant-time comparison vs `registration.publicTokenHash`
+  - Fetches registration + optional message lookups (confirmationMessageId, confirmationSmsMessageId)
+  - Guards: tenantId required, registration type check, 401 on invalid token, 404 on not found
+  - Returns whitelisted fields only (no PII/financials beyond payment status)
+- **API (E3):** Wired endpoint in [apps/api/src/index.ts](../apps/api/src/index.ts):
+  - Route: `GET /registrations/{id}:public` → `RegPublicGet.handle()`
+  - Positioned before auth middleware (public section, lines 282-287)
+  - Typecheck clean on apps/api, apps/web, apps/mobile ✅
+- **Web (E4):** Updated [apps/web/src/pages/PublicBookingPage.tsx](../apps/web/src/pages/PublicBookingPage.tsx):
+  - Polls server status after payment confirmation (20 tries, 1s delay)
+  - Shows: registration status, payment status, confirmed timestamp, hold countdown timer, email/SMS delivery indicators
+  - Stops polling on: `status=confirmed`, `status=cancelled`, or `paymentStatus=failed`
+  - Hold timer: displays "Xm Ys" remaining, shows "Hold expired" when past deadline
+- **Smokes (E5):** Added 2 core-tier smoke tests to [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs):
+  - `smoke:registrations:public-status-confirmed`: validates GET endpoint after successful payment (confirmed status, emailStatus=sent, smsStatus=sent) ✅
+  - `smoke:registrations:public-status-hold-expired`: validates GET endpoint after hold expiration (cancelled status, paymentStatus=failed, holdExpiresAt in past) ✅
+  - Added both to [ops/ci-smokes.json](../ops/ci-smokes.json) core tier
+- **Docs (E6):** Updated [MBapp-Foundations.md](MBapp-Foundations.md) Public Registration Status section and [smoke-coverage.md](smoke-coverage.md)
+
+**Verification:**
+- ✅ Typecheck: apps/api, apps/web, apps/mobile all clean
+- ✅ Smokes: both new tests pass independently and in core suite
+- ✅ Spec: lint, bundle, type generation all clean
+- ✅ Security: token validation uses constant-time comparison, no PII leakage
+
+**Impact:**
+- Enables public booking UX to show server truth instead of relying on local state or Stripe PI polling alone
+- Hold countdown provides urgency/transparency to users during checkout
+- Email/SMS delivery indicators build trust ("Confirmation sent at 2:30 PM")
+- No breaking changes: endpoint is additive, existing flows unchanged
+
+---
+
 ### Sprint AW — Postmark Email Provider Integration — ✅ Complete (2026-01-06)
 
 **Summary:** Integrated real transactional email via Postmark behind the simulate-mode seam. CI remains deterministic; production/staging can send real emails.
