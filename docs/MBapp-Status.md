@@ -103,6 +103,30 @@
 - No external templating engine; uses string interpolation (minimal, deterministic).
 - Var validation on render (missing required vars throw clear error).
 
+### Sprint BE — Message Templates Contract Documentation — ✅ Complete (2026-01-06)
+
+**Summary:** Documented the existing message template system contract with explicit render-at-enqueue + freeze semantics, retry behavior, public resend contract, and template conventions. No code changes; pure documentation sprint formalizing Sprint BA implementation.
+
+**Deliverables (E1):**
+- **Docs (E1):** Enhanced [MBapp-Foundations.md](MBapp-Foundations.md#message-templates-v1-sprint-babe) "Message Templates v1" section:
+  - **Render-at-Enqueue Contract:** Explicitly documented that `enqueueTemplatedEmail()` and `enqueueTemplatedSMS()` render templates once at enqueue time and persist frozen payload (`subject`/`body`) + audit metadata (`templateKey`/`templateVars`) + operational metadata (`metadata` field for correlation).
+  - **Retry Semantics:** Documented that retry handlers (`POST /messages/{id}:retry`, batch `POST /messages:retry-failed`, background job `retry-failed-messages`) send stored `subject`/`body` verbatim; do NOT re-render templates; preserve `templateKey`/`templateVars` for audit but don't use during retry.
+  - **Public Resend Contract:** Added subsection documenting `POST /registrations/{id}:resend` endpoint ([apps/api/src/registrations/public-resend.ts](../apps/api/src/registrations/public-resend.ts)): public auth via `X-MBapp-Public-Token`, retries only failed confirmation messages, rate-limited (max 3 resends, min 2 min apart), safe response projections (never exposes `subject`/`body`).
+  - **Template Conventions:** Added conventions block documenting templateKey format (dot-separated entity.action.channel), templateVars vs metadata distinction, validation behavior.
+
+**Verification:**
+- ✅ No code changes (documentation-only sprint)
+- ✅ Docs match actual behavior in [apps/api/src/common/templates.ts](../apps/api/src/common/templates.ts), [apps/api/src/common/notify.ts](../apps/api/src/common/notify.ts), [apps/api/src/messages/retry.ts](../apps/api/src/messages/retry.ts), [apps/api/src/registrations/public-resend.ts](../apps/api/src/registrations/public-resend.ts)
+
+**Impact:**
+- Explicit freeze contract documented: ensures team understands retry determinism (template copy changes affect only new messages)
+- Public resend behavior formalized: clarifies rate limiting and safe response shape
+- Template conventions established: provides guardrails for future template additions
+
+**Where to read more:**
+- [MBapp-Foundations.md](MBapp-Foundations.md#message-templates-v1-sprint-babe): Full template system contract including render-at-enqueue pattern, retry semantics, public resend behavior, and conventions
+- [smoke-coverage.md](smoke-coverage.md): Template-related smokes (`smoke:registrations:confirmation-message`, `smoke:registrations:confirmation-sms`) with non-brittle assertions validating `templateKey`/`templateVars` metadata
+
 ### Sprint AZ — Message Retry Endpoint — ✅ Complete (2026-01-06)
 
 **Summary:** Added a manual retry endpoint for failed messages with simulate/real parity and smoke coverage.
