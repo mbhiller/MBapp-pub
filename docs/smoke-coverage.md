@@ -124,6 +124,7 @@ Smokes are organized by tier for targeted CI validation:
   - Creates a failed email message directly via `/objects/message` (status=`failed`, retryCount=0), then calls `POST /messages/{id}:retry` with `X-Feature-Notify-Simulate: true`.
   - Asserts the message transitions to `status=sent`, sets `sentAt` and `lastAttemptAt`, increments `retryCount`, and sets a provider value (postmark in simulate path).
   - Flags/Headers: `X-Feature-Notify-Simulate: true` (CI-safe; no external provider calls).
+  - Copy semantics: retries use stored `subject`/`body` (frozen payload); no template re-render on retry.
 
 ## Recent Additions (Sprint BB)
 
@@ -131,17 +132,18 @@ Smokes are organized by tier for targeted CI validation:
   - Seeds two failed messages (email + sms) and one sent control via `/objects/message`, then lists with `status=failed` to ensure only failed are returned.
   - Calls `POST /messages:retry-failed?limit=1` with `X-Feature-Notify-Simulate: true`, asserts exactly one failed message is retried to `sent` with retryCount increment, and confirms it no longer appears in the failed list.
   - Flags/Headers: `X-Feature-Notify-Simulate: true` (simulate-safe); uses cursor-friendly list + bounded batch.
+  - Copy semantics: batch retries use stored `subject`/`body` (frozen payload); no template re-render on retry.
 
 ## Recent Additions (Sprint BA)
 
 - **Confirmation Email (templated):** `smoke:registrations:confirmation-message`
   - Creates public registration with email, runs checkout + Stripe webhook, asserts message created with `status=sent`, `templateKey="registration.confirmed.email"`, and `templateVars` contains `registrationId` and `paymentIntentId`.
-  - **Non-brittle assertions:** Validates template metadata exists, not rendered subject/body text (allows template copy updates without breaking test).
+  - **Stable assertions:** Validate template metadata exists (`templateKey`/`templateVars`), not rendered subject/body text (allows copy updates without breaking tests).
   - Flags/Headers: `X-Feature-Registrations-Enabled: true`, `X-Feature-Stripe-Simulate: true`, `X-Feature-Notify-Simulate: true`.
 
 - **Confirmation SMS (templated):** `smoke:registrations:confirmation-sms`
   - Creates public registration with phone, runs checkout + Stripe webhook, asserts message created with `channel=sms`, `status=sent`, `templateKey="registration.confirmed.sms"`, and `templateVars` contains `registrationId`.
-  - **Non-brittle assertions:** Validates template metadata exists, not rendered body text (allows template copy updates without breaking test).
+  - **Stable assertions:** Validate template metadata exists (`templateKey`/`templateVars`), not rendered body text (allows copy updates without breaking tests).
   - Flags/Headers: `X-Feature-Registrations-Enabled: true`, `X-Feature-Stripe-Simulate: true`, `X-Feature-Notify-Simulate: true`.
 
 ## Recent Additions (Sprint BD)
@@ -155,6 +157,7 @@ Smokes are organized by tier for targeted CI validation:
   - Seeds a failed message, then calls `POST /internal/jobs:run` with `jobType="retry-failed-messages"` and `X-Feature-Notify-Simulate: true`.
   - Asserts the message transitions to `sent`, `retryCount` increments, and job counts reflect examined/attempted/sent.
   - Flags/Headers: `X-Feature-Notify-Simulate: true` (CI-safe; no external providers), admin token with `ops:jobs:run`.
+  - Copy semantics: background retries use stored `subject`/`body` (frozen payload); no template re-render on retry.
 
 ## Recent Additions (Sprint BC)
 

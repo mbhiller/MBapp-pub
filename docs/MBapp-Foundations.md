@@ -72,19 +72,46 @@
 - **Safety & bounds:** Batch clamps `limit` server-side and only processes messages currently `status=failed`; skips others without failing the batch. Simulate header `X-Feature-Notify-Simulate: true` (or env flag) is honored during retry, mirroring single retry behavior.
 - **Projection:** Batch response returns lightweight `MessageRetryResult` (id, status, retryCount, lastAttemptAt, sentAt, provider, errorMessage) to keep payload minimal; subject/body not returned.
 
-### Message Templates v1 (Sprint BA)
+### Message Templates v1 (Sprint BA/BE)
 
-- **Template System:** Minimal, deterministic template renderer with no external deps. Validates required vars at render time.
-- **Templates:**
-  - `registration.confirmed.email`: Subject="Registration Confirmed", body contains registrationId + paymentIntentId. Required vars: `registrationId`, `paymentIntentId`.
-  - `registration.confirmed.sms`: Body contains registrationId. Required vars: `registrationId`.
-- **Storage:** Message object stores both rendered copy (`subject`/`body`) and template metadata (`templateKey`/`templateVars`):
-  - Rendered copy: used for send (provider consistency) and audit trail.
-  - Template metadata: allows future re-renders without re-fetching context vars; enables template versioning and migrations.
-  - Metadata field (optional): carries contextual data (e.g., `registrationId`, `paymentIntentId`, `eventId`) for audit/filtering.
-- **Enqueue flow:** `enqueueTemplatedEmail()` and `enqueueTemplatedSMS()` render template, validate vars, create message with rendered copy + metadata, then send (simulate or real).
-- **Retry behavior:** Retry handler reads stored `subject`/`body` verbatim; re-renders only on demand (not yet implemented). Stored template metadata preserved on retry for future audit.
-- **No brittle assertions:** Smokes assert `templateKey` and required `templateVars` keys exist, not on rendered text (allows copy updates without breaking tests).
+**Template System:** Minimal, deterministic template renderer with no external deps. Validates required vars at render time.
+
+**Current Templates:**
+- `registration.confirmed.email`: Subject="Registration Confirmed", body contains registrationId + paymentIntentId. Required vars: `registrationId`, `paymentIntentId`.
+- `registration.confirmed.sms`: Body contains registrationId. Required vars: `registrationId`.
+
+**Render-at-Enqueue Contract (Freeze Pattern):**
+- `enqueueTemplatedEmail()` and `enqueueTemplatedSMS()` render templates **once at enqueue time** and persist:
+  - **Frozen payload:** `subject`/`body` (rendered copy sent to provider; used for all retries)
+  - **Audit metadata:** `templateKey`, `templateVars` (preserved for audit trail; enables future template migrations)
+  - **Operational metadata:** `metadata` field carries correlation data (e.g., `registrationId`, `paymentIntentId`, `eventId`) for filtering/reporting
+- **Why freeze?** Ensures deterministic retries (identical copy), provider consistency, and audit trail integrity. Template copy changes affect only NEW messages.
+
+**Retry Semantics:**
+- Retry handler (`POST /messages/{id}:retry`, batch `POST /messages:retry-failed`, background job `retry-failed-messages`) reads stored `subject`/`body` and sends verbatim.
+- **Does NOT re-render templates** on retry; uses frozen payload from original enqueue.
+- `templateKey` and `templateVars` preserved in message record for future audit/migrations but not used during retry.
+- Increments `retryCount`, updates `lastAttemptAt`, clears `errorMessage` on retry attempt.
+
+**Public Resend (Sprint BC):**
+- **Endpoint:** `POST /registrations/{id}:resend` ([apps/api/src/registrations/public-resend.ts](../apps/api/src/registrations/public-resend.ts))
+- **Auth:** Public endpoint using `X-MBapp-Public-Token` header (SHA256 hash verified against registration's `publicTokenHash`)
+- **Behavior:** Loads registration's linked `confirmationMessageId` and `confirmationSmsMessageId`; retries **only failed messages** via shared `retryMessageRecord()` logic (same freeze/no-re-render semantics)
+- **Rate Limiting:** Max 3 resends per registration; min 2 minutes between resends (tracked via `publicResendCount`, `publicResendLastAt`)
+- **Channel Filter:** Query param `?channel=email|sms|both` (default `both`)
+- **Safe Response:** Returns `{ registrationId, email, sms, attempted, rateLimited }` where `email`/`sms` project only safe fields (`status`, `sentAt`, `provider`, `errorMessage`); **never exposes `subject`/`body`** in response
+
+**Template Conventions:**
+- **templateKey format:** Dot-separated namespace reflecting entity.action.channel (e.g., `registration.confirmed.email`, `registration.confirmed.sms`)
+- **templateVars:** Contain only values needed to render copy (IDs, URLs, amount strings, names); should be minimal and specific to template rendering
+- **metadata vs templateVars:**
+  - `templateVars`: Input to template renderer; required for copy generation
+  - `metadata`: Operational correlation data (eventId, registrationId, paymentIntentId); used for filtering/audit but not template rendering
+- **Validation:** `renderTemplate()` validates required vars at render time; throws descriptive error if any required var missing or falsy
+
+**Testing & Assertions:**
+- Smokes assert `templateKey` and required `templateVars` keys exist, **not rendered text** (allows copy updates without breaking tests)
+- Example: `assert(msg.templateKey === "registration.confirmed.email")`, `assert(msg.templateVars.registrationId)`
 
 ### Background Jobs (Sprint BD)
 
