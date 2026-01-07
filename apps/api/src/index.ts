@@ -119,6 +119,8 @@ import * as RegCheckout from "./registrations/checkout";
 import * as RegPublicGet from "./registrations/public-get";
 import * as RegPublicResend from "./registrations/public-resend";
 import * as RegCleanupExpiredHolds from "./registrations/cleanup-expired-holds";
+import * as RegCancel from "./registrations/cancel";
+import * as RegCancelRefund from "./registrations/cancel-refund";
 // Internal jobs
 import * as JobsRun from "./jobs/run";
 import { runBackgroundJobs } from "./jobs/background";
@@ -369,7 +371,8 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
 
     // Registrations (Tier-1 foundation; feature-guarded per request)
     {
-      const m = path.match(/^\/registrations(?:\/([^/]+))?$/i);
+      // Exclude action suffixes like ":cancel"/":cancel-refund" from the base matcher by disallowing ':' in the id
+      const m = path.match(/^\/registrations(?:\/([^\/:]+))?$/i);
       if (m) {
         const [, id] = m;
         if (method === "GET" && !id)    { return RegList.handle(event); }
@@ -385,6 +388,26 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
     if (method === "POST" && path === "/registrations:cleanup-expired-holds") {
       requirePerm(auth, "registration:write");
       return RegCleanupExpiredHolds.handle(event);
+    }
+
+    // Registrations: operator cancel
+    {
+      const m = path.match(/^\/registrations\/([^/]+):cancel$/i);
+      if (method === "POST" && m) {
+        const [, id] = m;
+        requirePerm(auth, "registration:write");
+        return RegCancel.handle(withId(event, id));
+      }
+    }
+
+    // Registrations: operator cancel+refund
+    {
+      const m = path.match(/^\/registrations\/([^/]+):cancel-refund$/i);
+      if (method === "POST" && m) {
+        const [, id] = m;
+        requirePerm(auth, "registration:write");
+        return RegCancelRefund.handle(withId(event, id));
+      }
     }
 
     // Messages: retry failed message

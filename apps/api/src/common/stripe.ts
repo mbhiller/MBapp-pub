@@ -38,6 +38,14 @@ export interface StripeEvent {
   };
 }
 
+/** Stripe Refund (minimal, non-sensitive) */
+export interface StripeRefundResult {
+  id: string;
+  amount?: number;
+  currency?: string;
+  provider?: string;
+}
+
 /** Create a PaymentIntent (real or simulated) */
 export async function createPaymentIntent(params: {
   amount: number;
@@ -157,4 +165,43 @@ export async function verifyWebhook(params: {
   } catch (err: any) {
     throw new Error(`Webhook signature verification failed: ${err.message}`);
   }
+}
+
+/** Create a Refund (real or simulated) */
+export async function createRefund(params: {
+  paymentIntentId: string;
+  amount?: number;
+  event?: APIGatewayProxyEventV2;
+}): Promise<StripeRefundResult> {
+  const { paymentIntentId, amount, event } = params;
+
+  // Simulate mode: return deterministic fake Refund
+  if (isSimulateMode(event)) {
+    const fakeId = `re_sim_${Date.now()}_${crypto.randomBytes(8).toString("hex")}`;
+    return {
+      id: fakeId,
+      amount,
+      provider: "stripe",
+    };
+  }
+
+  const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+  if (!STRIPE_SECRET_KEY) {
+    throw new Error("STRIPE_SECRET_KEY environment variable not set");
+  }
+
+  const Stripe = (await import("stripe")).default;
+  const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2025-12-15.clover" });
+
+  const refund = await stripe.refunds.create({
+    payment_intent: paymentIntentId,
+    amount,
+  });
+
+  return {
+    id: refund.id,
+    amount: refund.amount ?? undefined,
+    currency: (refund as any).currency ?? undefined,
+    provider: "stripe",
+  };
 }

@@ -398,6 +398,47 @@ Optional RV spot purchase as an add‑on during public booking. Contract aligns 
     "rateLimited": false
   }
   ```
+
+  ### Registration State Machine (Sprint BH)
+
+  - States: `draft → submitted → confirmed → cancelled`.
+  - Transitions:
+    - `draft → submitted`: via checkout; sets `submittedAt`, `holdExpiresAt`.
+    - `submitted → confirmed`: via Stripe webhook `payment_intent.succeeded`; sets `confirmedAt`, `paymentStatus=paid`.
+    - `submitted → cancelled`: on hold expiration cleanup; sets `paymentStatus=failed`, releases capacity.
+    - `confirmed → cancelled`: via operator actions (see below). Once cancelled, terminal.
+  - Capacity semantics: seat and optional RV reserves are released exactly once on transitions to `cancelled` (expiry or operator actions). Server-side release is idempotent and clamped at zero.
+
+  ### Payment Status Enum (Sprint BH)
+
+  - `pending`: Checkout initiated; hold active; awaiting payment confirmation.
+  - `paid`: Payment confirmed (Stripe PaymentIntent succeeded); registration is confirmed.
+  - `failed`: Payment failed or hold expired before confirmation; registration cancelled.
+  - `refunded`: Operator cancelled after payment was captured and a refund was created successfully.
+
+  ### Cancel vs Cancel-Refund (Sprint BH)
+
+  - Cancel (no refund): `POST /registrations/{id}:cancel`
+    - Auth: `registration:write`.
+    - Guards: Allowed from `draft|submitted|confirmed`. When cancelling from `submitted`, sets `paymentStatus=failed` (no refund). When from `confirmed`, no refund issued here.
+    - Effects: Sets `status=cancelled`, `cancelledAt` (first time only), releases seat and RV capacity once.
+    - Idempotent: Replays return the already-cancelled registration without double release.
+    - Handler: [apps/api/src/registrations/cancel.ts](../apps/api/src/registrations/cancel.ts)
+
+  - Cancel + Refund: `POST /registrations/{id}:cancel-refund`
+    - Auth: `registration:write`.
+    - Guards: Only from `confirmed` with `paymentStatus=paid`.
+    - Effects: Creates a refund (simulate or real), sets `status=cancelled`, `paymentStatus=refunded`, assigns `cancelledAt`/`refundedAt` (first set only), stores `refundId`, releases seat and RV capacity once.
+    - Idempotent: If already refunded, returns `{ registration, refund: null }`.
+    - Handlers: [apps/api/src/registrations/cancel-refund.ts](../apps/api/src/registrations/cancel-refund.ts), refund helper [apps/api/src/common/stripe.ts](../apps/api/src/common/stripe.ts).
+    - Simulate: Honor `X-Feature-Stripe-Simulate: true` to return deterministic refund results without external Stripe traffic.
+
+  ### Public Status — Cancel/Refund Surface (Sprint BH)
+
+  - `GET /registrations/{id}:public` now includes `cancelledAt` and `refundedAt` when applicable.
+  - `paymentStatus` values are normalized to the enum above (e.g., always `paid`, never `succeeded`).
+  - Safe response: Never exposes `refundId` or other sensitive payment fields.
+  - Handler: [apps/api/src/registrations/public-get.ts](../apps/api/src/registrations/public-get.ts)
 - **Simulate behavior:** Respects `X-Feature-Notify-Simulate` header; reuses shared `retryMessageRecord` logic so behavior identical to operator retry endpoints.
 - **Web UX:** "Resend Confirmation" button appears when `status=confirmed` AND (emailStatus=failed OR smsStatus=failed); disabled while loading; shows rate-limit message if hit; refreshes status after successful resend.
 
