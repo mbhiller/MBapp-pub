@@ -145,9 +145,35 @@ Smokes are organized by tier for targeted CI validation:
 - **Public Booking — RV Hold Expiration Release:** `smoke:public-booking:rv-hold-expiration-release`
   - Checkout A with `rvQty=1`, force `holdExpiresAt` to past, run cleanup to cancel + release capacity, then checkout B with `rvQty=1`.
   - **Stable assertions:** Cleanup returns success; second checkout succeeds (capacity released).
+  - **ReservationHold assertions:** After cleanup, fetches holds for regA and validates all transition from held/confirmed to `state="cancelled"` with `releaseReason="expired"` and `releasedAt` present.
   - Flags/Headers: `X-Feature-Registrations-Enabled: true`, `X-Feature-Stripe-Simulate: true`.
 
+## Recent Additions (Sprint BJ)
+
+- **Registrations Cancel + Refund (holds assertions):** `smoke:registrations:cancel-refund-happy-path`
+  - Creates event with capacity 1 (RV enabled), registers with `rvQty=1`, completes checkout + simulated Stripe webhook, then calls `POST /registrations/{id}:cancel-refund`.
+  - **Stable assertions:** Registration `status=cancelled`, `paymentStatus=refunded`, both `cancelledAt` and `refundedAt` present; event counters reversed (`reservedCount=0`, `rvReserved=0`); public GET shows `status=cancelled`, `paymentStatus=refunded`, includes `cancelledAt`/`refundedAt`, and never exposes `refundId`.
+  - **ReservationHold assertions:** Fetches holds by owner and asserts any prior holds have `state="released"` and `releasedAt` present; validates `allReleased=true`.
+  - Flags/Headers: `X-Feature-Registrations-Enabled: true`, `X-Feature-Stripe-Simulate: true`.
+
+- **Public Booking — RV Happy Path (holds assertions):** `smoke:public-booking:rv-happy-path`
+  - Creates RV-enabled event (`rvEnabled=true`, priced), public registration with `rvQty=2`, completes checkout + simulated Stripe webhook confirmation.
+  - **Stable assertions:** PaymentIntent created; `totalAmount === rvQty * rvUnitAmount`; `fees[]` contains RV line `{ key:"rv", qty, unitAmount, amount }`; registration `status=confirmed`, `paymentStatus=paid`.
+  - **ReservationHold assertions:** Fetches holds via `GET /reservation-holds?ownerType=registration&ownerId={regId}` and asserts:
+    - Seat hold present: `state="confirmed"`, `qty=1`
+    - RV hold present: `state="confirmed"`, `qty=2` (matches rvQty)
+    - Both holds have `itemType` matching their purpose.
+  - Flags/Headers: `X-Feature-Registrations-Enabled: true`, `X-Feature-Stripe-Simulate: true`, `X-Feature-Notify-Simulate: true`.
+
 ## Recent Additions (Sprint AZ)
+
+- **Messages Retry (simulate):** `smoke:messages:retry-failed`
+  - Creates a failed email message directly via `/objects/message` (status=`failed`, retryCount=0), then calls `POST /messages/{id}:retry` with `X-Feature-Notify-Simulate: true`.
+  - Asserts the message transitions to `status=sent`, sets `sentAt` and `lastAttemptAt`, increments `retryCount`, and sets a provider value (postmark in simulate path).
+  - Flags/Headers: `X-Feature-Notify-Simulate: true` (CI-safe; no external provider calls).
+  - Copy semantics: retries use stored `subject`/`body` (frozen payload); no template re-render on retry.
+
+## Recent Additions (Sprint BB)
 
 - **Messages Retry (simulate):** `smoke:messages:retry-failed`
   - Creates a failed email message directly via `/objects/message` (status=`failed`, retryCount=0), then calls `POST /messages/{id}:retry` with `X-Feature-Notify-Simulate: true`.

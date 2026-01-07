@@ -5,6 +5,7 @@ import { getTenantId } from "../common/env";
 import { getObjectById, updateObject, releaseEventSeat, releaseEventRv } from "../objects/repo";
 import { REGISTRATION_STATUS, REGISTRATION_PAYMENT_STATUS } from "./constants";
 import { guardRegistrations } from "./feature";
+import { releaseReservationHoldsForOwner } from "../reservations/holds";
 
 export async function handle(event: APIGatewayProxyEventV2) {
   try {
@@ -53,6 +54,19 @@ export async function handle(event: APIGatewayProxyEventV2) {
       if (rvQty > 0) {
         try { await releaseEventRv({ tenantId, eventId, qty: rvQty }); } catch (_) {}
       }
+    }
+
+    // Release reservation holds on operator cancel
+    try {
+      await releaseReservationHoldsForOwner({
+        tenantId,
+        ownerType: "registration",
+        ownerId: id,
+        reason: "operator_cancel",
+        event,
+      });
+    } catch (_) {
+      // ignore; counters already released
     }
 
     return ok(updated);

@@ -4,6 +4,28 @@
  */
 
 export interface paths {
+    "/reservation-holds/by-owner": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List reservation holds by owner (internal)
+         * @description Internal/operator endpoint to list reservation hold ledger records by owner.
+         *     Useful for smokes and admin introspection. Prefer generic /objects endpoints for general CRUD.
+         *
+         */
+        get: operations["listReservationHoldsByOwner"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/objects/{type}": {
         parameters: {
             query?: never;
@@ -2871,6 +2893,47 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        ReservationHold: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "reservationHold";
+            /**
+             * @description Owning entity type for the hold (e.g., registration)
+             * @enum {string}
+             */
+            ownerType: "registration";
+            ownerId: string;
+            /**
+             * @description Scope type for the resource being reserved (e.g., event)
+             * @enum {string}
+             */
+            scopeType: "event";
+            /** @description Scope ID (e.g., eventId) */
+            scopeId: string;
+            /**
+             * @description Reserved item kind within the scope
+             * @enum {string}
+             */
+            itemType: "seat" | "rv";
+            qty: number;
+            /**
+             * @description Current state of the reservation hold
+             * @enum {string}
+             */
+            state: "held" | "confirmed" | "released" | "cancelled";
+            /** Format: date-time */
+            heldAt: string;
+            /** Format: date-time */
+            expiresAt?: string | null;
+            /** Format: date-time */
+            confirmedAt?: string | null;
+            /** Format: date-time */
+            releasedAt?: string | null;
+            /** @description Optional freeform reason for release/cancel (v1; consider enum later) */
+            releaseReason?: string | null;
+            metadata?: {
+                [key: string]: unknown;
+            } | null;
+        };
         Organization: components["schemas"]["ObjectBase"] & {
             /** @enum {string} */
             type: "organization";
@@ -3945,6 +4008,33 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    listReservationHoldsByOwner: {
+        parameters: {
+            query: {
+                /** @description Owning entity type (currently registration) */
+                ownerType: "registration";
+                /** @description Owner ID (e.g., registration id) */
+                ownerId: string;
+                /** @description Optional state filter */
+                state?: "held" | "confirmed" | "released" | "cancelled";
+                /** @description Maximum number of items to return */
+                limit?: components["parameters"]["Limit"];
+                next?: components["parameters"]["Next"];
+            };
+            header: {
+                "x-tenant-id": components["parameters"]["TenantHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["ListPage"];
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
     listObjects: {
         parameters: {
             query?: {

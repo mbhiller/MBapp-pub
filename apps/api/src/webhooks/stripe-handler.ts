@@ -6,6 +6,7 @@ import { getTenantId } from "../common/env";
 import { badRequest, ok, error as respondError } from "../common/responses";
 import { enqueueTemplatedEmail, enqueueTemplatedSMS } from "../common/notify";
 import { REGISTRATION_STATUS, REGISTRATION_PAYMENT_STATUS } from "../registrations/constants";
+import { confirmReservationHoldsForOwner } from "../reservations/holds";
 
 /** 
  * Stripe webhook handler (POST /webhooks/stripe)
@@ -117,6 +118,18 @@ async function handlePaymentSucceeded(
       confirmedAt: new Date().toISOString(),
     },
   });
+
+  // Confirm reservation holds for this registration
+  try {
+    await confirmReservationHoldsForOwner({
+      tenantId,
+      ownerType: "registration",
+      ownerId: registrationId,
+      event,
+    });
+  } catch (err: any) {
+    console.error(`[stripe-webhook] Failed to confirm holds for ${registrationId}:`, err.message);
+  }
 
   console.log(`[stripe-webhook] Registration ${registrationId} confirmed via PaymentIntent ${paymentIntent.id}`);
 

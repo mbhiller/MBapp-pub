@@ -82,6 +82,7 @@ import * as InvAdjust from "./inventory/adjust";
 // Reservations & Resources
 import * as ReservationsCheckConflicts from "./reservations/check-conflicts";
 import * as ResourcesAvailability from "./resources/availability";
+import * as ReservationHoldsList from "./reservations/holds-list";
 
 
 // Tools
@@ -608,6 +609,12 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
     if (method === "POST" && path === "/reservations:check-conflicts") {
       requirePerm(auth, "reservation:read");
       return ReservationsCheckConflicts.handle(event);
+    }
+
+    // Reservation holds: by-owner listing
+    if (method === "GET" && path === "/reservation-holds") {
+      requirePerm(auth, "registration:read");
+      return ReservationHoldsList.handle(event);
     }
 
     // Resources: availability query

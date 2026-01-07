@@ -6,6 +6,7 @@ import { getObjectById, updateObject, releaseEventSeat, releaseEventRv } from ".
 import { guardRegistrations } from "./feature";
 import { createRefund } from "../common/stripe";
 import { REGISTRATION_STATUS, REGISTRATION_PAYMENT_STATUS } from "./constants";
+import { releaseReservationHoldsForOwner } from "../reservations/holds";
 
 export async function handle(event: APIGatewayProxyEventV2) {
   try {
@@ -65,6 +66,19 @@ export async function handle(event: APIGatewayProxyEventV2) {
       if (rvQty > 0) {
         try { await releaseEventRv({ tenantId, eventId, qty: rvQty }); } catch (_) {}
       }
+    }
+
+    // Release reservation holds on refund
+    try {
+      await releaseReservationHoldsForOwner({
+        tenantId,
+        ownerType: "registration",
+        ownerId: id,
+        reason: "refund",
+        event,
+      });
+    } catch (_) {
+      // ignore; counters already released
     }
 
     // Include refund details in response (non-sensitive)

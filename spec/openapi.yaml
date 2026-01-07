@@ -38,6 +38,56 @@ tags:
   - name: Admin
     description: Administrative and audit endpoints.
 paths:
+  /reservation-holds/by-owner:
+    get:
+      tags:
+        - Admin
+      operationId: listReservationHoldsByOwner
+      summary: List reservation holds by owner (internal)
+      description: |
+        Internal/operator endpoint to list reservation hold ledger records by owner.
+        Useful for smokes and admin introspection. Prefer generic /objects endpoints for general CRUD.
+      x-mbapp-permission: registration:read
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - name: ownerType
+          in: query
+          required: true
+          schema:
+            type: string
+            enum:
+              - registration
+          description: Owning entity type (currently registration)
+        - name: ownerId
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Owner ID (e.g., registration id)
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - held
+              - confirmed
+              - released
+              - cancelled
+          description: Optional state filter
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Next'
+      responses:
+        '200':
+          $ref: '#/components/responses/ListPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /objects/{type}:
     get:
       tags:
@@ -4360,6 +4410,81 @@ components:
         - tenantId
         - createdAt
         - updatedAt
+    ReservationHold:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          description: Ledger object for count-based holds/confirmations (e.g., event seats, RV spots).
+          required:
+            - type
+            - ownerType
+            - ownerId
+            - scopeType
+            - scopeId
+            - itemType
+            - qty
+            - state
+            - heldAt
+          properties:
+            type:
+              type: string
+              enum:
+                - reservationHold
+            ownerType:
+              type: string
+              description: Owning entity type for the hold (e.g., registration)
+              enum:
+                - registration
+            ownerId:
+              type: string
+            scopeType:
+              type: string
+              description: Scope type for the resource being reserved (e.g., event)
+              enum:
+                - event
+            scopeId:
+              type: string
+              description: Scope ID (e.g., eventId)
+            itemType:
+              type: string
+              description: Reserved item kind within the scope
+              enum:
+                - seat
+                - rv
+            qty:
+              type: number
+              minimum: 1
+            state:
+              type: string
+              enum:
+                - held
+                - confirmed
+                - released
+                - cancelled
+              description: Current state of the reservation hold
+            heldAt:
+              type: string
+              format: date-time
+            expiresAt:
+              type: string
+              format: date-time
+              nullable: true
+            confirmedAt:
+              type: string
+              format: date-time
+              nullable: true
+            releasedAt:
+              type: string
+              format: date-time
+              nullable: true
+            releaseReason:
+              type: string
+              nullable: true
+              description: Optional freeform reason for release/cancel (v1; consider enum later)
+            metadata:
+              type: object
+              additionalProperties: true
+              nullable: true
     Organization:
       allOf:
         - $ref: '#/components/schemas/ObjectBase'

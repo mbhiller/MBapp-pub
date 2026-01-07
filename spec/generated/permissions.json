@@ -4,6 +4,7 @@
   "GET /inventory/{id}/onhand": "inventory:read",
   "GET /inventory/{id}/onhand:by-location": "inventory:read",
   "GET /messages": "message:read",
+  "GET /reservation-holds/by-owner": "registration:read",
   "GET /views": "view:read",
   "GET /views/{id}": "view:read",
   "GET /workspaces": "workspace:read",

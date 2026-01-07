@@ -3,10 +3,11 @@ import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import crypto from "crypto";
 import { ok, badRequest, conflictError, error as respondError } from "../common/responses";
 import { getTenantId } from "../common/env";
-import { getObjectById, updateObject, reserveEventSeat, reserveEventRv, releaseEventSeat } from "../objects/repo";
+import { getObjectById, updateObject, reserveEventSeat, reserveEventRv, releaseEventSeat, releaseEventRv } from "../objects/repo";
 import { guardRegistrations } from "./feature";
 import { createPaymentIntent } from "../common/stripe";
 import { REGISTRATION_STATUS, REGISTRATION_PAYMENT_STATUS } from "./constants";
+import { createHeldReservationHold, releaseReservationHoldsForOwner } from "../reservations/holds";
 
 /** Constant-time string compare to avoid timing leaks */
 function constantTimeEqual(a: string, b: string) {
@@ -139,6 +140,42 @@ export async function handle(event: APIGatewayProxyEventV2) {
         try { await releaseEventSeat({ tenantId, eventId: (registration as any).eventId }); } catch (_) {}
         throw err;
       }
+    }
+
+    // Create reservation holds for ledger tracking (only after both seat and RV succeed)
+    try {
+      await createHeldReservationHold({
+        tenantId,
+        ownerType: "registration",
+        ownerId: (registration as any).id,
+        scopeType: "event",
+        scopeId: (registration as any).eventId,
+        itemType: "seat",
+        qty: 1,
+        expiresAt: holdExpiresAt,
+        event,
+      });
+
+      if (rvQty > 0) {
+        await createHeldReservationHold({
+          tenantId,
+          ownerType: "registration",
+          ownerId: (registration as any).id,
+          scopeType: "event",
+          scopeId: (registration as any).eventId,
+          itemType: "rv",
+          qty: rvQty,
+          expiresAt: holdExpiresAt,
+          event,
+        });
+      }
+    } catch (err: any) {
+      // If hold creation fails, release counters to be safe
+      try { await releaseEventSeat({ tenantId, eventId: (registration as any).eventId }); } catch (_) {}
+      if (rvQty > 0) {
+        try { await releaseEventRv({ tenantId, eventId: (registration as any).eventId, qty: rvQty }); } catch (_) {}
+      }
+      throw err;
     }
 
     // Use computed total amount for PaymentIntent (minor units)
