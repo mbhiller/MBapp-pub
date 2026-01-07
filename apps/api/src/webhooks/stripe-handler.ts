@@ -5,6 +5,7 @@ import { getObjectById, updateObject } from "../objects/repo";
 import { getTenantId } from "../common/env";
 import { badRequest, ok, error as respondError } from "../common/responses";
 import { enqueueTemplatedEmail, enqueueTemplatedSMS } from "../common/notify";
+import { REGISTRATION_STATUS, REGISTRATION_PAYMENT_STATUS } from "../registrations/constants";
 
 /** 
  * Stripe webhook handler (POST /webhooks/stripe)
@@ -99,7 +100,7 @@ async function handlePaymentSucceeded(
   }
 
   // Idempotency check: already confirmed
-  if ((registration as any).paymentStatus === "paid" && (registration as any).confirmedAt) {
+  if ((registration as any).paymentStatus === REGISTRATION_PAYMENT_STATUS.paid && (registration as any).confirmedAt) {
     console.log(`[stripe-webhook] Registration ${registrationId} already confirmed, skipping update`);
     return;
   }
@@ -110,8 +111,8 @@ async function handlePaymentSucceeded(
     type: "registration",
     id: registrationId,
     body: {
-      status: "confirmed",
-      paymentStatus: "paid",
+      status: REGISTRATION_STATUS.confirmed,
+      paymentStatus: REGISTRATION_PAYMENT_STATUS.paid,
       paymentIntentId: paymentIntent.id,
       confirmedAt: new Date().toISOString(),
     },
@@ -209,7 +210,7 @@ async function handlePaymentFailed(
   }
 
   // Idempotency check: already marked as failed
-  if ((registration as any).paymentStatus === "failed") {
+  if ((registration as any).paymentStatus === REGISTRATION_PAYMENT_STATUS.failed) {
     console.log(`[stripe-webhook] Registration ${registrationId} already marked as failed, skipping update`);
     return;
   }
@@ -220,7 +221,7 @@ async function handlePaymentFailed(
     type: "registration",
     id: registrationId,
     body: {
-      paymentStatus: "failed",
+      paymentStatus: REGISTRATION_PAYMENT_STATUS.failed,
       paymentIntentId: paymentIntent.id,
     },
   });

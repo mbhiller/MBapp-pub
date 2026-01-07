@@ -5,6 +5,7 @@ import { getTenantId } from "../common/env";
 import { listObjects } from "../objects/repo";
 import { guardRegistrations } from "./feature";
 import { expireRegistrationHold } from "./expire-helper";
+import { REGISTRATION_STATUS } from "./constants";
 
 /**
  * POST /registrations:cleanup-expired-holds
@@ -25,7 +26,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const page = await listObjects({
       tenantId,
       type: "registration",
-      filters: { status: "submitted" },
+      filters: { status: REGISTRATION_STATUS.submitted },
       limit,
       fields: ["id", "status", "holdExpiresAt", "eventId"],
     });
@@ -38,7 +39,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
       const status = item?.status as string | undefined;
       const hold = item?.holdExpiresAt as string | undefined;
       const holdMs = hold ? new Date(hold).getTime() : undefined;
-      if (!id || status !== "submitted") continue;
+      if (!id || status !== REGISTRATION_STATUS.submitted) continue;
       if (holdMs === undefined || holdMs >= nowMs) continue;
 
       const res = await expireRegistrationHold({ tenantId, regId: id });

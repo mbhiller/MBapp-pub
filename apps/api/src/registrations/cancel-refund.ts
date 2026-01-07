@@ -5,6 +5,7 @@ import { getTenantId } from "../common/env";
 import { getObjectById, updateObject, releaseEventSeat, releaseEventRv } from "../objects/repo";
 import { guardRegistrations } from "./feature";
 import { createRefund } from "../common/stripe";
+import { REGISTRATION_STATUS, REGISTRATION_PAYMENT_STATUS } from "./constants";
 
 export async function handle(event: APIGatewayProxyEventV2) {
   try {
@@ -29,12 +30,12 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const rvQty = Math.max(0, Number((reg as any).rvQty || 0));
 
     // Idempotency: already refunded or refundedAt set
-    if (paymentStatus === "refunded" || refundedAtExisting) {
+    if (paymentStatus === REGISTRATION_PAYMENT_STATUS.refunded || refundedAtExisting) {
       return ok({ registration: reg, refund: null });
     }
 
     // Guard: must be confirmed + paid
-    const allowed = currentStatus === "confirmed" && paymentStatus === "paid";
+    const allowed = currentStatus === REGISTRATION_STATUS.confirmed && paymentStatus === REGISTRATION_PAYMENT_STATUS.paid;
     if (!allowed) {
       return conflictError("Registration not eligible for cancel+refund", { code: "invalid_state", status: currentStatus, paymentStatus });
     }
@@ -49,8 +50,8 @@ export async function handle(event: APIGatewayProxyEventV2) {
     // Update registration with cancel+refund fields
     const nowIso = new Date().toISOString();
     const body: Record<string, any> = {
-      status: "cancelled",
-      paymentStatus: "refunded",
+      status: REGISTRATION_STATUS.cancelled,
+      paymentStatus: REGISTRATION_PAYMENT_STATUS.refunded,
       refundId: refund.id,
     };
     if (!(reg as any).cancelledAt) body.cancelledAt = nowIso;

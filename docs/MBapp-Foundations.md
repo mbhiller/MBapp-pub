@@ -148,6 +148,11 @@
 **Lambda Hook:** [apps/api/src/index.ts](../apps/api/src/index.ts)
 - Detects EventBridge-like invocations (non-HTTP + `source="mbapp.jobs"` or `jobType` present) and dispatches `runBackgroundJobs()` early; normal API routing remains unchanged.
 
+### Backend Foundations — Conventions
+
+- Routing convention: Generic "/resource/{id}" matchers must exclude ":" from id segments so "/resource/{id}:action" routes are never shadowed. Apply this to all optional-id matchers (e.g., `/views`, `/workspaces`).
+- Registration enums: `paymentStatus` values are `pending | paid | failed | refunded`; `status` values are `draft | submitted | confirmed | cancelled`. Source of truth in code: [apps/api/src/registrations/constants.ts](../apps/api/src/registrations/constants.ts).
+
 **Safety & Determinism:**
 - Admin-only endpoint; server clamps bounds; per-tenant iteration; simulate notifications outside prod.
 - CI smokes call `/internal/jobs:run` deterministically with simulate headers and tenant scoping.

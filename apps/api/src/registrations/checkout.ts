@@ -6,6 +6,7 @@ import { getTenantId } from "../common/env";
 import { getObjectById, updateObject, reserveEventSeat, reserveEventRv, releaseEventSeat } from "../objects/repo";
 import { guardRegistrations } from "./feature";
 import { createPaymentIntent } from "../common/stripe";
+import { REGISTRATION_STATUS, REGISTRATION_PAYMENT_STATUS } from "./constants";
 
 /** Constant-time string compare to avoid timing leaks */
 function constantTimeEqual(a: string, b: string) {
@@ -62,14 +63,14 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const holdExpiresMs = holdExpiresAt ? new Date(holdExpiresAt).getTime() : undefined;
 
     // Submitted replay: if expired, reject; else return existing PI
-    if (status === "submitted" && paymentIntentId && paymentIntentClientSecret) {
+    if (status === REGISTRATION_STATUS.submitted && paymentIntentId && paymentIntentClientSecret) {
       if (holdExpiresMs !== undefined && holdExpiresMs < nowMs) {
         return conflictError("Registration hold expired", { code: "hold_expired" });
       }
       return ok({ paymentIntentId, clientSecret: paymentIntentClientSecret, ...(existingTotalAmount != null ? { totalAmount: existingTotalAmount } : {}), ...(existingCurrency ? { currency: existingCurrency } : {}) });
     }
 
-    if (status && status !== "draft") {
+    if (status && status !== REGISTRATION_STATUS.draft) {
       return conflictError(`Registration is not in a draft state (status=${status})`, { code: "invalid_state" });
     }
 
@@ -164,8 +165,8 @@ export async function handle(event: APIGatewayProxyEventV2) {
       type: "registration",
       id,
       body: {
-        status: "submitted",
-        paymentStatus: "pending",
+        status: REGISTRATION_STATUS.submitted,
+        paymentStatus: REGISTRATION_PAYMENT_STATUS.pending,
         paymentIntentId: pi.id,
         paymentIntentClientSecret: pi.clientSecret,
         checkoutIdempotencyKey: idempotencyKey,
