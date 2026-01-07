@@ -332,6 +332,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/registrations/{id}:assign-resources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Assign discrete resources to a registration (operator)
+         * @description Generalized endpoint to assign specific discrete resources (stalls, RV sites, or future types) to a registration.
+         *     Converts a block resource hold (itemType per type, resourceId=null) into specific granular assignments.
+         *     Validates that resourceIds length matches the block hold qty and that resources are available.
+         *     Creates or updates ReservationHold records with resourceId set for each resource.
+         *     Requires operator permission (registration:write).
+         *
+         */
+        post: operations["assignResources"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/registrations/{id}:public": {
         parameters: {
             query?: never;
@@ -3404,6 +3429,23 @@ export interface components {
             /** @description Updated or created ReservationHold objects for assigned RV sites */
             holds?: components["schemas"]["ReservationHold"][];
         };
+        /** @description Request to assign specific discrete resources to a registration (Sprint BM) */
+        AssignResourcesRequest: {
+            /**
+             * @description Type of resource being assigned (extensible for future types like vip-suite, equipment)
+             * @enum {string}
+             */
+            itemType: "stall" | "rv";
+            /** @description List of resource IDs to assign */
+            resourceIds: string[];
+        };
+        /** @description Response from assign-resources action */
+        AssignResourcesResponse: {
+            /** @description Created or updated ReservationHold objects for assigned resources */
+            holds?: components["schemas"]["ReservationHold"][];
+            /** @description Number of holds in response */
+            count?: number;
+        };
         RegistrationLine: {
             id?: string;
             classId: string;
@@ -5603,6 +5645,81 @@ export interface operations {
                 };
             };
             /** @description Conflict (RV site already assigned, registration not in correct state) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    assignResources: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-tenant-id": components["parameters"]["TenantHeader"];
+                /** @description Optional idempotency key for safe retries. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssignResourcesRequest"];
+            };
+        };
+        responses: {
+            /** @description Resources successfully assigned */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignResourcesResponse"];
+                };
+            };
+            /** @description Validation error (qty mismatch, duplicates, invalid resource type, unsupported itemType) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Registration or resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflict (resource already assigned by another registration) */
             409: {
                 headers: {
                     [name: string]: unknown;

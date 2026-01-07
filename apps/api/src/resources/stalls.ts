@@ -6,7 +6,7 @@
  * Optional grouping stored as "group:<groupId>" (e.g., barn, row).
  */
 
-import { getObjectById } from "../objects/repo";
+import { assertResourcesExistAndAvailable } from "../common/resources";
 
 export type AssertStallResourcesArgs = {
   tenantId?: string;
@@ -16,89 +16,48 @@ export type AssertStallResourcesArgs = {
 
 /**
  * Validate that all stallIds exist, are resources of type stall, and optionally belong to eventId.
- * @param tenantId - Tenant ID for object lookup
- * @param stallIds - Array of resource IDs to validate
- * @param eventId - Optional event ID; if provided, validates that each resource has tag "event:<eventId>"
- * @throws Error with status 400 if validation fails (type, resourceType, or event mismatch)
- * @throws Error with status 404 if any stall not found
- * @returns Array of validated resource objects
+ * Wrapper around generalized assertResourcesExistAndAvailable for backward compatibility.
  */
 export async function assertStallResourcesExistAndAvailable({
   tenantId,
   stallIds,
   eventId,
 }: AssertStallResourcesArgs): Promise<Record<string, any>[]> {
-  if (!stallIds || stallIds.length === 0) {
-    throw Object.assign(new Error("No stall IDs provided"), { code: "invalid_stalls", statusCode: 400 });
-  }
-
-  // Check for duplicates
-  const unique = new Set(stallIds);
-  if (unique.size !== stallIds.length) {
-    throw Object.assign(new Error("Duplicate stall IDs"), { code: "duplicate_stalls", statusCode: 400 });
-  }
-
-  const resources: Record<string, any>[] = [];
-
-  for (const stallId of stallIds) {
-    let resource: Record<string, any> | null = null;
-
-    try {
-      resource = await getObjectById({
-        tenantId,
-        type: "resource",
-        id: stallId,
-        fields: ["id", "type", "resourceType", "tags", "status"],
+  try {
+    return await assertResourcesExistAndAvailable({
+      tenantId,
+      resourceIds: stallIds,
+      eventId,
+      expectedResourceType: "stall",
+    });
+  } catch (err: any) {
+    // Remap generic error codes to stall-specific for backward compatibility
+    if (err?.code === "resource_not_found") {
+      throw Object.assign(new Error(err.message.replace("Resource", "Stall")), {
+        code: "stall_not_found",
+        statusCode: 404,
       });
-    } catch (err: any) {
-      // Rethrow with 404 if not found
-      if (err?.statusCode === 404 || err?.code === "not_found") {
-        throw Object.assign(new Error(`Stall ${stallId} not found`), {
-          code: "stall_not_found",
-          statusCode: 404,
-        });
-      }
-      throw err;
     }
-
-    if (!resource) {
-      throw Object.assign(new Error(`Stall ${stallId} not found`), { code: "stall_not_found", statusCode: 404 });
-    }
-
-    // Validate type and resourceType
-    if (resource.type !== "resource") {
-      throw Object.assign(new Error(`${stallId} is not a resource`), {
+    if (err?.code === "invalid_resource_type") {
+      throw Object.assign(new Error(err.message), {
         code: "invalid_stall_type",
         statusCode: 400,
       });
     }
-
-    if (resource.resourceType !== "stall") {
-      throw Object.assign(new Error(`${stallId} is not a stall`), {
-        code: "invalid_stall_type",
+    if (err?.code === "duplicate_ids") {
+      throw Object.assign(new Error("Duplicate stall IDs"), {
+        code: "duplicate_stalls",
         statusCode: 400,
       });
     }
-
-    // Validate event membership if eventId provided
-    if (eventId) {
-      const tags = (resource.tags as string[]) ?? [];
-      const eventTag = `event:${eventId}`;
-      if (!tags.includes(eventTag)) {
-        throw Object.assign(
-          new Error(`Stall ${stallId} does not belong to event ${eventId}`),
-          {
-            code: "stall_not_for_event",
-            statusCode: 400,
-          }
-        );
-      }
+    if (err?.code === "invalid_resources") {
+      throw Object.assign(new Error("No stall IDs provided"), {
+        code: "invalid_stalls",
+        statusCode: 400,
+      });
     }
-
-    resources.push(resource);
+    throw err;
   }
-
-  return resources;
 }
 
 /**
