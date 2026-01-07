@@ -72,6 +72,8 @@
 - **Safety & bounds:** Batch clamps `limit` server-side and only processes messages currently `status=failed`; skips others without failing the batch. Simulate header `X-Feature-Notify-Simulate: true` (or env flag) is honored during retry, mirroring single retry behavior.
 - **Projection:** Batch response returns lightweight `MessageRetryResult` (id, status, retryCount, lastAttemptAt, sentAt, provider, errorMessage) to keep payload minimal; subject/body not returned.
 
+**Operator Console (Sprint BF):** Web UI available at `/messages` (protected by `message:read`) with filters + cursor pagination; detail view at `/messages/:id` shows status/provider/template metadata and retry controls when `message:write` is granted. UI is API-backed (uses the endpoints above; no provider-side coupling).
+
 ### Message Templates v1 (Sprint BA/BE)
 
 **Template System:** Minimal, deterministic template renderer with no external deps. Validates required vars at render time.

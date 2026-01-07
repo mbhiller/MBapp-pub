@@ -127,6 +127,26 @@
 - [MBapp-Foundations.md](MBapp-Foundations.md#message-templates-v1-sprint-babe): Full template system contract including render-at-enqueue pattern, retry semantics, public resend behavior, and conventions
 - [smoke-coverage.md](smoke-coverage.md): Template-related smokes (`smoke:registrations:confirmation-message`, `smoke:registrations:confirmation-sms`) with non-brittle assertions validating `templateKey`/`templateVars` metadata
 
+### Sprint BF — Operator Messaging Console v1 — ✅ Complete (2026-01-06)
+
+**Summary:** Delivered a web operator console for Messages with list + filters + cursor pagination, detail view, and remediation actions (single retry, batch retry failed). Permissions: `message:read` for access; `message:write` for retry actions.
+
+**Deliverables (E1-E4):**
+- **Web UI (List):** Added Messages list at `/messages` with filters (status, channel, provider, to, limit), cursor pagination (`next` token with Load More), row links to detail. Uses `GET /messages` via `apiFetch` with tenant + bearer headers. Protected via `ProtectedRoute` requiring `message:read`.
+- **Web UI (Detail):** Added detail view at `/messages/:id` showing status, provider/providerMessageId, retryCount, lastAttemptAt/sentAt/queuedAt, errorMessage, templateKey/templateVars, metadata. Fetches via `/objects/message/{id}`. Back link preserves query params.
+- **Actions:** Retry failed message (visible when status=`failed` and `message:write` granted) calling `POST /messages/{id}:retry`; batch retry failed (limit default 25, max 50) calling `POST /messages:retry-failed` with optional channel/provider filters; both surface inline success/error banners and refresh list/detail.
+- **Navigation:** Added Home shortcut link to `/messages` for quick access.
+
+**Verification (placeholders):**
+- 🟡 Web: manual spot check list + detail + retry (simulate) — _not yet recorded_
+- 🟡 API: relies on existing `GET /messages`, `POST /messages/{id}:retry`, `POST /messages:retry-failed` smokes; no new smokes added
+- 🟡 Typecheck/build: _(run before release)_
+
+**Impact:**
+- Operators can inspect and remediate failed messages without API tooling
+- Retry actions respect simulate flags and existing API guards; permissions gate write actions
+- UI reuses existing patterns (cursor pagination, inline banners) and remains API-backed (no new provider dependencies)
+
 ### Sprint AZ — Message Retry Endpoint — ✅ Complete (2026-01-06)
 
 **Summary:** Added a manual retry endpoint for failed messages with simulate/real parity and smoke coverage.

@@ -33,6 +33,8 @@ import CreatePurchaseOrderPage from "./pages/CreatePurchaseOrderPage";
 import EditPurchaseOrderPage from "./pages/EditPurchaseOrderPage";
 import LocationsListPage from "./pages/LocationsListPage";
 import LocationDetailPage from "./pages/LocationDetailPage";
+import MessagesListPage from "./pages/MessagesListPage";
+import MessageDetailPage from "./pages/MessageDetailPage";
 import InventoryMovementsPage from "./pages/InventoryMovementsPage";
 import DocsPage from "./pages/DocsPage";
 import NotAuthorizedPage from "./pages/NotAuthorizedPage";
@@ -54,6 +56,7 @@ function HomePage() {
         <Link to="/locations">Locations</Link>
         <Link to="/views">Views</Link>
         <Link to="/workspaces">Workspaces</Link>
+        <Link to="/messages">Messages</Link>
       </div>
     </div>
   );
@@ -94,6 +97,8 @@ export default function App() {
           <Route path="/purchase-orders/new" element={<ProtectedRoute requiredPerm="purchase:write"><CreatePurchaseOrderPage /></ProtectedRoute>} />
           <Route path="/purchase-orders/:id" element={<PurchaseOrderDetailPage />} />
           <Route path="/purchase-orders/:id/edit" element={<ProtectedRoute requiredPerm="purchase:write"><EditPurchaseOrderPage /></ProtectedRoute>} />
+          <Route path="/messages" element={<ProtectedRoute requiredPerm="message:read"><MessagesListPage /></ProtectedRoute>} />
+          <Route path="/messages/:id" element={<ProtectedRoute requiredPerm="message:read"><MessageDetailPage /></ProtectedRoute>} />
           <Route path="/locations" element={<LocationsListPage />} />
           <Route path="/locations/:id" element={<LocationDetailPage />} />
           <Route path="/docs" element={<DocsPage />} />

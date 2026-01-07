@@ -2,7 +2,7 @@ import { type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../providers/AuthProvider";
 import { hasPerm } from "../lib/permissions";
-import { PERM_INVENTORY_READ } from "../generated/permissions";
+import { PERM_INVENTORY_READ, PERM_MESSAGE_READ } from "../generated/permissions";
 
 export function Layout({ children }: { children: ReactNode }) {
   const { tenantId, token, setToken, policy, policyLoading, policyError } = useAuth();
@@ -15,6 +15,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const canViewSalesOrders = hasPerm(policy, "sales:read");
   const canViewPurchaseOrders = hasPerm(policy, "purchase:read");
   const canViewInventory = hasPerm(policy, PERM_INVENTORY_READ);
+  const canViewMessages = hasPerm(policy, PERM_MESSAGE_READ);
 
   return (
     <div style={{ fontFamily: "system-ui", minHeight: "100vh", background: "#f7f7f7", color: "#111" }}>
@@ -45,6 +46,7 @@ export function Layout({ children }: { children: ReactNode }) {
           {canViewPurchaseOrders && <Link to="/purchase-orders" style={{ color: "#fff", textDecoration: "underline" }}>Purchase Orders</Link>}
           {canViewPurchaseOrders && <Link to="/purchase-orders?vendorMode=1" style={{ color: "#fff", textDecoration: "underline" }}>Vendor Portal</Link>}
           {canViewInventory && <Link to="/inventory" style={{ color: "#fff", textDecoration: "underline" }}>Inventory</Link>}
+          {canViewMessages && <Link to="/messages" style={{ color: "#fff", textDecoration: "underline" }}>Messages</Link>}
           <Link to="/locations" style={{ color: "#fff", textDecoration: "underline" }}>Locations</Link>
           <Link to="/views" style={{ color: "#fff", textDecoration: "underline" }}>Views</Link>
           <Link to="/workspaces" style={{ color: "#fff", textDecoration: "underline" }}>Workspaces</Link>
