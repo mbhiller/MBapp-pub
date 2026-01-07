@@ -2255,7 +2255,20 @@ const tests = {
       && !!tv.registrationId && !!tv.paymentIntentId
       && typeof tv.rvQty === "number" && typeof tv.rvAmount === "number";
 
-    const pass = totalOk && currencyOk && feeOk && tmplOk;
+    // Fetch reservation holds by owner and validate state transitions
+    const holdsRes = await fetch(`${API}/reservation-holds?ownerType=registration&ownerId=${encodeURIComponent(regId)}`, {
+      headers: { ...baseHeaders(), "X-Feature-Registrations-Enabled": "true" }
+    });
+    const holdsBody = await holdsRes.json().catch(() => ({}));
+    const holds = Array.isArray(holdsBody?.items) ? holdsBody.items : [];
+
+    const seatHold = holds.find(h => h?.itemType === "seat");
+    const rvHold = holds.find(h => h?.itemType === "rv");
+
+    const seatHoldOk = seatHold && seatHold.state === "confirmed" && seatHold.qty === 1;
+    const rvHoldOk = rvHold && rvHold.state === "confirmed" && rvHold.qty === rvQty;
+
+    const pass = totalOk && currencyOk && feeOk && tmplOk && seatHoldOk && rvHoldOk;
     return {
       test: "public-booking:rv-happy-path",
       result: pass ? "PASS" : "FAIL",
@@ -2268,6 +2281,10 @@ const tests = {
       },
       fees: rvFee ? { key: rvFee.key, qty: rvFee.qty, unitAmount: rvFee.unitAmount, amount: rvFee.amount } : null,
       webhookStatus: whRes.status,
+      holds: {
+        seatHold: seatHold ? { state: seatHold.state, qty: seatHold.qty } : null,
+        rvHold: rvHold ? { state: rvHold.state, qty: rvHold.qty } : null
+      },
       message: msg?.ok ? {
         templateKey: msg.body?.templateKey,
         hasRvVars: typeof tv.rvQty === "number" && typeof tv.rvAmount === "number"
@@ -2398,6 +2415,15 @@ const tests = {
       return { test: "public-booking:rv-hold-expiration-release", result: "FAIL", reason: "cleanup-failed", cleanup };
     }
 
+    // Fetch reservation holds for regA and validate they transitioned from held → cancelled
+    const holdsResA = await fetch(`${API}/reservation-holds?ownerType=registration&ownerId=${encodeURIComponent(regAId)}`, {
+      headers: { ...baseHeaders(), "X-Feature-Registrations-Enabled": "true" }
+    });
+    const holdsBodyA = await holdsResA.json().catch(() => ({}));
+    const holdsA = Array.isArray(holdsBodyA?.items) ? holdsBodyA.items : [];
+    
+    const holdsExpired = holdsA.length > 0 && holdsA.every(h => h?.state === "cancelled" && h?.releaseReason === "expired" && h?.releasedAt);
+
     // Create public registration B with rvQty=1 and checkout should succeed
     const rB = await post(`/registrations:public`, { eventId, rvQty: 1 }, featureHeaders, { auth: "none" });
     if (!rB.ok || !rB.body?.registration?.id || !rB.body?.publicToken) {
@@ -2411,12 +2437,13 @@ const tests = {
       "Idempotency-Key": idem()
     }, { auth: "none" });
 
-    const pass = cB.ok && typeof cleanup.body?.expiredCount === "number" && cleanup.body.expiredCount >= 1;
+    const pass = cB.ok && typeof cleanup.body?.expiredCount === "number" && cleanup.body.expiredCount >= 1 && holdsExpired;
     return {
       test: "public-booking:rv-hold-expiration-release",
       result: pass ? "PASS" : "FAIL",
       cleanup: { expiredCount: cleanup.body?.expiredCount },
       checkoutBStatus: cB.status,
+      holds: { countA: holdsA.length, allExpired: holdsExpired },
       steps: { eventId, regAId, regBId }
     };
   },
@@ -13015,6 +13042,15 @@ const tests = {
     const seatOk = (evtAfter.body?.reservedCount ?? 0) === 0;
     const rvOk = (evtAfter.body?.rvReserved ?? 0) === 0;
 
+    // Fetch reservation holds by owner and validate they are released
+    const holdsRes = await fetch(`${API}/reservation-holds?ownerType=registration&ownerId=${encodeURIComponent(regId)}`, {
+      headers: { ...baseHeaders(), "X-Feature-Registrations-Enabled": "true" }
+    });
+    const holdsBody = await holdsRes.json().catch(() => ({}));
+    const holds = Array.isArray(holdsBody?.items) ? holdsBody.items : [];
+
+    const allHoldsReleased = holds.length > 0 && holds.every(h => (h?.state === "released" || h?.state === "cancelled") && h?.releasedAt);
+
     // Public status includes cancelled/refunded safely
     const publicStatus = await fetch(`${API}/registrations/${encodeURIComponent(regId)}:public`, {
       headers: { "X-MBapp-Public-Token": publicToken, "x-tenant-id": TENANT, "X-Feature-Registrations-Enabled": "true" }
@@ -13022,8 +13058,8 @@ const tests = {
     const pubBody = await publicStatus.json().catch(()=>({}));
     const pubOk = publicStatus.ok && pubBody?.status === "cancelled" && pubBody?.paymentStatus === "refunded" && !!pubBody?.cancelledAt && !!pubBody?.refundedAt && !("refundId" in pubBody);
 
-    const pass = statusOk && payOk && timestampsOk && seatOk && rvOk && pubOk;
-    return { test: "registrations:cancel-refund-happy-path", result: pass ? "PASS" : "FAIL", steps: { eventId, regId } };
+    const pass = statusOk && payOk && timestampsOk && seatOk && rvOk && allHoldsReleased && pubOk;
+    return { test: "registrations:cancel-refund-happy-path", result: pass ? "PASS" : "FAIL", steps: { eventId, regId }, holds: { count: holds.length, allReleased: allHoldsReleased } };
   },
 
   "smoke:registrations:cancel-refund-guards": async () => {

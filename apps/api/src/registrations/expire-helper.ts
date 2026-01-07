@@ -3,6 +3,7 @@ import { getObjectById, updateObject } from "../objects/repo";
 import { releaseEventSeat } from "../objects/repo";
 import { releaseEventRv } from "../objects/repo";
 import { REGISTRATION_STATUS, REGISTRATION_PAYMENT_STATUS } from "./constants";
+import { releaseReservationHoldsForOwner } from "../reservations/holds";
 
 export type ExpireHoldArgs = {
   tenantId: string;
@@ -53,6 +54,18 @@ export async function expireRegistrationHold({ tenantId, regId }: ExpireHoldArgs
         // ignore
       }
     }
+  }
+
+  // Release (transition to cancelled) reservation holds for this registration
+  try {
+    await releaseReservationHoldsForOwner({
+      tenantId,
+      ownerType: "registration",
+      ownerId: regId,
+      reason: "expired",
+    });
+  } catch (_) {
+    // ignore; counters already released
   }
 
   return { expired: true };

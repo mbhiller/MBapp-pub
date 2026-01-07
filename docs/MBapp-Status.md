@@ -6,6 +6,51 @@
 
 ---
 
+### Sprint BJ — ReservationHold Ledger v1 (spec + API + integrations + smokes) — ✅ Complete (2026-01-07)
+
+**Summary:** Shipped a generalized count-based reservation hold ledger enabling audit-trail tracking of seat and RV capacity bookings. Ledger complements event counters and sets foundation for future multi-resource assignments (stalls, suites, equipment). All registration flows (checkout, webhook confirm, expiry, cancel, refund) integrated with idempotent hold operations.
+
+**Deliverables (E1–E5):**
+- **Spec (E1):** Added [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml):
+  - `ReservationHold` schema: type `reservationHold` with ownerType/ownerId, scopeType/scopeId, itemType, qty, state (held|confirmed|released|cancelled), timestamps (heldAt, confirmedAt, releasedAt), releaseReason, metadata.
+  - `GET /reservation-holds/by-owner` (internal, `registration:read`): filters by ownerType/ownerId and optional state(s).
+  - Ran `npm run spec:lint`, `spec:bundle`, `spec:types:api`, `spec:types:mobile` ✅
+- **API Service Module (E2):** [apps/api/src/reservations/holds.ts](../apps/api/src/reservations/holds.ts):
+  - `createHeldReservationHold(...)` — idempotent create for held records (seat, RV, future resources).
+  - `confirmReservationHoldsForOwner(...)` — transition all held → confirmed on payment success.
+  - `releaseReservationHoldsForOwner(...)` — transition held/confirmed → released/cancelled with reason tracking.
+  - All functions safe for retry; check state before mutation.
+- **API Handler (E3):** [apps/api/src/reservations/holds-list.ts](../apps/api/src/reservations/holds-list.ts): handler for `GET /reservation-holds` (list by owner + optional state filter); routed in [apps/api/src/index.ts](../apps/api/src/index.ts).
+- **Registration Flow Integrations (E4):** Updated [apps/api/src/registrations/checkout.ts](../apps/api/src/registrations/checkout.ts), [apps/api/src/webhooks/stripe-handler.ts](../apps/api/src/webhooks/stripe-handler.ts), [apps/api/src/registrations/expire-helper.ts](../apps/api/src/registrations/expire-helper.ts), [apps/api/src/registrations/cancel.ts](../apps/api/src/registrations/cancel.ts), [apps/api/src/registrations/cancel-refund.ts](../apps/api/src/registrations/cancel-refund.ts):
+  - **Checkout:** Create held records for seat (qty=1) + RV (qty=rvQty) after both counter reserves succeed; rollback counters if hold creation fails.
+  - **Webhook confirm:** Confirm all held holds for registration on `payment_intent.succeeded`.
+  - **Expiry:** Release holds with reason="expired" after setting registration cancelled/failed.
+  - **Cancel/Cancel-Refund:** Release holds with reason="operator_cancel"/"refund" after updating registration and releasing counters.
+  - All integrations idempotent; safe for webhook/background job retries.
+- **Smokes (E5):** Enhanced existing core smokes in [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) and wired to [ops/ci-smokes.json](../ops/ci-smokes.json):
+  - `smoke:public-booking:rv-happy-path` — after webhook confirm, fetches holds and asserts: seat hold `state="confirmed"`, qty=1; RV hold `state="confirmed"`, qty=2 (matches rvQty).
+  - `smoke:registrations:cancel-refund-happy-path` — after cancel-refund, fetches holds and asserts: all prior holds `state="released"` or `"cancelled"`, with `releasedAt` present.
+  - `smoke:public-booking:rv-hold-expiration-release` — after cleanup expiry, fetches holds for regA and asserts: holds `state="cancelled"`, `releaseReason="expired"`, `releasedAt` present.
+
+**Endpoints:**
+- `GET /reservation-holds?ownerType=registration&ownerId={regId}&state=...` — Internal list by owner (optional state filter); requires `registration:read`. Returns `{ items: ReservationHold[], next? }`.
+
+**Data Model & Semantics:**
+- **Coexistence with event counters:** Event `reservedCount`/`rvReserved` remain source of truth for capacity math; ReservationHold ledger is source of truth for booking audit (which holds exist, in what state).
+- **Lifecycle:** Create (draft → submitted) → Confirm (submitted → confirmed) → Release (confirmed → released/cancelled).
+- **State safety:** State transitions only move forward/end; held/confirmed are transient; released/cancelled are terminal.
+- **Idempotency:** All operations check state before mutation and are safe for retries.
+
+**Verification:**
+- ✅ Typescript: `npm run typecheck -w apps/api` (all registrations, webhooks, holds modules)
+- ✅ Spec pipeline: lint/bundle/types clean
+- ✅ Smokes: rv-happy-path PASS (holds confirmed), cancel-refund-happy-path PASS (holds released), rv-hold-expiration-release PASS (holds cancelled with reason)
+
+**Impact:**
+- Enables non-repudiation audit trail for booking holds (when created, confirmed, released, why).
+- Sets foundation for future multi-resource booking model (stalls, suites, equipment) by decoupling hold identity from counter mutations.
+- Deterministic smoke assertions validate hold state transitions without hardcoding timestamps or metadata.
+
 ### Sprint BH — Registrations Cancel + Refund (spec + API + smokes) — ✅ Complete (2026-01-06)
 
 **Summary:** Shipped the smallest safe cancel/refund vertical slice: aligned paymentStatus enum, added operator actions for cancel and cancel-refund, normalized public status, and ensured capacity reversal for seats and RV. Simulate headers keep Stripe refund deterministic in CI.

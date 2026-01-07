@@ -12,6 +12,7 @@ export const PERMISSIONS_BY_ENDPOINT = {
   "GET /inventory/{id}/onhand": "inventory:read",
   "GET /inventory/{id}/onhand:by-location": "inventory:read",
   "GET /messages": "message:read",
+  "GET /reservation-holds/by-owner": "registration:read",
   "GET /views": "view:read",
   "GET /views/{id}": "view:read",
   "GET /workspaces": "workspace:read",
@@ -87,6 +88,7 @@ export const PERM_PURCHASE_CANCEL = "purchase:cancel" as const;
 export const PERM_PURCHASE_CLOSE = "purchase:close" as const;
 export const PERM_PURCHASE_RECEIVE = "purchase:receive" as const;
 export const PERM_PURCHASE_WRITE = "purchase:write" as const;
+export const PERM_REGISTRATION_READ = "registration:read" as const;
 export const PERM_REGISTRATION_WRITE = "registration:write" as const;
 export const PERM_SALES_CANCEL = "sales:cancel" as const;
 export const PERM_SALES_CLOSE = "sales:close" as const;
@@ -116,6 +118,7 @@ export const PERMISSION_KEYS = [
   "purchase:close",
   "purchase:receive",
   "purchase:write",
+  "registration:read",
   "registration:write",
   "sales:cancel",
   "sales:close",

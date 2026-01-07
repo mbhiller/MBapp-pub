@@ -345,6 +345,55 @@ Optional RV spot purchase as an add‑on during public booking. Contract aligns 
 - Feature‑guarded via existing registrations and simulate headers (`X-Feature-Registrations-Enabled`, `X-Feature-Stripe-Simulate`, `X-Feature-Notify-Simulate`).
 - Pricing and capacity are server‑authoritative; UI calculations are advisory only.
 
+### ReservationHold Ledger v1 (Sprint BJ)
+
+A count‑based ledger that tracks holds on capacity and resources across a booking lifecycle. Complements event‑level counters (`reservedCount`, `rvReserved`) with discrete audit records enabling future generalization to complex resource types (stalls, suites, equipment, classes).
+
+**Data model:**
+- **Type:** `reservationHold` (distinct object type in storage).
+- **Key fields:**
+  - `ownerType`, `ownerId` — who holds the capacity (e.g., `ownerType="registration"`, `ownerId="{regId}"`). Enables filtering holds by booking.
+  - `scopeType`, `scopeId` — what context the hold is scoped to (e.g., `scopeType="event"`, `scopeId="{eventId}"`).
+  - `itemType` — kind of item held (e.g., `"seat"`, `"rv"`). Extensible for future resources.
+  - `qty: number` — quantity held (e.g., 1 for seat, 2 for 2 RV spots).
+  - `state` — lifecycle: `"held"` (initial, awaiting payment) → `"confirmed"` (payment succeeded) → `"released"` or `"cancelled"` (booking ended or expired).
+- **Timestamps & metadata:**
+  - `heldAt`, `confirmedAt`, `releasedAt` — state transition times (stable for assertions, omit exact values from smoke tests).
+  - `releaseReason` — why the hold ended (e.g., `"expired"`, `"operator_cancel"`, `"refund"`).
+  - `metadata` — optional context (e.g., correlation IDs).
+
+**Lifecycle:**
+- **Create (draft → submitted):** On checkout, after both seat and RV counter reserves succeed, create held records for each item type. Idempotent: checks for existing held record before creating.
+  - `createHeldReservationHold({ ownerType, ownerId, scopeType, scopeId, itemType, qty, expiresAt?, metadata? })`
+  - Returns existing held record if already present (idempotent).
+- **Confirm (submitted → confirmed):** When Stripe webhook confirms payment, transition all held records for that owner to confirmed.
+  - `confirmReservationHoldsForOwner({ ownerType, ownerId })`
+  - Updates all `state="held"` records to `state="confirmed"` with `confirmedAt`.
+- **Release (held/confirmed → released or cancelled):** On expiry, operator cancel, or refund, transition all held/confirmed records to released (or cancelled if expired).
+  - `releaseReservationHoldsForOwner({ ownerType, ownerId, reason })`
+  - Sets `state="released"` or `"cancelled"` (if `reason="expired"`), records `releasedAt` and `releaseReason`.
+  - Safe/idempotent: only transitions from `held` or `confirmed` states.
+
+**Coexistence with event counters:**
+- Event counters (`reservedCount`, `rvReserved`) remain the source of truth for **capacity math** (are spots available?).
+- ReservationHold ledger is the source of truth for **booking audit** (which holds exist? in what state?).
+- Both are mutated in sync during checkout and release operations. Holds are created **after** counter reserves succeed; releases happen **alongside** counter releases.
+- Future: Allows querying "all holds for owner X" or "all holds in scope Y" for reporting and debugging.
+
+**Endpoints:**
+- `POST /reservation-holds` (internal, create) — Invoked by checkout/webhook flows; not exposed publicly.
+- `GET /reservation-holds?ownerType=...&ownerId=...&state=...` (internal, list by owner) — For debugging, admin dashboards, and smoke assertions. Requires `registration:read`.
+
+**Resource model guidance:**
+- **Resources** (stalls, RV spaces, suites, equipment, classes) are identity + metadata + availability. Tracked via capacity counters (event-level) or discrete slots (future). ReservationHold ledger will link bookings to resource assignments.
+- **Inventory** (consumables: hydraulic hose, parts, supplies) is count-based stock, separate from booking-driven holds.
+- **ReservationHold** is the ledger binding a booking (owner) to capacity/resource slots (scope, item). Future expansion: holds may reference specific resource IDs (e.g., "Stall #5"), enabling granular assignment and multi-resource bookings.
+
+**Safety & idempotency:**
+- All hold operations check existing state before mutation; safe for retries.
+- Confirmed → released transition is idempotent; re-releasing an already-released hold is a no-op.
+- Held holds created idempotently (same owner/scope/itemType returns existing held record).
+
 ### Public Registration Status (Sprint AY)
 
 - **Endpoint:** `GET /registrations/{id}:public` — public (no JWT), authenticated via `X-MBapp-Public-Token` header.
