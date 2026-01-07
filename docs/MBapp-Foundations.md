@@ -160,7 +160,7 @@
 # MBapp Foundations Report
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Status/Working](MBapp-Status.md) · [Cadence](MBapp-Cadence.md) · [Verification](smoke-coverage.md)  
-**Last Updated:** 2026-01-06
+**Last Updated:** 2026-01-07
 
 ---
 
@@ -393,6 +393,165 @@ A count‑based ledger that tracks holds on capacity and resources across a book
 - All hold operations check existing state before mutation; safe for retries.
 - Confirmed → released transition is idempotent; re-releasing an already-released hold is a no-op.
 - Held holds created idempotently (same owner/scope/itemType returns existing held record).
+
+## Sprint BK — Resources v1 (Stalls)
+
+Establishes a scalable resource-booking pattern using the ReservationHold ledger for discrete, assignable resource units (event stalls, RV sites, suites, equipment, classes). Designed to mirror across multiple resource types without schema-breaking migrations.
+
+### Core Concepts
+
+**Resource (identity + metadata):**
+- Storage type: `resource` with `resourceType` (e.g., `"stall"`) and optional tags for scoping.
+- Example: `{ type: "resource", resourceType: "stall", name: "Stall 1", tags: ["event:{eventId}", "group:{groupId}"] }`.
+- Tags enable efficient filtering and relationship querying without foreign keys.
+
+**Reservation (booking entity):**
+- Entity requesting resources (e.g., `registration`).
+- Holds a reference to an event and requested resource quantities (`stallQty`, future: `rvSiteQty`, `suiteQty`).
+- Lifecycle: draft → submitted → confirmed → cancelled/refunded.
+
+**ReservationHold (ledger entry):**
+- Tracks a binding between a reservation and a resource type within an event scope.
+- Block holds: `resourceId=null`, aggregate quantity (e.g., `qty=2` for 2 stalls).
+- Per-stall holds: `resourceId="{stallId}"`, qty=1 each.
+- States: `held` (pending payment) → `confirmed` (payment succeeded) → `released`/`cancelled` (booking ended/expired).
+
+### Stall Flow (Checkout → Assignment → Release)
+
+**1. Checkout (draft → submitted):**
+- Client provides `stallQty` at registration creation.
+- On checkout: atomically reserve stall capacity via `reserveEventStalls(eventId, stallQty)`.
+- Create block hold: `{ ownerType: "registration", ownerId: regId, scopeType: "event", scopeId: eventId, itemType: "stall", qty: stallQty, resourceId: null, state: "held" }`.
+- Fails with 409 `stallCapacityFull` if capacity exceeded.
+
+**2. Webhook Confirmation (submitted → confirmed):**
+- On `payment_intent.succeeded`: transition block hold from `held` → `confirmed`.
+
+**3. Operator Assignment:**
+- Endpoint: `POST /registrations/{id}:assign-stalls { stallIds: ["stall-1", "stall-2", ...] }`.
+- Validates requested stall IDs exist, belong to the event, and are not already assigned to another registration.
+- Per-stall holds created with `resourceId="{stallId}"`, state matching block (held or confirmed).
+- Block hold released with `releaseReason="assigned"`.
+- **Conflict detection:** Double-assign returns 409 with `{ code: "stall_already_assigned" }`.
+
+**4. Release (confirmed → released/cancelled):**
+- On expiry: cancel registration, release stall capacity, transition holds to `state="cancelled"` with `releaseReason="expired"`.
+- On operator cancel: release stall capacity, transition holds to `state="released"` with `releaseReason="operator_cancel"`.
+- On refund: release stall capacity, transition holds to `state="released"` with `releaseReason="refund"`.
+- All releases clamp decrements at zero; safe and idempotent.
+
+### EventResource Pattern (Tag-Based Scoping)
+
+**Tag extraction helpers:** [apps/api/src/resources/stalls.ts](../apps/api/src/resources/stalls.ts)
+- `extractEventIdFromTags(tags)` — reads tag with format `event:{eventId}`.
+- `extractGroupIdFromTags(tags)` — reads tag with format `group:{groupId}` for optional grouping.
+
+**Validation:**
+- `assertStallResourcesExistAndAvailable({ tenantId, stallIds, eventId })` ensures all stall IDs exist in storage, belong to the event (via tag), and are in `available` status.
+
+**Why tags over foreign keys?**
+- Avoid schema migrations when adding new scopes (e.g., supplier, location, group).
+- Single storage table `resource` serves all resource types with independent scope strategies.
+- Efficient filtering: queries by tag (e.g., `tags contains "event:xyz"`) and resource type.
+
+### Counters (Capacity Source of Truth)
+
+**Event-level counters:** [apps/api/src/objects/repo.ts](../apps/api/src/objects/repo.ts)
+- `stallEnabled: boolean` — feature flag per event.
+- `stallCapacity: number` — total stalls (0 means closed; null/absent means unlimited when enabled).
+- `stallReserved: number` — atomic, server-maintained count of currently reserved stalls.
+- `stallUnitAmount: number` — unit price (minor currency units).
+
+**Reserve/release functions:**
+- `reserveEventStalls(eventId, qty)` — atomic increment with guard `stallReserved + qty <= stallCapacity`. Fails with 409 `stallCapacityFull` on overfill. Uses optimistic concurrency (condition checks in UpdateCommand).
+- `releaseEventStalls(eventId, qty)` — atomic decrement, clamped at 0. Safe for retries (idempotent).
+
+**Coexistence with ledger:**
+- Counters answer "how many stalls are reserved?" (capacity math).
+- Holds ledger answers "which stalls are assigned to which registrations?" (audit trail).
+- Both are updated in sync during checkout and release; neither is source of truth for the other.
+
+### Conflict Detection & Idempotency
+
+**Double-assign guard:**
+- When assigning stalls to registration B, check if any requested stall ID is already held/confirmed by **another** registration in the same event.
+- Throw 409 with `{ code: "stall_already_assigned" }` to prevent overbooking.
+- Same-registration re-assignment is idempotent OK: reuse the existing per-stall hold.
+
+**Block hold creation is idempotent:**
+- If block hold already exists (held or confirmed) for this registration/event, reuse it.
+- Allows retries on network failures during checkout without creating duplicate holds.
+
+**Release is idempotent:**
+- Releasing an already-released hold is a no-op (no state change).
+- Counter decrements clamp at zero, safe for multiple retries.
+
+### Future Generalization (RV Sites, Suites, Equipment)
+
+This pattern scales to other resource types:
+
+| Resource Type | Event Field | Counter | Block Hold | Per-Item Hold | Example Tags |
+|---|---|---|---|---|---|
+| Stall | `stallEnabled` | `stallReserved` | `itemType="stall"` | `resourceId="{stallId}"` | `event:{eventId}`, `group:{groupId}` |
+| RV Site | `rvSiteEnabled` (future) | `rvSiteReserved` (future) | `itemType="rvSite"` | `resourceId="{siteId}"` | `event:{eventId}`, `zone:{zoneId}` |
+| Suite | `suiteEnabled` (future) | `suiteReserved` (future) | `itemType="suite"` | `resourceId="{suiteId}"` | `event:{eventId}`, `floor:{floorId}` |
+
+Changes needed for each new type:
+1. Event schema: enable flag, capacity, price fields.
+2. Repo: `reserve/releaseEvent{Type}` functions (mirror stall pattern).
+3. Registration: `{type}Qty` field (mirror `stallQty`).
+4. Checkout: compute fee, reserve counter, create block hold.
+5. Assign endpoint: `POST /registrations/{id}:assign-{type}s` (mirror `:assign-stalls`).
+6. Tests: mirror stall smokes for new type.
+
+No schema-breaking changes; reuses ReservationHold ledger and tagging strategy.
+
+### Resource Model — Stalls v1 (Sprint BK)
+
+Defines resource-based booking for event stalls using existing ledger + minimal resource identity.
+
+**Core definitions:**
+- **Resource:** Identity + metadata + tags describing a discrete assignable unit (e.g., stall). Example tags: `event:{eventId}`, `group:{groupId}`.
+- **Reservation:** The booking entity (e.g., `registration`) that owns holds and ultimately assigned resources.
+- **ReservationHold:** Ledger entries binding an `owner` to a `scope` and `itemType` with lifecycle state. For stalls, holds may be block-level (`resourceId=null`) or per-stall (`resourceId={stallId}`).
+
+**Stall resource model:**
+- `resourceType="stall"` records exist with tags scoping them to an event and optional group.
+- Validation helpers ensure referenced stall IDs exist, belong to the event, and are available for assignment:
+  - [apps/api/src/resources/stalls.ts](../apps/api/src/resources/stalls.ts) provides `assertStallResourcesExistAndAvailable(stallIds, eventId)` and tag extractors (`extractEventIdFromTags`, `extractGroupIdFromTags`).
+
+**Counters (capacity source of truth):**
+- Event-level counters track aggregate reserved stalls:
+  - [apps/api/src/objects/repo.ts](../apps/api/src/objects/repo.ts) implements `reserveEventStalls(eventId, qty)` and `releaseEventStalls(eventId, qty)` using optimistic concurrency and 409 guards.
+- Counters are authoritative for capacity math; holds ledger is authoritative for audit.
+
+**Block hold → assignment flow:**
+- **Checkout:** After registration persisted and stall capacity reserved, create a block hold:
+  - `itemType="stall"`, `ownerType="registration"`, `ownerId={regId}`, `scopeType="event"`, `scopeId={eventId}`, `qty=stallQty`, `resourceId=null`, `state="held"`.
+  - Idempotent creation: `createHeldStallBlockHold()` reuses existing held/confirmed block to tolerate retries.
+- **Webhook confirm:** On payment success, block hold transitions to `state="confirmed"`.
+- **Operator assignment:** `POST /registrations/{id}:assign-stalls` accepts `{ stallIds: string[] }`:
+  - Lookup the block hold (prefer confirmed over held); fail with context if missing.
+  - Validate requested stall IDs exist in the event and are assignable.
+  - Create per-stall holds with `resourceId={stallId}` and `state` parity with the block (held → held, confirmed → confirmed).
+  - Conflict checks: prevent assigning a stall already held/confirmed by another owner in the same event.
+  - Release the block hold with `releaseReason="assigned"` after successful per-stall creation.
+
+**Release reasons (terminal states):**
+- `expired` — hold TTL elapsed before confirmation; cleanup transitions holds to `state="cancelled"` with `releaseReason="expired"`.
+- `operator_cancel` — operator cancels a non-paid booking; transitions existing holds to `state="released"`.
+- `refund` — operator cancels a paid booking with refund; transitions holds to `state="released"` and decrements counters by `stallQty`.
+- `assigned` — block hold converted into per-stall holds; block transitions to `state="released"` with `releaseReason="assigned"`.
+
+**Safety & idempotency:**
+- Block hold creation is idempotent; assignment creates per-stall holds only once per stall/owner.
+- Conflict detection covers both `state="held"` and `state="confirmed"` holds within the event scope.
+- Counter releases clamp at zero; repeated releases are no-ops.
+
+**Endpoints:**
+- `POST /events/registration/{id}:checkout` — persists `stallQty`, reserves stall counters, creates block hold.
+- `POST /registrations/{id}:assign-stalls` — assigns specific `stallIds`, creates per-stall holds, releases block.
+- `POST /registrations/{id}:cancel-refund` — releases stall counters via `releaseEventStalls()` and transitions holds with `releaseReason="refund"`.
 
 ### Public Registration Status (Sprint AY)
 

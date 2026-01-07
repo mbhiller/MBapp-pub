@@ -2448,6 +2448,343 @@ const tests = {
     };
   },
 
+  "smoke:stalls:block-reserve-and-assign": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // Create event with stall enabled and capacity
+    const eventName = smokeTag("stalls_block_evt");
+    const stallUnitAmount = 5000; // $50.00
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 5,
+      reservedCount: 0,
+      stallEnabled: true,
+      stallCapacity: 3,
+      stallReserved: 0,
+      stallUnitAmount
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "stalls:block-reserve-and-assign", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+    // Create 3 stall resources tagged with event and group
+    const stalls = [];
+    for (let i = 1; i <= 3; i++) {
+      const stall = await post("/objects/resource", {
+        type: "resource",
+        resourceType: "stall",
+        name: `Stall-${i}`,
+        status: "available",
+        tags: [`event:${eventId}`, "group:BarnA"]
+      });
+      if (!stall.ok || !stall.body?.id) {
+        return { test: "stalls:block-reserve-and-assign", result: "FAIL", reason: `stall-${i}-create-failed`, stall };
+      }
+      stalls.push(stall.body.id);
+      recordCreated({ type: "resource", id: stall.body.id, route: "/objects/resource", meta: { name: `Stall-${i}`, eventId } });
+    }
+
+    // Create public registration with stallQty=2
+    const stallQty = 2;
+    const regCreate = await post(`/registrations:public`, { eventId, stallQty, party: { email: `stalls+${SMOKE_RUN_ID}@example.com` } }, featureHeaders, { auth: "none" });
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test: "stalls:block-reserve-and-assign", result: "FAIL", reason: "reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+
+    // Checkout
+    const checkout = await post(`/events/registration/${encodeURIComponent(regId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!checkout.ok || !checkout.body?.paymentIntentId) {
+      return { test: "stalls:block-reserve-and-assign", result: "FAIL", reason: "checkout-failed", checkout };
+    }
+
+    // Simulate Stripe webhook to confirm registration
+    const webhookBody = {
+      id: `evt_${SMOKE_RUN_ID}`,
+      type: "payment_intent.succeeded",
+      data: {
+        object: {
+          id: checkout.body.paymentIntentId,
+          status: "succeeded",
+          metadata: { registrationId: regId, eventId }
+        }
+      }
+    };
+    const whRes = await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "Stripe-Signature": "sim_valid_signature",
+        ...featureHeaders,
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify(webhookBody)
+    });
+    if (!whRes.ok) {
+      return { test: "stalls:block-reserve-and-assign", result: "FAIL", reason: "webhook-failed", whStatus: whRes.status };
+    }
+
+    // Verify stall block hold exists after confirmation before assignment
+    const holdsBeforeAssignRes = await get(`/reservation-holds?ownerType=registration&ownerId=${encodeURIComponent(regId)}`);
+    const holdsBefore = Array.isArray(holdsBeforeAssignRes.body?.items) ? holdsBeforeAssignRes.body.items : [];
+    const blockBefore = holdsBefore.find(h => h?.itemType === "stall" && !h?.resourceId && ["held","confirmed"].includes(String(h?.state)));
+    if (!blockBefore) {
+      const counts = holdsBefore.reduce((acc, h) => { const k = `${String(h?.itemType||"unknown")}:${String(h?.state||"unknown")}`; acc[k] = (acc[k]||0)+1; return acc; }, {});
+      return { test: "stalls:block-reserve-and-assign", result: "FAIL", reason: "no-block-hold-before-assign", diag: { counts, holds: holdsBefore } };
+    }
+
+    // Assign stalls
+    const assignRes = await post(`/registrations/${encodeURIComponent(regId)}:assign-stalls`, {
+      stallIds: [stalls[0], stalls[1]]
+    }, featureHeaders);
+    if (!assignRes.ok || !Array.isArray(assignRes.body?.holds)) {
+      return { test: "stalls:block-reserve-and-assign", result: "FAIL", reason: "assign-failed", assignRes };
+    }
+    const perStallHolds = assignRes.body.holds;
+
+    // Verify per-stall holds have resourceId set and state=confirmed
+    const perStallOk = perStallHolds.length === 2 && perStallHolds.every(h => h?.resourceId && h?.state === "confirmed");
+
+    // Fetch all holds for registration to check block hold is released
+    const holdsRes = await get(`/reservation-holds?ownerType=registration&ownerId=${encodeURIComponent(regId)}`);
+    const holds = Array.isArray(holdsRes.body?.items) ? holdsRes.body.items : [];
+    
+    const blockHold = holds.find(h => h?.itemType === "stall" && !h?.resourceId);
+    const blockReleased = blockHold?.state === "released" && blockHold?.releaseReason === "assigned";
+
+    const pass = perStallOk && blockReleased;
+    return {
+      test: "stalls:block-reserve-and-assign",
+      result: pass ? "PASS" : "FAIL",
+      registration: regId,
+      event: eventId,
+      stalledIds: stalls,
+      perStallHolds: perStallHolds.length,
+      blockHoldReleased: blockReleased,
+      reason: !perStallOk ? "per-stall-holds-invalid" : !blockReleased ? "block-not-released" : null
+    };
+  },
+
+  "smoke:stalls:double-assign-guard": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // Create event with stalls
+    const eventName = smokeTag("stalls_guard_evt");
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 10,
+      reservedCount: 0,
+      stallEnabled: true,
+      stallCapacity: 2,
+      stallUnitAmount: 5000
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "stalls:double-assign-guard", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+
+    // Create 2 stalls
+    const stalls = [];
+    for (let i = 1; i <= 2; i++) {
+      const stall = await post("/objects/resource", {
+        type: "resource",
+        resourceType: "stall",
+        name: `GuardStall-${i}`,
+        status: "available",
+        tags: [`event:${eventId}`]
+      });
+      if (!stall.ok || !stall.body?.id) {
+        return { test: "stalls:double-assign-guard", result: "FAIL", reason: `stall-create-failed`, stall };
+      }
+      stalls.push(stall.body.id);
+    }
+
+    // Create and checkout reg A with stallQty=1
+    const regARes = await post(`/registrations:public`, { eventId, stallQty: 1, party: { email: `guard_a+${SMOKE_RUN_ID}@example.com` } }, featureHeaders, { auth: "none" });
+    if (!regARes.ok) return { test: "stalls:double-assign-guard", result: "FAIL", reason: "regA-create-failed", regARes };
+    const regAId = regARes.body.registration.id;
+    const chkA = await post(`/events/registration/${encodeURIComponent(regAId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": regARes.body.publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!chkA.ok) return { test: "stalls:double-assign-guard", result: "FAIL", reason: "chkA-failed", chkA };
+
+    // Webhook to confirm A
+    await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "Stripe-Signature": "sim_valid_signature", ...featureHeaders, "x-tenant-id": TENANT },
+      body: JSON.stringify({ id: `evt_a_${SMOKE_RUN_ID}`, type: "payment_intent.succeeded", data: { object: { id: chkA.body.paymentIntentId, status: "succeeded", metadata: { registrationId: regAId, eventId } } } })
+    });
+
+    // Assign first stall to A
+    const assignA = await post(`/registrations/${encodeURIComponent(regAId)}:assign-stalls`, { stallIds: [stalls[0]] }, featureHeaders);
+    if (!assignA.ok) return { test: "stalls:double-assign-guard", result: "FAIL", reason: "assignA-failed", assignA };
+
+    // Create and checkout reg B with stallQty=1
+    const regBRes = await post(`/registrations:public`, { eventId, stallQty: 1, party: { email: `guard_b+${SMOKE_RUN_ID}@example.com` } }, featureHeaders, { auth: "none" });
+    if (!regBRes.ok) return { test: "stalls:double-assign-guard", result: "FAIL", reason: "regB-create-failed", regBRes };
+    const regBId = regBRes.body.registration.id;
+    const chkB = await post(`/events/registration/${encodeURIComponent(regBId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": regBRes.body.publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!chkB.ok) return { test: "stalls:double-assign-guard", result: "FAIL", reason: "chkB-failed", chkB };
+
+    // Webhook to confirm B
+    await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "Stripe-Signature": "sim_valid_signature", ...featureHeaders, "x-tenant-id": TENANT },
+      body: JSON.stringify({ id: `evt_b_${SMOKE_RUN_ID}`, type: "payment_intent.succeeded", data: { object: { id: chkB.body.paymentIntentId, status: "succeeded", metadata: { registrationId: regBId, eventId } } } })
+    });
+
+    // Try to assign same stall[0] to B - should fail with 409 + code
+    const assignBFail = await post(`/registrations/${encodeURIComponent(regBId)}:assign-stalls`, { stallIds: [stalls[0]] }, featureHeaders);
+    const failOk = assignBFail.status === 409 && (
+      assignBFail.body?.code === "stall_already_assigned" || assignBFail.body?.details?.code === "stall_already_assigned"
+    );
+
+    // Verify A's holds are still intact
+    const holdsA = await get(`/reservation-holds?ownerType=registration&ownerId=${encodeURIComponent(regAId)}`);
+    const aHolds = Array.isArray(holdsA.body?.items) ? holdsA.body.items : [];
+    const aAssigned = aHolds.some(h => h?.resourceId === stalls[0] && h?.state === "confirmed");
+
+    const pass = failOk && aAssigned;
+    return {
+      test: "stalls:double-assign-guard",
+      result: pass ? "PASS" : "FAIL",
+      regA: regAId,
+      regB: regBId,
+      assignBFailStatus: assignBFail.status,
+      aHoldsIntact: aAssigned,
+      reason: !failOk ? "assign-should-have-failed" : !aAssigned ? "reg-a-holds-corrupted" : null
+    };
+  },
+
+  "smoke:stalls:release-on-cancel": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // Create event with stalls
+    const eventName = smokeTag("stalls_release_evt");
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 10,
+      stallEnabled: true,
+      stallCapacity: 2,
+      stallUnitAmount: 5000
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "stalls:release-on-cancel", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+
+    // Create 2 stalls
+    const stalls = [];
+    for (let i = 1; i <= 2; i++) {
+      const stall = await post("/objects/resource", {
+        type: "resource",
+        resourceType: "stall",
+        name: `ReleaseStall-${i}`,
+        status: "available",
+        tags: [`event:${eventId}`]
+      });
+      if (!stall.ok) return { test: "stalls:release-on-cancel", result: "FAIL", reason: "stall-create-failed", stall };
+      stalls.push(stall.body.id);
+    }
+
+    // Reg A: create, checkout, confirm, assign, then cancel
+    const regARes = await post(`/registrations:public`, { eventId, stallQty: 2, party: { email: `release_a+${SMOKE_RUN_ID}@example.com` } }, featureHeaders, { auth: "none" });
+    if (!regARes.ok) return { test: "stalls:release-on-cancel", result: "FAIL", reason: "regA-create-failed" };
+    const regAId = regARes.body.registration.id;
+    
+    const chkA = await post(`/events/registration/${encodeURIComponent(regAId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": regARes.body.publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!chkA.ok) return { test: "stalls:release-on-cancel", result: "FAIL", reason: "chkA-failed" };
+
+    // Webhook confirm
+    await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "Stripe-Signature": "sim_valid_signature", ...featureHeaders, "x-tenant-id": TENANT },
+      body: JSON.stringify({ id: `evt_ca_${SMOKE_RUN_ID}`, type: "payment_intent.succeeded", data: { object: { id: chkA.body.paymentIntentId, status: "succeeded", metadata: { registrationId: regAId, eventId } } } })
+    });
+
+    // Assign both stalls to A
+    const assignA = await post(`/registrations/${encodeURIComponent(regAId)}:assign-stalls`, { stallIds: stalls }, featureHeaders);
+    if (!assignA.ok) return { test: "stalls:release-on-cancel", result: "FAIL", reason: "assignA-failed" };
+
+    // Cancel A with refund
+    const cancelA = await post(`/registrations/${encodeURIComponent(regAId)}:cancel-refund`, {}, featureHeaders);
+    if (!cancelA.ok) return { test: "stalls:release-on-cancel", result: "FAIL", reason: "cancelA-failed", cancelA };
+
+    // Check holds are released
+    const holdsAAfterCancel = await get(`/reservation-holds?ownerType=registration&ownerId=${encodeURIComponent(regAId)}`);
+    const aHoldsAfter = Array.isArray(holdsAAfterCancel.body?.items) ? holdsAAfterCancel.body.items : [];
+    const allReleased = aHoldsAfter.length > 0 && aHoldsAfter.every(h => h?.state === "released");
+
+    // Check event counter decremented
+    const evtAfter = await get(`/objects/event/${encodeURIComponent(eventId)}`);
+    const stallReservedAfter = Number(evtAfter.body?.stallReserved ?? 0);
+    const counterOk = stallReservedAfter === 0;
+
+    // Reg B should now be able to reserve/assign all freed stalls
+    const regBRes = await post(`/registrations:public`, { eventId, stallQty: 2, party: { email: `release_b+${SMOKE_RUN_ID}@example.com` } }, featureHeaders, { auth: "none" });
+    if (!regBRes.ok) return { test: "stalls:release-on-cancel", result: "FAIL", reason: "regB-create-failed" };
+    const regBId = regBRes.body.registration.id;
+
+    const chkB = await post(`/events/registration/${encodeURIComponent(regBId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": regBRes.body.publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    const checkoutBOk = chkB.ok;
+
+    const pass = allReleased && counterOk && checkoutBOk;
+    return {
+      test: "stalls:release-on-cancel",
+      result: pass ? "PASS" : "FAIL",
+      regA: regAId,
+      regB: regBId,
+      holdsReleased: allReleased,
+      stallReservedAfter,
+      regBCheckoutOk: checkoutBOk,
+      reason: !allReleased ? "holds-not-released" : !counterOk ? "counter-not-decremented" : !checkoutBOk ? "regB-checkout-failed" : null
+    };
+  },
   "smoke:po-receive-lot-location-assertions": async () => {
     await ensureBearer();
 

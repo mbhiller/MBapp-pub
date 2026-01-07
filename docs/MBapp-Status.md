@@ -1,10 +1,47 @@
 # MBapp Status / Working
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Foundations](MBapp-Foundations.md) · [Cadence](MBapp-Cadence.md) · [Verification](smoke-coverage.md)  
-**Last Updated:** 2026-01-06  
+**Last Updated:** 2026-01-07  
 **Workflow & DoD:** See [MBapp-Cadence.md](MBapp-Cadence.md) for canonical workflow, Definition of Done, and testing rules.
 
 ---
+### Sprint BK — Stalls v1 (resource-based holds + assignment) — ✅ Complete (2026-01-07)
+
+**Summary:** Delivered a true resource-based reservation for event stalls using the existing ReservationHold ledger plus minimal stall resource identity. Implemented block holds at checkout, per-stall assignment via operator action, robust conflict/lookup guards, and capacity release on cancel/refund. Added targeted smokes and CI wiring.
+
+**Deliverables (E1–E8):**
+- **Spec (E1):** Extended [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml):
+  - Event: stall configuration fields (enabled/pricing/capacity counters).
+  - ReservationHold: `itemType="stall"`, optional `resourceId`, optional `groupId` tags; response schemas for assigns.
+  - Registration: `stallQty` captured on public create; added `:assign-stalls` endpoint with request/response.
+  - Ran `npm run spec:lint`, `spec:bundle`, `spec:types:api`, `spec:types:mobile` ✅
+- **Repo counters (E2):** [apps/api/src/objects/repo.ts](../apps/api/src/objects/repo.ts): `reserveEventStalls()` / `releaseEventStalls()` with optimistic concurrency guards and clamped decrements.
+- **Resources module (E3):** [apps/api/src/resources/stalls.ts](../apps/api/src/resources/stalls.ts): validation helpers to ensure stall IDs exist, belong to event, and are available; tag extraction utilities.
+- **Holds extension (E4):** [apps/api/src/reservations/holds.ts](../apps/api/src/reservations/holds.ts):
+  - Idempotent `createHeldStallBlockHold()` that reuses existing held/confirmed block.
+  - `assignStallsToRegistration()` prefers confirmed block, performs per-stall conflict checks, creates per-stall holds with state parity, and releases block with `releaseReason="assigned"`.
+- **Checkout integration (E5):** [apps/api/src/registrations/checkout.ts](../apps/api/src/registrations/checkout.ts): compute stall fee, reserve stall capacity, create block hold post-persist; rollback on failure; public-create validates `stallQty` against event stall config.
+- **Endpoint wiring (E6):** [apps/api/src/registrations/assign-stalls.ts](../apps/api/src/registrations/assign-stalls.ts) handler; routed in [apps/api/src/index.ts](../apps/api/src/index.ts); returns safe holds summary.
+- **Smokes (E7):** Added 3 tests in [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) and wired tiers in [ops/ci-smokes.json](../ops/ci-smokes.json):
+  - Core: `smoke:stalls:block-reserve-and-assign` — asserts block hold exists pre-assign, per-stall holds confirmed, block released `reason="assigned"`.
+  - Extended: `smoke:stalls:double-assign-guard` — second assign returns non-OK guarded; owner A holds remain intact.
+  - Extended: `smoke:stalls:release-on-cancel` — cancel-refund releases stall holds/counters; subsequent registration can reserve.
+- **Fixes + hardening (E8):** Idempotency for block holds; prefer-confirmed block lookups with debug context; robust per-stall conflict checks; cancel-refund decrements stall counters; restored bearer checks in rv-happy-path; CI tier updates.
+
+**Endpoints:**
+- `POST /events/registration/{id}:checkout` — includes stall fee/capacity reserve and creates stall block hold.
+- `POST /registrations/{id}:assign-stalls` — validates/stores assignment; creates per-stall holds; releases block with `assigned`.
+- `POST /registrations/{id}:cancel-refund` — releases stall counters and transitions holds with `releaseReason="refund"`.
+
+**Verification:**
+- ✅ Typescript: `npm run typecheck --workspaces --if-present`
+- ✅ Smokes: all three stalls tests PASS (core + extended tiers)
+- ✅ Spec pipeline: lint/bundle/types clean
+
+**Impact:**
+- Establishes resource-based booking foundation without schema-breaking migrations.
+- Clear lifecycle: block hold → confirm → per-stall assignment → block release with `assigned`.
+- Deterministic tests and CI wiring ensure reliability across retries and operator actions.
 
 ### Sprint BJ — ReservationHold Ledger v1 (spec + API + integrations + smokes) — ✅ Complete (2026-01-07)
 

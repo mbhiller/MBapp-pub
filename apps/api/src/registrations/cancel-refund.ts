@@ -2,7 +2,7 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { ok, badRequest, conflictError, error as respondError, notFound } from "../common/responses";
 import { getTenantId } from "../common/env";
-import { getObjectById, updateObject, releaseEventSeat, releaseEventRv } from "../objects/repo";
+import { getObjectById, updateObject, releaseEventSeat, releaseEventRv, releaseEventStalls } from "../objects/repo";
 import { guardRegistrations } from "./feature";
 import { createRefund } from "../common/stripe";
 import { REGISTRATION_STATUS, REGISTRATION_PAYMENT_STATUS } from "./constants";
@@ -29,6 +29,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const refundedAtExisting = (reg as any).refundedAt as string | undefined;
     const eventId = (reg as any).eventId as string | undefined;
     const rvQty = Math.max(0, Number((reg as any).rvQty || 0));
+    const stallQty = Math.max(0, Number((reg as any).stallQty || 0));
 
     // Idempotency: already refunded or refundedAt set
     if (paymentStatus === REGISTRATION_PAYMENT_STATUS.refunded || refundedAtExisting) {
@@ -65,6 +66,9 @@ export async function handle(event: APIGatewayProxyEventV2) {
       try { await releaseEventSeat({ tenantId, eventId }); } catch (_) {}
       if (rvQty > 0) {
         try { await releaseEventRv({ tenantId, eventId, qty: rvQty }); } catch (_) {}
+      }
+      if (stallQty > 0) {
+        try { await releaseEventStalls({ tenantId, eventId, qty: stallQty }); } catch (_) {}
       }
     }
 

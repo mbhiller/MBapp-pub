@@ -542,6 +542,20 @@ components:
             type: integer
             minimum: 0
             description: Price in cents per RV spot for this event
+          stallEnabled:
+            type: boolean
+            description: Enable stall reservation for this event (Sprint BK)
+            default: false
+          stallCapacity:
+            type: integer
+            minimum: 0
+            nullable: true
+            description: Stall slots available for this event (0 means none, null means unlimited)
+          stallUnitAmount:
+            type: integer
+            minimum: 0
+            nullable: true
+            description: Price in cents per stall for this event (optional)
           notes:
             type: string
           lines:
@@ -1141,7 +1155,7 @@ components:
           itemType:
             type: string
             description: Reserved item kind within the scope
-            enum: [seat, rv]
+            enum: [seat, rv, stall]
           qty:
             type: number
             minimum: 1
@@ -1168,6 +1182,14 @@ components:
             type: string
             nullable: true
             description: Optional freeform reason for release/cancel (v1; consider enum later)
+          resourceId:
+            type: string
+            nullable: true
+            description: Optional specific resource ID (e.g., EventResource stall ID). When null, refers to a pool/block of resources (Sprint BK).
+          groupId:
+            type: string
+            nullable: true
+            description: Optional grouping ID (e.g., barn/row/section). Can also be stored in metadata (Sprint BK).
           metadata:
             type: object
             additionalProperties: true
@@ -1537,6 +1559,11 @@ components:
             type: integer
             minimum: 0
             description: Number of RV spots requested for this registration (server-stored)
+          stallQty:
+            type: integer
+            minimum: 0
+            nullable: true
+            description: Number of stalls requested for this registration (Sprint BK; server-stored)
           notes:
             type: string
             nullable: true
@@ -1824,6 +1851,27 @@ components:
             errorMessage:
               type: string
               nullable: true
+    AssignStallsRequest:
+      type: object
+      description: Request to assign specific stalls to a registration (Sprint BK)
+      required:
+      - stallIds
+      properties:
+        stallIds:
+          type: array
+          description: List of EventResource IDs (stalls) to assign
+          items:
+            type: string
+          minItems: 1
+    AssignStallsResponse:
+      type: object
+      description: Response from assign-stalls action
+      properties:
+        holds:
+          type: array
+          description: Updated or created ReservationHold objects for assigned stalls
+          items:
+            $ref: '#/components/schemas/ReservationHold'
     RegistrationLine:
       type: object
       properties:
@@ -4148,6 +4196,61 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /registrations/{id}:assign-stalls:
+    post:
+      tags:
+      - Registrations
+      operationId: assignStalls
+      summary: Assign specific stalls to a registration (operator)
+      description: |
+        Converts a block stall hold (itemType=stall, resourceId=null) into specific granular assignments.
+        Validates that stallIds length matches the block hold qty and that resources are available.
+        Creates or updates ReservationHold records with resourceId set for each stall.
+        Requires operator permission (registration:write).
+      x-mbapp-permission: registration:write
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignStallsRequest'
+      responses:
+        '200':
+          description: Stalls successfully assigned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssignStallsResponse'
+        '400':
+          description: Validation error (qty mismatch, duplicates, invalid resource)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Registration or resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflict (stall already assigned, registration not in correct state)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Forbidden, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /registrations/{id}:public:
     get:
       tags:

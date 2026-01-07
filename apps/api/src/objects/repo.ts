@@ -73,6 +73,13 @@ export type DeleteArgs = {
     at?: string;
   };
 
+  export type ReserveEventStallsArgs = {
+    tenantId?: string;
+    eventId: string;
+    qty: number;
+    at?: string;
+  };
+
 // -------- Dynamo config --------
 const TABLE   = process.env.MBAPP_OBJECTS_TABLE || process.env.MBAPP_TABLE || "mbapp_objects";
 const PK_ATTR = process.env.MBAPP_TABLE_PK || "pk";
@@ -744,6 +751,149 @@ export async function releaseEventRv({ tenantId, eventId, qty, at }: ReserveEven
           Key,
           UpdateExpression: "SET #rvReserved = :zero, #updatedAt = :now",
           ConditionExpression: "attribute_exists(#rvReserved) AND #rvReserved > :zero",
+          ExpressionAttributeNames: names,
+          ExpressionAttributeValues: values,
+          ReturnValues: "ALL_NEW",
+        }));
+        return res2.Attributes as AnyRecord;
+      } catch (_) {
+        // Treat as no-op if still failing
+        return null as any;
+      }
+    }
+    throw err;
+  }
+}
+
+/**
+ * Atomically reserve stall capacity by incrementing stallReserved by qty.
+ * Rules:
+ * - If qty <= 0 OR event.stallEnabled is false => no-op
+ * - If stallCapacity is null/undefined and stallEnabled=true => unlimited (allow increment)
+ * - If stallCapacity === 0 => capacity full for any qty>0
+ * - Guard: ensure previous stallReserved + qty <= stallCapacity using optimistic check
+ * Persists stallReserved on the event (defaults to 0 when missing).
+ */
+export async function reserveEventStalls({ tenantId, eventId, qty, at }: ReserveEventStallsArgs) {
+  if (!qty || qty <= 0) return null as any;
+
+  // Read current flags and counters (strongly consistent)
+  const current = await getObjectById({
+    tenantId,
+    type: "event",
+    id: eventId,
+    fields: ["id", "stallEnabled", "stallCapacity", "stallReserved"],
+  });
+
+  const stallEnabled = (current as any)?.stallEnabled === true;
+  const stallCapacity = (current as any)?.stallCapacity as number | undefined | null;
+  const stallReserved = Number((current as any)?.stallReserved ?? 0) || 0;
+
+  if (!stallEnabled) return null as any;
+  if (stallCapacity === 0 && qty > 0) {
+    throw Object.assign(new Error("Stall capacity full"), { code: "stall_capacity_full", statusCode: 409 });
+  }
+  if (typeof stallCapacity === "number" && stallCapacity > 0) {
+    if (stallReserved + qty > stallCapacity) {
+      throw Object.assign(new Error("Stall capacity full"), { code: "stall_capacity_full", statusCode: 409 });
+    }
+  }
+
+  const Key: AnyRecord = {
+    [PK_ATTR]: tenantId,
+    [SK_ATTR]: `${normalizeTypeParam("event") ?? "event"}#${eventId}`,
+  };
+
+  const names = {
+    "#stallReserved": "stallReserved",
+    "#updatedAt": "updatedAt",
+  } as Record<string, string>;
+
+  const values = {
+    ":now": at || nowIso(),
+    ":zero": 0,
+    ":qty": qty,
+    ":expected": stallReserved,
+  } as Record<string, unknown>;
+
+  // Optimistic concurrency: ensure stallReserved matches snapshot (or missing when expected=0)
+  const condition = stallReserved === 0
+    ? "(attribute_not_exists(#stallReserved) OR #stallReserved = :expected)"
+    : "#stallReserved = :expected";
+
+  try {
+    const res = await ddb.send(new UpdateCommand({
+      TableName: TABLE,
+      Key,
+      UpdateExpression: "SET #stallReserved = if_not_exists(#stallReserved, :zero) + :qty, #updatedAt = :now",
+      ConditionExpression: condition,
+      ExpressionAttributeNames: names,
+      ExpressionAttributeValues: values,
+      ReturnValues: "ALL_NEW",
+    }));
+    return res.Attributes as AnyRecord;
+  } catch (err: any) {
+    if (err?.name === "ConditionalCheckFailedException") {
+      // Lost race or capacity changed; surface as capacity_full for callers
+      throw Object.assign(new Error("Stall capacity full"), { code: "stall_capacity_full", statusCode: 409 });
+    }
+    throw err;
+  }
+}
+
+/**
+ * Atomically release stall capacity by decrementing stallReserved by qty.
+ * Safe/idempotent: clamps at 0 and treats insufficient reserved as no-op.
+ */
+export async function releaseEventStalls({ tenantId, eventId, qty, at }: ReserveEventStallsArgs) {
+  if (!qty || qty <= 0) return null as any;
+
+  // Optional check: if stall not enabled, treat as no-op
+  const current = await getObjectById({
+    tenantId,
+    type: "event",
+    id: eventId,
+    fields: ["id", "stallEnabled", "stallReserved"],
+  });
+  const stallEnabled = (current as any)?.stallEnabled === true;
+  if (!stallEnabled) return null as any;
+
+  const Key: AnyRecord = {
+    [PK_ATTR]: tenantId,
+    [SK_ATTR]: `${normalizeTypeParam("event") ?? "event"}#${eventId}`,
+  };
+
+  const names = {
+    "#stallReserved": "stallReserved",
+    "#updatedAt": "updatedAt",
+  } as Record<string, string>;
+
+  const values = {
+    ":now": at || nowIso(),
+    ":qty": qty,
+    ":zero": 0,
+  } as Record<string, unknown>;
+
+  try {
+    const res = await ddb.send(new UpdateCommand({
+      TableName: TABLE,
+      Key,
+      UpdateExpression: "SET #stallReserved = if_not_exists(#stallReserved, :zero) - :qty, #updatedAt = :now",
+      ConditionExpression: "#stallReserved >= :qty",
+      ExpressionAttributeNames: names,
+      ExpressionAttributeValues: values,
+      ReturnValues: "ALL_NEW",
+    }));
+    return res.Attributes as AnyRecord;
+  } catch (err: any) {
+    if (err?.name === "ConditionalCheckFailedException") {
+      // Clamp to zero if not enough reserved; perform safe correction
+      try {
+        const res2 = await ddb.send(new UpdateCommand({
+          TableName: TABLE,
+          Key,
+          UpdateExpression: "SET #stallReserved = :zero, #updatedAt = :now",
+          ConditionExpression: "attribute_exists(#stallReserved) AND #stallReserved > :zero",
           ExpressionAttributeNames: names,
           ExpressionAttributeValues: values,
           ReturnValues: "ALL_NEW",

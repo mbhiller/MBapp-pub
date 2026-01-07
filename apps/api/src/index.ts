@@ -122,6 +122,7 @@ import * as RegPublicResend from "./registrations/public-resend";
 import * as RegCleanupExpiredHolds from "./registrations/cleanup-expired-holds";
 import * as RegCancel from "./registrations/cancel";
 import * as RegCancelRefund from "./registrations/cancel-refund";
+import * as RegAssignStalls from "./registrations/assign-stalls";
 // Internal jobs
 import * as JobsRun from "./jobs/run";
 import { runBackgroundJobs } from "./jobs/background";
@@ -408,6 +409,16 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
         const [, id] = m;
         requirePerm(auth, "registration:write");
         return RegCancelRefund.handle(withId(event, id));
+      }
+    }
+
+    // Registrations: operator assign stalls
+    {
+      const m = path.match(/^\/registrations\/([^/]+):assign-stalls$/i);
+      if (method === "POST" && m) {
+        const [, id] = m;
+        requirePerm(auth, "registration:write");
+        return RegAssignStalls.handle(withId(event, id));
       }
     }
 
