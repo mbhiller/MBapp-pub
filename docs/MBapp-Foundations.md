@@ -302,6 +302,44 @@ const TENANT = process.env.MBAPP_TENANT_ID ?? "DemoTenant";
 - **Metadata:** PaymentIntent metadata includes `registrationId` and `eventId` for webhook correlation.
 - **Capacity guard:** Checkout enforces atomic `reservedCount` increment on Event with condition `reservedCount < capacity` (null/0 treated as unlimited). Failure → 409 `capacity_full`.
 
+### RV Add‑on (Sprint BG)
+
+Optional RV spot purchase as an add‑on during public booking. Contract aligns spec, API, and web.
+
+**Event fields:**
+- `rvEnabled: boolean` — feature flag per event.
+- `rvCapacity: number|null` — total RV spots (0 means none available; null/absent means unlimited when enabled).
+- `rvReserved: number` — server‑maintained reserved count (atomic; optimistic concurrency guards).
+- `rvUnitAmount: number` — unit price in minor currency units (e.g., cents).
+
+**Registration fields:**
+- `rvQty: number` — client’s requested quantity (0–10). Captured at `POST /registrations:public` and validated against event RV config.
+- `fees: FeeLineItem[]` — server‑priced at checkout. RV line uses `{ key:"rv", label:"RV Spot", qty, unitAmount, amount, currency }`.
+- `totalAmount: number`, `currency: string` — server‑computed and persisted on checkout; may be echoed in idempotent responses and public status where applicable.
+
+**Server‑priced fees (authoritative pricing):**
+- Client does not send amounts. On `POST /events/registration/{id}:checkout`, the API computes fee lines from server truth: if `rvQty > 0`, requires `rvEnabled` and positive `rvUnitAmount`, then adds the RV fee line and computes `totalAmount`.
+- Idempotent checkout reuses prior PaymentIntent and echoes the same totals.
+
+**Capacity semantics (seat + RV):**
+- Seat reserve: atomically increments `event.reservedCount` with capacity guard; 409 `{ code:"capacity_full" }` on overfill.
+- RV reserve: if `rvQty > 0`, atomically increments `event.rvReserved` with per‑event guard; 409 `{ code:"rv_capacity_full" }` on overfill. On RV reserve failure, the server rolls back the seat reserve and surfaces `rv_capacity_full`.
+- Release on expiry: when a submitted hold expires, expire helper cancels the registration, releases the seat, and decrements `rvReserved` by `rvQty` (clamped at 0; safe/idempotent).
+
+**Lifecycle:**
+- Create: `POST /registrations:public { eventId, rvQty? }` returns registration + `publicToken` when `rvQty` valid and event RV enabled/priced (if qty>0).
+- Checkout: `POST /events/registration/{id}:checkout` with `X-MBapp-Public-Token` computes fees/totals, reserves seat and RV, creates Stripe PaymentIntent (amount=`totalAmount`, currency=`usd`), sets `holdExpiresAt`.
+- Confirm: Stripe webhook `payment_intent.succeeded` marks `status=confirmed`, `paymentStatus=paid`; confirmation messages include optional RV summary line in both email and SMS templates when `rvQty > 0`.
+- Expire: Background/manual cleanup cancels expired holds and releases seat + RV capacity.
+
+**Public surfaces:**
+- Events public list includes RV configuration fields (`rvEnabled`, `rvCapacity`, `rvUnitAmount`, `rvReserved`).
+- Public registration status may include `totalAmount`, `currency`, and `fees` when available, but never exposes client‑sensitive payment details beyond payment status and delivery indicators.
+
+**Safety & flags:**
+- Feature‑guarded via existing registrations and simulate headers (`X-Feature-Registrations-Enabled`, `X-Feature-Stripe-Simulate`, `X-Feature-Notify-Simulate`).
+- Pricing and capacity are server‑authoritative; UI calculations are advisory only.
+
 ### Public Registration Status (Sprint AY)
 
 - **Endpoint:** `GET /registrations/{id}:public` — public (no JWT), authenticated via `X-MBapp-Public-Token` header.

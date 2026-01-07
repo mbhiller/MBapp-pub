@@ -118,6 +118,23 @@ Smokes are organized by tier for targeted CI validation:
   - Validates public endpoint exposes hold expiration state correctly.
   - Flags/Headers: `X-Feature-Registrations-Enabled: true`, `X-Feature-Stripe-Simulate: true`.
 
+## Recent Additions (Sprint BG)
+
+- **Public Booking — RV Happy Path:** `smoke:public-booking:rv-happy-path`
+  - Creates RV-enabled event (`rvEnabled=true`, priced), public registration with `rvQty>0`, runs checkout.
+  - **Stable assertions:** PaymentIntent created; `totalAmount === rvQty * rvUnitAmount`; `fees[]` contains RV line `{ key:"rv", qty, unitAmount, amount }`.
+  - Flags/Headers: `X-Feature-Registrations-Enabled: true`, `X-Feature-Stripe-Simulate: true`.
+
+- **Public Booking — RV Capacity Guard:** `smoke:public-booking:rv-capacity-guard`
+  - Seeds event with `rvCapacity=1`; first checkout with `rvQty=1` succeeds, second conflicts.
+  - **Stable assertions:** Second checkout returns 409 with `{ code:"rv_capacity_full" }`.
+  - Flags/Headers: `X-Feature-Registrations-Enabled: true`, `X-Feature-Stripe-Simulate: true`.
+
+- **Public Booking — RV Hold Expiration Release:** `smoke:public-booking:rv-hold-expiration-release`
+  - Checkout A with `rvQty=1`, force `holdExpiresAt` to past, run cleanup to cancel + release capacity, then checkout B with `rvQty=1`.
+  - **Stable assertions:** Cleanup returns success; second checkout succeeds (capacity released).
+  - Flags/Headers: `X-Feature-Registrations-Enabled: true`, `X-Feature-Stripe-Simulate: true`.
+
 ## Recent Additions (Sprint AZ)
 
 - **Messages Retry (simulate):** `smoke:messages:retry-failed`

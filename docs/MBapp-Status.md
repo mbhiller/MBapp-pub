@@ -6,6 +6,41 @@
 
 ---
 
+### Sprint BG — Event RV Add‑on (spec + API + web) — ✅ Complete (2026-01-06)
+
+**Summary:** Introduced an event‑level RV add‑on purchasable during public booking. Contract‑first changes span spec, API create/checkout, objects repo capacity counters, webhook/template vars, public events projection, web booking UI, and smoke coverage.
+
+**Deliverables (E1–E7):**
+- **Spec (E1):** Extended [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml):
+  - Event: `rvEnabled`, `rvCapacity`, `rvUnitAmount`, `rvReserved` (server‑maintained)
+  - Registration: `rvQty` (0–10), `fees: FeeLineItem[]`, `totalAmount`, `currency`
+  - Responses: Public status/checkout may include totals and fees; added `FeeLineItem` schema
+  - Ran `spec:lint`, `spec:bundle`, `spec:types:api`, `spec:types:mobile` ✅
+- **API (E2):** [apps/api/src/registrations/public-create.ts](../apps/api/src/registrations/public-create.ts) accepts `rvQty`; validates `rvEnabled` + priced event when `rvQty>0`; persists `rvQty`.
+- **Repo (E3):** [apps/api/src/objects/repo.ts](../apps/api/src/objects/repo.ts): added `reserveEventRv()`/`releaseEventRv()` with atomic counters, capacity guards, optimistic concurrency; error code `rv_capacity_full`.
+- **Checkout (E4):** [apps/api/src/registrations/checkout.ts](../apps/api/src/registrations/checkout.ts): server‑prices RV fee line; computes `totalAmount`; reserves seat then RV (rollback on RV failure); creates PaymentIntent with server total; persists totals/fees.
+- **Expiry (E4):** [apps/api/src/registrations/expire-helper.ts](../apps/api/src/registrations/expire-helper.ts): releases RV on hold expiry alongside seat.
+- **Templates/Webhook (E5):** [apps/api/src/webhooks/stripe-handler.ts](../apps/api/src/webhooks/stripe-handler.ts) includes RV vars in templateVars; [apps/api/src/common/templates.ts](../apps/api/src/common/templates.ts) renders an RV summary line when present.
+- **Public Events (E6):** [apps/api/src/events/public-list.ts](../apps/api/src/events/public-list.ts) projects RV fields for booking UI.
+- **Web (E6):** [apps/web/src/pages/PublicBookingPage.tsx](../apps/web/src/pages/PublicBookingPage.tsx) shows RV selector when enabled, posts `rvQty` in create, displays server total from checkout.
+- **Smokes (E7):** Added RV flows in [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs): happy path totals/fees, capacity guard, and expiry release.
+
+**Endpoints/fields:**
+- Public create: `POST /registrations:public { eventId, rvQty? }` (validates rv config)
+- Checkout: `POST /events/registration/{id}:checkout` → reserves seat+RV, returns `paymentIntentId`, `clientSecret`, `totalAmount`, `currency`, `fees[]`
+- Expiry cleanup: `POST /registrations:cleanup-expired-holds` releases seat and RV
+- Public list: `GET /events:public` includes `rvEnabled`, `rvCapacity`, `rvUnitAmount`, `rvReserved`
+
+**Verification:**
+- ✅ Spec: lint/bundle clean; types regenerated
+- ✅ API/web: typechecks clean
+- ✅ Smokes: new RV tests pass locally under simulate headers
+
+**Test Evidence (placeholders):**
+- `smoke:public-booking:rv-happy-path` → PaymentIntent created; `totalAmount = rvQty * rvUnitAmount`; fees include `key="rv"`
+- `smoke:public-booking:rv-capacity-guard` → second checkout 409 `{ code:"rv_capacity_full" }`
+- `smoke:public-booking:rv-hold-expiration-release` → after cleanup, a new `rvQty=1` checkout succeeds
+
 ### Sprint BD — Background Jobs Foundation — ✅ Complete (2026-01-06)
 
 **Summary:** Shipped a minimal, safe background jobs foundation: a dispatcher with bounded per-tenant execution, a secure internal endpoint to trigger jobs on-demand, a feature-flagged EventBridge scheduler, a Lambda hook for scheduled invocations, and deterministic smokes wired into core CI.

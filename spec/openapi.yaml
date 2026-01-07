@@ -3663,6 +3663,18 @@ components:
             capacity:
               type: number
               minimum: 0
+            rvEnabled:
+              type: boolean
+              description: Enable RV add-on booking for this event (Sprint BG)
+              default: false
+            rvCapacity:
+              type: integer
+              minimum: 0
+              description: RV spots available for this event (0 means none)
+            rvUnitAmount:
+              type: integer
+              minimum: 0
+              description: Price in cents per RV spot for this event
             notes:
               type: string
             lines:
@@ -4719,22 +4731,13 @@ components:
             fees:
               type: array
               nullable: true
-              description: Registration fees
+              description: Registration fee line items (server-owned after checkout)
               items:
-                type: object
-                required:
-                  - code
-                  - amount
-                properties:
-                  code:
-                    type: string
-                    description: Fee code/identifier
-                  amount:
-                    type: number
-                    description: Fee amount
-                  description:
-                    type: string
-                    nullable: true
+                $ref: '#/components/schemas/FeeLineItem'
+            rvQty:
+              type: integer
+              minimum: 0
+              description: Number of RV spots requested for this registration (server-stored)
             notes:
               type: string
               nullable: true
@@ -4751,6 +4754,14 @@ components:
                 - succeeded
                 - failed
               description: Payment status (Sprint AU)
+            totalAmount:
+              type: integer
+              nullable: true
+              description: Total amount in cents for this registration (server-computed)
+            currency:
+              type: string
+              nullable: true
+              description: ISO currency code for totals (e.g., "usd")
             submittedAt:
               type: string
               format: date-time
@@ -4853,6 +4864,20 @@ components:
             - pending
             - succeeded
             - failed
+        totalAmount:
+          type: integer
+          nullable: true
+          description: Safe total amount in cents (if exposed)
+        currency:
+          type: string
+          nullable: true
+          description: ISO currency code (e.g., "usd")
+        fees:
+          type: array
+          nullable: true
+          description: Safe projection of fee line items (no PII)
+          items:
+            $ref: '#/components/schemas/FeeLineItem'
         submittedAt:
           type: string
           format: date-time
@@ -5004,6 +5029,14 @@ components:
         clientSecret:
           type: string
           description: Client secret for Stripe.js to confirm payment
+        totalAmount:
+          type: integer
+          nullable: true
+          description: Total amount in cents for the PaymentIntent (server-computed)
+        currency:
+          type: string
+          nullable: true
+          description: ISO currency code (e.g., "usd")
     PublicRegistrationRequest:
       type: object
       description: Request body for public registration creation (Sprint AU)
@@ -5045,6 +5078,12 @@ components:
               description:
                 type: string
                 nullable: true
+        rvQty:
+          type: integer
+          minimum: 0
+          maximum: 10
+          default: 0
+          description: Optional number of RV spots requested (pricing is server-computed; client may not submit amounts)
         division:
           type: string
           nullable: true
@@ -5054,6 +5093,37 @@ components:
         notes:
           type: string
           nullable: true
+    FeeLineItem:
+      type: object
+      description: Server-owned fee line item used to compute totals
+      required:
+        - key
+        - label
+        - qty
+        - unitAmount
+        - amount
+        - currency
+      properties:
+        key:
+          type: string
+          description: Machine key (e.g., "rv")
+        label:
+          type: string
+          description: Human label (e.g., "RV Spot")
+        qty:
+          type: integer
+          minimum: 0
+        unitAmount:
+          type: integer
+          minimum: 0
+          description: Unit price in cents
+        amount:
+          type: integer
+          minimum: 0
+          description: Total amount in cents (qty * unitAmount)
+        currency:
+          type: string
+          description: ISO currency code (e.g., "usd")
     PublicRegistrationResponse:
       type: object
       description: Response from public registration creation including guest token (Sprint AU)

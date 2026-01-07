@@ -31,7 +31,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
       tenantId,
       type: "event",
       id: body.eventId,
-      fields: ["id", "status", "name"],
+      fields: ["id", "status", "name", "rvEnabled", "rvUnitAmount", "rvCapacity"],
     });
 
     if (!eventObj) {
@@ -42,6 +42,31 @@ export async function handle(event: APIGatewayProxyEventV2) {
       return forbidden(
         `Event is not open for registration (status: ${(eventObj as any).status})`
       );
+    }
+
+    // rvQty (optional): validate and store (no reservation yet; that occurs at checkout)
+    const rawRvQty = body.rvQty;
+    let rvQty = 0;
+    if (rawRvQty !== undefined && rawRvQty !== null) {
+      if (typeof rawRvQty !== "number" || !Number.isInteger(rawRvQty)) {
+        return badRequest("rvQty must be an integer", { field: "rvQty", code: "invalid_rvQty" });
+      }
+      if (rawRvQty < 0 || rawRvQty > 10) {
+        return badRequest("rvQty must be between 0 and 10", { field: "rvQty", code: "invalid_rvQty_range" });
+      }
+      rvQty = rawRvQty;
+    }
+
+    if (rvQty > 0) {
+      const rvEnabled = (eventObj as any)?.rvEnabled === true;
+      const rvUnitAmount = (eventObj as any)?.rvUnitAmount as number | undefined;
+      if (!rvEnabled) {
+        return badRequest("RV add-on not enabled for this event", { field: "rvQty", code: "rv_not_enabled" });
+      }
+      if (!(typeof rvUnitAmount === "number" && rvUnitAmount > 0)) {
+        return badRequest("RV unit amount not configured for this event", { field: "rvQty", code: "rv_pricing_missing" });
+      }
+      // Note: We do NOT reserve RV capacity at create time; reservation occurs at checkout submit.
     }
 
     // Generate cryptographically secure public token (32 bytes = 64 hex chars)
@@ -63,6 +88,9 @@ export async function handle(event: APIGatewayProxyEventV2) {
       submittedAt: null,
       confirmedAt: null,
     };
+
+    // Persist rvQty on registration
+    registrationBody.rvQty = rvQty;
 
     // Optional party information (guest details)
     if (body.party) {

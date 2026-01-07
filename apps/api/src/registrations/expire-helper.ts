@@ -1,6 +1,7 @@
 // apps/api/src/registrations/expire-helper.ts
 import { getObjectById, updateObject } from "../objects/repo";
 import { releaseEventSeat } from "../objects/repo";
+import { releaseEventRv } from "../objects/repo";
 
 export type ExpireHoldArgs = {
   tenantId: string;
@@ -25,6 +26,7 @@ export async function expireRegistrationHold({ tenantId, regId }: ExpireHoldArgs
   if (holdMs === undefined || holdMs >= nowMs) return { expired: false };
 
   const eventId = (reg as any).eventId as string | undefined;
+  const rvQty = Math.max(0, Number((reg as any).rvQty || 0));
 
   await updateObject({
     tenantId,
@@ -42,6 +44,13 @@ export async function expireRegistrationHold({ tenantId, regId }: ExpireHoldArgs
       await releaseEventSeat({ tenantId, eventId });
     } catch (_) {
       // ignore
+    }
+    if (rvQty > 0) {
+      try {
+        await releaseEventRv({ tenantId, eventId, qty: rvQty });
+      } catch (_) {
+        // ignore
+      }
     }
   }
 
