@@ -3,11 +3,11 @@ import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import crypto from "crypto";
 import { ok, badRequest, conflictError, error as respondError } from "../common/responses";
 import { getTenantId } from "../common/env";
-import { getObjectById, updateObject, reserveEventSeat, reserveEventRv, releaseEventSeat, releaseEventRv } from "../objects/repo";
+import { getObjectById, updateObject, reserveEventSeat, reserveEventRv, releaseEventSeat, releaseEventRv, reserveEventStalls, releaseEventStalls } from "../objects/repo";
 import { guardRegistrations } from "./feature";
 import { createPaymentIntent } from "../common/stripe";
 import { REGISTRATION_STATUS, REGISTRATION_PAYMENT_STATUS } from "./constants";
-import { createHeldReservationHold, releaseReservationHoldsForOwner } from "../reservations/holds";
+import { createHeldReservationHold, releaseReservationHoldsForOwner, createHeldStallBlockHold } from "../reservations/holds";
 
 /** Constant-time string compare to avoid timing leaks */
 function constantTimeEqual(a: string, b: string) {
@@ -75,12 +75,12 @@ export async function handle(event: APIGatewayProxyEventV2) {
       return conflictError(`Registration is not in a draft state (status=${status})`, { code: "invalid_state" });
     }
 
-    // Fetch event to validate status and capacity; include RV pricing/capacity
+    // Fetch event to validate status and capacity; include RV and stall pricing/capacity
     const eventObj = await getObjectById({
       tenantId,
       type: "event",
       id: (registration as any).eventId,
-      fields: ["id", "status", "capacity", "reservedCount", "rvEnabled", "rvCapacity", "rvUnitAmount"],
+      fields: ["id", "status", "capacity", "reservedCount", "rvEnabled", "rvCapacity", "rvUnitAmount", "stallEnabled", "stallCapacity", "stallUnitAmount"],
     });
 
     if (!eventObj) {
@@ -101,8 +101,11 @@ export async function handle(event: APIGatewayProxyEventV2) {
 
     // Compute authoritative fees (server-side) and totals
     const rvQty = Math.max(0, Number((registration as any).rvQty || 0));
+    const stallQty = Math.max(0, Number((registration as any).stallQty || 0));
     const rvEnabled = (eventObj as any)?.rvEnabled === true;
+    const stallEnabled = (eventObj as any)?.stallEnabled === true;
     const rvUnitAmount = Number((eventObj as any)?.rvUnitAmount ?? 0);
+    const stallUnitAmount = Number((eventObj as any)?.stallUnitAmount ?? 0);
 
     const computedFees: Array<{ key: string; label: string; qty: number; unitAmount: number; amount: number; currency: string }> = [];
     if (rvQty > 0) {
@@ -114,6 +117,16 @@ export async function handle(event: APIGatewayProxyEventV2) {
       }
       const amount = rvQty * rvUnitAmount;
       computedFees.push({ key: "rv", label: "RV Spot", qty: rvQty, unitAmount: rvUnitAmount, amount, currency: "usd" });
+    }
+    if (stallQty > 0) {
+      if (!stallEnabled) {
+        return conflictError("Stall reservation not enabled for this event", { code: "stall_not_enabled" });
+      }
+      if (!(stallUnitAmount > 0)) {
+        return conflictError("Stall pricing not configured for this event", { code: "stall_pricing_missing" });
+      }
+      const amount = stallQty * stallUnitAmount;
+      computedFees.push({ key: "stall", label: "Stall", qty: stallQty, unitAmount: stallUnitAmount, amount, currency: "usd" });
     }
     const totalAmount = computedFees.reduce((sum, f) => sum + (Number.isFinite(f.amount) ? f.amount : 0), 0);
 
@@ -142,7 +155,28 @@ export async function handle(event: APIGatewayProxyEventV2) {
       }
     }
 
-    // Create reservation holds for ledger tracking (only after both seat and RV succeed)
+    // Reserve stall capacity if requested; if it fails, release seat and RV and surface error
+    if (stallQty > 0) {
+      try {
+        await reserveEventStalls({ tenantId, eventId: (registration as any).eventId, qty: stallQty });
+      } catch (err: any) {
+        if (err?.code === "stall_capacity_full") {
+          try { await releaseEventSeat({ tenantId, eventId: (registration as any).eventId }); } catch (_) {}
+          if (rvQty > 0) {
+            try { await releaseEventRv({ tenantId, eventId: (registration as any).eventId, qty: rvQty }); } catch (_) {}
+          }
+          return conflictError("Stall capacity full", { code: "stall_capacity_full" });
+        }
+        // Unknown error; release seat and RV and propagate
+        try { await releaseEventSeat({ tenantId, eventId: (registration as any).eventId }); } catch (_) {}
+        if (rvQty > 0) {
+          try { await releaseEventRv({ tenantId, eventId: (registration as any).eventId, qty: rvQty }); } catch (_) {}
+        }
+        throw err;
+      }
+    }
+
+    // Create reservation holds for ledger tracking (only after seat, RV, and stall all succeed)
     try {
       await createHeldReservationHold({
         tenantId,
@@ -169,11 +203,24 @@ export async function handle(event: APIGatewayProxyEventV2) {
           event,
         });
       }
+
+      if (stallQty > 0) {
+        await createHeldStallBlockHold({
+          tenantId,
+          registrationId: (registration as any).id,
+          eventId: (registration as any).eventId,
+          qty: stallQty,
+          expiresAt: holdExpiresAt,
+        });
+      }
     } catch (err: any) {
       // If hold creation fails, release counters to be safe
       try { await releaseEventSeat({ tenantId, eventId: (registration as any).eventId }); } catch (_) {}
       if (rvQty > 0) {
         try { await releaseEventRv({ tenantId, eventId: (registration as any).eventId, qty: rvQty }); } catch (_) {}
+      }
+      if (stallQty > 0) {
+        try { await releaseEventStalls({ tenantId, eventId: (registration as any).eventId, qty: stallQty }); } catch (_) {}
       }
       throw err;
     }

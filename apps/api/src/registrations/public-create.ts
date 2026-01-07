@@ -31,7 +31,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
       tenantId,
       type: "event",
       id: body.eventId,
-      fields: ["id", "status", "name", "rvEnabled", "rvUnitAmount", "rvCapacity"],
+      fields: ["id", "status", "name", "rvEnabled", "rvUnitAmount", "rvCapacity", "stallEnabled", "stallUnitAmount", "stallCapacity"],
     });
 
     if (!eventObj) {
@@ -69,6 +69,29 @@ export async function handle(event: APIGatewayProxyEventV2) {
       // Note: We do NOT reserve RV capacity at create time; reservation occurs at checkout submit.
     }
 
+    // stallQty (optional): validate and store; reservation occurs at checkout
+    const rawStallQty = body.stallQty;
+    let stallQty = 0;
+    if (rawStallQty !== undefined && rawStallQty !== null) {
+      if (typeof rawStallQty !== "number" || !Number.isInteger(rawStallQty)) {
+        return badRequest("stallQty must be an integer", { field: "stallQty", code: "invalid_stallQty" });
+      }
+      if (rawStallQty < 0 || rawStallQty > 50) {
+        return badRequest("stallQty must be between 0 and 50", { field: "stallQty", code: "invalid_stallQty_range" });
+      }
+      stallQty = rawStallQty;
+    }
+    if (stallQty > 0) {
+      const stallEnabled = (eventObj as any)?.stallEnabled === true;
+      const stallUnitAmount = (eventObj as any)?.stallUnitAmount as number | undefined;
+      if (!stallEnabled) {
+        return badRequest("Stall add-on not enabled for this event", { field: "stallQty", code: "stall_not_enabled" });
+      }
+      if (!(typeof stallUnitAmount === "number" && stallUnitAmount > 0)) {
+        return badRequest("Stall unit amount not configured for this event", { field: "stallQty", code: "stall_pricing_missing" });
+      }
+    }
+
     // Generate cryptographically secure public token (32 bytes = 64 hex chars)
     const publicToken = crypto.randomBytes(32).toString("hex");
     
@@ -89,8 +112,9 @@ export async function handle(event: APIGatewayProxyEventV2) {
       confirmedAt: null,
     };
 
-    // Persist rvQty on registration
+    // Persist rvQty and stallQty on registration
     registrationBody.rvQty = rvQty;
+    registrationBody.stallQty = stallQty;
 
     // Optional party information (guest details)
     if (body.party) {

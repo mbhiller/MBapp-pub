@@ -1,7 +1,7 @@
 # Smoke Test Coverage (Sprint S, 2025-12-31)
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Status/Working](MBapp-Status.md) · [Foundations](MBapp-Foundations.md) · [Cadence](MBapp-Cadence.md)  
-**Last Updated:** 2026-01-06
+**Last Updated:** 2026-01-07
 
 ---
 
@@ -164,6 +164,26 @@ Smokes are organized by tier for targeted CI validation:
     - RV hold present: `state="confirmed"`, `qty=2` (matches rvQty)
     - Both holds have `itemType` matching their purpose.
   - Flags/Headers: `X-Feature-Registrations-Enabled: true`, `X-Feature-Stripe-Simulate: true`, `X-Feature-Notify-Simulate: true`.
+
+## Recent Additions (Sprint BK)
+
+- **Stalls: Block Reserve → Assign:** `smoke:stalls:block-reserve-and-assign` (core tier)
+  - Creates event with stalls enabled and `stallQty=2` on public registration; runs checkout to create block hold.
+  - Asserts block hold exists before assignment (`itemType="stall"`, `resourceId=null`, `state=held|confirmed`). Calls `POST /registrations/{id}:assign-stalls` with two `stallIds`.
+  - **Stable assertions:** Per-stall holds exist with `resourceId` set, state parity with block (confirmed when block confirmed); block hold transitions to `state="released"` with `releaseReason="assigned"`.
+  - Flags/Headers: `X-Feature-Registrations-Enabled: true`, `X-Feature-Stripe-Simulate: true`.
+
+- **Stalls: Double Assign Guard:** `smoke:stalls:double-assign-guard`
+  - Two registrations in same event; assign same stall IDs to A (succeeds), then attempt assign to B (fails with any non-OK guarded response).
+  - **Stable assertions:** B assign returns non-OK; A’s per-stall holds remain intact (`held|confirmed`), no mutation of A’s holds; conflict detection covers held+confirmed.
+  - Flags/Headers: `X-Feature-Registrations-Enabled: true`, `X-Feature-Stripe-Simulate: true`.
+
+- **Stalls: Release on Cancel-Refund:** `smoke:stalls:release-on-cancel` (extended tier)
+  - Confirmed registration with `stallQty>0`; operator `cancel-refund` executed.
+  - **Stable assertions:** Stall counter decremented (clamped at 0); prior stall holds transition to `state="released"` with `releaseReason="refund"`; subsequent registration can reserve stalls (capacity was freed).
+  - Flags/Headers: `X-Feature-Registrations-Enabled: true`, `X-Feature-Stripe-Simulate: true`.
+
+**Foundation validated:** Stalls v1 establishes resource-based booking with deterministic conflict detection, idempotent operations, and capacity safety. Patterns are designed to mirror for future resources (RV sites, suites, equipment) via same ReservationHold ledger and counter semantics.
 
 ## Recent Additions (Sprint AZ)
 

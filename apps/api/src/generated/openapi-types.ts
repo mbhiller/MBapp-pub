@@ -284,6 +284,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/registrations/{id}:assign-stalls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Assign specific stalls to a registration (operator)
+         * @description Converts a block stall hold (itemType=stall, resourceId=null) into specific granular assignments.
+         *     Validates that stallIds length matches the block hold qty and that resources are available.
+         *     Creates or updates ReservationHold records with resourceId set for each stall.
+         *     Requires operator permission (registration:write).
+         *
+         */
+        post: operations["assignStalls"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/registrations/{id}:public": {
         parameters: {
             query?: never;
@@ -2626,6 +2650,15 @@ export interface components {
             rvCapacity?: number;
             /** @description Price in cents per RV spot for this event */
             rvUnitAmount?: number;
+            /**
+             * @description Enable stall reservation for this event (Sprint BK)
+             * @default false
+             */
+            stallEnabled: boolean;
+            /** @description Stall slots available for this event (0 means none, null means unlimited) */
+            stallCapacity?: number | null;
+            /** @description Price in cents per stall for this event (optional) */
+            stallUnitAmount?: number | null;
             notes?: string;
             lines?: components["schemas"]["EventLine"][];
         };
@@ -2913,7 +2946,7 @@ export interface components {
              * @description Reserved item kind within the scope
              * @enum {string}
              */
-            itemType: "seat" | "rv";
+            itemType: "seat" | "rv" | "stall";
             qty: number;
             /**
              * @description Current state of the reservation hold
@@ -2930,6 +2963,10 @@ export interface components {
             releasedAt?: string | null;
             /** @description Optional freeform reason for release/cancel (v1; consider enum later) */
             releaseReason?: string | null;
+            /** @description Optional specific resource ID (e.g., EventResource stall ID). When null, refers to a pool/block of resources (Sprint BK). */
+            resourceId?: string | null;
+            /** @description Optional grouping ID (e.g., barn/row/section). Can also be stored in metadata (Sprint BK). */
+            groupId?: string | null;
             metadata?: {
                 [key: string]: unknown;
             } | null;
@@ -3150,6 +3187,8 @@ export interface components {
             fees?: components["schemas"]["FeeLineItem"][] | null;
             /** @description Number of RV spots requested for this registration (server-stored) */
             rvQty?: number;
+            /** @description Number of stalls requested for this registration (Sprint BK; server-stored) */
+            stallQty?: number | null;
             /** @description Additional notes */
             notes?: string | null;
             /** @description Stripe PaymentIntent ID (Sprint AU) */
@@ -3320,6 +3359,16 @@ export interface components {
                 provider?: string | null;
                 errorMessage?: string | null;
             } | null;
+        };
+        /** @description Request to assign specific stalls to a registration (Sprint BK) */
+        AssignStallsRequest: {
+            /** @description List of EventResource IDs (stalls) to assign */
+            stallIds: string[];
+        };
+        /** @description Response from assign-stalls action */
+        AssignStallsResponse: {
+            /** @description Updated or created ReservationHold objects for assigned stalls */
+            holds?: components["schemas"]["ReservationHold"][];
         };
         RegistrationLine: {
             id?: string;
@@ -5371,6 +5420,81 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    assignStalls: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-tenant-id": components["parameters"]["TenantHeader"];
+                /** @description Optional idempotency key for safe retries. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssignStallsRequest"];
+            };
+        };
+        responses: {
+            /** @description Stalls successfully assigned */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignStallsResponse"];
+                };
+            };
+            /** @description Validation error (qty mismatch, duplicates, invalid resource) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Registration or resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflict (stall already assigned, registration not in correct state) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
