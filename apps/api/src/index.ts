@@ -119,6 +119,9 @@ import * as RegCheckout from "./registrations/checkout";
 import * as RegPublicGet from "./registrations/public-get";
 import * as RegPublicResend from "./registrations/public-resend";
 import * as RegCleanupExpiredHolds from "./registrations/cleanup-expired-holds";
+// Internal jobs
+import * as JobsRun from "./jobs/run";
+import { runBackgroundJobs } from "./jobs/background";
 
 /* Helpers */
 const json = (statusCode: number, body: unknown): APIGatewayProxyResultV2 => ({
@@ -251,6 +254,28 @@ function requireObjectPerm(auth: any, method: string, typeRaw: string) {
 
 export async function handler(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   try {
+    // Allow EventBridge (or other non-HTTP) invokes to trigger background jobs.
+    // Detect via lightweight event shape: source === "mbapp.jobs" or a top-level jobType.
+    const anyEvt: any = event as any;
+    if ((anyEvt && (anyEvt.source === "mbapp.jobs" || anyEvt.jobType)) && !anyEvt?.requestContext?.http) {
+      const rawType = String(anyEvt.jobType || "all").toLowerCase();
+      const limit = Number.isFinite(anyEvt.limit) ? Math.max(1, Math.floor(anyEvt.limit)) : undefined;
+      const tenantId = typeof anyEvt.tenantId === "string" && anyEvt.tenantId.trim() ? anyEvt.tenantId.trim() : undefined;
+
+      const run = async (t: "cleanup-expired-holds" | "retry-failed-messages") =>
+        runBackgroundJobs({ jobType: t, ...(limit ? { limit } : {}), ...(tenantId ? { tenants: [tenantId] } : {}) });
+
+      if (rawType === "all") {
+        const a = await run("cleanup-expired-holds");
+        const b = await run("retry-failed-messages");
+        return json(200, { results: [...a.results, ...b.results] });
+      }
+
+      const allowed = rawType === "cleanup-expired-holds" || rawType === "retry-failed-messages" ? rawType : "cleanup-expired-holds";
+      const group = await run(allowed as any);
+      return json(200, { results: group.results });
+    }
+
     if (isPreflight(event)) return corsOk();
 
     const method = event.requestContext.http.method;
@@ -376,6 +401,12 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
     if (method === "POST" && path === "/messages:retry-failed") {
       requirePerm(auth, "message:write");
       return MessageRetryFailed.handle(event);
+    }
+
+    // Internal: on-demand background jobs
+    if (method === "POST" && (path === "/internal/jobs:run" || path === "/jobs:run")) {
+      requirePerm(auth, "ops:jobs:run");
+      return JobsRun.handle(event);
     }
 
     // Messages: list

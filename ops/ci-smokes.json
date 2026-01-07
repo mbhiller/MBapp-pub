@@ -55,6 +55,8 @@
     { "name": "smoke:registrations:public-status-confirmed", "tier": "core" },
     { "name": "smoke:registrations:public-status-hold-expired", "tier": "core" },
     { "name": "smoke:registrations:public-resend", "tier": "core" },
+    { "name": "smoke:jobs:background-cleanup-expired-holds", "tier": "core" },
+    { "name": "smoke:jobs:background-retry-failed-messages", "tier": "core" },
     { "name": "smoke:messages:retry-failed", "tier": "core" },
     { "name": "smoke:inventory:onhand-permission-denied", "tier": "extended" },
     { "name": "smoke:views:validate-filters", "tier": "extended" },
