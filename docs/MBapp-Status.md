@@ -6,6 +6,21 @@
 
 ---
 
+### Sprint BN — Assign-Resources Consolidation + Coverage — ✅ Complete (2026-01-07)
+
+**Summary:** Unified the polymorphic assign-resources flow with shared validation/registration loading/tag parsing, hardened error remapping for legacy compatibility, and expanded smoke/spec/docs coverage to reflect real conflict codes.
+
+**Deliverables (E1–E7):**
+- **Shared helpers:** Centralized validators, registration loader, and tag parsing in [apps/api/src/common/validators.ts](apps/api/src/common/validators.ts), [apps/api/src/registrations/assign-resources.ts](apps/api/src/registrations/assign-resources.ts), and [apps/api/src/common/tag-helpers.ts](apps/api/src/common/tag-helpers.ts) for cross-resource reuse.
+- **Registry routing + error map:** Assign-resources handler routes by `itemType` (stalls/RV registry) and remaps validator errors to stable codes (qty mismatch, duplicate IDs, unsupported item types, wrong event) for consistent 400/409s while keeping legacy wrapper compatibility.
+- **Coverage:** Added polymorphic happy-path smokes (`smoke:resources:assign-generic-stalls` core; RV + double-assign guard extended) plus error-path smokes (qty_mismatch, block_hold_not_found, invalid_item_type, duplicate_ids, resource_not_for_event) in [ops/smoke/smoke.mjs](ops/smoke/smoke.mjs); tiers wired in [ops/ci-smokes.json](ops/ci-smokes.json).
+- **Spec/docs:** [spec/MBapp-Modules.yaml](spec/MBapp-Modules.yaml) documents assign-resources 400/404/409 codes and `releaseReason="assigned"`; docs updated in [docs/MBapp-Foundations.md](docs/MBapp-Foundations.md) and [docs/smoke-coverage.md](docs/smoke-coverage.md) for tag conventions, assignment lifecycle, error envelopes, and coverage.
+
+**Verification:**
+- ✅ Spec pipeline: `npm run spec:lint`, `npm run spec:bundle`, `npm run spec:types:api`, `npm run spec:types:mobile` (warnings pre-existing outside BN scope)
+- ✅ Smokes: new core + extended resource assignments and error-path flows passing locally (simulate headers)
+- ✅ No schema/data migrations; changes are handler + doc/spec only
+
 ### Sprint BL — RV Sites v1 (discrete resource assignment) — ✅ Complete (2026-01-07)
 
 **Summary:** Delivered discrete RV site assignment capability using the ReservationHold ledger, extending the stalls pattern to event RV sites. Implemented block holds at checkout, per-RV-site assignment via operator action, robust conflict guards, and capacity release on cancel/refund. Added comprehensive smokes and CI wiring.

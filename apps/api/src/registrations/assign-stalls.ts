@@ -8,9 +8,10 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { ok, badRequest, conflictError, error as respondError, notFound } from "../common/responses";
 import { getTenantId } from "../common/env";
-import { getObjectById } from "../objects/repo";
 import { guardRegistrations } from "./feature";
 import { assignStallsToRegistration } from "../reservations/holds";
+import { parseNonEmptyStringArray } from "../common/registration-validators";
+import { loadRegistrationWithEvent } from "../common/registration-helpers";
 
 export async function handle(event: APIGatewayProxyEventV2) {
   try {
@@ -29,25 +30,24 @@ export async function handle(event: APIGatewayProxyEventV2) {
       return badRequest("Invalid request body", { code: "invalid_json" });
     }
 
-    const stallIds = body.stallIds;
-    if (!Array.isArray(stallIds) || stallIds.length === 0) {
-      return badRequest("stallIds must be a non-empty array", { field: "stallIds" });
+    // Validate stallIds using shared helper
+    let stallIds: string[];
+    try {
+      stallIds = parseNonEmptyStringArray(body.stallIds, { field: "stallIds", label: "stallIds" });
+    } catch (err: any) {
+      return badRequest(err.message, { code: err.code, field: err.field });
     }
 
-    // Validate all items are strings
-    if (!stallIds.every((id: unknown) => typeof id === "string")) {
-      return badRequest("stallIds must contain only strings", { field: "stallIds" });
-    }
-
-    // Load registration to get eventId
-    const reg = await getObjectById({ tenantId, type: "registration", id });
-    if (!reg) {
-      return notFound("Registration not found");
-    }
-
-    const eventId = (reg as any)?.eventId as string | undefined;
-    if (!eventId) {
-      return badRequest("Registration has no eventId", { code: "missing_event_id" });
+    // Load registration to get eventId using shared helper
+    let eventId: string;
+    try {
+      const { eventId: eid } = await loadRegistrationWithEvent(tenantId, id);
+      eventId = eid;
+    } catch (err: any) {
+      if (err?.statusCode === 404) {
+        return notFound(err.message);
+      }
+      return badRequest(err.message, { code: err.code });
     }
 
     // Assign stalls (validates block hold, stall resources, etc.)

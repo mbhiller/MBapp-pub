@@ -416,6 +416,26 @@ Establishes a scalable resource-booking pattern using the ReservationHold ledger
 - Per-stall holds: `resourceId="{stallId}"`, qty=1 each.
 - States: `held` (pending payment) → `confirmed` (payment succeeded) → `released`/`cancelled` (booking ended/expired).
 
+### Resource Tag Conventions
+
+- **Required scope tag:** `event:{eventId}` on all event-scoped resources (stalls, RV sites, future suites/equipment/classes). Enables constant-time filtering by event without schema migrations.
+- **Optional grouping tag:** `group:{groupId}` when resources need an additional grouping dimension (e.g., barn/section/zone). Keep group semantics orthogonal to event tagging.
+- **Future prefixes:** Prefer explicit tags per scope (e.g., `lot:{lotId}`, `barn:{barnId}`, `section:{sectionId}`, or general `location:{locationId}`) instead of overloading existing tags. Preserve `event:` as the primary scoping tag for booking workflows.
+- **Consistency rule:** Keep tags lowercase, ASCII, `prefix:value` with no spaces. Avoid mixing unrelated scopes in a single tag to keep parsing simple (`event:abc|bad` is invalid; prefer two tags).
+- **Validator usage:** Resource validators read `event:{eventId}` to enforce scope; mismatches return `resource_not_for_event` (400) instead of silently reassigning across events.
+
+### Block Hold → Granular Assignment Conversion
+
+- **Block hold shape:** `resourceId=null`, `qty=N`, `state=held|confirmed` — created at checkout right after counters succeed. Mirrors requested quantity; does not embed specific resource IDs.
+- **Per-resource holds:** Created during assignment with `qty=1` each and `resourceId` set to the target resource; state mirrors the block (held/confirmed). Safe to retry; existing per-resource holds are reused.
+- **Block release:** Once all per-resource holds are created, release the block hold with `releaseReason="assigned"` to mark the aggregate slot consumed by granular holds.
+- **Counters + idempotency:** Assignment does **not** mutate event counters (capacity math already handled at checkout). Block→granular conversion is idempotent: replays keep per-resource holds stable and block stays released, preventing double-counting.
+- **Conflict + compatibility:** Conflict detection happens during per-resource creation (already-assigned → 409). Legacy `:assign-stalls` / `:assign-rv-sites` wrappers remain for compatibility, but `:assign-resources` is the primary endpoint going forward.
+
+### Error Envelopes for Assign-Resources
+
+- Some validation errors use a generic top-level `code` (e.g., `validation_error`) with the specific error in `details.code` (`qty_mismatch`, `duplicate_ids`, `invalid_item_type`, `resource_not_for_event`, `block_hold_not_found`). Treat `details.code` as the authoritative signal for conflict/validation branches.
+
 ### Stall Flow (Checkout → Assignment → Release)
 
 **1. Checkout (draft → submitted):**

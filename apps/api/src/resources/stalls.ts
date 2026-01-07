@@ -7,6 +7,7 @@
  */
 
 import { assertResourcesExistAndAvailable } from "../common/resources";
+import { extractEventIdFromTags, extractGroupIdFromTags } from "../common/tag-helpers";
 
 export type AssertStallResourcesArgs = {
   tenantId?: string;
@@ -29,61 +30,33 @@ export async function assertStallResourcesExistAndAvailable({
       resourceIds: stallIds,
       eventId,
       expectedResourceType: "stall",
+      errorMap: {
+        duplicate_ids: "duplicate_stalls",
+        resource_not_found: "stall_not_found",
+        invalid_resource_type: "invalid_stall_type",
+        invalid_resources: "invalid_stalls",
+      },
     });
   } catch (err: any) {
-    // Remap generic error codes to stall-specific for backward compatibility
-    if (err?.code === "resource_not_found") {
+    // Remap messages for stall-specific wording (codes already mapped in common helper)
+    if (err?.code === "stall_not_found") {
       throw Object.assign(new Error(err.message.replace("Resource", "Stall")), {
-        code: "stall_not_found",
-        statusCode: 404,
+        code: err.code,
+        statusCode: err.statusCode ?? 404,
       });
     }
-    if (err?.code === "invalid_resource_type") {
-      throw Object.assign(new Error(err.message), {
-        code: "invalid_stall_type",
-        statusCode: 400,
-      });
-    }
-    if (err?.code === "duplicate_ids") {
+    if (err?.code === "duplicate_stalls") {
       throw Object.assign(new Error("Duplicate stall IDs"), {
-        code: "duplicate_stalls",
-        statusCode: 400,
+        code: err.code,
+        statusCode: err.statusCode ?? 400,
       });
     }
-    if (err?.code === "invalid_resources") {
+    if (err?.code === "invalid_stalls") {
       throw Object.assign(new Error("No stall IDs provided"), {
-        code: "invalid_stalls",
-        statusCode: 400,
+        code: err.code,
+        statusCode: err.statusCode ?? 400,
       });
     }
     throw err;
   }
-}
-
-/**
- * Extract group ID from resource tags.
- * Looks for tag "group:<groupId>" and returns groupId or null.
- */
-export function extractGroupIdFromTags(tags: string[] | undefined): string | null {
-  if (!tags || !Array.isArray(tags)) return null;
-  for (const tag of tags) {
-    if (tag.startsWith("group:")) {
-      return tag.substring(6); // "group:".length = 6
-    }
-  }
-  return null;
-}
-
-/**
- * Extract event ID from resource tags.
- * Looks for tag "event:<eventId>" and returns eventId or null.
- */
-export function extractEventIdFromTags(tags: string[] | undefined): string | null {
-  if (!tags || !Array.isArray(tags)) return null;
-  for (const tag of tags) {
-    if (tag.startsWith("event:")) {
-      return tag.substring(6); // "event:".length = 6
-    }
-  }
-  return null;
 }

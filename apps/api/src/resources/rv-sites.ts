@@ -29,31 +29,31 @@ export async function assertRvResourcesExistAndAvailable({
       resourceIds: rvSiteIds,
       eventId,
       expectedResourceType: "rv",
+      errorMap: {
+        duplicate_ids: "duplicate_rv_sites",
+        resource_not_found: "rv_site_not_found",
+        invalid_resource_type: "invalid_rv_site_type",
+        invalid_resources: "invalid_rv_sites",
+      },
     });
   } catch (err: any) {
-    // Remap generic error codes to rv-site-specific for backward compatibility
-    if (err?.code === "resource_not_found") {
+    // Remap messages for RV-site-specific wording (codes already mapped in common helper)
+    if (err?.code === "rv_site_not_found") {
       throw Object.assign(new Error(err.message.replace("Resource", "RV site")), {
-        code: "rv_site_not_found",
-        statusCode: 404,
+        code: err.code,
+        statusCode: err.statusCode ?? 404,
       });
     }
-    if (err?.code === "invalid_resource_type") {
-      throw Object.assign(new Error(err.message), {
-        code: "invalid_rv_site_type",
-        statusCode: 400,
-      });
-    }
-    if (err?.code === "duplicate_ids") {
+    if (err?.code === "duplicate_rv_sites") {
       throw Object.assign(new Error("Duplicate RV site IDs"), {
-        code: "duplicate_rv_sites",
-        statusCode: 400,
+        code: err.code,
+        statusCode: err.statusCode ?? 400,
       });
     }
-    if (err?.code === "invalid_resources") {
+    if (err?.code === "invalid_rv_sites") {
       throw Object.assign(new Error("No RV site IDs provided"), {
-        code: "invalid_rv_sites",
-        statusCode: 400,
+        code: err.code,
+        statusCode: err.statusCode ?? 400,
       });
     }
     throw err;

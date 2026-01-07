@@ -11,6 +11,7 @@ export type AssertResourcesArgs = {
   eventId?: string;
   expectedResourceType: string; // e.g., "stall", "rv"
   eventTagPrefix?: string;
+  errorMap?: Partial<Record<string, string>>;
 };
 
 /**
@@ -30,15 +31,24 @@ export async function assertResourcesExistAndAvailable({
   eventId,
   expectedResourceType,
   eventTagPrefix = "event:",
+  errorMap,
 }: AssertResourcesArgs): Promise<Record<string, any>[]> {
+  const mapCode = (code: string) => errorMap?.[code] ?? code;
+
   if (!resourceIds || resourceIds.length === 0) {
-    throw Object.assign(new Error("No resource IDs provided"), { code: "invalid_resources", statusCode: 400 });
+    throw Object.assign(new Error("No resource IDs provided"), {
+      code: mapCode("invalid_resources"),
+      statusCode: 400,
+    });
   }
 
   // Check for duplicates
   const unique = new Set(resourceIds);
   if (unique.size !== resourceIds.length) {
-    throw Object.assign(new Error("Duplicate resource IDs"), { code: "duplicate_ids", statusCode: 400 });
+    throw Object.assign(new Error("Duplicate resource IDs"), {
+      code: mapCode("duplicate_ids"),
+      statusCode: 400,
+    });
   }
 
   const resources: Record<string, any>[] = [];
@@ -57,7 +67,7 @@ export async function assertResourcesExistAndAvailable({
       // Rethrow with 404 if not found
       if (err?.statusCode === 404 || err?.code === "not_found") {
         throw Object.assign(new Error(`Resource ${resourceId} not found`), {
-          code: "resource_not_found",
+          code: mapCode("resource_not_found"),
           statusCode: 404,
         });
       }
@@ -66,7 +76,7 @@ export async function assertResourcesExistAndAvailable({
 
     if (!resource) {
       throw Object.assign(new Error(`Resource ${resourceId} not found`), {
-        code: "resource_not_found",
+        code: mapCode("resource_not_found"),
         statusCode: 404,
       });
     }
@@ -74,7 +84,7 @@ export async function assertResourcesExistAndAvailable({
     // Validate type and resourceType
     if (resource.type !== "resource") {
       throw Object.assign(new Error(`${resourceId} is not a resource`), {
-        code: "invalid_resource_type",
+        code: mapCode("invalid_resource_type"),
         statusCode: 400,
       });
     }
@@ -83,7 +93,7 @@ export async function assertResourcesExistAndAvailable({
       throw Object.assign(
         new Error(`${resourceId} is not a ${expectedResourceType} resource (got ${resource.resourceType})`),
         {
-          code: "invalid_resource_type",
+          code: mapCode("invalid_resource_type"),
           statusCode: 400,
         }
       );
@@ -95,7 +105,7 @@ export async function assertResourcesExistAndAvailable({
       const eventTag = `${eventTagPrefix}${eventId}`;
       if (!tags.includes(eventTag)) {
         throw Object.assign(new Error(`Resource ${resourceId} does not belong to event ${eventId}`), {
-          code: "resource_not_for_event",
+          code: mapCode("resource_not_for_event"),
           statusCode: 400,
         });
       }
