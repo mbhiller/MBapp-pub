@@ -65,6 +65,28 @@ Smokes are organized by tier for targeted CI validation:
 - **`smoke:rv-sites:double-assign-guard`** — RegA reserves/confirms/assigns 1 RV site; RegB reserves/confirms/attempts same site. Asserts: RegB assignment fails 409 with code `"rv_site_already_assigned"`, RegA holds remain intact (idempotent).
 - **`smoke:rv-sites:release-on-cancel`** — RegA reserves/confirms/assigns 2 RV sites, then cancel-refund; RegB reserves/confirms to verify freed sites reusable. Asserts: All holds released (state=released), event rvReserved=0, RegB checkout succeeds.
 
+## Sprint BM — Generalized Resource Assignment
+
+**Scope:** Polymorphic `assign-resources` across resource types with block→per-resource conversion, conflict guards, and error-path validation.
+
+### CORE
+- **`smoke:resources:assign-generic-stalls`** — End-to-end stall flow: checkout creates block hold, Stripe webhook confirms, `:assign-resources` converts block → per-stall holds, releases block with `assigned` reason; asserts per-resource holds exist and match block qty.
+
+### EXTENDED
+- **`smoke:resources:assign-generic-rv-sites`** — Mirrors stalls flow for RV resources tagged to the event; asserts per-site holds count matches block qty and block released with `assigned`.
+- **`smoke:resources:double-assign-guard-polymorphic`** — Two registrations compete for one resource; first assignment succeeds, second returns 409 conflict with resource preserved for owner A (idempotent replay safe).
+
+## Sprint BN — Error-path coverage
+
+**Scope:** Assign-resources negative paths exercising validator/errorMap coverage.
+
+### EXTENDED
+- **`smoke:resources:error-qty-mismatch`** — 400 `qty_mismatch` when requested resourceIds length differs from block hold qty.
+- **`smoke:resources:error-block-hold-not-found`** — 400 `block_hold_not_found` when no matching block hold exists for the owner/itemType.
+- **`smoke:resources:error-unsupported-itemtype`** — 400 `invalid_item_type` when itemType is unrecognized.
+- **`smoke:resources:error-duplicate-ids`** — 400 `duplicate_ids` when resourceIds contains duplicates.
+- **`smoke:resources:error-resource-not-in-event`** — 400 `resource_not_for_event` when a resource tag points to a different event than the registration.
+
 ---
 
 ## CI Debugging Failed Smokes

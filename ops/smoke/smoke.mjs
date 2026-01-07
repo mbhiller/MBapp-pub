@@ -3505,6 +3505,341 @@ const tests = {
     };
   },
 
+  "smoke:resources:error-qty-mismatch": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // Event + resources scoped to SMOKE_RUN_ID
+    const eventName = smokeTag("resources_qty_evt");
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 5,
+      reservedCount: 0,
+      stallEnabled: true,
+      stallCapacity: 3,
+      stallReserved: 0,
+      stallUnitAmount: 5500
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "resources:error-qty-mismatch", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+    const stallIds = [];
+    for (let i = 1; i <= 2; i++) {
+      const stall = await post("/objects/resource", {
+        type: "resource",
+        resourceType: "stall",
+        name: `Stall-QM-${i}`,
+        status: "available",
+        tags: [`event:${eventId}`]
+      });
+      if (!stall.ok || !stall.body?.id) {
+        return { test: "resources:error-qty-mismatch", result: "FAIL", reason: `stall-${i}-create-failed`, stall };
+      }
+      stallIds.push(stall.body.id);
+      recordCreated({ type: "resource", id: stall.body.id, route: "/objects/resource" });
+    }
+
+    // Create confirmed registration and explicit block hold (qty=2)
+    const regCreate = await post("/objects/registration", {
+      type: "registration",
+      status: "confirmed",
+      eventId,
+      stallQty: 2,
+      party: { email: `qty-mismatch+${SMOKE_RUN_ID}@example.com` }
+    });
+    if (!regCreate.ok || !regCreate.body?.id) {
+      return { test: "resources:error-qty-mismatch", result: "FAIL", reason: "reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.id;
+
+    const blockHold = await post("/objects/reservationHold", {
+      type: "reservationHold",
+      ownerType: "registration",
+      ownerId: regId,
+      scopeType: "event",
+      scopeId: eventId,
+      itemType: "stall",
+      qty: 2,
+      state: "confirmed",
+      resourceId: null
+    });
+    if (!blockHold.ok) {
+      return { test: "resources:error-qty-mismatch", result: "FAIL", reason: "block-hold-create-failed", blockHold };
+    }
+
+    // Assign with fewer resources than block hold qty
+    const assignRes = await post(`/registrations/${encodeURIComponent(regId)}:assign-resources`, {
+      itemType: "stall",
+      resourceIds: [stallIds[0]]
+    }, featureHeaders);
+
+    const responseCode = assignRes.body?.details?.code || assignRes.body?.code;
+    const pass = !assignRes.ok && assignRes.status === 400 && responseCode === "qty_mismatch";
+    return {
+      test: "resources:error-qty-mismatch",
+      result: pass ? "PASS" : "FAIL",
+      status: assignRes.status,
+      code: responseCode,
+      response: assignRes.body,
+      requestedIds: [stallIds[0]],
+      registration: regId,
+      event: eventId,
+      reason: pass ? null : "expected-qty_mismatch"
+    };
+  },
+
+  "smoke:resources:error-block-hold-not-found": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    const eventName = smokeTag("resources_no_block_evt");
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 5,
+      reservedCount: 0,
+      stallEnabled: true,
+      stallCapacity: 1,
+      stallReserved: 0,
+      stallUnitAmount: 4500
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "resources:error-block-hold-not-found", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event" });
+
+    const stall = await post("/objects/resource", {
+      type: "resource",
+      resourceType: "stall",
+      name: "Stall-NoBlock",
+      status: "available",
+      tags: [`event:${eventId}`]
+    });
+    if (!stall.ok || !stall.body?.id) {
+      return { test: "resources:error-block-hold-not-found", result: "FAIL", reason: "stall-create-failed", stall };
+    }
+    const stallId = stall.body.id;
+    recordCreated({ type: "resource", id: stallId, route: "/objects/resource" });
+
+    // Create registration without creating any block hold
+    const regCreate = await post("/objects/registration", {
+      type: "registration",
+      status: "confirmed",
+      eventId,
+      stallQty: 1,
+      party: { email: `block-missing+${SMOKE_RUN_ID}@example.com` }
+    });
+    if (!regCreate.ok || !regCreate.body?.id) {
+      return { test: "resources:error-block-hold-not-found", result: "FAIL", reason: "registration-create-failed", regCreate };
+    }
+    const regId = regCreate.body.id;
+
+    const assignRes = await post(`/registrations/${encodeURIComponent(regId)}:assign-resources`, {
+      itemType: "stall",
+      resourceIds: [stallId]
+    }, featureHeaders);
+
+    const responseCode = assignRes.body?.details?.code || assignRes.body?.code;
+    const pass = !assignRes.ok && assignRes.status === 400 && responseCode === "block_hold_not_found";
+    return {
+      test: "resources:error-block-hold-not-found",
+      result: pass ? "PASS" : "FAIL",
+      status: assignRes.status,
+      code: responseCode,
+      registration: regId,
+      event: eventId,
+      reason: pass ? null : "expected-block_hold_not_found"
+    };
+  },
+
+  "smoke:resources:error-unsupported-itemtype": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    const regId = smokeTag("invalid-itemtype");
+    const assignRes = await post(`/registrations/${encodeURIComponent(regId)}:assign-resources`, {
+      itemType: "unknown",
+      resourceIds: ["dummy"]
+    }, featureHeaders);
+
+    const responseCode = assignRes.body?.details?.code || assignRes.body?.code;
+    const pass = !assignRes.ok && assignRes.status === 400 && responseCode === "invalid_item_type";
+    return {
+      test: "resources:error-unsupported-itemtype",
+      result: pass ? "PASS" : "FAIL",
+      status: assignRes.status,
+      code: responseCode,
+      reason: pass ? null : "expected-invalid_item_type"
+    };
+  },
+
+  "smoke:resources:error-duplicate-ids": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    const regId = smokeTag("dup-ids");
+    const assignRes = await post(`/registrations/${encodeURIComponent(regId)}:assign-resources`, {
+      itemType: "stall",
+      resourceIds: ["dup-1", "dup-1"]
+    }, featureHeaders);
+
+    const responseCode = assignRes.body?.details?.code || assignRes.body?.code;
+    const pass = !assignRes.ok && assignRes.status === 400 && responseCode === "duplicate_ids";
+    return {
+      test: "resources:error-duplicate-ids",
+      result: pass ? "PASS" : "FAIL",
+      status: assignRes.status,
+      code: responseCode,
+      reason: pass ? null : "expected-duplicate_ids"
+    };
+  },
+
+  "smoke:resources:error-resource-not-in-event": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // Event A: registration + block hold
+    const eventAName = smokeTag("resources_evt_a");
+    const evtA = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventAName,
+      capacity: 5,
+      reservedCount: 0,
+      stallEnabled: true,
+      stallCapacity: 1,
+      stallReserved: 0,
+      stallUnitAmount: 5200
+    });
+    if (!evtA.ok || !evtA.body?.id) {
+      return { test: "resources:error-resource-not-in-event", result: "FAIL", reason: "eventA-create-failed", evtA };
+    }
+    const eventAId = evtA.body.id;
+    recordCreated({ type: "event", id: eventAId, route: "/objects/event" });
+
+    // Event B: resource tagged to a different event
+    const evtB = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: smokeTag("resources_evt_b"),
+      capacity: 3,
+      reservedCount: 0,
+      stallEnabled: true,
+      stallCapacity: 1,
+      stallReserved: 0,
+      stallUnitAmount: 4800
+    });
+    if (!evtB.ok || !evtB.body?.id) {
+      return { test: "resources:error-resource-not-in-event", result: "FAIL", reason: "eventB-create-failed", evtB };
+    }
+    const eventBId = evtB.body.id;
+    recordCreated({ type: "event", id: eventBId, route: "/objects/event" });
+
+    const stall = await post("/objects/resource", {
+      type: "resource",
+      resourceType: "stall",
+      name: "Stall-Wrong-Event",
+      status: "available",
+      tags: [`event:${eventBId}`]
+    });
+    if (!stall.ok || !stall.body?.id) {
+      return { test: "resources:error-resource-not-in-event", result: "FAIL", reason: "stall-create-failed", stall };
+    }
+    const wrongEventStallId = stall.body.id;
+    recordCreated({ type: "resource", id: wrongEventStallId, route: "/objects/resource" });
+
+    // Registration on Event A with stallQty=1
+    const regCreate = await post(`/registrations:public`, { eventId: eventAId, stallQty: 1, party: { email: `wrong-event+${SMOKE_RUN_ID}@example.com` } }, featureHeaders, { auth: "none" });
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test: "resources:error-resource-not-in-event", result: "FAIL", reason: "reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+
+    const checkout = await post(`/events/registration/${encodeURIComponent(regId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!checkout.ok) {
+      return { test: "resources:error-resource-not-in-event", result: "FAIL", reason: "checkout-failed", checkout };
+    }
+
+    const whRes = await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "Stripe-Signature": "sim_valid_signature",
+        ...featureHeaders,
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify({
+        id: `evt_${SMOKE_RUN_ID}_wrong_evt`,
+        type: "payment_intent.succeeded",
+        data: {
+          object: {
+            id: checkout.body.paymentIntentId,
+            status: "succeeded",
+            metadata: { registrationId: regId, eventId: eventAId }
+          }
+        }
+      })
+    });
+    if (!whRes.ok) {
+      return { test: "resources:error-resource-not-in-event", result: "FAIL", reason: "webhook-failed", whStatus: whRes.status };
+    }
+
+    const assignRes = await post(`/registrations/${encodeURIComponent(regId)}:assign-resources`, {
+      itemType: "stall",
+      resourceIds: [wrongEventStallId]
+    }, featureHeaders);
+
+    const responseCode = assignRes.body?.details?.code || assignRes.body?.code;
+    const pass = !assignRes.ok && assignRes.status === 400 && responseCode === "resource_not_for_event";
+    return {
+      test: "resources:error-resource-not-in-event",
+      result: pass ? "PASS" : "FAIL",
+      status: assignRes.status,
+      code: responseCode,
+      registration: regId,
+      event: eventAId,
+      wrongEvent: eventBId,
+      reason: pass ? null : "expected-resource_not_for_event"
+    };
+  },
+
   "smoke:po-receive-lot-location-assertions": async () => {
     await ensureBearer();
 

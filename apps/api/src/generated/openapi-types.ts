@@ -298,7 +298,7 @@ export interface paths {
          * @description Converts a block stall hold (itemType=stall, resourceId=null) into specific granular assignments.
          *     Validates that stallIds length matches the block hold qty and that resources are available.
          *     Creates or updates ReservationHold records with resourceId set for each stall.
-         *     Requires operator permission (registration:write).
+         *     Requires operator permission (registration:write). Compatibility wrapper over assign-resources for stalls.
          *
          */
         post: operations["assignStalls"];
@@ -322,7 +322,7 @@ export interface paths {
          * @description Converts a block RV hold (itemType=rv, resourceId=null) into specific granular assignments.
          *     Validates that rvSiteIds length matches the block hold qty and that resources are available.
          *     Creates or updates ReservationHold records with resourceId set for each RV site.
-         *     Requires operator permission (registration:write).
+         *     Requires operator permission (registration:write). Compatibility wrapper over assign-resources for RV sites.
          *
          */
         post: operations["assignRvSites"];
@@ -348,6 +348,10 @@ export interface paths {
          *     Validates that resourceIds length matches the block hold qty and that resources are available.
          *     Creates or updates ReservationHold records with resourceId set for each resource.
          *     Requires operator permission (registration:write).
+         *     **Error Codes:**
+         *     - 400: invalid_item_type, invalid_resource_ids, duplicate_ids, block_hold_not_found, qty_mismatch, resource_not_for_event
+         *     - 404: registration_not_found, resource_not_found
+         *     - 409: stall_already_assigned, rv_site_already_assigned (resource already assigned to another registration)
          *
          */
         post: operations["assignResources"];
@@ -3010,7 +3014,12 @@ export interface components {
             confirmedAt?: string | null;
             /** Format: date-time */
             releasedAt?: string | null;
-            /** @description Optional freeform reason for release/cancel (v1; consider enum later) */
+            /** @description Optional reason for release/cancel. Known values include:
+             *     - assigned (block converted into per-resource holds)
+             *     - expired
+             *     - cancelled
+             *     - manual
+             *      */
             releaseReason?: string | null;
             /** @description Optional specific resource ID (e.g., EventResource stall ID). When null, refers to a pool/block of resources (Sprint BK). */
             resourceId?: string | null;
@@ -5683,7 +5692,7 @@ export interface operations {
                     "application/json": components["schemas"]["AssignResourcesResponse"];
                 };
             };
-            /** @description Validation error (qty mismatch, duplicates, invalid resource type, unsupported itemType) */
+            /** @description Validation error for itemType or resource assignment */
             400: {
                 headers: {
                     [name: string]: unknown;

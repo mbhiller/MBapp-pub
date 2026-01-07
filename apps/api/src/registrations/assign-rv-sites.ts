@@ -8,9 +8,10 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { ok, badRequest, conflictError, error as respondError, notFound } from "../common/responses";
 import { getTenantId } from "../common/env";
-import { getObjectById } from "../objects/repo";
 import { guardRegistrations } from "./feature";
 import { assignRvSitesToRegistration } from "../reservations/holds";
+import { parseNonEmptyStringArray } from "../common/registration-validators";
+import { loadRegistrationWithEvent } from "../common/registration-helpers";
 
 export async function handle(event: APIGatewayProxyEventV2) {
   try {
@@ -29,25 +30,24 @@ export async function handle(event: APIGatewayProxyEventV2) {
       return badRequest("Invalid request body", { code: "invalid_json" });
     }
 
-    const rvSiteIds = body.rvSiteIds;
-    if (!Array.isArray(rvSiteIds) || rvSiteIds.length === 0) {
-      return badRequest("rvSiteIds must be a non-empty array", { field: "rvSiteIds" });
+    // Validate rvSiteIds using shared helper
+    let rvSiteIds: string[];
+    try {
+      rvSiteIds = parseNonEmptyStringArray(body.rvSiteIds, { field: "rvSiteIds", label: "rvSiteIds" });
+    } catch (err: any) {
+      return badRequest(err.message, { code: err.code, field: err.field });
     }
 
-    // Validate all items are strings
-    if (!rvSiteIds.every((id: unknown) => typeof id === "string")) {
-      return badRequest("rvSiteIds must contain only strings", { field: "rvSiteIds" });
-    }
-
-    // Load registration to get eventId
-    const reg = await getObjectById({ tenantId, type: "registration", id });
-    if (!reg) {
-      return notFound("Registration not found");
-    }
-
-    const eventId = (reg as any)?.eventId as string | undefined;
-    if (!eventId) {
-      return badRequest("Registration has no eventId", { code: "missing_event_id" });
+    // Load registration to get eventId using shared helper
+    let eventId: string;
+    try {
+      const { eventId: eid } = await loadRegistrationWithEvent(tenantId, id);
+      eventId = eid;
+    } catch (err: any) {
+      if (err?.statusCode === 404) {
+        return notFound(err.message);
+      }
+      return badRequest(err.message, { code: err.code });
     }
 
     // Assign RV sites (validates block hold, RV site resources, etc.)

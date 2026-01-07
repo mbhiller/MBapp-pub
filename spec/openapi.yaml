@@ -1246,7 +1246,7 @@ paths:
         Converts a block stall hold (itemType=stall, resourceId=null) into specific granular assignments.
         Validates that stallIds length matches the block hold qty and that resources are available.
         Creates or updates ReservationHold records with resourceId set for each stall.
-        Requires operator permission (registration:write).
+        Requires operator permission (registration:write). Compatibility wrapper over assign-resources for stalls.
       x-mbapp-permission: registration:write
       security:
         - bearerAuth: []
@@ -1311,7 +1311,7 @@ paths:
         Converts a block RV hold (itemType=rv, resourceId=null) into specific granular assignments.
         Validates that rvSiteIds length matches the block hold qty and that resources are available.
         Creates or updates ReservationHold records with resourceId set for each RV site.
-        Requires operator permission (registration:write).
+        Requires operator permission (registration:write). Compatibility wrapper over assign-resources for RV sites.
       x-mbapp-permission: registration:write
       security:
         - bearerAuth: []
@@ -1378,6 +1378,10 @@ paths:
         Validates that resourceIds length matches the block hold qty and that resources are available.
         Creates or updates ReservationHold records with resourceId set for each resource.
         Requires operator permission (registration:write).
+        **Error Codes:**
+        - 400: invalid_item_type, invalid_resource_ids, duplicate_ids, block_hold_not_found, qty_mismatch, resource_not_for_event
+        - 404: registration_not_found, resource_not_found
+        - 409: stall_already_assigned, rv_site_already_assigned (resource already assigned to another registration)
       x-mbapp-permission: registration:write
       security:
         - bearerAuth: []
@@ -1403,11 +1407,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/AssignResourcesResponse'
         '400':
-          description: Validation error (qty mismatch, duplicates, invalid resource type, unsupported itemType)
+          description: Validation error for itemType or resource assignment
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+          x-error-codes:
+            - invalid_item_type
+            - invalid_resource_ids
+            - duplicate_ids
+            - block_hold_not_found
+            - qty_mismatch
+            - resource_not_for_event
         '401':
           description: Unauthorized
           content:
@@ -1432,6 +1443,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+          x-error-codes:
+            - stall_already_assigned
+            - rv_site_already_assigned
   /registrations/{id}:public:
     get:
       tags:
@@ -4691,7 +4705,12 @@ components:
             releaseReason:
               type: string
               nullable: true
-              description: Optional freeform reason for release/cancel (v1; consider enum later)
+              description: |
+                Optional reason for release/cancel. Known values include:
+                - assigned (block converted into per-resource holds)
+                - expired
+                - cancelled
+                - manual
             resourceId:
               type: string
               nullable: true
