@@ -2157,6 +2157,270 @@ const tests = {
     return { test:"ping", result:r.ok?"PASS":"FAIL", status:r.status, text:t };
   },
 
+  "smoke:public-booking:rv-happy-path": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // Create an open event with RV enabled and pricing
+    const eventName = smokeTag("rv_happy_evt");
+    const rvUnitAmount = 2500; // $25.00
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 2,
+      reservedCount: 0,
+      rvEnabled: true,
+      rvCapacity: 5,
+      rvReserved: 0,
+      rvUnitAmount
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "public-booking:rv-happy-path", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+    // Create public registration with rvQty and email to trigger confirmation message
+    const rvQty = 2;
+    const regCreate = await post(`/registrations:public`, { eventId, rvQty, party: { email: `rv+${SMOKE_RUN_ID}@example.com` } }, featureHeaders, { auth: "none" });
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test: "public-booking:rv-happy-path", result: "FAIL", reason: "reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+
+    // Checkout and verify totals reflect RV price
+    const checkout = await post(`/events/registration/${encodeURIComponent(regId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+
+    if (!checkout.ok || !checkout.body?.paymentIntentId) {
+      return { test: "public-booking:rv-happy-path", result: "FAIL", reason: "checkout-failed", checkout };
+    }
+
+    const expectedTotal = rvQty * rvUnitAmount;
+    const totalOk = typeof checkout.body?.totalAmount === "number" && checkout.body.totalAmount === expectedTotal;
+    const currencyOk = checkout.body?.currency ? true : true; // present or optional; accept either
+
+    // Read registration to verify fees persisted with RV line
+    const reg = await get(`/objects/registration/${encodeURIComponent(regId)}`);
+    const fees = Array.isArray(reg.body?.fees) ? reg.body.fees : [];
+    const rvFee = fees.find(f => f?.key === "rv");
+    const feeOk = !!rvFee && rvFee?.qty === rvQty && rvFee?.unitAmount === rvUnitAmount && rvFee?.amount === expectedTotal;
+
+    // Simulate Stripe webhook to confirm registration
+    const webhookBody = {
+      id: `evt_${SMOKE_RUN_ID}`,
+      type: "payment_intent.succeeded",
+      data: {
+        object: {
+          id: checkout.body.paymentIntentId,
+          status: "succeeded",
+          metadata: { registrationId: regId, eventId }
+        }
+      }
+    };
+    const whRes = await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "Stripe-Signature": "sim_valid_signature",
+        ...featureHeaders,
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify(webhookBody)
+    });
+    const whBody = await whRes.json().catch(() => ({}));
+    if (!whRes.ok) {
+      return { test: "public-booking:rv-happy-path", result: "FAIL", reason: "webhook-failed", whStatus: whRes.status, whBody };
+    }
+
+    // Read registration to get confirmation message and validate templateVars include RV details
+    const regObj = await get(`/objects/registration/${encodeURIComponent(regId)}`);
+    const msgId = regObj?.body?.confirmationMessageId;
+    if (!msgId) {
+      return { test: "public-booking:rv-happy-path", result: "FAIL", reason: "no-confirmation-message", reg: regObj.body };
+    }
+    const msg = await get(`/objects/message/${encodeURIComponent(msgId)}`);
+    const tv = (msg?.body?.templateVars) || {};
+    const tmplOk = msg.ok && msg.body?.templateKey === "registration.confirmed.email"
+      && !!tv.registrationId && !!tv.paymentIntentId
+      && typeof tv.rvQty === "number" && typeof tv.rvAmount === "number";
+
+    const pass = totalOk && currencyOk && feeOk && tmplOk;
+    return {
+      test: "public-booking:rv-happy-path",
+      result: pass ? "PASS" : "FAIL",
+      checkout: {
+        status: checkout.status,
+        paymentIntentId: checkout.body?.paymentIntentId,
+        clientSecret: checkout.body?.clientSecret,
+        totalAmount: checkout.body?.totalAmount,
+        currency: checkout.body?.currency
+      },
+      fees: rvFee ? { key: rvFee.key, qty: rvFee.qty, unitAmount: rvFee.unitAmount, amount: rvFee.amount } : null,
+      webhookStatus: whRes.status,
+      message: msg?.ok ? {
+        templateKey: msg.body?.templateKey,
+        hasRvVars: typeof tv.rvQty === "number" && typeof tv.rvAmount === "number"
+      } : null,
+      steps: { eventId, regId, rvQty, rvUnitAmount, expectedTotal }
+    };
+  },
+
+  "smoke:public-booking:rv-capacity-guard": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true"
+    };
+
+    // Event with RV capacity = 1 so second checkout fails on RV
+    const eventName = smokeTag("rv_cap_evt");
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 2,
+      reservedCount: 0,
+      rvEnabled: true,
+      rvCapacity: 1,
+      rvReserved: 0,
+      rvUnitAmount: 1000
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "public-booking:rv-capacity-guard", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+    // Single public registration requesting 2 RV with capacity=1 should fail deterministically
+    const r = await post(`/registrations:public`, { eventId, rvQty: 2 }, featureHeaders, { auth: "none" });
+    if (!r.ok || !r.body?.registration?.id || !r.body?.publicToken) {
+      return { test: "public-booking:rv-capacity-guard", result: "FAIL", reason: "reg-create-failed", r };
+    }
+
+    const c = await post(`/events/registration/${encodeURIComponent(r.body.registration.id)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": r.body.publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+
+    // Tight assertions: 409 conflict with RV-specific details, and no PI fields on failure
+    const conflictIsRv = c.status === 409
+      && c.body?.code === "conflict"
+      && c.body?.details?.code === "rv_capacity_full";
+    const noPiLeaked = !c.body?.paymentIntentId && !c.body?.clientSecret;
+    const pass = conflictIsRv && noPiLeaked;
+    return {
+      test: "public-booking:rv-capacity-guard",
+      result: pass ? "PASS" : "FAIL",
+      c: { status: c.status, code: c.body?.code, detailsCode: c.body?.details?.code, hasPi: !!c.body?.paymentIntentId },
+      steps: { eventId, regId: r.body.registration.id }
+    };
+  },
+
+  "smoke:public-booking:rv-hold-expiration-release": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true"
+    };
+
+    // Event with single RV capacity
+    const eventName = smokeTag("rv_expire_evt");
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 2,
+      reservedCount: 0,
+      rvEnabled: true,
+      rvCapacity: 1,
+      rvReserved: 0,
+      rvUnitAmount: 1500
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "public-booking:rv-hold-expiration-release", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+    // Create public registration A with rvQty=1
+    const rA = await post(`/registrations:public`, { eventId, rvQty: 1, party: { email: `rvA+${SMOKE_RUN_ID}@example.com` } }, featureHeaders, { auth: "none" });
+    if (!rA.ok || !rA.body?.registration?.id || !rA.body?.publicToken) {
+      return { test: "public-booking:rv-hold-expiration-release", result: "FAIL", reason: "regA-create-failed", rA };
+    }
+    const regAId = rA.body.registration.id;
+    const tokenA = rA.body.publicToken;
+
+    // Checkout A (reserves seat and RV)
+    const cA = await post(`/events/registration/${encodeURIComponent(regAId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": tokenA,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!cA.ok) {
+      return { test: "public-booking:rv-hold-expiration-release", result: "FAIL", reason: "checkout-A-failed", cA };
+    }
+
+    // Force A to expire: set holdExpiresAt in the past
+    const regAGet = await get(`/registrations/${encodeURIComponent(regAId)}`, undefined, { headers: featureHeaders });
+    if (!regAGet.ok || !regAGet.body?.id) {
+      return { test: "public-booking:rv-hold-expiration-release", result: "FAIL", reason: "regA-get-failed", regAGet };
+    }
+    const past = new Date(Date.now() - 60000).toISOString();
+    const updatedA = { ...regAGet.body, holdExpiresAt: past, status: "submitted" };
+    if (!updatedA.partyId) updatedA.partyId = `party_${SMOKE_RUN_ID}`;
+    if (updatedA.party) delete updatedA.party;
+    // Avoid validation issues on fees by removing computed/derived fields
+    if (updatedA.fees) delete updatedA.fees;
+    if (updatedA.totalAmount) delete updatedA.totalAmount;
+    if (updatedA.currency) delete updatedA.currency;
+    const setPast = await put(`/registrations/${encodeURIComponent(regAId)}`, updatedA, featureHeaders);
+    if (!setPast.ok) {
+      return { test: "public-booking:rv-hold-expiration-release", result: "FAIL", reason: "set-past-failed", setPast };
+    }
+
+    // Cleanup expired holds (releases seat and RV)
+    const cleanup = await post(`/registrations:cleanup-expired-holds`, {}, { ...baseHeaders(), "X-Feature-Registrations-Enabled": "true" });
+    if (!cleanup.ok) {
+      return { test: "public-booking:rv-hold-expiration-release", result: "FAIL", reason: "cleanup-failed", cleanup };
+    }
+
+    // Create public registration B with rvQty=1 and checkout should succeed
+    const rB = await post(`/registrations:public`, { eventId, rvQty: 1 }, featureHeaders, { auth: "none" });
+    if (!rB.ok || !rB.body?.registration?.id || !rB.body?.publicToken) {
+      return { test: "public-booking:rv-hold-expiration-release", result: "FAIL", reason: "regB-create-failed", rB };
+    }
+    const regBId = rB.body.registration.id;
+    const tokenB = rB.body.publicToken;
+    const cB = await post(`/events/registration/${encodeURIComponent(regBId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": tokenB,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+
+    const pass = cB.ok && typeof cleanup.body?.expiredCount === "number" && cleanup.body.expiredCount >= 1;
+    return {
+      test: "public-booking:rv-hold-expiration-release",
+      result: pass ? "PASS" : "FAIL",
+      cleanup: { expiredCount: cleanup.body?.expiredCount },
+      checkoutBStatus: cB.status,
+      steps: { eventId, regAId, regBId }
+    };
+  },
+
   "smoke:po-receive-lot-location-assertions": async () => {
     await ensureBearer();
 

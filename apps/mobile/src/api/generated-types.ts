@@ -2556,6 +2556,15 @@ export interface components {
              */
             status: "draft" | "scheduled" | "open" | "closed" | "completed" | "cancelled" | "archived";
             capacity?: number;
+            /**
+             * @description Enable RV add-on booking for this event (Sprint BG)
+             * @default false
+             */
+            rvEnabled: boolean;
+            /** @description RV spots available for this event (0 means none) */
+            rvCapacity?: number;
+            /** @description Price in cents per RV spot for this event */
+            rvUnitAmount?: number;
             notes?: string;
             lines?: components["schemas"]["EventLine"][];
         };
@@ -3035,14 +3044,10 @@ export interface components {
             division?: string | null;
             /** @description Class or level (optional) */
             class?: string | null;
-            /** @description Registration fees */
-            fees?: {
-                /** @description Fee code/identifier */
-                code: string;
-                /** @description Fee amount */
-                amount: number;
-                description?: string | null;
-            }[] | null;
+            /** @description Registration fee line items (server-owned after checkout) */
+            fees?: components["schemas"]["FeeLineItem"][] | null;
+            /** @description Number of RV spots requested for this registration (server-stored) */
+            rvQty?: number;
             /** @description Additional notes */
             notes?: string | null;
             /** @description Stripe PaymentIntent ID (Sprint AU) */
@@ -3052,6 +3057,10 @@ export interface components {
              * @enum {string|null}
              */
             paymentStatus?: "pending" | "succeeded" | "failed" | null;
+            /** @description Total amount in cents for this registration (server-computed) */
+            totalAmount?: number | null;
+            /** @description ISO currency code for totals (e.g., "usd") */
+            currency?: string | null;
             /**
              * Format: date-time
              * @description Timestamp when status changed to submitted (Sprint AU)
@@ -3121,6 +3130,12 @@ export interface components {
             status?: "draft" | "submitted" | "confirmed" | "cancelled";
             /** @enum {string|null} */
             paymentStatus?: "pending" | "succeeded" | "failed" | null;
+            /** @description Safe total amount in cents (if exposed) */
+            totalAmount?: number | null;
+            /** @description ISO currency code (e.g., "usd") */
+            currency?: string | null;
+            /** @description Safe projection of fee line items (no PII) */
+            fees?: components["schemas"]["FeeLineItem"][] | null;
             /** Format: date-time */
             submittedAt?: string | null;
             /** Format: date-time */
@@ -3185,6 +3200,10 @@ export interface components {
             paymentIntentId: string;
             /** @description Client secret for Stripe.js to confirm payment */
             clientSecret: string;
+            /** @description Total amount in cents for the PaymentIntent (server-computed) */
+            totalAmount?: number | null;
+            /** @description ISO currency code (e.g., "usd") */
+            currency?: string | null;
         };
         /** @description Request body for public registration creation (Sprint AU) */
         PublicRegistrationRequest: {
@@ -3203,9 +3222,28 @@ export interface components {
                 amount: number;
                 description?: string | null;
             }[] | null;
+            /**
+             * @description Optional number of RV spots requested (pricing is server-computed; client may not submit amounts)
+             * @default 0
+             */
+            rvQty: number;
             division?: string | null;
             class?: string | null;
             notes?: string | null;
+        };
+        /** @description Server-owned fee line item used to compute totals */
+        FeeLineItem: {
+            /** @description Machine key (e.g., "rv") */
+            key: string;
+            /** @description Human label (e.g., "RV Spot") */
+            label: string;
+            qty: number;
+            /** @description Unit price in cents */
+            unitAmount: number;
+            /** @description Total amount in cents (qty * unitAmount) */
+            amount: number;
+            /** @description ISO currency code (e.g., "usd") */
+            currency: string;
         };
         /** @description Response from public registration creation including guest token (Sprint AU) */
         PublicRegistrationResponse: {

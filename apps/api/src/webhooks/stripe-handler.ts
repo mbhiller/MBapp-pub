@@ -119,6 +119,14 @@ async function handlePaymentSucceeded(
 
   console.log(`[stripe-webhook] Registration ${registrationId} confirmed via PaymentIntent ${paymentIntent.id}`);
 
+  // Prepare optional RV details for templates
+  const rvQty = Math.max(0, Number(((registration as any)?.rvQty) || 0));
+  const fees = Array.isArray((registration as any)?.fees) ? ((registration as any).fees as any[]) : [];
+  const rvFee = fees.find((f) => f && (f.key === "rv"));
+  const rvUnitAmount = rvFee && typeof rvFee.unitAmount === "number" ? rvFee.unitAmount : undefined;
+  const rvAmount = rvFee && typeof rvFee.amount === "number" ? rvFee.amount : (rvQty > 0 && typeof rvUnitAmount === "number" ? rvQty * rvUnitAmount : undefined);
+  const currency = (registration as any)?.currency as string | undefined;
+
   // Enqueue confirmation email (idempotent: store confirmationMessageId on registration)
   const email = (registration as any)?.party?.email as string | undefined;
   const existingMsgId = (registration as any)?.confirmationMessageId as string | undefined;
@@ -127,7 +135,14 @@ async function handlePaymentSucceeded(
       tenantId: tenantId!,
       to: email,
       templateKey: "registration.confirmed.email",
-      templateVars: { registrationId, paymentIntentId: paymentIntent.id },
+      templateVars: {
+        registrationId,
+        paymentIntentId: paymentIntent.id,
+        ...(rvQty > 0 ? { rvQty } : {}),
+        ...(rvQty > 0 && typeof rvUnitAmount === "number" ? { rvUnitAmount } : {}),
+        ...(rvQty > 0 && typeof rvAmount === "number" ? { rvAmount } : {}),
+        ...(currency ? { currency } : {}),
+      },
       metadata: { registrationId, paymentIntentId: paymentIntent.id },
       event,
     });
@@ -148,7 +163,13 @@ async function handlePaymentSucceeded(
       tenantId: tenantId!,
       to: phone,
       templateKey: "registration.confirmed.sms",
-      templateVars: { registrationId },
+      templateVars: {
+        registrationId,
+        ...(rvQty > 0 ? { rvQty } : {}),
+        ...(rvQty > 0 && typeof rvUnitAmount === "number" ? { rvUnitAmount } : {}),
+        ...(rvQty > 0 && typeof rvAmount === "number" ? { rvAmount } : {}),
+        ...(currency ? { currency } : {}),
+      },
       metadata: { registrationId, paymentIntentId: paymentIntent.id },
       event,
     });

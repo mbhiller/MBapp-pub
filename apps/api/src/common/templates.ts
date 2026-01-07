@@ -43,19 +43,43 @@ export function renderTemplate(
       validateVars(templateKey, vars, ["registrationId", "paymentIntentId"]);
       const registrationId = vars.registrationId as string;
       const paymentIntentId = vars.paymentIntentId as string;
+      const rvQty = Number(vars.rvQty ?? 0);
+      const rvUnitAmount = typeof vars.rvUnitAmount === "number" ? (vars.rvUnitAmount as number) : undefined;
+      const rvAmount = typeof vars.rvAmount === "number" ? (vars.rvAmount as number) : undefined;
+      const hasRv = rvQty > 0 && typeof rvUnitAmount === "number" && typeof rvAmount === "number";
+
+      const lines: string[] = [
+        `Your registration ${registrationId} is confirmed. PaymentIntent ${paymentIntentId}.`,
+      ];
+      if (hasRv) {
+        const unit = (rvUnitAmount! / 100).toFixed(2);
+        const amt = (rvAmount! / 100).toFixed(2);
+        lines.push(`RV Spots: ${rvQty} x $${unit} = $${amt}`);
+      }
       return {
         channel: "email",
         subject: "Registration Confirmed",
-        body: `Your registration ${registrationId} is confirmed. PaymentIntent ${paymentIntentId}.`,
+        body: lines.join("\n"),
       };
     }
 
     case "registration.confirmed.sms": {
       validateVars(templateKey, vars, ["registrationId"]);
       const registrationId = vars.registrationId as string;
+      const rvQty = Number(vars.rvQty ?? 0);
+      const rvUnitAmount = typeof vars.rvUnitAmount === "number" ? (vars.rvUnitAmount as number) : undefined;
+      const rvAmount = typeof vars.rvAmount === "number" ? (vars.rvAmount as number) : undefined;
+      const hasRv = rvQty > 0 && typeof rvUnitAmount === "number" && typeof rvAmount === "number";
+
+      let body = `Your registration ${registrationId} is confirmed.`;
+      if (hasRv) {
+        const unit = (rvUnitAmount! / 100).toFixed(2);
+        const amt = (rvAmount! / 100).toFixed(2);
+        body += ` RV: ${rvQty} x $${unit} = $${amt}`;
+      }
       return {
         channel: "sms",
-        body: `Your registration ${registrationId} is confirmed.`,
+        body,
       };
     }
 

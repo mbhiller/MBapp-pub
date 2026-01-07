@@ -11,6 +11,10 @@ type EventSummary = {
   endsAt?: string;
   capacity?: number | null;
   reservedCount?: number | null;
+  rvEnabled?: boolean | null;
+  rvCapacity?: number | null;
+  rvUnitAmount?: number | null;
+  rvReserved?: number | null;
 };
 
 type RegistrationResponse = {
@@ -70,6 +74,9 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
   const [publicToken, setPublicToken] = useState<string | null>(null);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null);
+  const [rvQty, setRvQty] = useState<number>(0);
+  const [serverTotalAmount, setServerTotalAmount] = useState<number | null>(null);
+  const [serverCurrency, setServerCurrency] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string>("");
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -86,12 +93,15 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
     setPublicToken(null);
     setClientSecret(null);
     setPaymentIntentId(null);
+    setServerTotalAmount(null);
+    setServerCurrency(null);
     setStatusMessage("");
     setErrorMessage("");
     setIsSubmitting(false);
     setHoldExpired(false);
     setLocalRegStatus("");
     setResendMessage("");
+    setRvQty(0);
   }
 
   useEffect(() => {
@@ -128,6 +138,38 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
     return () => clearInterval(interval);
   }, [serverStatus]);
 
+  useEffect(() => {
+    // Reset RV qty when switching events
+    setRvQty(0);
+  }, [selectedEventId]);
+
+  const selectedEvent = useMemo(() => events.find((e) => e.id === selectedEventId), [events, selectedEventId]);
+
+  const rvUnit = useMemo(() => {
+    const amt = selectedEvent?.rvUnitAmount ?? null;
+    return typeof amt === "number" && amt >= 0 ? amt : null;
+  }, [selectedEvent]);
+
+  const rvCapacityRemaining = useMemo(() => {
+    if (!selectedEvent) return null;
+    if (selectedEvent.rvCapacity == null) return null; // unknown/unlimited
+    const reserved = selectedEvent.rvReserved ?? 0;
+    const rem = Math.max(0, (selectedEvent.rvCapacity || 0) - reserved);
+    return rem;
+  }, [selectedEvent]);
+
+  const rvMaxSelectable = useMemo(() => {
+    const cap = rvCapacityRemaining;
+    const hardCap = 10;
+    if (cap == null) return hardCap;
+    return Math.max(0, Math.min(hardCap, cap));
+  }, [rvCapacityRemaining]);
+
+  const rvSubtotal = useMemo(() => {
+    if (!rvUnit) return 0;
+    return (rvQty || 0) * rvUnit;
+  }, [rvUnit, rvQty]);
+
   async function createRegistration() {
     if (!selectedEventId) return;
     setIsSubmitting(true);
@@ -136,7 +178,7 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
     try {
       const res = await publicFetch<RegistrationResponse>(apiBase, publicTenant, "/registrations:public", {
         method: "POST",
-        body: { eventId: selectedEventId },
+        body: { eventId: selectedEventId, ...(rvQty > 0 ? { rvQty } : {}) },
       });
       setRegistration(res.registration);
       setPublicToken(res.publicToken);
@@ -228,7 +270,7 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
     setStatusMessage("Starting checkout...");
     try {
       const idem = randomKey();
-      const res = await publicFetch<PaymentIntentResponse>(apiBase, publicTenant, `/events/registration/${reg.id}:checkout`, {
+      const res = await publicFetch<PaymentIntentResponse & { totalAmount?: number; currency?: string }>(apiBase, publicTenant, `/events/registration/${reg.id}:checkout`, {
         method: "POST",
         headers: {
           "X-MBapp-Public-Token": token,
@@ -237,6 +279,8 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
       });
       setClientSecret(res.clientSecret);
       setPaymentIntentId(res.paymentIntentId);
+      if (typeof (res as any).totalAmount === "number") setServerTotalAmount((res as any).totalAmount);
+      if (typeof (res as any).currency === "string") setServerCurrency((res as any).currency || null);
       setStatusMessage("Payment intent created. Please enter card details.");
     } catch (err: any) {
       if (err?.status === 409 && err?.code === "hold_expired") {
@@ -307,7 +351,7 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
     }
   }
 
-  const selectedEvent = useMemo(() => events.find((e) => e.id === selectedEventId), [events, selectedEventId]);
+  
 
   return (
     <div style={{ maxWidth: 520, margin: "0 auto", display: "grid", gap: 12 }}>
@@ -329,6 +373,26 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
             ))}
           </select>
         </label>
+      )}
+
+      {/* RV Add-on */}
+      {selectedEvent?.rvEnabled && (
+        <div style={{ padding: 12, border: "1px solid #ddd", borderRadius: 8, display: "grid", gap: 8 }}>
+          <div style={{ fontWeight: 600 }}>RV Add-on</div>
+          <div>Unit: {rvUnit != null ? `$${(rvUnit / 100).toFixed(2)}` : "N/A"}</div>
+          {rvCapacityRemaining != null && (
+            <div>RV Remaining: {rvCapacityRemaining}</div>
+          )}
+          <label style={{ display: "grid", gap: 4 }}>
+            <span>RV Quantity</span>
+            <select value={rvQty} onChange={(e) => setRvQty(parseInt(e.target.value, 10) || 0)} disabled={isSubmitting}>
+              {Array.from({ length: rvMaxSelectable + 1 }).map((_, i) => (
+                <option key={i} value={i}>{i}</option>
+              ))}
+            </select>
+          </label>
+          <div>RV Subtotal: ${((rvSubtotal || 0) / 100).toFixed(2)}</div>
+        </div>
       )}
 
       <button
@@ -407,6 +471,9 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
           <button onClick={handleConfirmPayment} disabled={!stripe || isSubmitting}>
             Pay now
           </button>
+          {(serverTotalAmount != null) && (
+            <div>Total: ${((serverTotalAmount || 0) / 100).toFixed(2)}{serverCurrency ? ` ${serverCurrency.toUpperCase()}` : ""}</div>
+          )}
         </div>
       )}
 

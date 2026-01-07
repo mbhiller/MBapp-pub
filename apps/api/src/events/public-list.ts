@@ -42,6 +42,10 @@ export async function handle(event: APIGatewayProxyEventV2) {
         "endsAt",
         "capacity",
         "reservedCount",
+        "rvEnabled",
+        "rvCapacity",
+        "rvUnitAmount",
+        "rvReserved",
         "createdAt",
       ],
     });

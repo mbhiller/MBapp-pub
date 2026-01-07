@@ -66,6 +66,13 @@ export type DeleteArgs = {
     eventId: string;
   };
 
+  export type ReserveEventRvArgs = {
+    tenantId?: string;
+    eventId: string;
+    qty: number;
+    at?: string;
+  };
+
 // -------- Dynamo config --------
 const TABLE   = process.env.MBAPP_OBJECTS_TABLE || process.env.MBAPP_TABLE || "mbapp_objects";
 const PK_ATTR = process.env.MBAPP_TABLE_PK || "pk";
@@ -603,6 +610,149 @@ export async function releaseEventSeat({ tenantId, eventId }: ReserveEventSeatAr
     if (err?.name === "ConditionalCheckFailedException") {
       // No reserved seats to release; treat as no-op.
       return null as any;
+    }
+    throw err;
+  }
+}
+
+/**
+ * Atomically reserve RV capacity on an event by incrementing rvReserved by qty.
+ * Rules:
+ * - If qty <= 0 OR event.rvEnabled is false => no-op
+ * - If rvCapacity is null/undefined and rvEnabled=true => unlimited (allow increment)
+ * - If rvCapacity === 0 => capacity full for any qty>0
+ * - Guard: ensure previous rvReserved + qty <= rvCapacity using optimistic check
+ * Persists rvReserved on the event (defaults to 0 when missing).
+ */
+export async function reserveEventRv({ tenantId, eventId, qty, at }: ReserveEventRvArgs) {
+  if (!qty || qty <= 0) return null as any;
+
+  // Read current flags and counters (strongly consistent)
+  const current = await getObjectById({
+    tenantId,
+    type: "event",
+    id: eventId,
+    fields: ["id", "rvEnabled", "rvCapacity", "rvReserved"],
+  });
+
+  const rvEnabled = (current as any)?.rvEnabled === true;
+  const rvCapacity = (current as any)?.rvCapacity as number | undefined | null;
+  const rvReserved = Number((current as any)?.rvReserved ?? 0) || 0;
+
+  if (!rvEnabled) return null as any;
+  if (rvCapacity === 0 && qty > 0) {
+    throw Object.assign(new Error("RV capacity full"), { code: "rv_capacity_full", statusCode: 409 });
+  }
+  if (typeof rvCapacity === "number" && rvCapacity > 0) {
+    if (rvReserved + qty > rvCapacity) {
+      throw Object.assign(new Error("RV capacity full"), { code: "rv_capacity_full", statusCode: 409 });
+    }
+  }
+
+  const Key: AnyRecord = {
+    [PK_ATTR]: tenantId,
+    [SK_ATTR]: `${normalizeTypeParam("event") ?? "event"}#${eventId}`,
+  };
+
+  const names = {
+    "#rvReserved": "rvReserved",
+    "#updatedAt": "updatedAt",
+  } as Record<string, string>;
+
+  const values = {
+    ":now": at || nowIso(),
+    ":zero": 0,
+    ":qty": qty,
+    ":expected": rvReserved,
+  } as Record<string, unknown>;
+
+  // Optimistic concurrency: ensure rvReserved matches snapshot (or missing when expected=0)
+  const condition = rvReserved === 0
+    ? "(attribute_not_exists(#rvReserved) OR #rvReserved = :expected)"
+    : "#rvReserved = :expected";
+
+  try {
+    const res = await ddb.send(new UpdateCommand({
+      TableName: TABLE,
+      Key,
+      UpdateExpression: "SET #rvReserved = if_not_exists(#rvReserved, :zero) + :qty, #updatedAt = :now",
+      ConditionExpression: condition,
+      ExpressionAttributeNames: names,
+      ExpressionAttributeValues: values,
+      ReturnValues: "ALL_NEW",
+    }));
+    return res.Attributes as AnyRecord;
+  } catch (err: any) {
+    if (err?.name === "ConditionalCheckFailedException") {
+      // Lost race or capacity changed; surface as capacity_full for callers
+      throw Object.assign(new Error("RV capacity full"), { code: "rv_capacity_full", statusCode: 409 });
+    }
+    throw err;
+  }
+}
+
+/**
+ * Atomically release RV capacity by decrementing rvReserved by qty.
+ * Safe/idempotent: clamps at 0 and treats insufficient reserved as no-op.
+ */
+export async function releaseEventRv({ tenantId, eventId, qty, at }: ReserveEventRvArgs) {
+  if (!qty || qty <= 0) return null as any;
+
+  // Optional check: if rv not enabled, treat as no-op
+  const current = await getObjectById({
+    tenantId,
+    type: "event",
+    id: eventId,
+    fields: ["id", "rvEnabled", "rvReserved"],
+  });
+  const rvEnabled = (current as any)?.rvEnabled === true;
+  if (!rvEnabled) return null as any;
+
+  const Key: AnyRecord = {
+    [PK_ATTR]: tenantId,
+    [SK_ATTR]: `${normalizeTypeParam("event") ?? "event"}#${eventId}`,
+  };
+
+  const names = {
+    "#rvReserved": "rvReserved",
+    "#updatedAt": "updatedAt",
+  } as Record<string, string>;
+
+  const values = {
+    ":now": at || nowIso(),
+    ":qty": qty,
+    ":zero": 0,
+  } as Record<string, unknown>;
+
+  try {
+    const res = await ddb.send(new UpdateCommand({
+      TableName: TABLE,
+      Key,
+      UpdateExpression: "SET #rvReserved = if_not_exists(#rvReserved, :zero) - :qty, #updatedAt = :now",
+      ConditionExpression: "#rvReserved >= :qty",
+      ExpressionAttributeNames: names,
+      ExpressionAttributeValues: values,
+      ReturnValues: "ALL_NEW",
+    }));
+    return res.Attributes as AnyRecord;
+  } catch (err: any) {
+    if (err?.name === "ConditionalCheckFailedException") {
+      // Clamp to zero if not enough reserved; perform safe correction
+      try {
+        const res2 = await ddb.send(new UpdateCommand({
+          TableName: TABLE,
+          Key,
+          UpdateExpression: "SET #rvReserved = :zero, #updatedAt = :now",
+          ConditionExpression: "attribute_exists(#rvReserved) AND #rvReserved > :zero",
+          ExpressionAttributeNames: names,
+          ExpressionAttributeValues: values,
+          ReturnValues: "ALL_NEW",
+        }));
+        return res2.Attributes as AnyRecord;
+      } catch (_) {
+        // Treat as no-op if still failing
+        return null as any;
+      }
     }
     throw err;
   }
