@@ -341,7 +341,7 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
 
     // Views (Sprint III)
     {
-      const m = path.match(/^\/views(?:\/([^/]+))?$/i);
+      const m = path.match(/^\/views(?:\/([^\/:]+))?$/i);
       if (m) {
         const [, id] = m;
         if (method === "GET" && !id)    { requirePerm(auth, "view:read");  return ViewsList.handle(event); }
@@ -356,7 +356,7 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
 
     // Workspaces (Sprint III v1: list only)
     {
-      const m = path.match(/^\/workspaces(?:\/([^/]+))?$/i);
+      const m = path.match(/^\/workspaces(?:\/([^\/:]+))?$/i);
       if (m) {
         const [, id] = m;
         if (method === "GET" && !id)    { requirePerm(auth, "workspace:read");  return WsList.handle(event); }

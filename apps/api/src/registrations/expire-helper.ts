@@ -2,6 +2,7 @@
 import { getObjectById, updateObject } from "../objects/repo";
 import { releaseEventSeat } from "../objects/repo";
 import { releaseEventRv } from "../objects/repo";
+import { REGISTRATION_STATUS, REGISTRATION_PAYMENT_STATUS } from "./constants";
 
 export type ExpireHoldArgs = {
   tenantId: string;
@@ -22,7 +23,7 @@ export async function expireRegistrationHold({ tenantId, regId }: ExpireHoldArgs
   const nowMs = Date.now();
   const holdMs = holdExpiresAt ? new Date(holdExpiresAt).getTime() : undefined;
 
-  if (status !== "submitted") return { expired: false };
+  if (status !== REGISTRATION_STATUS.submitted) return { expired: false };
   if (holdMs === undefined || holdMs >= nowMs) return { expired: false };
 
   const eventId = (reg as any).eventId as string | undefined;
@@ -33,8 +34,8 @@ export async function expireRegistrationHold({ tenantId, regId }: ExpireHoldArgs
     type: "registration",
     id: regId,
     body: {
-      status: "cancelled",
-      paymentStatus: "failed",
+      status: REGISTRATION_STATUS.cancelled,
+      paymentStatus: REGISTRATION_PAYMENT_STATUS.failed,
       paymentIntentClientSecret: null,
     },
   });
