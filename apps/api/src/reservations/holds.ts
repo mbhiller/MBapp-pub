@@ -183,28 +183,46 @@ export async function createHeldStallBlockHold({
  * 
  * Returns: Array of per-stall holds created
  */
-export async function assignStallsToRegistration({
+
+/**
+ * Generalized resource assignment for discrete resource types (stalls, RV sites, etc.).
+ * Handles idempotency, conflict detection, and per-resource hold creation (Sprint BM).
+ */
+export async function assignResourcesToRegistration({
   tenantId,
   registrationId,
   eventId,
-  stallIds,
+  itemType,
+  resourceIds,
+  conflictCode,
+  expectedResourceType,
+  assertResourcesFn,
 }: {
   tenantId?: string;
   registrationId: string;
   eventId: string;
-  stallIds: string[];
+  itemType: string; // "stall" | "rv" | future types
+  resourceIds: string[];
+  conflictCode: string; // e.g., "stall_already_assigned"
+  expectedResourceType: string; // e.g., "stall"
+  assertResourcesFn: (args: Record<string, any>) => Promise<any[]>; // Validator function
 }) {
   const { getObjectById } = await import("../objects/repo");
-  const { assertStallResourcesExistAndAvailable } = await import("../resources/stalls");
 
-  if (!stallIds || stallIds.length === 0) {
-    throw Object.assign(new Error("No stall IDs provided"), { code: "no_stalls", statusCode: 400 });
+  if (!resourceIds || resourceIds.length === 0) {
+    throw Object.assign(new Error(`No ${itemType} IDs provided`), { 
+      code: `no_${itemType}s`, 
+      statusCode: 400 
+    });
   }
 
   // Validate uniqueness
-  const unique = new Set(stallIds);
-  if (unique.size !== stallIds.length) {
-    throw Object.assign(new Error("Duplicate stall IDs"), { code: "duplicate_stalls", statusCode: 400 });
+  const unique = new Set(resourceIds);
+  if (unique.size !== resourceIds.length) {
+    throw Object.assign(new Error(`Duplicate ${itemType} IDs`), { 
+      code: `duplicate_${itemType}s`, 
+      statusCode: 400 
+    });
   }
 
   // Validate registration exists and is in correct state
@@ -217,13 +235,23 @@ export async function assignStallsToRegistration({
   const allowedStates = ["confirmed", "submitted"];
   if (!allowedStates.includes(String(regStatus))) {
     throw Object.assign(
-      new Error(`Registration status ${regStatus} does not allow stall assignment`),
+      new Error(`Registration status ${regStatus} does not allow ${itemType} assignment`),
       { code: "invalid_registration_state", statusCode: 400 }
     );
   }
 
-  // Validate stall resources exist and belong to this event
-  await assertStallResourcesExistAndAvailable({ tenantId, stallIds, eventId });
+  // Validate resources exist and belong to this event
+  // Build the correct parameter object for the assertion function
+  const assertArgs: Record<string, any> = { tenantId, eventId };
+  if (itemType === "stall") {
+    assertArgs.stallIds = resourceIds;
+  } else if (itemType === "rv") {
+    assertArgs.rvSiteIds = resourceIds;
+  } else {
+    // For future types, use a generic key
+    assertArgs[`${itemType}Ids`] = resourceIds;
+  }
+  await assertResourcesFn(assertArgs);
 
   // Check existing holds and build idempotent + to-create lists
   const ownerConfirmed = await listObjects({
@@ -232,7 +260,7 @@ export async function assignStallsToRegistration({
     filters: {
       ownerType: "registration",
       ownerId: registrationId,
-      itemType: "stall",
+      itemType,
       state: "confirmed",
     },
     limit: 200,
@@ -244,7 +272,7 @@ export async function assignStallsToRegistration({
     filters: {
       ownerType: "registration",
       ownerId: registrationId,
-      itemType: "stall",
+      itemType,
       state: "held",
     },
     limit: 200,
@@ -261,7 +289,7 @@ export async function assignStallsToRegistration({
     filters: {
       scopeType: "event",
       scopeId: eventId,
-      itemType: "stall",
+      itemType,
       state: "confirmed",
     },
     limit: 200,
@@ -273,7 +301,7 @@ export async function assignStallsToRegistration({
     filters: {
       scopeType: "event",
       scopeId: eventId,
-      itemType: "stall",
+      itemType,
       state: "held",
     },
     limit: 200,
@@ -286,25 +314,25 @@ export async function assignStallsToRegistration({
   ];
 
   const preexistingHolds: any[] = [];
-  const stallIdsToCreate: string[] = [];
+  const resourcesToCreate: string[] = [];
 
-  for (const stallId of stallIds) {
-    const owned = ownerItems.find((item: any) => (item as any)?.resourceId === stallId && (String((item as any)?.state) === "held" || String((item as any)?.state) === "confirmed"));
+  for (const resourceId of resourceIds) {
+    const owned = ownerItems.find((item: any) => (item as any)?.resourceId === resourceId && (String((item as any)?.state) === "held" || String((item as any)?.state) === "confirmed"));
     if (owned) {
       // Idempotent: already assigned to this registration
       preexistingHolds.push(owned);
       continue;
     }
 
-    const conflict = eventItems.find((item: any) => (item as any)?.resourceId === stallId && (String((item as any)?.state) === "held" || String((item as any)?.state) === "confirmed") && String((item as any)?.ownerType) === "registration" && String((item as any)?.ownerId) !== String(registrationId));
+    const conflict = eventItems.find((item: any) => (item as any)?.resourceId === resourceId && (String((item as any)?.state) === "held" || String((item as any)?.state) === "confirmed") && String((item as any)?.ownerType) === "registration" && String((item as any)?.ownerId) !== String(registrationId));
     if (conflict) {
       throw Object.assign(
-        new Error(`Stall ${stallId} is already assigned`),
-        { code: "stall_already_assigned", statusCode: 409 }
+        new Error(`${itemType} ${resourceId} is already assigned`),
+        { code: conflictCode, statusCode: 409 }
       );
     }
 
-    stallIdsToCreate.push(stallId);
+    resourcesToCreate.push(resourceId);
   }
 
   // Find block hold (resourceId=null); prefer confirmed first, else held
@@ -316,7 +344,7 @@ export async function assignStallsToRegistration({
       ownerId: registrationId,
       scopeType: "event",
       scopeId: eventId,
-      itemType: "stall",
+      itemType,
     },
     limit: 1,
     fields: ["id", "qty", "state", "resourceId"],
@@ -332,30 +360,30 @@ export async function assignStallsToRegistration({
       return acc;
     }, {});
     throw Object.assign(
-      new Error("No stall block hold found for registration"),
+      new Error(`No ${itemType} block hold found for registration`),
       { code: "block_hold_not_found", statusCode: 400, context: { ownerId: registrationId, eventId, counts: debugCounts } }
     );
   }
 
   const blockQty = (blockHold as any)?.qty;
-  if (blockQty !== stallIds.length) {
+  if (blockQty !== resourceIds.length) {
     throw Object.assign(
-      new Error(`Block hold qty (${blockQty}) does not match requested stallIds (${stallIds.length})`),
+      new Error(`Block hold qty (${blockQty}) does not match requested ${itemType} IDs (${resourceIds.length})`),
       { code: "qty_mismatch", statusCode: 400 }
     );
   }
 
-  // Create per-stall holds with same state as block hold
+  // Create per-resource holds with same state as block hold
   const blockState = (blockHold as any)?.state || "held";
-  const perStallHolds: any[] = [];
+  const perResourceHolds: any[] = [];
 
   // Include any preexisting holds (idempotent)
   for (const h of preexistingHolds) {
-    perStallHolds.push(h);
+    perResourceHolds.push(h);
   }
 
-  for (const stallId of stallIdsToCreate) {
-    const perStallHold = await createObject({
+  for (const resourceId of resourcesToCreate) {
+    const perResourceHold = await createObject({
       tenantId,
       type: "reservationHold",
       body: {
@@ -364,19 +392,19 @@ export async function assignStallsToRegistration({
         ownerId: registrationId,
         scopeType: "event",
         scopeId: eventId,
-        itemType: "stall",
+        itemType,
         qty: 1,
-        resourceId: stallId,
+        resourceId,
         state: blockState,
         heldAt: (blockHold as any)?.heldAt || nowIso(),
         ...(blockState === "confirmed" ? { confirmedAt: nowIso() } : {}),
       },
     });
-    perStallHolds.push(perStallHold);
+    perResourceHolds.push(perResourceHold);
   }
 
   // Release block hold with reason
-  await updateObject({
+  const releasedBlockHold = await updateObject({
     tenantId,
     type: "reservationHold",
     id: (blockHold as any)?.id,
@@ -387,7 +415,33 @@ export async function assignStallsToRegistration({
     },
   });
 
-  return perStallHolds;
+  // Return per-resource holds followed by released block hold
+  return [...perResourceHolds, releasedBlockHold];
+}
+
+export async function assignStallsToRegistration({
+  tenantId,
+  registrationId,
+  eventId,
+  stallIds,
+}: {
+  tenantId?: string;
+  registrationId: string;
+  eventId: string;
+  stallIds: string[];
+}) {
+  const { assertStallResourcesExistAndAvailable } = await import("../resources/stalls");
+
+  return assignResourcesToRegistration({
+    tenantId,
+    registrationId,
+    eventId,
+    itemType: "stall",
+    resourceIds: stallIds,
+    conflictCode: "stall_already_assigned",
+    expectedResourceType: "stall",
+    assertResourcesFn: assertStallResourcesExistAndAvailable as (args: Record<string, any>) => Promise<any[]>,
+  });
 }
 
 /**
@@ -474,198 +528,17 @@ export async function assignRvSitesToRegistration({
   eventId: string;
   rvSiteIds: string[];
 }) {
-  const { getObjectById } = await import("../objects/repo");
   const { assertRvResourcesExistAndAvailable } = await import("../resources/rv-sites");
 
-  if (!rvSiteIds || rvSiteIds.length === 0) {
-    throw Object.assign(new Error("No RV site IDs provided"), { code: "no_rv_sites", statusCode: 400 });
-  }
-
-  // Validate uniqueness
-  const unique = new Set(rvSiteIds);
-  if (unique.size !== rvSiteIds.length) {
-    throw Object.assign(new Error("Duplicate RV site IDs"), { code: "duplicate_rv_sites", statusCode: 400 });
-  }
-
-  // Validate registration exists and is in correct state
-  const reg = await getObjectById({ tenantId, type: "registration", id: registrationId, fields: ["id", "status"] });
-  if (!reg) {
-    throw Object.assign(new Error("Registration not found"), { code: "registration_not_found", statusCode: 404 });
-  }
-
-  const regStatus = (reg as any)?.status;
-  const allowedStates = ["confirmed", "submitted"];
-  if (!allowedStates.includes(String(regStatus))) {
-    throw Object.assign(
-      new Error(`Registration status ${regStatus} does not allow RV site assignment`),
-      { code: "invalid_registration_state", statusCode: 400 }
-    );
-  }
-
-  // Validate RV site resources exist and belong to this event
-  await assertRvResourcesExistAndAvailable({ tenantId, rvSiteIds, eventId });
-
-  // Check existing holds and build idempotent + to-create lists
-  const ownerConfirmed = await listObjects({
+  return assignResourcesToRegistration({
     tenantId,
-    type: "reservationHold",
-    filters: {
-      ownerType: "registration",
-      ownerId: registrationId,
-      itemType: "rv",
-      state: "confirmed",
-    },
-    limit: 200,
-    fields: ["id", "resourceId", "state"],
+    registrationId,
+    eventId,
+    itemType: "rv",
+    resourceIds: rvSiteIds,
+    conflictCode: "rv_site_already_assigned",
+    expectedResourceType: "rv",
+    assertResourcesFn: assertRvResourcesExistAndAvailable as (args: Record<string, any>) => Promise<any[]>,
   });
-  const ownerHeld = await listObjects({
-    tenantId,
-    type: "reservationHold",
-    filters: {
-      ownerType: "registration",
-      ownerId: registrationId,
-      itemType: "rv",
-      state: "held",
-    },
-    limit: 200,
-    fields: ["id", "resourceId", "state"],
-  });
-  const ownerItems = [
-    ...(((ownerConfirmed.items as any[]) || [])),
-    ...(((ownerHeld.items as any[]) || [])),
-  ];
-
-  const existingConfirmed = await listObjects({
-    tenantId,
-    type: "reservationHold",
-    filters: {
-      scopeType: "event",
-      scopeId: eventId,
-      itemType: "rv",
-      state: "confirmed",
-    },
-    limit: 200,
-    fields: ["id", "resourceId", "state", "ownerType", "ownerId"],
-  });
-  const existingHeld = await listObjects({
-    tenantId,
-    type: "reservationHold",
-    filters: {
-      scopeType: "event",
-      scopeId: eventId,
-      itemType: "rv",
-      state: "held",
-    },
-    limit: 200,
-    fields: ["id", "resourceId", "state", "ownerType", "ownerId"],
-  });
-
-  const eventItems = [
-    ...(((existingConfirmed.items as any[]) || [])),
-    ...(((existingHeld.items as any[]) || [])),
-  ];
-
-  const preexistingHolds: any[] = [];
-  const rvSiteIdsToCreate: string[] = [];
-
-  for (const rvSiteId of rvSiteIds) {
-    const owned = ownerItems.find((item: any) => (item as any)?.resourceId === rvSiteId && (String((item as any)?.state) === "held" || String((item as any)?.state) === "confirmed"));
-    if (owned) {
-      // Idempotent: already assigned to this registration
-      preexistingHolds.push(owned);
-      continue;
-    }
-
-    const conflict = eventItems.find((item: any) => (item as any)?.resourceId === rvSiteId && (String((item as any)?.state) === "held" || String((item as any)?.state) === "confirmed") && String((item as any)?.ownerType) === "registration" && String((item as any)?.ownerId) !== String(registrationId));
-    if (conflict) {
-      throw Object.assign(
-        new Error(`RV site ${rvSiteId} is already assigned`),
-        { code: "rv_site_already_assigned", statusCode: 409 }
-      );
-    }
-
-    rvSiteIdsToCreate.push(rvSiteId);
-  }
-
-  // Find block hold (resourceId=null); prefer confirmed first, else held
-  const blockHolds = await listObjects({
-    tenantId,
-    type: "reservationHold",
-    filters: {
-      ownerType: "registration",
-      ownerId: registrationId,
-      scopeType: "event",
-      scopeId: eventId,
-      itemType: "rv",
-    },
-    limit: 1,
-    fields: ["id", "qty", "state", "resourceId"],
-  });
-
-  const blockItems = (blockHolds.items as any[]) || [];
-  const blockHold = blockItems.find((h: any) => !h.resourceId && String(h.state) === "confirmed")
-    || blockItems.find((h: any) => !h.resourceId && String(h.state) === "held");
-  if (!blockHold) {
-    const debugCounts = blockItems.reduce((acc: Record<string, number>, h: any) => {
-      const key = `${String(h.itemType || "unknown")}:${String(h.state || "unknown")}`;
-      acc[key] = (acc[key] || 0) + 1;
-      return acc;
-    }, {});
-    throw Object.assign(
-      new Error("No RV block hold found for registration"),
-      { code: "block_hold_not_found", statusCode: 400, context: { ownerId: registrationId, eventId, counts: debugCounts } }
-    );
-  }
-
-  const blockQty = (blockHold as any)?.qty;
-  if (blockQty !== rvSiteIds.length) {
-    throw Object.assign(
-      new Error(`Block hold qty (${blockQty}) does not match requested rvSiteIds (${rvSiteIds.length})`),
-      { code: "qty_mismatch", statusCode: 400 }
-    );
-  }
-
-  // Create per-site holds with same state as block hold
-  const blockState = (blockHold as any)?.state || "held";
-  const perSiteHolds: any[] = [];
-
-  // Include any preexisting holds (idempotent)
-  for (const h of preexistingHolds) {
-    perSiteHolds.push(h);
-  }
-
-  for (const rvSiteId of rvSiteIdsToCreate) {
-    const perSiteHold = await createObject({
-      tenantId,
-      type: "reservationHold",
-      body: {
-        type: "reservationHold",
-        ownerType: "registration",
-        ownerId: registrationId,
-        scopeType: "event",
-        scopeId: eventId,
-        itemType: "rv",
-        qty: 1,
-        resourceId: rvSiteId,
-        state: blockState,
-        heldAt: (blockHold as any)?.heldAt || nowIso(),
-        ...(blockState === "confirmed" ? { confirmedAt: nowIso() } : {}),
-      },
-    });
-    perSiteHolds.push(perSiteHold);
-  }
-
-  // Release block hold with reason
-  await updateObject({
-    tenantId,
-    type: "reservationHold",
-    id: (blockHold as any)?.id,
-    body: {
-      state: "released",
-      releasedAt: nowIso(),
-      releaseReason: "assigned",
-    },
-  });
-
-  return perSiteHolds;
 }
+

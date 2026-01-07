@@ -1893,6 +1893,37 @@ components:
           description: Updated or created ReservationHold objects for assigned RV sites
           items:
             $ref: '#/components/schemas/ReservationHold'
+    AssignResourcesRequest:
+      type: object
+      description: Request to assign specific discrete resources to a registration (Sprint BM)
+      required:
+      - itemType
+      - resourceIds
+      properties:
+        itemType:
+          type: string
+          enum:
+          - stall
+          - rv
+          description: Type of resource being assigned (extensible for future types like vip-suite, equipment)
+        resourceIds:
+          type: array
+          description: List of resource IDs to assign
+          items:
+            type: string
+          minItems: 1
+    AssignResourcesResponse:
+      type: object
+      description: Response from assign-resources action
+      properties:
+        holds:
+          type: array
+          description: Created or updated ReservationHold objects for assigned resources
+          items:
+            $ref: '#/components/schemas/ReservationHold'
+        count:
+          type: integer
+          description: Number of holds in response
     RegistrationLine:
       type: object
       properties:
@@ -4321,6 +4352,62 @@ paths:
                 $ref: '#/components/schemas/Error'
         '409':
           description: Conflict (RV site already assigned, registration not in correct state)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Forbidden, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /registrations/{id}:assign-resources:
+    post:
+      tags:
+      - Registrations
+      operationId: assignResources
+      summary: Assign discrete resources to a registration (operator)
+      description: |
+        Generalized endpoint to assign specific discrete resources (stalls, RV sites, or future types) to a registration.
+        Converts a block resource hold (itemType per type, resourceId=null) into specific granular assignments.
+        Validates that resourceIds length matches the block hold qty and that resources are available.
+        Creates or updates ReservationHold records with resourceId set for each resource.
+        Requires operator permission (registration:write).
+      x-mbapp-permission: registration:write
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignResourcesRequest'
+      responses:
+        '200':
+          description: Resources successfully assigned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssignResourcesResponse'
+        '400':
+          description: Validation error (qty mismatch, duplicates, invalid resource type, unsupported itemType)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Registration or resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflict (resource already assigned by another registration)
           content:
             application/json:
               schema:

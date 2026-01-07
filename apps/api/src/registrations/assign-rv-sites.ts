@@ -59,7 +59,9 @@ export async function handle(event: APIGatewayProxyEventV2) {
     });
 
     // Return created holds (safe response: id, state, resourceId only)
-    const safeHolds = createdHolds.map((h: any) => ({
+    // Filter to only per-resource holds (exclude released block hold for backward compatibility)
+    const perResourceHolds = createdHolds.filter((h: any) => h.resourceId);
+    const safeHolds = perResourceHolds.map((h: any) => ({
       id: h.id,
       state: h.state,
       resourceId: h.resourceId,
