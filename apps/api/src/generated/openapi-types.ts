@@ -308,6 +308,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/registrations/{id}:assign-rv-sites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Assign specific RV sites to a registration (operator)
+         * @description Converts a block RV hold (itemType=rv, resourceId=null) into specific granular assignments.
+         *     Validates that rvSiteIds length matches the block hold qty and that resources are available.
+         *     Creates or updates ReservationHold records with resourceId set for each RV site.
+         *     Requires operator permission (registration:write).
+         *
+         */
+        post: operations["assignRvSites"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/registrations/{id}:public": {
         parameters: {
             query?: never;
@@ -3370,6 +3394,16 @@ export interface components {
             /** @description Updated or created ReservationHold objects for assigned stalls */
             holds?: components["schemas"]["ReservationHold"][];
         };
+        /** @description Request to assign specific RV site resources to a registration (Sprint BL) */
+        AssignRvSitesRequest: {
+            /** @description List of EventResource IDs (RV sites) to assign */
+            rvSiteIds: string[];
+        };
+        /** @description Response from assign-rv-sites action */
+        AssignRvSitesResponse: {
+            /** @description Updated or created ReservationHold objects for assigned RV sites */
+            holds?: components["schemas"]["ReservationHold"][];
+        };
         RegistrationLine: {
             id?: string;
             classId: string;
@@ -5494,6 +5528,81 @@ export interface operations {
                 };
             };
             /** @description Conflict (stall already assigned, registration not in correct state) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    assignRvSites: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-tenant-id": components["parameters"]["TenantHeader"];
+                /** @description Optional idempotency key for safe retries. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssignRvSitesRequest"];
+            };
+        };
+        responses: {
+            /** @description RV sites successfully assigned */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignRvSitesResponse"];
+                };
+            };
+            /** @description Validation error (qty mismatch, duplicates, invalid resource) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Registration or resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflict (RV site already assigned, registration not in correct state) */
             409: {
                 headers: {
                     [name: string]: unknown;

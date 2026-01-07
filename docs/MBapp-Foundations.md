@@ -567,6 +567,48 @@ Defines resource-based booking for event stalls using existing ledger + minimal 
 - **Security:** Endpoint returns 401 if token missing/invalid, 404 if registration not found. Feature-guarded (`X-Feature-Registrations-Enabled`).
 - **Message privacy:** Response includes message `status`, `sentAt`, `provider`, `errorMessage` only — no `to`, `subject`, `textBody`, or `htmlBody`.
 
+### Resource Model — RV Sites v1 (Sprint BL)
+
+Extends the discrete-resource booking pattern to RV sites, mirroring the stalls implementation. Reuses ReservationHold ledger and tag-based scoping for event membership without schema-breaking migrations.
+
+**RV site resource model:**
+- `resourceType="rv"` records exist with tags scoping them to an event and optional zone/group.
+- Validation helper ensures referenced RV site IDs exist, belong to the event, and are available for assignment:
+  - [apps/api/src/resources/rv-sites.ts](../apps/api/src/resources/rv-sites.ts) provides `assertRvResourcesExistAndAvailable(rvSiteIds, eventId)` to validate RV site resources.
+
+**Counters (capacity source of truth):**
+- Event-level counters track aggregate reserved RV sites:
+  - [apps/api/src/objects/repo.ts](../apps/api/src/objects/repo.ts) implements `reserveEventRvSites(eventId, qty)` and `releaseEventRvSites(eventId, qty)` using optimistic concurrency and 409 guards.
+- Counters are authoritative for capacity math; holds ledger is authoritative for audit.
+
+**Block hold → assignment flow:**
+- **Checkout:** After registration persisted and RV capacity reserved, create a block hold:
+  - `itemType="rv"`, `ownerType="registration"`, `ownerId={regId}`, `scopeType="event"`, `scopeId={eventId}`, `qty=rvQty`, `resourceId=null`, `state="held"`.
+  - Idempotent creation: `createHeldRvBlockHold()` reuses existing held/confirmed block to tolerate retries.
+- **Webhook confirm:** On payment success, block hold transitions to `state="confirmed"`.
+- **Operator assignment:** `POST /registrations/{id}:assign-rv-sites` accepts `{ rvSiteIds: string[] }`:
+  - Lookup the block hold (prefer confirmed over held); fail with context if missing.
+  - Validate requested RV site IDs exist in the event and are assignable.
+  - Create per-RV-site holds with `resourceId={rvSiteId}` and `state` parity with the block (held → held, confirmed → confirmed).
+  - Conflict checks: prevent assigning an RV site already held/confirmed by another owner in the same event. Returns 409 with `{ code: "rv_site_already_assigned" }`.
+  - Release the block hold with `releaseReason="assigned"` after successful per-site creation.
+
+**Release reasons (terminal states):**
+- `expired` — hold TTL elapsed before confirmation; cleanup transitions holds to `state="cancelled"` with `releaseReason="expired"`.
+- `operator_cancel` — operator cancels a non-paid booking; transitions existing holds to `state="released"`.
+- `refund` — operator cancels a paid booking with refund; transitions holds to `state="released"` and decrements counters by `rvQty`.
+- `assigned` — block hold converted into per-RV-site holds; block transitions to `state="released"` with `releaseReason="assigned"`.
+
+**Safety & idempotency:**
+- Block hold creation is idempotent; assignment creates per-RV-site holds only once per site/owner.
+- Conflict detection covers both `state="held"` and `state="confirmed"` holds within the event scope.
+- Counter releases clamp at zero; repeated releases are no-ops.
+
+**Endpoints:**
+- `POST /events/registration/{id}:checkout` — persists `rvQty`, reserves RV capacity, creates block hold.
+- `POST /registrations/{id}:assign-rv-sites` — assigns specific `rvSiteIds`, creates per-RV-site holds, releases block.
+- `POST /registrations/{id}:cancel-refund` — releases RV counters via `releaseEventRvSites()` and transitions holds with `releaseReason="refund"`.
+
 ### Public Booking UX (Sprint BC)
 
 **Polling behavior (exponential backoff + jitter):**

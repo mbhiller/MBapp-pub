@@ -2785,6 +2785,344 @@ const tests = {
       reason: !allReleased ? "holds-not-released" : !counterOk ? "counter-not-decremented" : !checkoutBOk ? "regB-checkout-failed" : null
     };
   },
+
+  "smoke:rv-sites:block-reserve-and-assign": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // Create event with RV enabled and capacity
+    const eventName = smokeTag("rv_sites_block_evt");
+    const rvUnitAmount = 7500; // $75.00
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 5,
+      reservedCount: 0,
+      rvEnabled: true,
+      rvCapacity: 3,
+      rvReserved: 0,
+      rvUnitAmount
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "rv-sites:block-reserve-and-assign", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+    // Create 3 RV site resources tagged with event and group
+    const rvSites = [];
+    for (let i = 1; i <= 3; i++) {
+      const rvSite = await post("/objects/resource", {
+        type: "resource",
+        resourceType: "rv",
+        name: `RV-Site-${i}`,
+        status: "available",
+        tags: [`event:${eventId}`, "group:LotA"]
+      });
+      if (!rvSite.ok || !rvSite.body?.id) {
+        return { test: "rv-sites:block-reserve-and-assign", result: "FAIL", reason: `rv-site-${i}-create-failed`, rvSite };
+      }
+      rvSites.push(rvSite.body.id);
+      recordCreated({ type: "resource", id: rvSite.body.id, route: "/objects/resource", meta: { name: `RV-Site-${i}`, eventId } });
+    }
+
+    // Create public registration with rvQty=2
+    const rvQty = 2;
+    const regCreate = await post(`/registrations:public`, { eventId, rvQty, party: { email: `rv-sites+${SMOKE_RUN_ID}@example.com` } }, featureHeaders, { auth: "none" });
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test: "rv-sites:block-reserve-and-assign", result: "FAIL", reason: "reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+
+    // Checkout
+    const checkout = await post(`/events/registration/${encodeURIComponent(regId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!checkout.ok || !checkout.body?.paymentIntentId) {
+      return { test: "rv-sites:block-reserve-and-assign", result: "FAIL", reason: "checkout-failed", checkout };
+    }
+
+    // Simulate Stripe webhook to confirm registration
+    const webhookBody = {
+      id: `evt_${SMOKE_RUN_ID}`,
+      type: "payment_intent.succeeded",
+      data: {
+        object: {
+          id: checkout.body.paymentIntentId,
+          status: "succeeded",
+          metadata: { registrationId: regId, eventId }
+        }
+      }
+    };
+    const whRes = await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "Stripe-Signature": "sim_valid_signature",
+        ...featureHeaders,
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify(webhookBody)
+    });
+    if (!whRes.ok) {
+      return { test: "rv-sites:block-reserve-and-assign", result: "FAIL", reason: "webhook-failed", whStatus: whRes.status };
+    }
+
+    // Verify RV block hold exists after confirmation before assignment
+    const holdsBeforeAssignRes = await get(`/reservation-holds?ownerType=registration&ownerId=${encodeURIComponent(regId)}`);
+    const holdsBefore = Array.isArray(holdsBeforeAssignRes.body?.items) ? holdsBeforeAssignRes.body.items : [];
+    const blockBefore = holdsBefore.find(h => h?.itemType === "rv" && !h?.resourceId && ["held","confirmed"].includes(String(h?.state)));
+    if (!blockBefore) {
+      const counts = holdsBefore.reduce((acc, h) => { const k = `${String(h?.itemType||"unknown")}:${String(h?.state||"unknown")}`; acc[k] = (acc[k]||0)+1; return acc; }, {});
+      return { test: "rv-sites:block-reserve-and-assign", result: "FAIL", reason: "no-block-hold-before-assign", diag: { counts, holds: holdsBefore } };
+    }
+
+    // Assign RV sites
+    const assignRes = await post(`/registrations/${encodeURIComponent(regId)}:assign-rv-sites`, {
+      rvSiteIds: [rvSites[0], rvSites[1]]
+    }, featureHeaders);
+    if (!assignRes.ok || !Array.isArray(assignRes.body?.holds)) {
+      return { test: "rv-sites:block-reserve-and-assign", result: "FAIL", reason: "assign-failed", assignRes };
+    }
+    const perSiteHolds = assignRes.body.holds;
+
+    // Verify per-site holds have resourceId set and state=confirmed
+    const perSiteOk = perSiteHolds.length === 2 && perSiteHolds.every(h => h?.resourceId && h?.state === "confirmed");
+
+    // Fetch all holds for registration to check block hold is released
+    const holdsRes = await get(`/reservation-holds?ownerType=registration&ownerId=${encodeURIComponent(regId)}`);
+    const holds = Array.isArray(holdsRes.body?.items) ? holdsRes.body.items : [];
+    
+    const blockHold = holds.find(h => h?.itemType === "rv" && !h?.resourceId);
+    const blockReleased = blockHold?.state === "released" && blockHold?.releaseReason === "assigned";
+
+    const pass = perSiteOk && blockReleased;
+    return {
+      test: "rv-sites:block-reserve-and-assign",
+      result: pass ? "PASS" : "FAIL",
+      registration: regId,
+      event: eventId,
+      rvSiteIds: rvSites,
+      perSiteHolds: perSiteHolds.length,
+      blockHoldReleased: blockReleased,
+      reason: !perSiteOk ? "per-site-holds-invalid" : !blockReleased ? "block-not-released" : null
+    };
+  },
+
+  "smoke:rv-sites:double-assign-guard": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // Create event with RV
+    const eventName = smokeTag("rv_sites_guard_evt");
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 10,
+      reservedCount: 0,
+      rvEnabled: true,
+      rvCapacity: 2,
+      rvUnitAmount: 7500
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "rv-sites:double-assign-guard", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+
+    // Create 2 RV sites
+    const rvSites = [];
+    for (let i = 1; i <= 2; i++) {
+      const rvSite = await post("/objects/resource", {
+        type: "resource",
+        resourceType: "rv",
+        name: `GuardRvSite-${i}`,
+        status: "available",
+        tags: [`event:${eventId}`]
+      });
+      if (!rvSite.ok || !rvSite.body?.id) {
+        return { test: "rv-sites:double-assign-guard", result: "FAIL", reason: `rv-site-create-failed`, rvSite };
+      }
+      rvSites.push(rvSite.body.id);
+    }
+
+    // Create and checkout reg A with rvQty=1
+    const regARes = await post(`/registrations:public`, { eventId, rvQty: 1, party: { email: `guard_a+${SMOKE_RUN_ID}@example.com` } }, featureHeaders, { auth: "none" });
+    if (!regARes.ok) return { test: "rv-sites:double-assign-guard", result: "FAIL", reason: "regA-create-failed", regARes };
+    const regAId = regARes.body.registration.id;
+    const chkA = await post(`/events/registration/${encodeURIComponent(regAId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": regARes.body.publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!chkA.ok) return { test: "rv-sites:double-assign-guard", result: "FAIL", reason: "chkA-failed", chkA };
+
+    // Webhook to confirm A
+    await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "Stripe-Signature": "sim_valid_signature", ...featureHeaders, "x-tenant-id": TENANT },
+      body: JSON.stringify({ id: `evt_a_${SMOKE_RUN_ID}`, type: "payment_intent.succeeded", data: { object: { id: chkA.body.paymentIntentId, status: "succeeded", metadata: { registrationId: regAId, eventId } } } })
+    });
+
+    // Assign first RV site to A
+    const assignA = await post(`/registrations/${encodeURIComponent(regAId)}:assign-rv-sites`, { rvSiteIds: [rvSites[0]] }, featureHeaders);
+    if (!assignA.ok) return { test: "rv-sites:double-assign-guard", result: "FAIL", reason: "assignA-failed", assignA };
+
+    // Create and checkout reg B with rvQty=1
+    const regBRes = await post(`/registrations:public`, { eventId, rvQty: 1, party: { email: `guard_b+${SMOKE_RUN_ID}@example.com` } }, featureHeaders, { auth: "none" });
+    if (!regBRes.ok) return { test: "rv-sites:double-assign-guard", result: "FAIL", reason: "regB-create-failed", regBRes };
+    const regBId = regBRes.body.registration.id;
+    const chkB = await post(`/events/registration/${encodeURIComponent(regBId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": regBRes.body.publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!chkB.ok) return { test: "rv-sites:double-assign-guard", result: "FAIL", reason: "chkB-failed", chkB };
+
+    // Webhook to confirm B
+    await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "Stripe-Signature": "sim_valid_signature", ...featureHeaders, "x-tenant-id": TENANT },
+      body: JSON.stringify({ id: `evt_b_${SMOKE_RUN_ID}`, type: "payment_intent.succeeded", data: { object: { id: chkB.body.paymentIntentId, status: "succeeded", metadata: { registrationId: regBId, eventId } } } })
+    });
+
+    // Try to assign same RV site[0] to B - should fail with 409 + code
+    const assignBFail = await post(`/registrations/${encodeURIComponent(regBId)}:assign-rv-sites`, { rvSiteIds: [rvSites[0]] }, featureHeaders);
+    const failOk = assignBFail.status === 409 && (
+      assignBFail.body?.code === "rv_site_already_assigned" || assignBFail.body?.details?.code === "rv_site_already_assigned"
+    );
+
+    // Verify A's holds are still intact
+    const holdsA = await get(`/reservation-holds?ownerType=registration&ownerId=${encodeURIComponent(regAId)}`);
+    const aHolds = Array.isArray(holdsA.body?.items) ? holdsA.body.items : [];
+    const aAssigned = aHolds.some(h => h?.resourceId === rvSites[0] && h?.state === "confirmed");
+
+    const pass = failOk && aAssigned;
+    return {
+      test: "rv-sites:double-assign-guard",
+      result: pass ? "PASS" : "FAIL",
+      regA: regAId,
+      regB: regBId,
+      assignBFailStatus: assignBFail.status,
+      aHoldsIntact: aAssigned,
+      reason: !failOk ? "assign-should-have-failed" : !aAssigned ? "reg-a-holds-corrupted" : null
+    };
+  },
+
+  "smoke:rv-sites:release-on-cancel": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // Create event with RV
+    const eventName = smokeTag("rv_sites_release_evt");
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 10,
+      rvEnabled: true,
+      rvCapacity: 2,
+      rvUnitAmount: 7500
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "rv-sites:release-on-cancel", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+
+    // Create 2 RV sites
+    const rvSites = [];
+    for (let i = 1; i <= 2; i++) {
+      const rvSite = await post("/objects/resource", {
+        type: "resource",
+        resourceType: "rv",
+        name: `ReleaseRvSite-${i}`,
+        status: "available",
+        tags: [`event:${eventId}`]
+      });
+      if (!rvSite.ok) return { test: "rv-sites:release-on-cancel", result: "FAIL", reason: "rv-site-create-failed", rvSite };
+      rvSites.push(rvSite.body.id);
+    }
+
+    // Reg A: create, checkout, confirm, assign, then cancel
+    const regARes = await post(`/registrations:public`, { eventId, rvQty: 2, party: { email: `release_a+${SMOKE_RUN_ID}@example.com` } }, featureHeaders, { auth: "none" });
+    if (!regARes.ok) return { test: "rv-sites:release-on-cancel", result: "FAIL", reason: "regA-create-failed" };
+    const regAId = regARes.body.registration.id;
+    
+    const chkA = await post(`/events/registration/${encodeURIComponent(regAId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": regARes.body.publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!chkA.ok) return { test: "rv-sites:release-on-cancel", result: "FAIL", reason: "chkA-failed" };
+
+    // Webhook confirm
+    await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "Stripe-Signature": "sim_valid_signature", ...featureHeaders, "x-tenant-id": TENANT },
+      body: JSON.stringify({ id: `evt_ca_${SMOKE_RUN_ID}`, type: "payment_intent.succeeded", data: { object: { id: chkA.body.paymentIntentId, status: "succeeded", metadata: { registrationId: regAId, eventId } } } })
+    });
+
+    // Assign both RV sites to A
+    const assignA = await post(`/registrations/${encodeURIComponent(regAId)}:assign-rv-sites`, { rvSiteIds: rvSites }, featureHeaders);
+    if (!assignA.ok) return { test: "rv-sites:release-on-cancel", result: "FAIL", reason: "assignA-failed" };
+
+    // Cancel A with refund
+    const cancelA = await post(`/registrations/${encodeURIComponent(regAId)}:cancel-refund`, {}, featureHeaders);
+    if (!cancelA.ok) return { test: "rv-sites:release-on-cancel", result: "FAIL", reason: "cancelA-failed", cancelA };
+
+    // Check holds are released
+    const holdsAAfterCancel = await get(`/reservation-holds?ownerType=registration&ownerId=${encodeURIComponent(regAId)}`);
+    const aHoldsAfter = Array.isArray(holdsAAfterCancel.body?.items) ? holdsAAfterCancel.body.items : [];
+    const allReleased = aHoldsAfter.length > 0 && aHoldsAfter.every(h => h?.state === "released");
+
+    // Check event counter decremented
+    const evtAfter = await get(`/objects/event/${encodeURIComponent(eventId)}`);
+    const rvReservedAfter = Number(evtAfter.body?.rvReserved ?? 0);
+    const counterOk = rvReservedAfter === 0;
+
+    // Reg B should now be able to reserve/assign all freed RV sites
+    const regBRes = await post(`/registrations:public`, { eventId, rvQty: 2, party: { email: `release_b+${SMOKE_RUN_ID}@example.com` } }, featureHeaders, { auth: "none" });
+    if (!regBRes.ok) return { test: "rv-sites:release-on-cancel", result: "FAIL", reason: "regB-create-failed" };
+    const regBId = regBRes.body.registration.id;
+
+    const chkB = await post(`/events/registration/${encodeURIComponent(regBId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": regBRes.body.publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    const checkoutBOk = chkB.ok;
+
+    const pass = allReleased && counterOk && checkoutBOk;
+    return {
+      test: "rv-sites:release-on-cancel",
+      result: pass ? "PASS" : "FAIL",
+      regA: regAId,
+      regB: regBId,
+      holdsReleased: allReleased,
+      rvReservedAfter,
+      regBCheckoutOk: checkoutBOk,
+      reason: !allReleased ? "holds-not-released" : !counterOk ? "counter-not-decremented" : !checkoutBOk ? "regB-checkout-failed" : null
+    };
+  },
   "smoke:po-receive-lot-location-assertions": async () => {
     await ensureBearer();
 
