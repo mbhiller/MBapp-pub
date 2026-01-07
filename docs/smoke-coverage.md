@@ -54,6 +54,19 @@ Smokes are organized by tier for targeted CI validation:
 
 ---
 
+## Sprint BL — RV Sites (Discrete Resource Assignment)
+
+**Scope:** Validates RV site discrete assignment via the ReservationHold ledger, mirroring the stalls pattern (block hold → per-site holds → block release with `assigned` reason).
+
+### CORE
+- **`smoke:rv-sites:block-reserve-and-assign`** — Creates event with rvEnabled/rvCapacity/rvUnitAmount, 3 RV site resources (tagged to event), public registration with rvQty=2, checkout, confirm via webhook, then POST `:assign-rv-sites` with 2 sites. Asserts: 2 per-site holds confirmed, block hold released with reason `"assigned"`.
+
+### EXTENDED
+- **`smoke:rv-sites:double-assign-guard`** — RegA reserves/confirms/assigns 1 RV site; RegB reserves/confirms/attempts same site. Asserts: RegB assignment fails 409 with code `"rv_site_already_assigned"`, RegA holds remain intact (idempotent).
+- **`smoke:rv-sites:release-on-cancel`** — RegA reserves/confirms/assigns 2 RV sites, then cancel-refund; RegB reserves/confirms to verify freed sites reusable. Asserts: All holds released (state=released), event rvReserved=0, RegB checkout succeeds.
+
+---
+
 ## CI Debugging Failed Smokes
 
 **When a smoke fails locally or in CI:**

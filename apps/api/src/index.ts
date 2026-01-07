@@ -123,6 +123,7 @@ import * as RegCleanupExpiredHolds from "./registrations/cleanup-expired-holds";
 import * as RegCancel from "./registrations/cancel";
 import * as RegCancelRefund from "./registrations/cancel-refund";
 import * as RegAssignStalls from "./registrations/assign-stalls";
+import * as RegAssignRvSites from "./registrations/assign-rv-sites";
 // Internal jobs
 import * as JobsRun from "./jobs/run";
 import { runBackgroundJobs } from "./jobs/background";
@@ -419,6 +420,16 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
         const [, id] = m;
         requirePerm(auth, "registration:write");
         return RegAssignStalls.handle(withId(event, id));
+      }
+    }
+
+    // Registrations: operator assign RV sites
+    {
+      const m = path.match(/^\/registrations\/([^/]+):assign-rv-sites$/i);
+      if (method === "POST" && m) {
+        const [, id] = m;
+        requirePerm(auth, "registration:write");
+        return RegAssignRvSites.handle(withId(event, id));
       }
     }
 

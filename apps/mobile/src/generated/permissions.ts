@@ -37,6 +37,7 @@ export const PERMISSIONS_BY_ENDPOINT = {
   "POST /purchasing/po/{id}:receive": "purchase:receive",
   "POST /purchasing/suggest-po": "purchase:write",
   "POST /registrations:cleanup-expired-holds": "registration:write",
+  "POST /registrations/{id}:assign-rv-sites": "registration:write",
   "POST /registrations/{id}:assign-stalls": "registration:write",
   "POST /registrations/{id}:cancel": "registration:write",
   "POST /registrations/{id}:cancel-refund": "registration:write",

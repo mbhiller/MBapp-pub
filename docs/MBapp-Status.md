@@ -5,6 +5,47 @@
 **Workflow & DoD:** See [MBapp-Cadence.md](MBapp-Cadence.md) for canonical workflow, Definition of Done, and testing rules.
 
 ---
+
+### Sprint BL — RV Sites v1 (discrete resource assignment) — ✅ Complete (2026-01-07)
+
+**Summary:** Delivered discrete RV site assignment capability using the ReservationHold ledger, extending the stalls pattern to event RV sites. Implemented block holds at checkout, per-RV-site assignment via operator action, robust conflict guards, and capacity release on cancel/refund. Added comprehensive smokes and CI wiring.
+
+**Deliverables (E1–E4):**
+- **Spec (E1):** Extended [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml):
+  - `AssignRvSitesRequest` schema: `{ rvSiteIds: string[] }`
+  - `AssignRvSitesResponse` schema: `{ holds: ReservationHold[] }`
+  - `POST /registrations/{id}:assign-rv-sites` endpoint with permission `registration:write`, error codes 400/404/409 (conflict: `rv_site_already_assigned`)
+  - Ran `npm run spec:lint`, `spec:bundle`, `spec:types:api`, `spec:types:mobile` ✅
+- **Holds extension + resource validation (E2):** [apps/api/src/reservations/holds.ts](../apps/api/src/reservations/holds.ts):
+  - `createHeldRvBlockHold()` — Idempotent creation of RV block holds (qty-based, itemType="rv", resourceId=null)
+  - `assignRvSitesToRegistration()` — Converts block → per-RV-site holds with conflict guard (409 `rv_site_already_assigned`), validates RV site resources exist/belong to event
+  - [apps/api/src/resources/rv-sites.ts](../apps/api/src/resources/rv-sites.ts) (NEW) — `assertRvResourcesExistAndAvailable()` validation helper
+- **Endpoint wiring (E3):** [apps/api/src/registrations/assign-rv-sites.ts](../apps/api/src/registrations/assign-rv-sites.ts) (NEW) handler; routed in [apps/api/src/index.ts](../apps/api/src/index.ts); returns safe holds summary with permission checks and error routing (400/404/409)
+- **Smokes (E4):** Added 3 tests in [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) and wired tiers in [ops/ci-smokes.json](../ops/ci-smokes.json):
+  - CORE: `smoke:rv-sites:block-reserve-and-assign` — asserts block hold exists pre-assign, per-site holds confirmed, block released `reason="assigned"`. **Result: PASS** ✅
+  - EXTENDED: `smoke:rv-sites:double-assign-guard` — second assign returns 409 with code `rv_site_already_assigned`, owner A holds intact. **Result: PASS** ✅
+  - EXTENDED: `smoke:rv-sites:release-on-cancel` — cancel-refund releases RV holds/counters, subsequent registration can reserve freed sites. **Result: PASS** ✅
+
+**Endpoints:**
+- `POST /registrations/{id}:assign-rv-sites` — Validates/stores assignment; creates per-RV-site holds; releases block with `assigned`; returns 409 on double-assign conflicts.
+
+**Verification:**
+- ✅ Typescript: `npm run typecheck --workspaces --if-present` (all 3 workspaces clean)
+- ✅ Smokes: all three RV sites tests PASS (core + extended tiers)
+- ✅ Spec pipeline: lint/bundle/types clean
+- ✅ 409 conflict guard functional (assignBFailStatus=409, aHoldsIntact=true)
+- ✅ Holds release functional (holdsReleased=true on cancel-refund)
+- ✅ Counter decrement functional (rvReservedAfter=0)
+- ✅ Resource reuse functional (freed sites assignable to new registrations)
+
+**Impact:**
+- Establishes RV site discrete assignment foundation reusing proven stalls pattern.
+- Clear lifecycle: block hold → confirm → per-site assignment → block release with `assigned`.
+- Foundation-grade conflict detection (409 `rv_site_already_assigned`) prevents overbooking.
+- Deterministic tests and CI wiring ensure reliability across retries and operator actions.
+
+---
+
 ### Sprint BK — Stalls v1 (resource-based holds + assignment) — ✅ Complete (2026-01-07)
 
 **Summary:** Delivered a true resource-based reservation for event stalls using the existing ReservationHold ledger plus minimal stall resource identity. Implemented block holds at checkout, per-stall assignment via operator action, robust conflict/lookup guards, and capacity release on cancel/refund. Added targeted smokes and CI wiring.

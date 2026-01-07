@@ -1301,6 +1301,71 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /registrations/{id}:assign-rv-sites:
+    post:
+      tags:
+        - Registrations
+      operationId: assignRvSites
+      summary: Assign specific RV sites to a registration (operator)
+      description: |
+        Converts a block RV hold (itemType=rv, resourceId=null) into specific granular assignments.
+        Validates that rvSiteIds length matches the block hold qty and that resources are available.
+        Creates or updates ReservationHold records with resourceId set for each RV site.
+        Requires operator permission (registration:write).
+      x-mbapp-permission: registration:write
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignRvSitesRequest'
+      responses:
+        '200':
+          description: RV sites successfully assigned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssignRvSitesResponse'
+        '400':
+          description: Validation error (qty mismatch, duplicates, invalid resource)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Registration or resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflict (RV site already assigned, registration not in correct state)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /registrations/{id}:public:
     get:
       tags:
@@ -5389,6 +5454,27 @@ components:
         holds:
           type: array
           description: Updated or created ReservationHold objects for assigned stalls
+          items:
+            $ref: '#/components/schemas/ReservationHold'
+    AssignRvSitesRequest:
+      type: object
+      description: Request to assign specific RV site resources to a registration (Sprint BL)
+      required:
+        - rvSiteIds
+      properties:
+        rvSiteIds:
+          type: array
+          description: List of EventResource IDs (RV sites) to assign
+          items:
+            type: string
+          minItems: 1
+    AssignRvSitesResponse:
+      type: object
+      description: Response from assign-rv-sites action
+      properties:
+        holds:
+          type: array
+          description: Updated or created ReservationHold objects for assigned RV sites
           items:
             $ref: '#/components/schemas/ReservationHold'
     RegistrationLine:
