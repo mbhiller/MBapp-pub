@@ -6,6 +6,37 @@
 
 ---
 
+### Sprint BH — Registrations Cancel + Refund (spec + API + smokes) — ✅ Complete (2026-01-06)
+
+**Summary:** Shipped the smallest safe cancel/refund vertical slice: aligned paymentStatus enum, added operator actions for cancel and cancel-refund, normalized public status, and ensured capacity reversal for seats and RV. Simulate headers keep Stripe refund deterministic in CI.
+
+**Deliverables (E1–E6):**
+- **Spec (E1):** Updated [spec/MBapp-Modules.yaml](../spec/MBapp-Modules.yaml):
+  - Registration schema: `paymentStatus` enum aligned (`pending|paid|failed|refunded`); added `cancelledAt`, `refundedAt`, `refundId`.
+  - Endpoints: `POST /registrations/{id}:cancel` and `POST /registrations/{id}:cancel-refund` with guards and response shapes; public status extended to include cancel/refund timestamps.
+  - Ran `npm run spec:lint`, `spec:bundle`, `spec:types:api`, `spec:types:mobile` ✅
+- **API Refund Helper (E2):** [apps/api/src/common/stripe.ts](../apps/api/src/common/stripe.ts) `createRefund({ paymentIntentId, amount?, event })` with simulate and real support.
+- **API Cancel (E3):** [apps/api/src/registrations/cancel.ts](../apps/api/src/registrations/cancel.ts): sets `status=cancelled`, `cancelledAt`, and when cancelling from submitted sets `paymentStatus=failed`; releases capacity once; idempotent.
+- **API Cancel-Refund (E4):** [apps/api/src/registrations/cancel-refund.ts](../apps/api/src/registrations/cancel-refund.ts): guards `confirmed+paid`; creates refund; sets `status=cancelled`, `paymentStatus=refunded`, timestamps, `refundId`; releases capacity; idempotent returns `{ registration, refund: null }`.
+- **Public Status (E5):** [apps/api/src/registrations/public-get.ts](../apps/api/src/registrations/public-get.ts) now includes `cancelledAt`/`refundedAt`, normalizes `paymentStatus` to aligned enum, and keeps constant-time token compare.
+- **Smokes (E6):** Added in [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs) and wired to [ops/ci-smokes.json](../ops/ci-smokes.json):
+  - Core: `smoke:registrations:cancel-refund-happy-path` — confirms cancel-refund sets `status=cancelled`, `paymentStatus=refunded`, timestamps present; verifies capacity reversal and safe public status (no refundId).
+  - Extended: `smoke:registrations:cancel-refund-guards` — disallows draft/submitted/confirmed+failed states; replays are idempotent (200, unchanged).
+
+**Endpoints:**
+- `POST /registrations/{id}:cancel` — operator cancel without refund (idempotent)
+- `POST /registrations/{id}:cancel-refund` — operator cancel with refund for confirmed+paid (idempotent)
+- `GET /registrations/{id}:public` — includes `cancelledAt`/`refundedAt` and normalized `paymentStatus`
+
+**Verification:**
+- ✅ Typescript: `npm run typecheck -w apps/api`
+- ✅ Spec pipeline: lint/bundle/types clean
+- ✅ Smokes: cancel-refund happy path PASS; guards PASS (simulate Stripe)
+
+**Impact:**
+- Clear operator flows for cancellation with or without refund, safe capacity reversal, and public status transparency.
+- Deterministic CI via `X-Feature-Stripe-Simulate` for refunds; no external Stripe calls during tests.
+
 ### Sprint BG — Event RV Add‑on (spec + API + web) — ✅ Complete (2026-01-06)
 
 **Summary:** Introduced an event‑level RV add‑on purchasable during public booking. Contract‑first changes span spec, API create/checkout, objects repo capacity counters, webhook/template vars, public events projection, web booking UI, and smoke coverage.

@@ -109,7 +109,7 @@ Smokes are organized by tier for targeted CI validation:
   - Flags/Headers: `X-Feature-Registrations-Enabled: true`, `X-Feature-Stripe-Simulate: true`, `X-Feature-Notify-Simulate: true`.
 
 - **Public Status Endpoint (confirmed):** `smoke:registrations:public-status-confirmed`
-  - Creates public registration with email + phone, runs checkout + webhook to confirm, then calls `GET /registrations/{id}:public` with `X-MBapp-Public-Token` and asserts: `status=confirmed`, `paymentStatus=paid|succeeded`, `confirmedAt` set, `emailStatus.status=sent`, `smsStatus.status=sent`.
+  - Creates public registration with email + phone, runs checkout + webhook to confirm, then calls `GET /registrations/{id}:public` with `X-MBapp-Public-Token` and asserts: `status=confirmed`, `paymentStatus=paid`, `confirmedAt` set, `emailStatus.status=sent`, `smsStatus.status=sent`.
   - Validates server truth after payment confirmation with delivery indicators.
   - Flags/Headers: `X-Feature-Registrations-Enabled: true`, `X-Feature-Stripe-Simulate: true`, `X-Feature-Notify-Simulate: true`.
 
@@ -119,6 +119,18 @@ Smokes are organized by tier for targeted CI validation:
   - Flags/Headers: `X-Feature-Registrations-Enabled: true`, `X-Feature-Stripe-Simulate: true`.
 
 ## Recent Additions (Sprint BG)
+
+## Recent Additions (Sprint BH)
+
+- **Registrations: Cancel + Refund (happy path):** `smoke:registrations:cancel-refund-happy-path`
+  - Creates event with capacity 1 (RV enabled), registers with `rvQty=1`, completes checkout + simulated Stripe webhook, then calls `POST /registrations/{id}:cancel-refund`.
+  - **Stable assertions:** Registration `status=cancelled`, `paymentStatus=refunded`, both `cancelledAt` and `refundedAt` present; event counters reversed (`reservedCount=0`, `rvReserved=0`); public GET shows `status=cancelled`, `paymentStatus=refunded`, includes `cancelledAt`/`refundedAt`, and never exposes `refundId`.
+  - Flags/Headers: `X-Feature-Registrations-Enabled: true`, `X-Feature-Stripe-Simulate: true`.
+
+- **Registrations: Cancel + Refund (guards):** `smoke:registrations:cancel-refund-guards`
+  - Disallows refund from `draft`, `submitted` (pending), and `confirmed` with `paymentStatus=failed` (expect 409). Runs happy path then replays cancel-refund to validate idempotency (second call 200 with no change).
+  - **Stable assertions:** Guard 409s for ineligible states; idempotent replay returns 200.
+  - Flags/Headers: `X-Feature-Registrations-Enabled: true`, `X-Feature-Stripe-Simulate: true`.
 
 - **Public Booking — RV Happy Path:** `smoke:public-booking:rv-happy-path`
   - Creates RV-enabled event (`rvEnabled=true`, priced), public registration with `rvQty>0`, runs checkout.

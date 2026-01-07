@@ -46,6 +46,8 @@ export async function handle(event: APIGatewayProxyEventV2) {
         "paymentStatus",
         "submittedAt",
         "confirmedAt",
+        "cancelledAt",
+        "refundedAt",
         "holdExpiresAt",
         "publicTokenHash",
         "confirmationMessageId",
@@ -73,13 +75,18 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const emailStatus = await loadMessageStatus(tenantId, confirmationMessageId);
     const smsStatus = await loadMessageStatus(tenantId, confirmationSmsMessageId);
 
+    const rawPaymentStatus = (registration as any).paymentStatus as string | undefined;
+    const paymentStatus = rawPaymentStatus === "succeeded" ? "paid" : rawPaymentStatus;
+
     return ok({
       id: (registration as any).id,
       eventId: (registration as any).eventId,
       status: (registration as any).status,
-      paymentStatus: (registration as any).paymentStatus,
+      paymentStatus,
       submittedAt: (registration as any).submittedAt,
       confirmedAt: (registration as any).confirmedAt,
+      cancelledAt: (registration as any).cancelledAt,
+      refundedAt: (registration as any).refundedAt,
       holdExpiresAt: (registration as any).holdExpiresAt,
       emailStatus,
       smsStatus,

@@ -1001,6 +1001,105 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /registrations/{id}:cancel:
+    post:
+      tags:
+        - Registrations
+      operationId: cancelRegistration
+      summary: Cancel a registration (operator)
+      x-mbapp-permission: registration:write
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Updated registration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Registration'
+        '400':
+          description: Validation or state error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /registrations/{id}:cancel-refund:
+    post:
+      tags:
+        - Registrations
+      operationId: cancelRefundRegistration
+      summary: Cancel a confirmed registration and refund payment (operator)
+      description: |
+        Cancels a confirmed, paid registration and issues a refund.
+        In simulate mode, returns a synthetic refund result. Returns the updated registration and optional refund info.
+      x-mbapp-permission: registration:write
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Cancellation + refund result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CancelRefundResponse'
+        '400':
+          description: Validation or state error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
     put:
       tags:
         - Registrations
@@ -4751,9 +4850,10 @@ components:
               nullable: true
               enum:
                 - pending
-                - succeeded
+                - paid
                 - failed
-              description: Payment status (Sprint AU)
+                - refunded
+              description: Payment status
             totalAmount:
               type: integer
               nullable: true
@@ -4772,6 +4872,20 @@ components:
               format: date-time
               nullable: true
               description: Timestamp when status changed to confirmed (Sprint AU)
+            cancelledAt:
+              type: string
+              format: date-time
+              nullable: true
+              description: Timestamp when status changed to cancelled (operator or TTL expiry)
+            refundedAt:
+              type: string
+              format: date-time
+              nullable: true
+              description: Timestamp when payment was refunded (operator action)
+            refundId:
+              type: string
+              nullable: true
+              description: Provider refund id (server-only; never included in public response)
             holdExpiresAt:
               type: string
               format: date-time
@@ -4862,8 +4976,9 @@ components:
           nullable: true
           enum:
             - pending
-            - succeeded
+            - paid
             - failed
+            - refunded
         totalAmount:
           type: integer
           nullable: true
@@ -4883,6 +4998,14 @@ components:
           format: date-time
           nullable: true
         confirmedAt:
+          type: string
+          format: date-time
+          nullable: true
+        cancelledAt:
+          type: string
+          format: date-time
+          nullable: true
+        refundedAt:
           type: string
           format: date-time
           nullable: true
@@ -4941,6 +5064,36 @@ components:
               nullable: true
             errorMessage:
               type: string
+              nullable: true
+    RefundResult:
+      type: object
+      description: Minimal refund information (non-sensitive)
+      properties:
+        id:
+          type: string
+          description: Provider refund id
+        amount:
+          type: integer
+          nullable: true
+          description: Refunded amount in cents (if available)
+        currency:
+          type: string
+          nullable: true
+          description: ISO currency code
+        provider:
+          type: string
+          nullable: true
+          description: Payment provider key (e.g., stripe)
+    CancelRefundResponse:
+      type: object
+      description: Response for cancel-refund action
+      properties:
+        registration:
+          $ref: '#/components/schemas/Registration'
+        refund:
+          allOf:
+            - $ref: '#/components/schemas/RefundResult'
+            - type: object
               nullable: true
         sms:
           type: object

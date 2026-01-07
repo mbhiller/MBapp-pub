@@ -12937,6 +12937,155 @@ const tests = {
     };
   },
 
+  "smoke:registrations:cancel-refund-happy-path": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true"
+    };
+
+    // Create event with capacity 1 and RV enabled capacity 1
+    const eventName = smokeTag("cancel_refund_evt");
+    const rvUnitAmount = 3000;
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 1,
+      reservedCount: 0,
+      rvEnabled: true,
+      rvCapacity: 1,
+      rvReserved: 0,
+      rvUnitAmount
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "registrations:cancel-refund-happy-path", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+    // Public create with rvQty=1
+    const regCreate = await post(`/registrations:public`, { eventId, rvQty: 1 }, featureHeaders, { auth: "none" });
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test: "registrations:cancel-refund-happy-path", result: "FAIL", reason: "reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+
+    // Checkout
+    const checkout = await post(`/events/registration/${encodeURIComponent(regId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!checkout.ok || !checkout.body?.paymentIntentId) {
+      return { test: "registrations:cancel-refund-happy-path", result: "FAIL", reason: "checkout-failed", checkout };
+    }
+
+    // Simulate payment succeeded webhook
+    const webhookBody = {
+      id: `evt_${SMOKE_RUN_ID}`,
+      type: "payment_intent.succeeded",
+      data: { object: { id: checkout.body.paymentIntentId, status: "succeeded", metadata: { registrationId: regId, eventId } } }
+    };
+    const whRes = await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "Stripe-Signature": "sim_valid_signature", ...featureHeaders, "x-tenant-id": TENANT },
+      body: JSON.stringify(webhookBody)
+    });
+    if (!whRes.ok) {
+      const whBody = await whRes.json().catch(()=>({}));
+      return { test: "registrations:cancel-refund-happy-path", result: "FAIL", reason: "webhook-failed", whStatus: whRes.status, whBody };
+    }
+
+    // Operator cancel-refund
+    const cancelRefund = await post(`/registrations/${encodeURIComponent(regId)}:cancel-refund`, {}, featureHeaders);
+    if (!cancelRefund.ok) {
+      return { test: "registrations:cancel-refund-happy-path", result: "FAIL", reason: "cancel-refund-failed", cancelRefund };
+    }
+
+    const regOut = cancelRefund.body?.registration || cancelRefund.body; // accept either shape
+    const statusOk = regOut?.status === "cancelled";
+    const payOk = regOut?.paymentStatus === "refunded";
+    const timestampsOk = !!regOut?.cancelledAt && !!regOut?.refundedAt;
+
+    // Capacity reversed: event counters should be 0
+    const evtAfter = await get(`/objects/event/${encodeURIComponent(eventId)}`);
+    const seatOk = (evtAfter.body?.reservedCount ?? 0) === 0;
+    const rvOk = (evtAfter.body?.rvReserved ?? 0) === 0;
+
+    // Public status includes cancelled/refunded safely
+    const publicStatus = await fetch(`${API}/registrations/${encodeURIComponent(regId)}:public`, {
+      headers: { "X-MBapp-Public-Token": publicToken, "x-tenant-id": TENANT, "X-Feature-Registrations-Enabled": "true" }
+    });
+    const pubBody = await publicStatus.json().catch(()=>({}));
+    const pubOk = publicStatus.ok && pubBody?.status === "cancelled" && pubBody?.paymentStatus === "refunded" && !!pubBody?.cancelledAt && !!pubBody?.refundedAt && !("refundId" in pubBody);
+
+    const pass = statusOk && payOk && timestampsOk && seatOk && rvOk && pubOk;
+    return { test: "registrations:cancel-refund-happy-path", result: pass ? "PASS" : "FAIL", steps: { eventId, regId } };
+  },
+
+  "smoke:registrations:cancel-refund-guards": async () => {
+    await ensureBearer();
+
+    const featureHeaders = { "X-Feature-Registrations-Enabled": "true", "X-Feature-Stripe-Simulate": "true" };
+
+    // Seed event
+    const evt = await post("/objects/event", { type: "event", status: "open", name: smokeTag("cancel_refund_guards"), capacity: 1, reservedCount: 0 });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "registrations:cancel-refund-guards", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+
+    // 1) Draft: disallow
+    const draft = await post("/objects/registration", { type: "registration", status: "draft", eventId });
+    if (!draft.ok || !draft.body?.id) {
+      return { test: "registrations:cancel-refund-guards", result: "FAIL", reason: "draft-create-failed", draft };
+    }
+    const cr1 = await post(`/registrations/${encodeURIComponent(draft.body.id)}:cancel-refund`, {}, featureHeaders);
+    const guard1 = cr1.status === 409;
+
+    // 2) Submitted (pending): disallow
+    const regCreate = await post(`/registrations:public`, { eventId }, featureHeaders, { auth: "none" });
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test: "registrations:cancel-refund-guards", result: "FAIL", reason: "reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+    const checkout = await post(`/events/registration/${encodeURIComponent(regId)}:checkout`, {}, { ...featureHeaders, "X-MBapp-Public-Token": publicToken, "Idempotency-Key": idem() }, { auth: "none" });
+    if (!checkout.ok) {
+      return { test: "registrations:cancel-refund-guards", result: "FAIL", reason: "checkout-failed", checkout };
+    }
+    const cr2 = await post(`/registrations/${encodeURIComponent(regId)}:cancel-refund`, {}, featureHeaders);
+    const guard2 = cr2.status === 409;
+
+    // 3) Confirmed but not paid (failed): disallow
+    const bad = await post("/objects/registration", { type: "registration", status: "confirmed", paymentStatus: "failed", eventId });
+    if (!bad.ok || !bad.body?.id) {
+      return { test: "registrations:cancel-refund-guards", result: "FAIL", reason: "bad-create-failed", bad };
+    }
+    const cr3 = await post(`/registrations/${encodeURIComponent(bad.body.id)}:cancel-refund`, {}, featureHeaders);
+    const guard3 = cr3.status === 409;
+
+    // 4) Double refund: run happy-path then retry
+    // Finish payment for regId
+    const webhookBody = { id: `evt_${SMOKE_RUN_ID}`, type: "payment_intent.succeeded", data: { object: { id: checkout.body?.paymentIntentId, status: "succeeded", metadata: { registrationId: regId, eventId } } } };
+    const whRes = await fetch(`${API}/webhooks/stripe`, { method: "POST", headers: { "content-type": "application/json", "Stripe-Signature": "sim_valid_signature", ...featureHeaders, "x-tenant-id": TENANT }, body: JSON.stringify(webhookBody) });
+    if (!whRes.ok) {
+      return { test: "registrations:cancel-refund-guards", result: "FAIL", reason: "webhook-failed", whStatus: whRes.status };
+    }
+    const first = await post(`/registrations/${encodeURIComponent(regId)}:cancel-refund`, {}, featureHeaders);
+    if (!first.ok) {
+      return { test: "registrations:cancel-refund-guards", result: "FAIL", reason: "first-cancel-refund", first };
+    }
+    const second = await post(`/registrations/${encodeURIComponent(regId)}:cancel-refund`, {}, featureHeaders);
+    const idempotent = second.ok; // status 200 and no errors
+
+    const pass = guard1 && guard2 && guard3 && idempotent;
+    return { test: "registrations:cancel-refund-guards", result: pass ? "PASS" : "FAIL", guards: { draft: guard1, submitted: guard2, confirmedFailed: guard3, idempotent } };
+  },
+
   "smoke:messages:retry-failed": async () => {
     await ensureBearer();
 

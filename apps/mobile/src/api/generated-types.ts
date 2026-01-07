@@ -213,9 +213,48 @@ export interface paths {
         };
         /** Get a Registration */
         get: operations["getRegistration"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/registrations/{id}:cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel a registration (operator) */
+        post: operations["cancelRegistration"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/registrations/{id}:cancel-refund": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
         /** Update a Registration */
         put: operations["updateRegistration"];
-        post?: never;
+        /**
+         * Cancel a confirmed registration and refund payment (operator)
+         * @description Cancels a confirmed, paid registration and issues a refund.
+         *     In simulate mode, returns a synthetic refund result. Returns the updated registration and optional refund info.
+         *
+         */
+        post: operations["cancelRefundRegistration"];
         /** Delete a Registration */
         delete: operations["deleteRegistration"];
         options?: never;
@@ -3053,10 +3092,10 @@ export interface components {
             /** @description Stripe PaymentIntent ID (Sprint AU) */
             paymentIntentId?: string | null;
             /**
-             * @description Payment status (Sprint AU)
+             * @description Payment status
              * @enum {string|null}
              */
-            paymentStatus?: "pending" | "succeeded" | "failed" | null;
+            paymentStatus?: "pending" | "paid" | "failed" | "refunded" | null;
             /** @description Total amount in cents for this registration (server-computed) */
             totalAmount?: number | null;
             /** @description ISO currency code for totals (e.g., "usd") */
@@ -3071,6 +3110,18 @@ export interface components {
              * @description Timestamp when status changed to confirmed (Sprint AU)
              */
             confirmedAt?: string | null;
+            /**
+             * Format: date-time
+             * @description Timestamp when status changed to cancelled (operator or TTL expiry)
+             */
+            cancelledAt?: string | null;
+            /**
+             * Format: date-time
+             * @description Timestamp when payment was refunded (operator action)
+             */
+            refundedAt?: string | null;
+            /** @description Provider refund id (server-only; never included in public response) */
+            refundId?: string | null;
             /**
              * Format: date-time
              * @description When a submitted hold should expire and be cancelled; null means no TTL
@@ -3129,7 +3180,7 @@ export interface components {
             /** @enum {string} */
             status?: "draft" | "submitted" | "confirmed" | "cancelled";
             /** @enum {string|null} */
-            paymentStatus?: "pending" | "succeeded" | "failed" | null;
+            paymentStatus?: "pending" | "paid" | "failed" | "refunded" | null;
             /** @description Safe total amount in cents (if exposed) */
             totalAmount?: number | null;
             /** @description ISO currency code (e.g., "usd") */
@@ -3140,6 +3191,10 @@ export interface components {
             submittedAt?: string | null;
             /** Format: date-time */
             confirmedAt?: string | null;
+            /** Format: date-time */
+            cancelledAt?: string | null;
+            /** Format: date-time */
+            refundedAt?: string | null;
             /** Format: date-time */
             holdExpiresAt?: string | null;
             emailStatus?: {
@@ -3162,6 +3217,22 @@ export interface components {
                 provider?: string | null;
                 errorMessage?: string | null;
             } | null;
+        };
+        /** @description Minimal refund information (non-sensitive) */
+        RefundResult: {
+            /** @description Provider refund id */
+            id?: string;
+            /** @description Refunded amount in cents (if available) */
+            amount?: number | null;
+            /** @description ISO currency code */
+            currency?: string | null;
+            /** @description Payment provider key (e.g., stripe) */
+            provider?: string | null;
+        };
+        /** @description Response for cancel-refund action */
+        CancelRefundResponse: {
+            registration?: components["schemas"]["Registration"];
+            refund?: components["schemas"]["RefundResult"] & (Record<string, never> | null);
             sms?: {
                 /** @enum {string} */
                 status?: "queued" | "sending" | "sent" | "failed" | "cancelled";
@@ -4980,6 +5051,68 @@ export interface operations {
             };
         };
     };
+    cancelRegistration: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-tenant-id": components["parameters"]["TenantHeader"];
+                /** @description Optional idempotency key for safe retries. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Updated registration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Registration"];
+                };
+            };
+            /** @description Validation or state error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     updateRegistration: {
         parameters: {
             query?: never;
@@ -5015,6 +5148,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ValidationError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    cancelRefundRegistration: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-tenant-id": components["parameters"]["TenantHeader"];
+                /** @description Optional idempotency key for safe retries. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cancellation + refund result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CancelRefundResponse"];
+                };
+            };
+            /** @description Validation or state error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             /** @description Unauthorized */
