@@ -26,6 +26,15 @@ export type ListArgs = {
   sort?: string;
 };
 
+export type ListRegistrationsByEventArgs = {
+  tenantId?: string;
+  eventId: string;
+  limit?: number;
+  next?: string | null;
+  scanIndexForward?: boolean;
+  q?: string | null;
+};
+
 export type GetArgs = {
   tenantId?: string;
   type: string;
@@ -121,6 +130,73 @@ function decodeNext(token?: string | null) {
   }
 }
 
+function computeRegistrationEventIndexKeys({ tenantId, reg }: { tenantId: string | undefined; reg: AnyRecord }) {
+  const eventId = reg.eventId as string | undefined;
+  const id = reg.id as string | undefined;
+  if (!tenantId || !eventId || !id) return {} as AnyRecord;
+
+  const dateComponent =
+    (reg.submittedAt as string | undefined) ||
+    (reg.createdAt as string | undefined) ||
+    (reg.updatedAt as string | undefined) ||
+    nowIso();
+
+  return {
+    gsi4pk: `${tenantId}|event|${eventId}`,
+    gsi4sk: `${dateComponent}#${id}`,
+  } as AnyRecord;
+}
+
+function stripInternalFields<T extends AnyRecord>(obj: T): T {
+  if (!obj) return obj;
+  const copy = { ...obj } as AnyRecord;
+  delete copy.gsi4pk;
+  delete copy.gsi4sk;
+  return copy as T;
+}
+
+export async function listRegistrationsByEventId({ tenantId, eventId, limit = 50, next, scanIndexForward = true, q }: ListRegistrationsByEventArgs) {
+  const decoded = decodeNext(next ?? null) as AnyRecord | undefined;
+  const isOffsetCursor = !!decoded && typeof (decoded as AnyRecord).offset === "number";
+  const forceFiltered = !!q || isOffsetCursor;
+
+  // If cursor is an offset cursor or q is present, keep using filtered path for continuity.
+  if (forceFiltered) {
+    return listObjects({ tenantId, type: "registration", filters: { eventId }, limit, next: next ?? undefined, q: q ?? undefined });
+  }
+
+  try {
+    const res = await ddb.send(new QueryCommand({
+      TableName: TABLE,
+      IndexName: "gsi4",
+      KeyConditionExpression: "#gpk = :gpk",
+      ExpressionAttributeNames: { "#gpk": "gsi4pk" },
+      ExpressionAttributeValues: { ":gpk": `${tenantId}|event|${eventId}` },
+      ExclusiveStartKey: decoded as AnyRecord | undefined,
+      Limit: limit,
+      ScanIndexForward: scanIndexForward,
+      ConsistentRead: false,
+    }));
+
+    const items = (res.Items || []) as AnyRecord[];
+    return {
+      items: items.map(stripInternalFields),
+      next: encodeNext(res.LastEvaluatedKey),
+    };
+  } catch (err: any) {
+    // Fallback to filtered path when index is absent/not ready.
+    if (METRICS_ENABLED) {
+      console.warn(JSON.stringify({
+        event: "objects:list:registration-event-fallback",
+        tenantId,
+        eventId,
+        reason: err?.name || "unknown",
+      }));
+    }
+    return listObjects({ tenantId, type: "registration", filters: { eventId }, limit, next: next ?? undefined });
+  }
+}
+
 /**
  * Compute table keys for an item (Layout A).
  * Table PK is PK_ATTR (e.g., "pk") containing the tenant id.
@@ -172,6 +248,7 @@ export async function createObject({ tenantId, type, body }: CreateArgs) {
     ...computeKeys(tenantId!, canonicalType, id),
     createdAt,
     updatedAt: nowIso(),
+    ...(canonicalType === "registration" ? computeRegistrationEventIndexKeys({ tenantId, reg: { ...normalizedBody, id, createdAt } }) : {}),
   };
 
   // Type is already canonical from computeKeys; ensure consistency
@@ -179,7 +256,7 @@ export async function createObject({ tenantId, type, body }: CreateArgs) {
   item.id = id;
 
   await ddb.send(new PutCommand({ TableName: TABLE, Item: item }));
-  return item;
+  return stripInternalFields(item);
 }
 
 export async function getObjectById({ tenantId, type, id, fields, acceptAliasType = false }: GetArgs) {
@@ -192,7 +269,7 @@ export async function getObjectById({ tenantId, type, id, fields, acceptAliasTyp
   const res = await ddb.send(new GetCommand({ TableName: TABLE, Key, ConsistentRead: true }));
   if (!res.Item) return null;
   if (!acceptAliasType && (res.Item as AnyRecord).type !== canonicalType) return null;
-  return project(res.Item as AnyRecord, fields);
+  return project(stripInternalFields(res.Item as AnyRecord), fields);
 }
 
 export async function listObjects({
@@ -244,7 +321,7 @@ export async function listObjects({
     }
 
     return {
-      items: items.map((o) => project(o, fields)),
+      items: items.map((o) => project(stripInternalFields(o), fields)),
       next: encodeNext(res.LastEvaluatedKey),
     };
   }
@@ -425,7 +502,7 @@ export async function listObjects({
   }
 
   return {
-    items: finalItems.map((o) => project(o, fields)),
+    items: finalItems.map((o) => project(stripInternalFields(o), fields)),
     next: outgoingCursor,
   };
 }
@@ -474,10 +551,11 @@ export async function replaceObject({ tenantId, type, id, body }: ReplaceArgs) {
     type: canonicalType,
     createdAt,
     updatedAt: nowIso(),
+    ...(canonicalType === "registration" ? computeRegistrationEventIndexKeys({ tenantId, reg: { ...body, id, createdAt } }) : {}),
   };
 
   await ddb.send(new PutCommand({ TableName: TABLE, Item: item }));
-  return item;
+  return stripInternalFields(item);
 }
 
 export async function updateObject({ tenantId, type, id, body }: UpdateArgs) {
@@ -485,6 +563,8 @@ export async function updateObject({ tenantId, type, id, body }: UpdateArgs) {
   const needsLineIds =
     canonicalType === "salesOrder" || canonicalType === "purchaseOrder" || canonicalType === "event";
   let normalizedBody: AnyRecord | UpdateArgs["body"] = body;
+
+  let registrationIndexKeys: AnyRecord | null = null;
 
   if (needsLineIds && Array.isArray((body as AnyRecord)?.lines)) {
     const existing = await getObjectById({ tenantId, type, id, fields: ["lines"] });
@@ -520,7 +600,17 @@ export async function updateObject({ tenantId, type, id, body }: UpdateArgs) {
       (normalizedBody as AnyRecord).linesReservedById = {};
     }
   }
-  const identity = new Set([PK_ATTR, SK_ATTR, "tenantId", "type", "id", "createdAt", "updatedAt"]);
+  if (canonicalType === "registration") {
+    const existing = await getObjectById({ tenantId, type, id, fields: ["eventId", "createdAt", "submittedAt", "updatedAt"] });
+    const merged = {
+      ...(existing as AnyRecord),
+      ...(normalizedBody as AnyRecord),
+      id,
+    } as AnyRecord;
+    registrationIndexKeys = computeRegistrationEventIndexKeys({ tenantId, reg: merged });
+  }
+
+  const identity = new Set([PK_ATTR, SK_ATTR, "tenantId", "type", "id", "createdAt", "updatedAt", "gsi4pk", "gsi4sk"]);
   const sets: string[] = [];
   const names: Record<string, string> = {};
   const values: Record<string, unknown> = {};
@@ -542,6 +632,16 @@ export async function updateObject({ tenantId, type, id, body }: UpdateArgs) {
   values[":v_updatedAt"] = nowIso();
   sets.push("#n_updatedAt = :v_updatedAt");
 
+  if (registrationIndexKeys && registrationIndexKeys.gsi4pk && registrationIndexKeys.gsi4sk) {
+    names["#n_gsi4pk"] = "gsi4pk";
+    values[":v_gsi4pk"] = registrationIndexKeys.gsi4pk;
+    sets.push("#n_gsi4pk = :v_gsi4pk");
+
+    names["#n_gsi4sk"] = "gsi4sk";
+    values[":v_gsi4sk"] = registrationIndexKeys.gsi4sk;
+    sets.push("#n_gsi4sk = :v_gsi4sk");
+  }
+
   const Key: AnyRecord = {
     [PK_ATTR]: tenantId,
     [SK_ATTR]: `${canonicalType}#${id}`,
@@ -559,7 +659,7 @@ export async function updateObject({ tenantId, type, id, body }: UpdateArgs) {
   );
 
   const item = { ...(res.Attributes || {}), id } as AnyRecord;
-  return item;
+  return stripInternalFields(item);
 }
 
 /**

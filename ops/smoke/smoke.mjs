@@ -19118,6 +19118,89 @@ const tests = {
     };
   },
 
+  "smoke:checkin:worklist-pagination": async () => {
+    await ensureBearer();
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    const eventName = smokeTag("worklist_pagination_evt");
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 20,
+      reservedCount: 0
+    });
+    if (!evt.ok || !evt.body?.id) return { test: "checkin:worklist-pagination", result: "FAIL", reason: "event-create-failed", evt };
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+    async function createReadyReg(tag) {
+      const regCreate = await post(
+        `/registrations:public`,
+        { eventId, party: { email: `${tag}+${SMOKE_RUN_ID}@example.com` } },
+        featureHeaders,
+        { auth: "none" }
+      );
+      if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+        return { ok: false, reason: "reg-create-failed", regCreate };
+      }
+      const regId = regCreate.body.registration.id;
+      const publicToken = regCreate.body.publicToken;
+
+      const checkout = await post(
+        `/events/registration/${encodeURIComponent(regId)}:checkout`,
+        {},
+        { ...featureHeaders, "X-MBapp-Public-Token": publicToken, "Idempotency-Key": idem() },
+        { auth: "none" }
+      );
+      if (!checkout.ok || !checkout.body?.paymentIntentId) return { ok: false, reason: "checkout-failed", checkout };
+
+      const webhookBody = { id: `evt_${SMOKE_RUN_ID}_${regId}`, type: "payment_intent.succeeded", data: { object: { id: checkout.body.paymentIntentId, status: "succeeded", metadata: { registrationId: regId, eventId } } } };
+      const whRes = await fetch(`${API}/webhooks/stripe`, { method: "POST", headers: { "content-type": "application/json", "Stripe-Signature": "sim_valid_signature", ...featureHeaders, "x-tenant-id": TENANT }, body: JSON.stringify(webhookBody) });
+      if (!whRes.ok) return { ok: false, reason: "payment-confirm-failed", status: whRes.status };
+
+      await post(`/registrations/${encodeURIComponent(regId)}:recompute-checkin-status`, {}, featureHeaders);
+
+      return { ok: true, regId };
+    }
+
+    const readyRegs = [];
+    for (let i = 1; i <= 5; i++) {
+      const res = await createReadyReg(`worklist-page-r${i}`);
+      if (!res.ok) return { test: "checkin:worklist-pagination", result: "FAIL", step: `create-r${i}`, detail: res };
+      readyRegs.push(res.regId);
+    }
+
+    const page1 = await get(`/events/${encodeURIComponent(eventId)}:checkin-worklist`, { checkedIn: false, limit: 2 }, { headers: featureHeaders });
+    const items1 = Array.isArray(page1.body?.items) ? page1.body.items : [];
+    const ids1 = items1.map((r) => r?.id).filter(Boolean);
+    const next = page1.body?.next ?? null;
+    if (!page1.ok || ids1.length !== 2 || !next) {
+      return { test: "checkin:worklist-pagination", result: "FAIL", step: "page1", http: { ok: page1.ok, status: page1.status }, ids1, next };
+    }
+
+    const page2 = await get(`/events/${encodeURIComponent(eventId)}:checkin-worklist`, { checkedIn: false, limit: 2, next }, { headers: featureHeaders });
+    const items2 = Array.isArray(page2.body?.items) ? page2.body.items : [];
+    const ids2 = items2.map((r) => r?.id).filter(Boolean);
+    const intersection = ids2.filter((id) => ids1.includes(id));
+    if (!page2.ok || ids2.length < 1 || intersection.length > 0) {
+      return { test: "checkin:worklist-pagination", result: "FAIL", step: "page2", http: { ok: page2.ok, status: page2.status }, ids2, intersection };
+    }
+
+    return {
+      test: "checkin:worklist-pagination",
+      result: "PASS",
+      summary: "Worklist paginates across cursor formats without duplicate ids",
+      eventId,
+      pages: { ids1, ids2, next },
+      readyRegs
+    };
+  },
+
   "smoke:checkin:worklist-search": async () => {
     await ensureBearer();
     const featureHeaders = {

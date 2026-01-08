@@ -1,6 +1,6 @@
 
-variable "region"       { type = string }
-variable "environment"  { type = string }
+variable "region" { type = string }
+variable "environment" { type = string }
 variable "objects_table_name" { type = string }
 
 data "aws_caller_identity" "current" {}
@@ -32,8 +32,8 @@ data "aws_iam_policy_document" "objects_ddb" {
     ]
   }
   statement {
-    sid     = "RWCoreAndIndexes"
-    effect  = "Allow"
+    sid    = "RWCoreAndIndexes"
+    effect = "Allow"
     actions = [
       "dynamodb:Scan",
       "dynamodb:Query",

@@ -1,5 +1,5 @@
-variable "region"               { type = string }
-variable "http_api_id"          { type = string }
+variable "region" { type = string }
+variable "http_api_id" { type = string }
 variable "lambda_function_name" { type = string }
 
 # New: make permission optional so apply doesn’t fail if the function isn't created yet
