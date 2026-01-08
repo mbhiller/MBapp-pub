@@ -39,7 +39,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
     }
 
     const storedIdem = (registration as any).checkInStatusIdempotencyKey as string | undefined;
-    if (idempotencyKey && storedIdem === idempotencyKey && (registration as any).checkInStatus) {
+    if (idempotencyKey && storedIdem === idempotencyKey) {
       // Idempotent: return current registration (no recompute)
       return ok(registration);
     }

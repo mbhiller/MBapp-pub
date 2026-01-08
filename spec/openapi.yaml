@@ -3090,6 +3090,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Registration'
+        '409':
+          description: Check-in blocked (registration not ready)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckInBlockedError'
   /events/registration/{id}:checkout:
     post:
       tags:
@@ -5526,6 +5532,22 @@ components:
               description: Legacy field (line items)
               items:
                 $ref: '#/components/schemas/RegistrationLine'
+            checkedInAt:
+              type: string
+              format: date-time
+              nullable: true
+            checkedInBy:
+              type: string
+              nullable: true
+            checkedInDeviceId:
+              type: string
+              nullable: true
+            checkInIdempotencyKey:
+              type: string
+              nullable: true
+            checkInStatusIdempotencyKey:
+              type: string
+              nullable: true
             checkInStatus:
               $ref: '#/components/schemas/CheckInStatus'
               nullable: true
@@ -5792,6 +5814,22 @@ components:
         version:
           type: integer
           nullable: true
+    CheckInBlockedError:
+      type: object
+      description: Conflict envelope when check-in is blocked by readiness failures
+      required:
+        - code
+        - message
+        - checkInStatus
+      properties:
+        code:
+          type: string
+          enum:
+            - checkin_blocked
+        message:
+          type: string
+        checkInStatus:
+          $ref: '#/components/schemas/CheckInStatus'
     AssignStallsRequest:
       type: object
       description: Request to assign specific stalls to a registration (Sprint BK)

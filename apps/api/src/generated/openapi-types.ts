@@ -2085,6 +2085,15 @@ export interface paths {
                         "application/json": components["schemas"]["Registration"];
                     };
                 };
+                /** @description Check-in blocked (registration not ready) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CheckInBlockedError"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -3434,6 +3443,12 @@ export interface components {
             partyKind?: "person" | "organization" | "animal" | null;
             /** @description Legacy field (line items) */
             lines?: components["schemas"]["RegistrationLine"][] | null;
+            /** Format: date-time */
+            checkedInAt?: string | null;
+            checkedInBy?: string | null;
+            checkedInDeviceId?: string | null;
+            checkInIdempotencyKey?: string | null;
+            checkInStatusIdempotencyKey?: string | null;
             checkInStatus?: components["schemas"]["CheckInStatus"];
         };
         /** @description Public-safe registration status snapshot (no PII/financials) */
@@ -3543,6 +3558,13 @@ export interface components {
             /** Format: date-time */
             lastEvaluatedAt: string;
             version?: number | null;
+        };
+        /** @description Conflict envelope when check-in is blocked by readiness failures */
+        CheckInBlockedError: {
+            /** @enum {string} */
+            code: "checkin_blocked";
+            message: string;
+            checkInStatus: components["schemas"]["CheckInStatus"];
         };
         /** @description Request to assign specific stalls to a registration (Sprint BK) */
         AssignStallsRequest: {

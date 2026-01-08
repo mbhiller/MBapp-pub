@@ -58,6 +58,8 @@
     { "name": "smoke:jobs:background-cleanup-expired-holds", "tier": "core" },
     { "name": "smoke:jobs:background-retry-failed-messages", "tier": "core" },
     { "name": "smoke:registrations:cancel-refund-happy-path", "tier": "core" },
+    { "name": "smoke:checkin:action-blocked", "tier": "core" },
+    { "name": "smoke:checkin:action-idempotent", "tier": "core" },
     { "name": "smoke:checkin:readiness-unpaid", "tier": "core" },
     { "name": "smoke:checkin:readiness-stalls-unassigned", "tier": "core" },
     { "name": "smoke:checkin:readiness-classes-unassigned", "tier": "core" },

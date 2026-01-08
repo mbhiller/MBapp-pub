@@ -6,6 +6,31 @@
 
 ---
 
+### Sprint BU — Atomic Registration Check-In — ✅ Complete (2026-01-08)
+
+**Summary:** Delivered the operator check-in action with blocker-aware 409s and idempotent stamping. The endpoint recomputes readiness on call, refuses when blockers exist, and stamps `checkedInAt/by/deviceId` plus a ready snapshot on success. Replays (same/different Idempotency-Key, or already checked-in) return the existing checked-in registration.
+
+**Deliverables (E1–E5):**
+- **Spec (E1):** Added `checkedInAt`, `checkedInBy`, `checkedInDeviceId`, `checkInIdempotencyKey`, `checkInStatusIdempotencyKey` to Registration; defined `CheckInBlockedError`; added 409 to check-in action.
+- **Backend Route (E2):** Wired `/events/registration/{id}:checkin` with `registration:write` guard.
+- **Backend Handler (E3):** Implemented atomic check-in: recompute readiness; 409 with snapshot when blocked; 200 stamps checked-in fields + ready snapshot when clear; idempotent for same/different keys and already-checked-in states.
+- **Idempotency Alignment (E4):** Recompute endpoint aligned to spec-named `checkInStatusIdempotencyKey` short-circuit.
+- **Smokes (E5):** Added 2 CORE tests in [ops/smoke/smoke.mjs](ops/smoke/smoke.mjs) and registered in [ops/ci-smokes.json](ops/ci-smokes.json):
+  - `smoke:checkin:action-blocked` — Unpaid registration; check-in returns 409 `checkin_blocked` with `payment_unpaid`; no `checkedInAt`.
+  - `smoke:checkin:action-idempotent` — Ready registration; first check-in stamps `checkedInAt`; replays (same/different Idempotency-Key) return identical timestamp.
+
+**Endpoints:**
+- `POST /events/registration/{id}:checkin` — Atomic operator check-in with readiness guard and idempotency.
+
+**Verification:**
+- ✅ Typecheck: `npm run typecheck --workspaces --if-present`
+- ⏭️ Smokes: core suite not run in-session (check-in readiness + new action smokes available).
+
+**Impact:**
+- Operators can now perform blocker-aware, idempotent check-ins; future audit wiring can attach to the stored actor/device fields.
+
+---
+
 ### Sprint BT — Check-In Readiness v0 — ✅ Complete (2026-01-08)
 
 **Summary:** Established snapshot-based readiness contract for event check-in operations. `Registration.checkInStatus` provides precomputed readiness state with blockers (payment, resource assignments, cancellation). Auto-updates on all state-changing mutations. Includes compute-only and persist endpoints, comprehensive smoke coverage.
