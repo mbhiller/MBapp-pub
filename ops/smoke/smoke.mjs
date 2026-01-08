@@ -18907,9 +18907,287 @@ const tests = {
     return { test: "checkin:readiness-ready", result: "PASS", summary: "Readiness shows ready=true and no blockers after assignments", snapshot: snap };
   }
   return { test: "checkin:readiness-ready", result: "FAIL", reason: "expected ready=true with empty blockers", http: { ok: readyRes.ok, status: readyRes.status }, snapshot: snap };
+  },
+
+  "smoke:checkin:worklist-ready-vs-blocked": async () => {
+    await ensureBearer();
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    const eventName = smokeTag("worklist_ready_blocked_evt");
+    const stallUnitAmount = 2500;
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 10,
+      reservedCount: 0,
+      stallEnabled: true,
+      stallCapacity: 4,
+      stallReserved: 0,
+      stallUnitAmount
+    });
+    if (!evt.ok || !evt.body?.id) return { test: "checkin:worklist-ready-vs-blocked", result: "FAIL", reason: "event-create-failed", evt };
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+    // Seed stalls for assignments
+    const stalls = [];
+    for (let i = 1; i <= 2; i++) {
+      const stall = await post("/objects/resource", { type: "resource", resourceType: "stall", name: `Worklist-Stall-${i}`, status: "available", tags: [`event:${eventId}`, "group:Worklist"] });
+      if (!stall.ok || !stall.body?.id) return { test: "checkin:worklist-ready-vs-blocked", result: "FAIL", reason: `stall-${i}-create-failed`, stall };
+      stalls.push(stall.body.id);
+      recordCreated({ type: "resource", id: stall.body.id, route: "/objects/resource", meta: { name: `Worklist-Stall-${i}`, eventId } });
+    }
+
+    async function createRegWithCheckout({ emailTag, stallQty }) {
+      const regCreate = await post(
+        `/registrations:public`,
+        { eventId, stallQty, party: { email: `${emailTag}+${SMOKE_RUN_ID}@example.com` } },
+        featureHeaders,
+        { auth: "none" }
+      );
+      if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+        return { ok: false, reason: "reg-create-failed", regCreate };
+      }
+      const regId = regCreate.body.registration.id;
+      const publicToken = regCreate.body.publicToken;
+
+      const checkout = await post(
+        `/events/registration/${encodeURIComponent(regId)}:checkout`,
+        {},
+        { ...featureHeaders, "X-MBapp-Public-Token": publicToken, "Idempotency-Key": idem() },
+        { auth: "none" }
+      );
+      if (!checkout.ok || !checkout.body?.paymentIntentId) return { ok: false, reason: "checkout-failed", checkout };
+
+      return { ok: true, regId, paymentIntentId: checkout.body.paymentIntentId };
+    }
+
+    async function confirmPayment(regId, paymentIntentId) {
+      const webhookBody = { id: `evt_${SMOKE_RUN_ID}_${regId}`, type: "payment_intent.succeeded", data: { object: { id: paymentIntentId, status: "succeeded", metadata: { registrationId: regId, eventId } } } };
+      const whRes = await fetch(`${API}/webhooks/stripe`, { method: "POST", headers: { "content-type": "application/json", "Stripe-Signature": "sim_valid_signature", ...featureHeaders, "x-tenant-id": TENANT }, body: JSON.stringify(webhookBody) });
+      return whRes;
+    }
+
+    async function recompute(regId) {
+      return post(`/registrations/${encodeURIComponent(regId)}:recompute-checkin-status`, {}, featureHeaders);
+    }
+
+    // R1: ready (paid + stalls assigned)
+    const r1 = await createRegWithCheckout({ emailTag: "worklist-ready-r1", stallQty: 1 });
+    if (!r1.ok) return { test: "checkin:worklist-ready-vs-blocked", result: "FAIL", step: "r1-create", detail: r1 };
+    const wh1 = await confirmPayment(r1.regId, r1.paymentIntentId);
+    if (!wh1.ok) return { test: "checkin:worklist-ready-vs-blocked", result: "FAIL", step: "r1-payment", status: wh1.status };
+    const assign1 = await post(`/registrations/${encodeURIComponent(r1.regId)}:assign-resources`, { itemType: "stall", resourceIds: [stalls[0]] }, featureHeaders);
+    if (!assign1.ok) return { test: "checkin:worklist-ready-vs-blocked", result: "FAIL", step: "r1-assign", assign1 };
+    await recompute(r1.regId);
+
+    // R2: unpaid (checkout only)
+    const r2 = await createRegWithCheckout({ emailTag: "worklist-unpaid-r2", stallQty: 0 });
+    if (!r2.ok) return { test: "checkin:worklist-ready-vs-blocked", result: "FAIL", step: "r2-create", detail: r2 };
+    await recompute(r2.regId);
+
+    // R3: paid but stalls unassigned
+    const r3 = await createRegWithCheckout({ emailTag: "worklist-stalls-r3", stallQty: 1 });
+    if (!r3.ok) return { test: "checkin:worklist-ready-vs-blocked", result: "FAIL", step: "r3-create", detail: r3 };
+    const wh3 = await confirmPayment(r3.regId, r3.paymentIntentId);
+    if (!wh3.ok) return { test: "checkin:worklist-ready-vs-blocked", result: "FAIL", step: "r3-payment", status: wh3.status };
+    await recompute(r3.regId);
+
+    const collectIds = (items) => (Array.isArray(items) ? items.map((r) => r?.id).filter(Boolean) : []);
+
+    const readyRes = await get(`/events/${encodeURIComponent(eventId)}:checkin-worklist?checkedIn=false&ready=true`, undefined, { headers: featureHeaders });
+    const readyIds = collectIds(readyRes.body?.items);
+    if (!readyRes.ok || readyIds.length !== 1 || !readyIds.includes(r1.regId)) {
+      return { test: "checkin:worklist-ready-vs-blocked", result: "FAIL", step: "ready=true", http: { ok: readyRes.ok, status: readyRes.status }, ids: readyIds, expected: [r1.regId] };
+    }
+
+    const blockedRes = await get(`/events/${encodeURIComponent(eventId)}:checkin-worklist?checkedIn=false&ready=false`, undefined, { headers: featureHeaders });
+    const blockedIds = collectIds(blockedRes.body?.items);
+    const expectedBlocked = new Set([r2.regId, r3.regId]);
+    const blockedMatch = blockedIds.length === expectedBlocked.size && blockedIds.every((id) => expectedBlocked.has(id));
+    if (!blockedRes.ok || !blockedMatch) {
+      return { test: "checkin:worklist-ready-vs-blocked", result: "FAIL", step: "ready=false", http: { ok: blockedRes.ok, status: blockedRes.status }, ids: blockedIds, expected: Array.from(expectedBlocked) };
+    }
+
+    const unpaidRes = await get(`/events/${encodeURIComponent(eventId)}:checkin-worklist?checkedIn=false&ready=false&blockerCode=payment_unpaid`, undefined, { headers: featureHeaders });
+    const unpaidIds = collectIds(unpaidRes.body?.items);
+    if (!unpaidRes.ok || unpaidIds.length !== 1 || unpaidIds[0] !== r2.regId) {
+      return { test: "checkin:worklist-ready-vs-blocked", result: "FAIL", step: "blocker=payment_unpaid", http: { ok: unpaidRes.ok, status: unpaidRes.status }, ids: unpaidIds, expected: [r2.regId] };
+    }
+
+    const stallsRes = await get(`/events/${encodeURIComponent(eventId)}:checkin-worklist?checkedIn=false&ready=false&blockerCode=stalls_unassigned`, undefined, { headers: featureHeaders });
+    const stallsIds = collectIds(stallsRes.body?.items);
+    if (!stallsRes.ok || stallsIds.length !== 1 || stallsIds[0] !== r3.regId) {
+      return { test: "checkin:worklist-ready-vs-blocked", result: "FAIL", step: "blocker=stalls_unassigned", http: { ok: stallsRes.ok, status: stallsRes.status }, ids: stallsIds, expected: [r3.regId] };
+    }
+
+    return {
+      test: "checkin:worklist-ready-vs-blocked",
+      result: "PASS",
+      summary: "Worklist splits ready vs blocked and blocker filters isolate unpaid vs stalls",
+      ids: { ready: readyIds, blocked: blockedIds, unpaid: unpaidIds, stalls: stallsIds },
+      eventId,
+      registrations: { ready: r1.regId, unpaid: r2.regId, stalls: r3.regId }
+    };
+  },
+
+  "smoke:checkin:worklist-checked-in": async () => {
+    await ensureBearer();
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    const eventName = smokeTag("worklist_checked_evt");
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 8,
+      reservedCount: 0
+    });
+    if (!evt.ok || !evt.body?.id) return { test: "checkin:worklist-checked-in", result: "FAIL", reason: "event-create-failed", evt };
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+    async function createReadyReg(tag) {
+      const regCreate = await post(
+        `/registrations:public`,
+        { eventId, party: { email: `${tag}+${SMOKE_RUN_ID}@example.com` } },
+        featureHeaders,
+        { auth: "none" }
+      );
+      if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+        return { ok: false, reason: "reg-create-failed", regCreate };
+      }
+      const regId = regCreate.body.registration.id;
+      const publicToken = regCreate.body.publicToken;
+
+      const checkout = await post(
+        `/events/registration/${encodeURIComponent(regId)}:checkout`,
+        {},
+        { ...featureHeaders, "X-MBapp-Public-Token": publicToken, "Idempotency-Key": idem() },
+        { auth: "none" }
+      );
+      if (!checkout.ok || !checkout.body?.paymentIntentId) return { ok: false, reason: "checkout-failed", checkout };
+
+      const webhookBody = { id: `evt_${SMOKE_RUN_ID}_${regId}`, type: "payment_intent.succeeded", data: { object: { id: checkout.body.paymentIntentId, status: "succeeded", metadata: { registrationId: regId, eventId } } } };
+      const whRes = await fetch(`${API}/webhooks/stripe`, { method: "POST", headers: { "content-type": "application/json", "Stripe-Signature": "sim_valid_signature", ...featureHeaders, "x-tenant-id": TENANT }, body: JSON.stringify(webhookBody) });
+      if (!whRes.ok) return { ok: false, reason: "payment-confirm-failed", status: whRes.status };
+
+      await post(`/registrations/${encodeURIComponent(regId)}:recompute-checkin-status`, {}, featureHeaders);
+
+      return { ok: true, regId };
+    }
+
+    const r1 = await createReadyReg("worklist-r1");
+    if (!r1.ok) return { test: "checkin:worklist-checked-in", result: "FAIL", step: "r1-create", detail: r1 };
+    const r2 = await createReadyReg("worklist-r2");
+    if (!r2.ok) return { test: "checkin:worklist-checked-in", result: "FAIL", step: "r2-create", detail: r2 };
+
+    const chk = await post(`/events/registration/${encodeURIComponent(r1.regId)}:checkin`, {}, { ...featureHeaders, "Idempotency-Key": idem() });
+    if (!chk.ok || !chk.body?.checkedInAt) return { test: "checkin:worklist-checked-in", result: "FAIL", reason: "checkin-failed", chk };
+
+    const collectIds = (items) => (Array.isArray(items) ? items.map((r) => r?.id).filter(Boolean) : []);
+
+    const notCheckedRes = await get(`/events/${encodeURIComponent(eventId)}:checkin-worklist?checkedIn=false`, undefined, { headers: featureHeaders });
+    const notCheckedIds = collectIds(notCheckedRes.body?.items);
+    if (!notCheckedRes.ok || notCheckedIds.includes(r1.regId) || !notCheckedIds.includes(r2.regId)) {
+      return { test: "checkin:worklist-checked-in", result: "FAIL", step: "checkedIn=false", http: { ok: notCheckedRes.ok, status: notCheckedRes.status }, ids: notCheckedIds, expected: [r2.regId] };
+    }
+
+    const checkedRes = await get(`/events/${encodeURIComponent(eventId)}:checkin-worklist?checkedIn=true`, undefined, { headers: featureHeaders });
+    const checkedIds = collectIds(checkedRes.body?.items);
+    if (!checkedRes.ok || !checkedIds.includes(r1.regId)) {
+      return { test: "checkin:worklist-checked-in", result: "FAIL", step: "checkedIn=true", http: { ok: checkedRes.ok, status: checkedRes.status }, ids: checkedIds, expectedIncludes: r1.regId };
+    }
+
+    return {
+      test: "checkin:worklist-checked-in",
+      result: "PASS",
+      summary: "Worklist separates checked-in vs not-checked-in registrations",
+      ids: { checkedIn: checkedIds, notCheckedIn: notCheckedIds },
+      eventId,
+      registrations: { checkedIn: r1.regId, notCheckedIn: r2.regId }
+    };
+  },
+
+  "smoke:checkin:worklist-search": async () => {
+    await ensureBearer();
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    const eventName = smokeTag("worklist_search_evt");
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 6,
+      reservedCount: 0
+    });
+    if (!evt.ok || !evt.body?.id) return { test: "checkin:worklist-search", result: "FAIL", reason: "event-create-failed", evt };
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+    async function createReg(tag) {
+      const partyRes = await post("/objects/party", { type: "party", name: `Worklist Search ${tag}`, roles: ["customer"], email: `${tag}+${SMOKE_RUN_ID}@example.com` });
+      if (!partyRes.ok || !partyRes.body?.id) return { ok: false, reason: "party-create-failed", partyRes };
+      const partyId = partyRes.body.id;
+      recordCreated({ type: "party", id: partyId, route: "/objects/party", meta: { tag, eventId } });
+
+      const regCreate = await post("/objects/registration", { type: "registration", eventId, status: "draft", paymentStatus: "pending", partyId });
+      if (!regCreate.ok || !regCreate.body?.id) return { ok: false, reason: "reg-create-failed", regCreate };
+      const regId = regCreate.body.id;
+      recordCreated({ type: "registration", id: regId, route: "/objects/registration", meta: { tag, eventId } });
+
+      return { ok: true, regId, partyId };
+    }
+
+    const r1 = await createReg("worklist-search-r1");
+    if (!r1.ok) return { test: "checkin:worklist-search", result: "FAIL", step: "r1-create", detail: r1 };
+    const r2 = await createReg("worklist-search-r2");
+    if (!r2.ok) return { test: "checkin:worklist-search", result: "FAIL", step: "r2-create", detail: r2 };
+    const r3 = await createReg("worklist-search-r3");
+    if (!r3.ok) return { test: "checkin:worklist-search", result: "FAIL", step: "r3-create", detail: r3 };
+
+    const searchRes = await get(`/events/${encodeURIComponent(eventId)}:checkin-worklist`, { checkedIn: false, q: r1.partyId }, { headers: featureHeaders });
+    const items = Array.isArray(searchRes.body?.items) ? searchRes.body.items : [];
+    const ids = items.map((r) => r?.id).filter(Boolean);
+    const partyIds = items.map((r) => r?.partyId).filter(Boolean);
+
+    if (!searchRes.ok || ids.length !== 1 || ids[0] !== r1.regId || partyIds[0] !== r1.partyId) {
+      return {
+        test: "checkin:worklist-search",
+        result: "FAIL",
+        step: "q=partyId",
+        http: { ok: searchRes.ok, status: searchRes.status },
+        ids,
+        partyIds,
+        expected: { regId: r1.regId, partyId: r1.partyId }
+      };
+    }
+
+    return {
+      test: "checkin:worklist-search",
+      result: "PASS",
+      summary: "Worklist q filter matches by partyId",
+      ids,
+      partyIds,
+      eventId,
+      registrations: { target: r1.regId, others: [r2.regId, r3.regId] }
+    };
   }
 
-  
+
 };
 
 const cmd=process.argv[2]??"list";

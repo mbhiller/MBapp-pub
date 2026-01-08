@@ -42,9 +42,9 @@ Smokes are organized by tier for targeted CI validation:
 
 | Tier | Flows | Duration | When | Command |
 |------|-------|----------|------|--------|
-| **core** | 43 | ~2–3 min | Every PR/push | `npm run smokes:run:core` |
+| **core** | 45 | ~2–3 min | Every PR/push | `npm run smokes:run:core` |
 | **extended** | 24 | ~2–3 min | Nightly (2 AM UTC) | `npm run smokes:run:extended` |
-| **all** | 67 | ~5–6 min | Nightly full | `npm run smokes:run:ci` |
+| **all** | 69 | ~5–6 min | Nightly full | `npm run smokes:run:ci` |
 
 **Core flows:** Foundation + critical domain workflows (auth, objects, line ID, sales/purchase orders, inventory, fulfillment, backorders, suggestions).
 
@@ -67,6 +67,14 @@ Smokes are organized by tier for targeted CI validation:
 - **`smoke:checkin:readiness-stalls-unassigned`** — Event with stalls enabled, registration checkout + payment webhook (confirmed + paid), no stall assignment. Asserts: `ready=false`, blockers contains `stalls_unassigned` with action `assign_stalls`, no payment blockers.
 - **`smoke:checkin:readiness-classes-unassigned`** — Event with class lines, registration checkout + payment confirmation, no class assignment. Asserts: `ready=false`, blockers contains `classes_unassigned` with action `assign_classes`.
 - **`smoke:checkin:readiness-ready`** — Event with stalls, registration checkout + payment + stall assignment (all resources assigned). Asserts: `ready=true`, blockers array empty.
+
+## Sprint BV — Check-In Worklists v0
+
+**Scope:** Segments event check-in queues by readiness and checked-in state; supports blocker/status/q filters.
+
+### CORE
+- **`smoke:checkin:worklist-ready-vs-blocked`** — Creates registrations across ready/unpaid/unassigned, confirms ready-only list and blocker-specific filters (`payment_unpaid`, `stalls_unassigned`).
+- **`smoke:checkin:worklist-checked-in`** — Marks one registration as checked in; asserts `checkedIn=false` list excludes it and `checkedIn=true` list includes it.
 
 ---
 
