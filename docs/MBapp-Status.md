@@ -6,6 +6,68 @@
 
 ---
 
+### Sprint BT — Check-In Readiness v0 — ✅ Complete (2026-01-08)
+
+**Summary:** Established snapshot-based readiness contract for event check-in operations. `Registration.checkInStatus` provides precomputed readiness state with blockers (payment, resource assignments, cancellation). Auto-updates on all state-changing mutations. Includes compute-only and persist endpoints, comprehensive smoke coverage.
+
+**Deliverables (E1–E7):**
+- **Spec (E1):** Extended [spec/MBapp-Modules.yaml](spec/MBapp-Modules.yaml):
+  - 3 new schemas: `CheckInStatus`, `CheckInBlocker`, `CheckInBlockerAction`
+  - `Registration.checkInStatus` field (nullable)
+  - `GET /registrations/{id}:checkin-readiness` — Compute-only readiness check (permission: `registration:read`)
+  - `POST /registrations/{id}:recompute-checkin-status` — Persist snapshot with idempotency (permission: `registration:write`)
+  - Blocker codes v0: `payment_unpaid`, `payment_failed`, `cancelled`, `stalls_unassigned`, `rv_unassigned`, `classes_unassigned`
+  - Verification: `npm run spec:lint`, `spec:bundle`, `spec:types:api`, `spec:types:mobile` ✅
+- **Backend - Readiness Helper (E2–E3):** Created [apps/api/src/registrations/readiness-helper.ts](apps/api/src/registrations/readiness-helper.ts):
+  - `computeCheckInReadiness(reg)` — Computes ready boolean + blockers array from registration state and ReservationHold ledger
+  - Payment checks: Guards against unpaid/failed based on `status` + `paymentStatus`
+  - Resource assignment checks: Queries holds for stalls/RV/classes; flags unassigned when block holds exist without corresponding per-resource confirmed holds
+  - Cancellation check: Sets `cancelled` blocker when `status === "cancelled"`
+  - Returns `CheckInStatus` with ISO timestamp and null version (v0)
+- **Backend - Endpoints (E4):** Implemented GET/POST handlers:
+  - [apps/api/src/registrations/checkin-readiness-get.ts](apps/api/src/registrations/checkin-readiness-get.ts) — Compute-only endpoint
+  - [apps/api/src/registrations/recompute-checkin-status-post.ts](apps/api/src/registrations/recompute-checkin-status-post.ts) — Persist endpoint with idempotency guard
+  - Registered routes in [apps/api/src/index.ts](apps/api/src/index.ts) with permission checks
+  - Manual verification: Unpaid returns `ready=false` + `payment_unpaid` blocker; after payment `ready=false` + `stalls_unassigned`; after assignment `ready=true` ✅
+- **Auto-Update Hooks (E5):** Integrated snapshot updates into mutation flows:
+  - Checkout: Calls `updateCheckInStatusAfterChange()` after event seat reservation
+  - Payment webhook: Updates after `paymentStatus` change (succeeded/failed)
+  - Assign-resources: Updates after per-resource hold creation
+  - Cancel / cancel-refund: Updates after status change
+  - Expire-helper: Updates after hold expiration cleanup
+  - Helper uses `computeCheckInReadiness()` + PUT to persist snapshot
+  - Manual verification: Snapshots auto-update across all mutation paths ✅
+- **Smokes (E6):** Added 4 CORE tests in [ops/smoke/smoke.mjs](ops/smoke/smoke.mjs) and registered in [ops/ci-smokes.json](ops/ci-smokes.json):
+  - `smoke:checkin:readiness-unpaid` — Registration checkout without payment confirmation; asserts `ready=false` with `payment_unpaid` blocker
+  - `smoke:checkin:readiness-stalls-unassigned` — Event with stalls, payment confirmed, no assignment; asserts `ready=false` with `stalls_unassigned` blocker (no payment blockers)
+  - `smoke:checkin:readiness-classes-unassigned` — Event with class lines, payment confirmed, no assignment; asserts `ready=false` with `classes_unassigned` blocker
+  - `smoke:checkin:readiness-ready` — Event with stalls, payment confirmed, resources assigned; asserts `ready=true` with empty blockers array
+  - All smokes validate snapshot structure, blocker codes, and action metadata
+  - **Result: All PASS** ✅
+- **Docs (E7):** Updated [docs/MBapp-Foundations.md](docs/MBapp-Foundations.md), [docs/MBapp-Status.md](docs/MBapp-Status.md), [docs/smoke-coverage.md](docs/smoke-coverage.md) with readiness contract, auto-update triggers, future extensions, and smoke coverage.
+
+**Endpoints:**
+- `GET /registrations/{id}:checkin-readiness` — Returns computed `CheckInStatus` (no persistence)
+- `POST /registrations/{id}:recompute-checkin-status` — Computes and persists `CheckInStatus` snapshot with idempotency
+
+**Data Model:**
+- **CheckInStatus:** `{ ready: boolean, blockers: CheckInBlocker[], lastEvaluatedAt: ISO8601, version: string | null }`
+- **Auto-update:** Snapshot persisted on checkout, payment webhook, assign-resources, cancel, cancel-refund, expire-helper
+- **Future v1:** Waivers, documentation, printing blockers; atomic check-in action endpoint
+
+**Verification:**
+- ✅ Typescript: `npm run typecheck --workspaces --if-present` (all workspaces clean)
+- ✅ Spec pipeline: lint/bundle/types clean (pre-existing warnings, no errors)
+- ✅ Manual endpoint testing: All blocker scenarios verified (payment, stalls, classes, ready)
+- ✅ Smokes: 4 CORE tests PASS; existing smokes PASS (no regressions)
+
+**Impact:**
+- Check-in console teams can now query readiness state without complex client-side logic.
+- Future sprints can extend blocker codes (waivers, docs, printing) without breaking existing consumers (versioned contract).
+- Foundation for atomic check-in endpoint with operator context and audit trails.
+
+---
+
 ### Sprint BP — Event Classes Operator Reporting — ✅ Complete (2026-01-08)
 
 **Summary:** Added operator reporting endpoints for event class entries: per-line capacity summary and paged registrations-by-line query. Operators can now see reserved/remaining/requested metrics per class line and drill down into registrations filtered by specific line IDs. Includes comprehensive smoke coverage in the core CI tier.

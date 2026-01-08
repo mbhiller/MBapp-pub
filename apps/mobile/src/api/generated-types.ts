@@ -406,6 +406,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/registrations/{id}:checkin-readiness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get check-in readiness snapshot for a registration
+         * @description Computes readiness on-demand and returns a snapshot for UI/operators.
+         */
+        get: operations["getRegistrationCheckInReadiness"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/registrations/{id}:recompute-checkin-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Recompute and persist check-in status on registration
+         * @description Computes CheckInStatus and persists on Registration; returns the updated object.
+         */
+        post: operations["recomputeRegistrationCheckInStatus"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/events:public": {
         parameters: {
             query?: never;
@@ -2016,7 +2056,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Check in a registration */
+        /**
+         * Check in a registration
+         * @description Stub endpoint for future check-in. Do not implement in this sprint.
+         *     When implemented, server SHOULD require readiness (checkInStatus.ready=true) or return 409.
+         *
+         */
         post: {
             parameters: {
                 query?: never;
@@ -3389,6 +3434,7 @@ export interface components {
             partyKind?: "person" | "organization" | "animal" | null;
             /** @description Legacy field (line items) */
             lines?: components["schemas"]["RegistrationLine"][] | null;
+            checkInStatus?: components["schemas"]["CheckInStatus"];
         };
         /** @description Public-safe registration status snapshot (no PII/financials) */
         PublicRegistrationStatusResponse: {
@@ -3474,6 +3520,29 @@ export interface components {
                 provider?: string | null;
                 errorMessage?: string | null;
             } | null;
+        };
+        /** @description Action hint for resolving a check-in blocker */
+        CheckInAction: {
+            /** @enum {string} */
+            type: "view_payment" | "assign_stalls" | "assign_rv" | "assign_classes";
+            label: string;
+            /** @description Optional target id or route key */
+            target?: string | null;
+        };
+        /** @description Blocker preventing check-in readiness */
+        CheckInBlocker: {
+            /** @enum {string} */
+            code: "payment_unpaid" | "payment_failed" | "cancelled" | "stalls_unassigned" | "rv_unassigned" | "classes_unassigned";
+            message: string;
+            action?: components["schemas"]["CheckInAction"] & (Record<string, never> | null);
+        };
+        /** @description Precomputed readiness snapshot for registration check-in */
+        CheckInStatus: {
+            ready: boolean;
+            blockers: components["schemas"]["CheckInBlocker"][];
+            /** Format: date-time */
+            lastEvaluatedAt: string;
+            version?: number | null;
         };
         /** @description Request to assign specific stalls to a registration (Sprint BK) */
         AssignStallsRequest: {
@@ -5933,6 +6002,110 @@ export interface operations {
             };
             /** @description Invalid or missing public token */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getRegistrationCheckInReadiness: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-tenant-id": components["parameters"]["TenantHeader"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Readiness snapshot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckInStatus"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    recomputeRegistrationCheckInStatus: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-tenant-id": components["parameters"]["TenantHeader"];
+                /** @description Optional idempotency key for safe retries. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Updated registration with check-in status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Registration"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

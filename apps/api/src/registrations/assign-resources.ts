@@ -9,6 +9,8 @@ import { ok, badRequest, conflictError, error as respondError, notFound } from "
 import { getTenantId } from "../common/env";
 import { guardRegistrations } from "./feature";
 import { assignResourcesToRegistration } from "../reservations/holds";
+import { getObjectById, listObjects, updateObject } from "../objects/repo";
+import { computeCheckInStatus } from "./checkin-readiness";
 import { parseNonEmptyStringArray } from "../common/registration-validators";
 import { loadRegistrationWithEvent } from "../common/registration-helpers";
 import { assertStallResourcesExistAndAvailable } from "../resources/stalls";
@@ -115,6 +117,26 @@ export async function handle(event: APIGatewayProxyEventV2) {
       assertResourcesFn: (args: Record<string, any>) => config.assertFn(args as AssertResourcesFnArgs),
       options: itemType === "class_entry" ? { exclusiveResourceIds: false, blockHoldPerResourceId: true } : undefined,
     });
+
+    // After assignment, recompute readiness snapshot and persist on registration
+    const reg = await getObjectById({
+      tenantId,
+      type: "registration",
+      id,
+      fields: ["id", "type", "status", "paymentStatus", "stallQty", "rvQty", "lines", "checkInStatus"],
+    });
+    if (reg && (reg as any).type === "registration") {
+      const holdsPage = await listObjects({
+        tenantId,
+        type: "reservationHold",
+        filters: { ownerType: "registration", ownerId: id },
+        limit: 200,
+        fields: ["id", "itemType", "resourceId", "state"],
+      });
+      const holds = ((holdsPage.items as any[]) || []) as any[];
+      const snapshot = computeCheckInStatus({ tenantId, registration: reg as any, holds: holds as any });
+      await updateObject({ tenantId, type: "registration", id, body: { checkInStatus: snapshot } });
+    }
 
     // Return created holds (safe response: id, state, resourceId only)
     const safeHolds = createdHolds.map((h: any) => ({

@@ -54,6 +54,18 @@ Smokes are organized by tier for targeted CI validation:
 
 ---
 
+## Sprint BT — Check-In Readiness v0
+
+**Scope:** Validates snapshot-based readiness contract for event check-in: payment blockers, resource assignment blockers, cancellation state.
+
+### CORE
+- **`smoke:checkin:readiness-unpaid`** — Creates event, registration, checkout (draft → submitted) without payment confirmation. Calls `GET /registrations/{id}:checkin-readiness`. Asserts: `ready=false`, blockers array contains `payment_unpaid` with action `view_payment`.
+- **`smoke:checkin:readiness-stalls-unassigned`** — Event with stalls enabled, registration checkout + payment webhook (confirmed + paid), no stall assignment. Asserts: `ready=false`, blockers contains `stalls_unassigned` with action `assign_stalls`, no payment blockers.
+- **`smoke:checkin:readiness-classes-unassigned`** — Event with class lines, registration checkout + payment confirmation, no class assignment. Asserts: `ready=false`, blockers contains `classes_unassigned` with action `assign_classes`.
+- **`smoke:checkin:readiness-ready`** — Event with stalls, registration checkout + payment + stall assignment (all resources assigned). Asserts: `ready=true`, blockers array empty.
+
+---
+
 ## Sprint BP — Event Classes Operator Reporting
 
 **Scope:** Validates operator reporting endpoints for event class entries: per-line capacity summary and paged registrations-by-line query.

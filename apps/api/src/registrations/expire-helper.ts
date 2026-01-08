@@ -2,6 +2,7 @@
 import { getObjectById, updateObject, releaseEventSeat, releaseEventRv, listObjects, releaseEventLineCapacity } from "../objects/repo";
 import { REGISTRATION_STATUS, REGISTRATION_PAYMENT_STATUS } from "./constants";
 import { releaseReservationHoldsForOwner } from "../reservations/holds";
+import { computeCheckInStatus } from "./checkin-readiness";
 
 export type ExpireHoldArgs = {
   tenantId: string;
@@ -109,6 +110,14 @@ export async function expireRegistrationHold({ tenantId, regId }: ExpireHoldArgs
   const eventId = (reg as any).eventId as string | undefined;
   const rvQty = Math.max(0, Number((reg as any).rvQty || 0));
 
+  // Compute terminal readiness snapshot (expired → cancelled + failed)
+  const regForSnapshot: any = {
+    ...reg,
+    status: REGISTRATION_STATUS.cancelled,
+    paymentStatus: REGISTRATION_PAYMENT_STATUS.failed,
+  };
+  const snapshot = computeCheckInStatus({ tenantId, registration: regForSnapshot, holds: [] });
+
   await updateObject({
     tenantId,
     type: "registration",
@@ -117,6 +126,7 @@ export async function expireRegistrationHold({ tenantId, regId }: ExpireHoldArgs
       status: REGISTRATION_STATUS.cancelled,
       paymentStatus: REGISTRATION_PAYMENT_STATUS.failed,
       paymentIntentClientSecret: null,
+      checkInStatus: snapshot,
     },
   });
 
