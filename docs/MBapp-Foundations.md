@@ -144,6 +144,22 @@ The snapshot is automatically recomputed and persisted whenever registration sta
 - Documentation uploaded/pending blockers (`docs_missing`)
 - Printing status blockers (`print_not_ready`)
 - Atomic check-in action endpoint (`POST /registrations/{id}:checkin`) with timestamp and optional operator context
+
+### Atomic Registration Check-In (Sprint BU)
+
+Implements the operator action to mark a registration as checked in while enforcing readiness at call time.
+
+**Endpoint:**
+- `POST /events/registration/{id}:checkin`
+
+**Behavior:**
+- Recomputes readiness on every call using `computeCheckInStatus` + current holds.
+- If not ready → `409` with `{ code: "checkin_blocked", message, checkInStatus }` (blockers snapshot).
+- If ready → persists `checkedInAt`, `checkedInBy` (auth user), optional `checkedInDeviceId`, `checkInStatus` (ready snapshot), and `checkInIdempotencyKey`; returns updated registration.
+- Already checked in → idempotent 200 with existing registration (no further mutation).
+- Idempotency: Same `Idempotency-Key` returns the existing result; different keys after success keep the original `checkedInAt`.
+
+**Audit:** Deferred until audit infra exists; current version stores actor + device on the registration for traceability.
   - Both require `event:read` + `registration:read` permissions
 
 - **Summary derivation (`classes-summary`):**

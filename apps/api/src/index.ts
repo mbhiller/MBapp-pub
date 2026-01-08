@@ -129,6 +129,7 @@ import * as RegAssignRvSites from "./registrations/assign-rv-sites";
 import * as RegAssignResources from "./registrations/assign-resources";
 import * as RegCheckInReadiness from "./registrations/checkin-readiness-get";
 import * as RegRecomputeCheckInStatus from "./registrations/recompute-checkin-status-post";
+import * as RegCheckIn from "./registrations/checkin-post";
 // Internal jobs
 import * as JobsRun from "./jobs/run";
 import { runBackgroundJobs } from "./jobs/background";
@@ -672,6 +673,16 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
     if (method === "GET" && path === "/reservation-holds") {
       requirePerm(auth, "registration:read");
       return ReservationHoldsList.handle(event);
+    }
+
+    // Events: registration check-in (operator)
+    {
+      const m = match(/^\/events\/registration\/([^/]+):checkin$/i, path);
+      if (m && method === "POST") {
+        const [id] = m;
+        requirePerm(auth, "registration:write");
+        return RegCheckIn.handle(withId(event, id));
+      }
     }
 
     // Events: classes capacity summary (operator reporting - Sprint BP)

@@ -18425,6 +18425,181 @@ const tests = {
     };
   },
 
+  "smoke:checkin:action-blocked": async () => {
+    await ensureBearer();
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    const eventName = smokeTag("checkin_blocked_evt");
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 5,
+      reservedCount: 0
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "checkin:action-blocked", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+    const regCreate = await post(
+      `/registrations:public`,
+      { eventId, party: { email: `checkin_blocked+${SMOKE_RUN_ID}@example.com` } },
+      featureHeaders,
+      { auth: "none" }
+    );
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test: "checkin:action-blocked", result: "FAIL", reason: "reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+
+    const checkout = await post(
+      `/events/registration/${encodeURIComponent(regId)}:checkout`,
+      {},
+      { ...featureHeaders, "X-MBapp-Public-Token": publicToken, "Idempotency-Key": idem() },
+      { auth: "none" }
+    );
+    if (!checkout.ok || !checkout.body?.paymentIntentId) {
+      return { test: "checkin:action-blocked", result: "FAIL", reason: "checkout-failed", checkout };
+    }
+
+    const key = idem();
+    const checkin = await post(
+      `/events/registration/${encodeURIComponent(regId)}:checkin`,
+      {},
+      { ...featureHeaders, "Idempotency-Key": key }
+    );
+
+    const status = checkin.status;
+    const body = checkin.body || {};
+    const snap = body.checkInStatus || {};
+    const codes = Array.isArray(snap.blockers) ? snap.blockers.map((b) => b?.code).filter(Boolean) : [];
+    const hasUnpaid = codes.includes("payment_unpaid");
+    const ready = Boolean(snap.ready);
+
+    // Ensure registration not checked in
+    const regGet = await get(`/registrations/${encodeURIComponent(regId)}`, undefined, { headers: featureHeaders });
+    const regBody = regGet.body || {};
+    const checkedInAt = regBody.checkedInAt || regBody.registration?.checkedInAt;
+
+    if (status === 409 && body.code === "checkin_blocked" && ready === false && hasUnpaid && !checkedInAt) {
+      return {
+        test: "checkin:action-blocked",
+        result: "PASS",
+        summary: "Check-in blocked with payment_unpaid and no checkedInAt set",
+        snapshot: snap
+      };
+    }
+
+    return {
+      test: "checkin:action-blocked",
+      result: "FAIL",
+      reason: "expected 409 checkin_blocked with payment_unpaid and no checkedInAt",
+      http: { ok: checkin.ok, status },
+      response: body,
+      snapshot: snap,
+      registration: regBody
+    };
+  },
+
+  "smoke:checkin:action-idempotent": async () => {
+    await ensureBearer();
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    const eventName = smokeTag("checkin_idem_evt");
+    const stallUnitAmount = 1500;
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 5,
+      reservedCount: 0,
+      stallEnabled: true,
+      stallCapacity: 2,
+      stallReserved: 0,
+      stallUnitAmount
+    });
+    if (!evt.ok || !evt.body?.id) return { test: "checkin:action-idempotent", result: "FAIL", reason: "event-create-failed", evt };
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+    const stalls = [];
+    for (let i = 1; i <= 2; i++) {
+      const stall = await post("/objects/resource", { type: "resource", resourceType: "stall", name: `ChkStall-${i}`, status: "available", tags: [`event:${eventId}`, "group:BarnChk"] });
+      if (!stall.ok || !stall.body?.id) return { test: "checkin:action-idempotent", result: "FAIL", reason: `stall-${i}-create-failed`, stall };
+      stalls.push(stall.body.id);
+      recordCreated({ type: "resource", id: stall.body.id, route: "/objects/resource", meta: { name: `ChkStall-${i}`, eventId } });
+    }
+
+    const regCreate = await post(
+      `/registrations:public`,
+      { eventId, stallQty: 2, party: { email: `checkin_idem+${SMOKE_RUN_ID}@example.com` } },
+      featureHeaders,
+      { auth: "none" }
+    );
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) return { test: "checkin:action-idempotent", result: "FAIL", reason: "reg-create-failed", regCreate };
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+
+    const checkout = await post(
+      `/events/registration/${encodeURIComponent(regId)}:checkout`,
+      {},
+      { ...featureHeaders, "X-MBapp-Public-Token": publicToken, "Idempotency-Key": idem() },
+      { auth: "none" }
+    );
+    if (!checkout.ok || !checkout.body?.paymentIntentId) return { test: "checkin:action-idempotent", result: "FAIL", reason: "checkout-failed", checkout };
+
+    const webhookBody = { id: `evt_${SMOKE_RUN_ID}`, type: "payment_intent.succeeded", data: { object: { id: checkout.body.paymentIntentId, status: "succeeded", metadata: { registrationId: regId, eventId } } } };
+    const whRes = await fetch(`${API}/webhooks/stripe`, { method: "POST", headers: { "content-type": "application/json", "Stripe-Signature": "sim_valid_signature", ...featureHeaders, "x-tenant-id": TENANT }, body: JSON.stringify(webhookBody) });
+    if (!whRes.ok) return { test: "checkin:action-idempotent", result: "FAIL", reason: "webhook-confirm-failed", whStatus: whRes.status };
+
+    const assignRes = await post(`/registrations/${encodeURIComponent(regId)}:assign-resources`, { itemType: "stall", resourceIds: [stalls[0], stalls[1]] }, featureHeaders);
+    if (!assignRes.ok) return { test: "checkin:action-idempotent", result: "FAIL", reason: "assign-resources-failed", assignRes };
+
+    // Ensure readiness is green before check-in
+    const readyRes = await get(`/registrations/${encodeURIComponent(regId)}:checkin-readiness`, undefined, { headers: featureHeaders });
+    if (!readyRes.ok || !readyRes.body?.ready) {
+      return { test: "checkin:action-idempotent", result: "FAIL", reason: "not-ready-before-checkin", snapshot: readyRes.body };
+    }
+
+    const keyA = `chkA-${SMOKE_RUN_ID}`;
+    const keyB = `chkB-${SMOKE_RUN_ID}`;
+
+    const chk1 = await post(`/events/registration/${encodeURIComponent(regId)}:checkin`, {}, { ...featureHeaders, "Idempotency-Key": keyA });
+    if (!chk1.ok || !chk1.body?.checkedInAt) {
+      return { test: "checkin:action-idempotent", result: "FAIL", reason: "checkin-first-failed", chk1 };
+    }
+    const ts1 = chk1.body.checkedInAt;
+
+    const chk2 = await post(`/events/registration/${encodeURIComponent(regId)}:checkin`, {}, { ...featureHeaders, "Idempotency-Key": keyA });
+    if (!chk2.ok || chk2.body?.checkedInAt !== ts1) {
+      return { test: "checkin:action-idempotent", result: "FAIL", reason: "idempotent-replay-mismatch", ts1, chk2Ts: chk2.body?.checkedInAt, chk2 };
+    }
+
+    const chk3 = await post(`/events/registration/${encodeURIComponent(regId)}:checkin`, {}, { ...featureHeaders, "Idempotency-Key": keyB });
+    if (!chk3.ok || chk3.body?.checkedInAt !== ts1) {
+      return { test: "checkin:action-idempotent", result: "FAIL", reason: "different-key-should-return-same-ts", ts1, chk3Ts: chk3.body?.checkedInAt, chk3 };
+    }
+
+    return {
+      test: "checkin:action-idempotent",
+      result: "PASS",
+      summary: "Check-in is idempotent across same/different keys and preserves checkedInAt",
+      checkedInAt: ts1,
+      actor: chk1.body?.checkedInBy ?? null
+    };
+  },
+
   // E6: Core smokes for Check-In readiness v0
   "smoke:checkin:readiness-unpaid": async () => {
     await ensureBearer();
@@ -18732,31 +18907,9 @@ const tests = {
     return { test: "checkin:readiness-ready", result: "PASS", summary: "Readiness shows ready=true and no blockers after assignments", snapshot: snap };
   }
   return { test: "checkin:readiness-ready", result: "FAIL", reason: "expected ready=true with empty blockers", http: { ok: readyRes.ok, status: readyRes.status }, snapshot: snap };
-  },
-
-  // Core runner: execute readiness smokes in sequence
-  "smokes:run:core": async () => {
-    const names = [
-      "smoke:checkin:readiness-unpaid",
-      "smoke:checkin:readiness-stalls-unassigned",
-      "smoke:checkin:readiness-classes-unassigned",
-      "smoke:checkin:readiness-ready"
-    ];
-    const results = [];
-    for (const n of names) {
-      try {
-        const r = await tests[n]();
-        results.push({ name: n, result: r?.result, summary: r?.summary, snapshot: r?.snapshot });
-        if (r?.result !== "PASS") {
-          // Fail fast but include blockers for diagnosis
-          return { test: "smokes:run:core", result: "FAIL", failed: n, results };
-        }
-      } catch (err) {
-        return { test: "smokes:run:core", result: "FAIL", failed: n, error: err?.message || String(err), results };
-      }
-    }
-    return { test: "smokes:run:core", result: "PASS", summary: "All core readiness smokes passed", results };
   }
+
+  
 };
 
 const cmd=process.argv[2]??"list";

@@ -59,6 +59,10 @@ Smokes are organized by tier for targeted CI validation:
 **Scope:** Validates snapshot-based readiness contract for event check-in: payment blockers, resource assignment blockers, cancellation state.
 
 ### CORE
+- **`smoke:checkin:action-blocked`** — Checkout without payment confirmation; POST check-in with Idempotency-Key; expects 409 `checkin_blocked`, `checkInStatus.ready=false`, blockers include `payment_unpaid`, and no `checkedInAt` set.
+- **`smoke:checkin:action-idempotent`** — Ready registration (payment confirmed + assignments); POST check-in with key A stamps `checkedInAt`; replay with key A and then key B returns the same timestamp (idempotent across keys/already-checked states).
+
+### CORE
 - **`smoke:checkin:readiness-unpaid`** — Creates event, registration, checkout (draft → submitted) without payment confirmation. Calls `GET /registrations/{id}:checkin-readiness`. Asserts: `ready=false`, blockers array contains `payment_unpaid` with action `view_payment`.
 - **`smoke:checkin:readiness-stalls-unassigned`** — Event with stalls enabled, registration checkout + payment webhook (confirmed + paid), no stall assignment. Asserts: `ready=false`, blockers contains `stalls_unassigned` with action `assign_stalls`, no payment blockers.
 - **`smoke:checkin:readiness-classes-unassigned`** — Event with class lines, registration checkout + payment confirmation, no class assignment. Asserts: `ready=false`, blockers contains `classes_unassigned` with action `assign_classes`.
