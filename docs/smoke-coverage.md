@@ -54,6 +54,18 @@ Smokes are organized by tier for targeted CI validation:
 
 ---
 
+## Sprint BOv2 — Event Classes v1
+
+**Scope:** Validates class entry reservation lifecycle with line-scoped capacity, block holds at checkout, per-entry assignment conversion, and correct counter release.
+
+### CORE
+- **`smoke:classes:reserve-and-assign-happy-path`** — Creates event with two lines (capacities set), public registration with mixed quantities, checkout, webhook confirm, `:assign-resources` converts block holds → per-entry holds (duplicates allowed per line). Asserts per-entry holds counts match, block holds released with `releaseReason="assigned"`.
+- **`smoke:classes:capacity-full-guard`** — Seeds event with line capacity=2; RegA reserves 2 then RegB attempts 1. Asserts RegB checkout returns 409 `class_capacity_full` and `linesReservedById` remains 2.
+- **`smoke:classes:not-in-event-guard`** — Event with Class X only; registration requests Class Y. Asserts checkout returns 400 `validation_error` with details.code=`class_not_in_event`.
+
+### EXTENDED
+- **`smoke:classes:release-on-cancel`** — RegA reserves/confirms/assigns per-entry holds, then cancel-refund releases holds and decrements `linesReservedById`; RegB successfully reserves freed capacity. Asserts all holds released and line counter=0.
+
 ## Sprint BL — RV Sites (Discrete Resource Assignment)
 
 **Scope:** Validates RV site discrete assignment via the ReservationHold ledger, mirroring the stalls pattern (block hold → per-site holds → block release with `assigned` reason).

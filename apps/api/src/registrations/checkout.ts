@@ -1,13 +1,25 @@
 // apps/api/src/registrations/checkout.ts
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import crypto from "crypto";
-import { ok, badRequest, conflictError, error as respondError } from "../common/responses";
+import { ok, badRequest, conflictError, notFound, error as respondError } from "../common/responses";
 import { getTenantId } from "../common/env";
-import { getObjectById, updateObject, reserveEventSeat, reserveEventRv, releaseEventSeat, releaseEventRv, reserveEventStalls, releaseEventStalls } from "../objects/repo";
+import {
+  getObjectById,
+  listObjects,
+  updateObject,
+  reserveEventSeat,
+  reserveEventRv,
+  reserveEventLineCapacity,
+  releaseEventSeat,
+  releaseEventRv,
+  releaseEventLineCapacity,
+  reserveEventStalls,
+  releaseEventStalls,
+} from "../objects/repo";
 import { guardRegistrations } from "./feature";
 import { createPaymentIntent } from "../common/stripe";
 import { REGISTRATION_STATUS, REGISTRATION_PAYMENT_STATUS } from "./constants";
-import { createHeldReservationHold, releaseReservationHoldsForOwner, createHeldStallBlockHold } from "../reservations/holds";
+import { createHeldReservationHold, releaseReservationHoldsForOwner, createHeldStallBlockHold, createHeldClassBlockHold } from "../reservations/holds";
 
 /** Constant-time string compare to avoid timing leaks */
 function constantTimeEqual(a: string, b: string) {
@@ -80,7 +92,19 @@ export async function handle(event: APIGatewayProxyEventV2) {
       tenantId,
       type: "event",
       id: (registration as any).eventId,
-      fields: ["id", "status", "capacity", "reservedCount", "rvEnabled", "rvCapacity", "rvUnitAmount", "stallEnabled", "stallCapacity", "stallUnitAmount"],
+      fields: [
+        "id",
+        "status",
+        "capacity",
+        "reservedCount",
+        "rvEnabled",
+        "rvCapacity",
+        "rvUnitAmount",
+        "stallEnabled",
+        "stallCapacity",
+        "stallUnitAmount",
+        "lines",
+      ],
     });
 
     if (!eventObj) {
@@ -108,6 +132,39 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const stallUnitAmount = Number((eventObj as any)?.stallUnitAmount ?? 0);
 
     const computedFees: Array<{ key: string; label: string; qty: number; unitAmount: number; amount: number; currency: string }> = [];
+
+    // Class lines mapping (registration lines -> eventLineIds)
+    const registrationLines = Array.isArray((registration as any)?.lines) ? ((registration as any).lines as any[]) : [];
+    const eventLinesRaw = (eventObj as any)?.lines;
+    const eventLines = Array.isArray(eventLinesRaw)
+      ? eventLinesRaw
+      : eventLinesRaw && typeof eventLinesRaw === "object"
+      ? Object.values(eventLinesRaw as Record<string, unknown>)
+      : [];
+
+    const requestedClassPerLine: Record<string, { qty: number; fee: number; classId: string }> = {};
+
+    for (const line of registrationLines) {
+      const classId = (line as any)?.classId;
+      const qty = Number((line as any)?.qty ?? 0);
+      if (!classId || typeof classId !== "string") {
+        return badRequest("Invalid class selection", { code: "invalid_class", field: "classId" });
+      }
+      if (!(qty > 0)) {
+        return badRequest("Invalid class qty", { code: "invalid_class_qty", field: "qty" });
+      }
+      const eventLine = eventLines.find((el: any) => (el as any)?.classId === classId);
+      if (!eventLine) {
+        return badRequest("Class not in event", { code: "class_not_in_event" });
+      }
+      const lineId = (eventLine as any)?.id;
+      if (!lineId || typeof lineId !== "string") {
+        return badRequest("Event line missing id", { code: "event_line_not_found" });
+      }
+      const fee = Number((eventLine as any)?.fee ?? 0) || 0;
+      const prev = requestedClassPerLine[lineId] || { qty: 0, fee, classId };
+      requestedClassPerLine[lineId] = { qty: prev.qty + qty, fee, classId };
+    }
     if (rvQty > 0) {
       if (!rvEnabled) {
         return conflictError("RV add-on not enabled for this event", { code: "rv_not_enabled" });
@@ -128,6 +185,12 @@ export async function handle(event: APIGatewayProxyEventV2) {
       const amount = stallQty * stallUnitAmount;
       computedFees.push({ key: "stall", label: "Stall", qty: stallQty, unitAmount: stallUnitAmount, amount, currency: "usd" });
     }
+
+    for (const [lineId, info] of Object.entries(requestedClassPerLine)) {
+      const amount = info.qty * info.fee;
+      computedFees.push({ key: `class:${lineId}`, label: `Class ${info.classId}`, qty: info.qty, unitAmount: info.fee, amount, currency: "usd" });
+    }
+
     const totalAmount = computedFees.reduce((sum, f) => sum + (Number.isFinite(f.amount) ? f.amount : 0), 0);
 
     // Enforce capacity atomically (only when transitioning draft -> submitted)
@@ -176,8 +239,95 @@ export async function handle(event: APIGatewayProxyEventV2) {
       }
     }
 
-    // Create reservation holds for ledger tracking (only after seat, RV, and stall all succeed)
+    const reservedClassDeltas: Array<{ lineId: string; qty: number }> = [];
+
+    // Reserve class capacities and create per-line block holds (idempotent)
     try {
+      if (Object.keys(requestedClassPerLine).length > 0) {
+        const classBlocksPage = await listObjects({
+          tenantId,
+          type: "reservationHold",
+          filters: {
+            ownerType: "registration",
+            ownerId: String((registration as any).id),
+            scopeType: "event",
+            scopeId: String((registration as any).eventId),
+            itemType: "class_entry",
+          },
+          limit: 200,
+          fields: ["id", "state", "qty", "resourceId", "metadata", "heldAt"],
+        });
+
+        const existingBlocks = (classBlocksPage.items as any[]) || [];
+        const blockByLine: Record<string, any> = {};
+        for (const b of existingBlocks) {
+          if ((b as any)?.resourceId) continue;
+          const lid = (b as any)?.metadata?.eventLineId;
+          if (!lid) continue;
+          // prefer confirmed over held
+          const current = blockByLine[lid];
+          if (!current || String(current.state) === "held") {
+            blockByLine[lid] = b;
+          }
+        }
+
+        for (const [lineId, info] of Object.entries(requestedClassPerLine)) {
+          const block = blockByLine[lineId];
+          const existingQty = block ? Number((block as any)?.qty ?? 0) || 0 : 0;
+          if (block && existingQty !== info.qty) {
+            throw Object.assign(new Error("Block hold qty mismatch"), { code: "qty_mismatch", statusCode: 400 });
+          }
+
+          const delta = Math.max(0, info.qty - existingQty);
+          if (delta > 0) {
+            await reserveEventLineCapacity({ tenantId, eventId: (registration as any).eventId, lineId, qty: delta });
+            reservedClassDeltas.push({ lineId, qty: delta });
+          }
+
+          if (!block) {
+            await createHeldClassBlockHold({
+              tenantId,
+              registrationId: (registration as any).id,
+              eventId: (registration as any).eventId,
+              eventLineId: lineId,
+              qty: info.qty,
+              expiresAt: holdExpiresAt,
+            });
+          }
+        }
+
+        // Consistency check: verify all requested class entries have corresponding held block holds
+        const classHoldsVerify = await listObjects({
+          tenantId,
+          type: "reservationHold",
+          filters: {
+            ownerType: "registration",
+            ownerId: String((registration as any).id),
+            scopeType: "event",
+            scopeId: String((registration as any).eventId),
+            itemType: "class_entry",
+          },
+          limit: 200,
+          fields: ["id", "state", "qty", "resourceId", "metadata"],
+        });
+
+        const verifyHolds = (classHoldsVerify.items as any[]) || [];
+        for (const [lineId, info] of Object.entries(requestedClassPerLine)) {
+          const blockHold = verifyHolds.find((h: any) => 
+            !h.resourceId && 
+            (h.metadata as any)?.eventLineId === lineId && 
+            (String(h.state) === "held" || String(h.state) === "confirmed")
+          );
+          if (!blockHold) {
+            throw Object.assign(
+              new Error(`Block hold missing for line ${lineId}`),
+              { code: "block_hold_missing", statusCode: 500, lineId, availableHolds: verifyHolds.map((h: any) => ({ id: h.id, state: h.state, resourceId: h.resourceId, eventLineId: (h.metadata as any)?.eventLineId })) }
+            );
+          }
+        }
+      }
+
+      // Create reservation holds for ledger tracking (only after seat, RV, stall, and class lines succeed)
       await createHeldReservationHold({
         tenantId,
         ownerType: "registration",
@@ -214,13 +364,16 @@ export async function handle(event: APIGatewayProxyEventV2) {
         });
       }
     } catch (err: any) {
-      // If hold creation fails, release counters to be safe
+      // If hold creation or class reservation fails, release counters to be safe
       try { await releaseEventSeat({ tenantId, eventId: (registration as any).eventId }); } catch (_) {}
       if (rvQty > 0) {
         try { await releaseEventRv({ tenantId, eventId: (registration as any).eventId, qty: rvQty }); } catch (_) {}
       }
       if (stallQty > 0) {
         try { await releaseEventStalls({ tenantId, eventId: (registration as any).eventId, qty: stallQty }); } catch (_) {}
+      }
+      for (const delta of reservedClassDeltas) {
+        try { await releaseEventLineCapacity({ tenantId, eventId: (registration as any).eventId, lineId: delta.lineId, qty: delta.qty }); } catch (_) {}
       }
       throw err;
     }
@@ -264,6 +417,28 @@ export async function handle(event: APIGatewayProxyEventV2) {
 
     return ok({ paymentIntentId: pi.id, clientSecret: pi.clientSecret, totalAmount: amount, currency: "usd" });
   } catch (err: any) {
+    // Map custom error statusCodes to appropriate responses
+    if (err?.statusCode === 409 && err?.code === "class_capacity_full") {
+      return {
+        statusCode: 409,
+        headers: {
+          "content-type": "application/json",
+          "access-control-allow-origin": "*",
+          "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
+          "access-control-allow-headers": "content-type,x-tenant-id,Idempotency-Key"
+        },
+        body: JSON.stringify({ code: "class_capacity_full", message: err.message || "Class capacity full" }),
+      };
+    }
+    if (err?.statusCode === 409) {
+      return conflictError(err.message || "Conflict", { code: err?.code });
+    }
+    if (err?.statusCode === 400) {
+      return badRequest(err.message || "Bad Request", { code: err?.code });
+    }
+    if (err?.statusCode === 404) {
+      return notFound(err.message || "Not Found");
+    }
     return respondError(err);
   }
 }

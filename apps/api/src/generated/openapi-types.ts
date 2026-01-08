@@ -343,15 +343,15 @@ export interface paths {
         put?: never;
         /**
          * Assign discrete resources to a registration (operator)
-         * @description Generalized endpoint to assign specific discrete resources (stalls, RV sites, or future types) to a registration.
+         * @description Generalized endpoint to assign specific discrete resources (stalls, RV sites, class entries, or future types) to a registration.
          *     Converts a block resource hold (itemType per type, resourceId=null) into specific granular assignments.
          *     Validates that resourceIds length matches the block hold qty and that resources are available.
          *     Creates or updates ReservationHold records with resourceId set for each resource.
          *     Requires operator permission (registration:write).
          *     **Error Codes:**
-         *     - 400: invalid_item_type, invalid_resource_ids, duplicate_ids, block_hold_not_found, qty_mismatch, resource_not_for_event
+         *     - 400: invalid_item_type, invalid_resource_ids, duplicate_ids, block_hold_not_found, qty_mismatch, resource_not_for_event, class_not_in_event, event_line_not_found
          *     - 404: registration_not_found, resource_not_found
-         *     - 409: stall_already_assigned, rv_site_already_assigned (resource already assigned to another registration)
+         *     - 409: stall_already_assigned, rv_site_already_assigned, class_capacity_full (resource already assigned to another registration or class full)
          *
          */
         post: operations["assignResources"];
@@ -2714,6 +2714,10 @@ export interface components {
             stallUnitAmount?: number | null;
             notes?: string;
             lines?: components["schemas"]["EventLine"][];
+            /** @description Map of eventLineId to reserved quantity */
+            linesReservedById?: {
+                [key: string]: number;
+            };
         };
         EventLine: {
             id?: string;
@@ -2721,6 +2725,13 @@ export interface components {
             capacity?: number | null;
             fee?: number | null;
             note?: string | null;
+            divisionId?: string | null;
+            discipline?: string | null;
+            /** Format: date-time */
+            scheduledStartAt?: string | null;
+            /** Format: date-time */
+            scheduledEndAt?: string | null;
+            location?: string | null;
         };
         GoodsReceipt: components["schemas"]["ObjectBase"] & {
             id?: string;
@@ -2999,7 +3010,7 @@ export interface components {
              * @description Reserved item kind within the scope
              * @enum {string}
              */
-            itemType: "seat" | "rv" | "stall";
+            itemType: "seat" | "rv" | "stall" | "class_entry";
             qty: number;
             /**
              * @description Current state of the reservation hold
@@ -3441,10 +3452,10 @@ export interface components {
         /** @description Request to assign specific discrete resources to a registration (Sprint BM) */
         AssignResourcesRequest: {
             /**
-             * @description Type of resource being assigned (extensible for future types like vip-suite, equipment)
+             * @description Type of resource being assigned (extensible for future types like vip-suite, equipment, class entries)
              * @enum {string}
              */
-            itemType: "stall" | "rv";
+            itemType: "stall" | "rv" | "class_entry";
             /** @description List of resource IDs to assign */
             resourceIds: string[];
         };
@@ -5728,7 +5739,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Conflict (resource already assigned by another registration) */
+            /** @description Conflict (resource already assigned by another registration or class capacity reached) */
             409: {
                 headers: {
                     [name: string]: unknown;

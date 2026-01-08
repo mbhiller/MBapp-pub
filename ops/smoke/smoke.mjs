@@ -718,6 +718,30 @@ const api = {
 
 const PARTY_TYPE="party";
 
+/* ---------- Class Entry Diagnostics Helper ---------- */
+/**
+ * Fetch and print class_entry reservation holds for diagnostic purposes.
+ * Called when a checkout succeeds but a later operation fails.
+ */
+async function dumpClassEntryHolds(registrationId, eventId) {
+  try {
+    const holds = await get(`/reservation-holds?ownerType=registration&ownerId=${encodeURIComponent(registrationId)}&scopeType=event&scopeId=${encodeURIComponent(eventId)}&itemType=class_entry&limit=100`);
+    if (!holds.ok || !Array.isArray(holds.body?.items)) return;
+    
+    const items = holds.body.items.filter(h => h?.itemType === "class_entry");
+    if (items.length === 0) return;
+    
+    console.log("[DEBUG] Class Entry Holds:");
+    for (const h of items) {
+      const lineId = h?.resourceId || h?.metadata?.eventLineId || "?";
+      const blockOrEntry = h?.resourceId ? "entry" : "block";
+      console.log(`  - id=${h?.id}, state=${h?.state}, qty=${h?.qty}, resourceId=${h?.resourceId || "null"}, lineId=${lineId}, type=${blockOrEntry}`);
+    }
+  } catch (err) {
+    // Diagnostics failure should not block test
+  }
+}
+
 /* ---------- Tests ---------- */
 const tests = {
     "smoke:close-the-loop": async () => {
@@ -3119,6 +3143,544 @@ const tests = {
       regB: regBId,
       holdsReleased: allReleased,
       rvReservedAfter,
+      regBCheckoutOk: checkoutBOk,
+      reason: !allReleased ? "holds-not-released" : !counterOk ? "counter-not-decremented" : !checkoutBOk ? "regB-checkout-failed" : null
+    };
+  },
+
+  // Event classes: class entry reservations with per-line capacity
+
+  "smoke:classes:reserve-and-assign-happy-path": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // Create 2 Class objects
+    const class1 = await post("/objects/class", {
+      type: "class",
+      name: `Jumping-${SMOKE_RUN_ID}`,
+      status: "open"
+    });
+    if (!class1.ok || !class1.body?.id) {
+      return { test: "classes:reserve-and-assign-happy-path", result: "FAIL", reason: "class1-create-failed", class1 };
+    }
+    const classId1 = class1.body.id;
+
+    const class2 = await post("/objects/class", {
+      type: "class",
+      name: `Dressage-${SMOKE_RUN_ID}`,
+      status: "open"
+    });
+    if (!class2.ok || !class2.body?.id) {
+      return { test: "classes:reserve-and-assign-happy-path", result: "FAIL", reason: "class2-create-failed", class2 };
+    }
+    const classId2 = class2.body.id;
+
+    // Create event with 2 EventLine entries with capacities
+    const eventName = smokeTag("classes_block_evt");
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 10,
+      reservedCount: 0,
+      lines: [
+        {
+          classId: classId1,
+          capacity: 3,
+          divisionId: null,
+          discipline: "Jumping",
+          scheduledStartAt: "2026-02-15T09:00:00Z",
+          scheduledEndAt: "2026-02-15T11:00:00Z",
+          location: "Arena A",
+          fee: 5000
+        },
+        {
+          classId: classId2,
+          capacity: 3,
+          divisionId: null,
+          discipline: "Dressage",
+          scheduledStartAt: "2026-02-15T11:30:00Z",
+          scheduledEndAt: "2026-02-15T13:00:00Z",
+          location: "Arena B",
+          fee: 4500
+        }
+      ]
+    });
+    if (!evt.ok || !evt.body?.id || !Array.isArray(evt.body?.lines) || evt.body.lines.length < 2) {
+      return { test: "classes:reserve-and-assign-happy-path", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    const L1 = evt.body.lines[0]?.id || "L1";
+    const L2 = evt.body.lines[1]?.id || "L2";
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName, lines: [L1, L2] } });
+
+    // Create registration with class entries: qty 2 for L1, qty 1 for L2
+    const regCreate = await post(`/registrations:public`, {
+      eventId,
+      lines: [
+        { classId: classId1, qty: 2 },
+        { classId: classId2, qty: 1 }
+      ],
+      party: { email: `classes+${SMOKE_RUN_ID}@example.com` }
+    }, featureHeaders, { auth: "none" });
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test: "classes:reserve-and-assign-happy-path", result: "FAIL", reason: "reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+
+    // Checkout
+    const checkout = await post(`/events/registration/${encodeURIComponent(regId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!checkout.ok || !checkout.body?.paymentIntentId) {
+      return { test: "classes:reserve-and-assign-happy-path", result: "FAIL", reason: "checkout-failed", checkout };
+    }
+
+    // Verify linesReservedById after checkout
+    const evtAfterCheckout = await get(`/objects/event/${encodeURIComponent(eventId)}`);
+    const l1Reserved = Number(evtAfterCheckout.body?.linesReservedById?.[L1] ?? 0);
+    const l2Reserved = Number(evtAfterCheckout.body?.linesReservedById?.[L2] ?? 0);
+    const reserveOk = l1Reserved === 2 && l2Reserved === 1;
+
+    // Verify block holds exist with correct metadata
+    const holdsRes = await get(`/reservation-holds?ownerType=registration&ownerId=${encodeURIComponent(regId)}`);
+    const holds = Array.isArray(holdsRes.body?.items) ? holdsRes.body.items : [];
+    const classHolds = holds.filter(h => h?.itemType === "class_entry" && !h?.resourceId);
+    const blockL1 = classHolds.find(h => h?.metadata?.eventLineId === L1);
+    const blockL2 = classHolds.find(h => h?.metadata?.eventLineId === L2);
+    const blocksOk = blockL1?.qty === 2 && blockL2?.qty === 1;
+
+    // Webhook confirm
+    const webhookBody = {
+      id: `evt_${SMOKE_RUN_ID}`,
+      type: "payment_intent.succeeded",
+      data: {
+        object: {
+          id: checkout.body.paymentIntentId,
+          status: "succeeded",
+          metadata: { registrationId: regId, eventId }
+        }
+      }
+    };
+    await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "Stripe-Signature": "sim_valid_signature", ...featureHeaders, "x-tenant-id": TENANT },
+      body: JSON.stringify(webhookBody)
+    });
+
+    // Assign resources: create per-entry holds from block holds
+    const assignRes = await post(`/registrations/${encodeURIComponent(regId)}:assign-resources`, {
+      itemType: "class_entry",
+      resourceIds: [L1, L1, L2]
+    }, featureHeaders);
+    if (!assignRes.ok) {
+      await dumpClassEntryHolds(regId, eventId);
+      return { test: "classes:reserve-and-assign-happy-path", result: "FAIL", reason: "assign-failed", assignRes };
+    }
+
+    // Verify per-entry holds exist with resourceId set
+    const holdsAfterAssign = await get(`/reservation-holds?ownerType=registration&ownerId=${encodeURIComponent(regId)}`);
+    const allHolds = Array.isArray(holdsAfterAssign.body?.items) ? holdsAfterAssign.body.items : [];
+    const perEntryHolds = allHolds.filter(h => h?.itemType === "class_entry" && h?.resourceId);
+    const l1Entries = perEntryHolds.filter(h => h?.resourceId === L1).length;
+    const l2Entries = perEntryHolds.filter(h => h?.resourceId === L2).length;
+    const entriesOk = l1Entries === 2 && l2Entries === 1;
+
+    // Verify block holds are released with reason "assigned"
+    const blockHolds = allHolds.filter(h => h?.itemType === "class_entry" && !h?.resourceId);
+    const blocksReleased = blockHolds.length > 0 && blockHolds.every(h => h?.state === "released" && h?.releaseReason === "assigned");
+
+    const pass = reserveOk && blocksOk && entriesOk && blocksReleased;
+    return {
+      test: "classes:reserve-and-assign-happy-path",
+      result: pass ? "PASS" : "FAIL",
+      steps: { eventId, regId, lineIds: { L1, L2 }, classIds: { classId1, classId2 } },
+      reserves: { l1Reserved, l2Reserved },
+      perEntryHolds: { l1Entries, l2Entries },
+      blocksReleased,
+      reason: !reserveOk ? "reserve-failed" : !blocksOk ? "block-holds-invalid" : !entriesOk ? "per-entry-holds-invalid" : !blocksReleased ? "blocks-not-released" : null
+    };
+  },
+
+  "smoke:classes:capacity-full-guard": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true"
+    };
+
+    // Create Class
+    const cls = await post("/objects/class", {
+      type: "class",
+      name: `CapGuard-${SMOKE_RUN_ID}`,
+      status: "open"
+    });
+    if (!cls.ok || !cls.body?.id) {
+      return { test: "classes:capacity-full-guard", result: "FAIL", reason: "class-create-failed", cls };
+    }
+    const classId = cls.body.id;
+
+    // Create event with one line capacity=2
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: smokeTag("classes_cap_guard_evt"),
+      capacity: 10,
+      lines: [
+        {
+          classId,
+          capacity: 2,
+          divisionId: null,
+          discipline: "Hunter",
+          scheduledStartAt: "2026-02-20T10:00:00Z",
+          scheduledEndAt: "2026-02-20T12:00:00Z",
+          location: "Main Arena",
+          fee: 6000
+        }
+      ]
+    });
+    if (!evt.ok || !evt.body?.id || !Array.isArray(evt.body?.lines) || evt.body.lines.length < 1) {
+      return { test: "classes:capacity-full-guard", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    const lineId = evt.body.lines[0]?.id || "L1";
+
+    // Reg A: create, checkout with qty=2 -> should succeed
+    const regARes = await post(`/registrations:public`, {
+      eventId,
+      lines: [{ classId, qty: 2 }],
+      party: { email: `cap_a+${SMOKE_RUN_ID}@example.com` }
+    }, featureHeaders, { auth: "none" });
+    if (!regARes.ok) {
+      return { test: "classes:capacity-full-guard", result: "FAIL", reason: "regA-create-failed" };
+    }
+    const regAId = regARes.body.registration.id;
+
+    const chkA = await post(`/events/registration/${encodeURIComponent(regAId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": regARes.body.publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!chkA.ok) {
+      await dumpClassEntryHolds(regAId, eventId);
+      return { test: "classes:capacity-full-guard", result: "FAIL", reason: "regA-checkout-failed", chkA };
+    }
+    const checkoutAOk = chkA.ok;
+
+    // Reg B: create, checkout with qty=1 -> should fail 409
+    const regBRes = await post(`/registrations:public`, {
+      eventId,
+      lines: [{ classId, qty: 1 }],
+      party: { email: `cap_b+${SMOKE_RUN_ID}@example.com` }
+    }, featureHeaders, { auth: "none" });
+    if (!regBRes.ok) {
+      return { test: "classes:capacity-full-guard", result: "FAIL", reason: "regB-create-failed" };
+    }
+    const regBId = regBRes.body.registration.id;
+
+    const chkB = await post(`/events/registration/${encodeURIComponent(regBId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": regBRes.body.publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    const checkoutBGuarded = chkB.status === 409 && chkB.body?.code === "class_capacity_full";
+
+    // Verify linesReservedById unchanged at 2
+    const evtFinal = await get(`/objects/event/${encodeURIComponent(eventId)}`);
+    const reserved = Number(evtFinal.body?.linesReservedById?.[lineId] ?? 0);
+    const reserveUnchanged = reserved === 2;
+
+    const pass = checkoutAOk && checkoutBGuarded && reserveUnchanged;
+    return {
+      test: "classes:capacity-full-guard",
+      result: pass ? "PASS" : "FAIL",
+      eventId,
+      regA: regAId,
+      regB: regBId,
+      checkoutA: { ok: checkoutAOk },
+      checkoutB: { status: chkB.status, code: chkB.body?.code },
+      reserved,
+      reason: !checkoutAOk ? "regA-checkout-failed" : !checkoutBGuarded ? "regB-not-guarded" : !reserveUnchanged ? "reserve-changed" : null
+    };
+  },
+
+  "smoke:classes:not-in-event-guard": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true"
+    };
+
+    // Create 2 classes
+    const cls1 = await post("/objects/class", { type: "class", name: `X-${SMOKE_RUN_ID}`, status: "open" });
+    const cls2 = await post("/objects/class", { type: "class", name: `Y-${SMOKE_RUN_ID}`, status: "open" });
+    if (!cls1.ok || !cls2.ok) {
+      return { test: "classes:not-in-event-guard", result: "FAIL", reason: "class-create-failed" };
+    }
+    const classId1 = cls1.body.id;
+    const classId2 = cls2.body.id;
+
+    // Create event with only Class X line
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: smokeTag("classes_not_in_evt"),
+      capacity: 10,
+      lines: [
+        {
+          classId: classId1,
+          capacity: 5,
+          divisionId: null,
+          discipline: "Hunter",
+          scheduledStartAt: "2026-02-25T09:00:00Z",
+          scheduledEndAt: "2026-02-25T11:00:00Z",
+          location: "Arena",
+          fee: 5000
+        }
+      ]
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "classes:not-in-event-guard", result: "FAIL", reason: "event-create-failed" };
+    }
+    const eventId = evt.body.id;
+
+    // Attempt registration with Class Y (not in event) -> should fail 400
+    const regRes = await post(`/registrations:public`, {
+      eventId,
+      lines: [{ classId: classId2, qty: 1 }],
+      party: { email: `not_in+${SMOKE_RUN_ID}@example.com` }
+    }, featureHeaders, { auth: "none" });
+    if (!regRes.ok || !regRes.body?.registration?.id) {
+      return { test: "classes:not-in-event-guard", result: "FAIL", reason: "reg-create-failed" };
+    }
+    const regId = regRes.body.registration.id;
+
+    const chk = await post(`/events/registration/${encodeURIComponent(regId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": regRes.body.publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+
+    const guarded = chk.status === 400 && chk.body?.details?.code === "class_not_in_event";
+    return {
+      test: "classes:not-in-event-guard",
+      result: guarded ? "PASS" : "FAIL",
+      eventId,
+      regId,
+      classNotInEvent: classId2,
+      checkoutStatus: chk.status,
+      checkoutCode: chk.body?.code,
+      checkoutDetailsCode: chk.body?.details?.code,
+      reason: !guarded ? "not-guarded" : null
+    };
+  },
+
+  "smoke:classes:schedule-fields-roundtrip": async () => {
+    await ensureBearer();
+
+    // Create Class
+    const cls = await post("/objects/class", {
+      type: "class",
+      name: `Roundtrip-${SMOKE_RUN_ID}`,
+      status: "open"
+    });
+    if (!cls.ok || !cls.body?.id) {
+      return { test: "classes:schedule-fields-roundtrip", result: "FAIL", reason: "class-create-failed" };
+    }
+    const classId = cls.body.id;
+
+    // Create event with schedule fields on line
+    const scheduledStartAt = "2026-03-01T08:30:00Z";
+    const scheduledEndAt = "2026-03-01T10:30:00Z";
+    const location = "North Arena";
+    const discipline = "Equitation";
+
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: smokeTag("schedule_roundtrip_evt"),
+      capacity: 10,
+      lines: [
+        {
+          classId,
+          capacity: 5,
+          divisionId: null,
+          discipline,
+          scheduledStartAt,
+          scheduledEndAt,
+          location,
+          fee: 5500
+        }
+      ]
+    });
+    if (!evt.ok || !evt.body?.id || !Array.isArray(evt.body?.lines) || evt.body.lines.length < 1) {
+      return { test: "classes:schedule-fields-roundtrip", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    const line = evt.body.lines[0];
+
+    // Read event back and verify fields match
+    const evtRead = await get(`/objects/event/${encodeURIComponent(eventId)}`);
+    if (!evtRead.ok || !Array.isArray(evtRead.body?.lines) || evtRead.body.lines.length < 1) {
+      return { test: "classes:schedule-fields-roundtrip", result: "FAIL", reason: "event-read-failed" };
+    }
+    const lineRead = evtRead.body.lines[0];
+
+    const disciplineMatch = String(lineRead?.discipline || "") === discipline;
+    const startMatch = String(lineRead?.scheduledStartAt || "") === scheduledStartAt;
+    const endMatch = String(lineRead?.scheduledEndAt || "") === scheduledEndAt;
+    const locationMatch = String(lineRead?.location || "") === location;
+
+    const pass = disciplineMatch && startMatch && endMatch && locationMatch;
+    return {
+      test: "classes:schedule-fields-roundtrip",
+      result: pass ? "PASS" : "FAIL",
+      eventId,
+      lineCreated: { discipline, scheduledStartAt, scheduledEndAt, location },
+      lineRead: { discipline: lineRead?.discipline, scheduledStartAt: lineRead?.scheduledStartAt, scheduledEndAt: lineRead?.scheduledEndAt, location: lineRead?.location },
+      matches: { discipline: disciplineMatch, startTime: startMatch, endTime: endMatch, location: locationMatch },
+      reason: !pass ? "field-mismatch" : null
+    };
+  },
+
+  "smoke:classes:release-on-cancel": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // Create Class
+    const cls = await post("/objects/class", {
+      type: "class",
+      name: `Release-${SMOKE_RUN_ID}`,
+      status: "open"
+    });
+    if (!cls.ok || !cls.body?.id) {
+      return { test: "classes:release-on-cancel", result: "FAIL", reason: "class-create-failed" };
+    }
+    const classId = cls.body.id;
+
+    // Create event with line capacity=2
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: smokeTag("classes_release_evt"),
+      capacity: 10,
+      lines: [
+        {
+          classId,
+          capacity: 2,
+          divisionId: null,
+          discipline: "Jumping",
+          scheduledStartAt: "2026-03-05T14:00:00Z",
+          scheduledEndAt: "2026-03-05T16:00:00Z",
+          location: "West Arena",
+          fee: 5500
+        }
+      ]
+    });
+    if (!evt.ok || !evt.body?.id || !Array.isArray(evt.body?.lines) || evt.body.lines.length < 1) {
+      return { test: "classes:release-on-cancel", result: "FAIL", reason: "event-create-failed" };
+    }
+    const eventId = evt.body.id;
+    const lineId = evt.body.lines[0]?.id || "L1";
+
+    // Reg A: create, checkout, confirm, assign, then cancel-refund
+    const regARes = await post(`/registrations:public`, {
+      eventId,
+      lines: [{ classId, qty: 2 }],
+      party: { email: `release_a+${SMOKE_RUN_ID}@example.com` }
+    }, featureHeaders, { auth: "none" });
+    if (!regARes.ok) {
+      return { test: "classes:release-on-cancel", result: "FAIL", reason: "regA-create-failed" };
+    }
+    const regAId = regARes.body.registration.id;
+
+    const chkA = await post(`/events/registration/${encodeURIComponent(regAId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": regARes.body.publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!chkA.ok) {
+      return { test: "classes:release-on-cancel", result: "FAIL", reason: "chkA-failed" };
+    }
+
+    // Webhook confirm
+    await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "Stripe-Signature": "sim_valid_signature", ...featureHeaders, "x-tenant-id": TENANT },
+      body: JSON.stringify({ id: `evt_ca_${SMOKE_RUN_ID}`, type: "payment_intent.succeeded", data: { object: { id: chkA.body.paymentIntentId, status: "succeeded", metadata: { registrationId: regAId, eventId } } } })
+    });
+
+    // Assign: create per-entry holds
+    const assignA = await post(`/registrations/${encodeURIComponent(regAId)}:assign-resources`, {
+      itemType: "class_entry",
+      resourceIds: [lineId, lineId]
+    }, featureHeaders);
+    if (!assignA.ok) {
+      await dumpClassEntryHolds(regAId, eventId);
+      return { test: "classes:release-on-cancel", result: "FAIL", reason: "assignA-failed", assignA };
+    }
+
+    // Cancel A with refund
+    const cancelA = await post(`/registrations/${encodeURIComponent(regAId)}:cancel-refund`, {}, featureHeaders);
+    if (!cancelA.ok) {
+      await dumpClassEntryHolds(regAId, eventId);
+      return { test: "classes:release-on-cancel", result: "FAIL", reason: "cancelA-failed", cancelA };
+    }
+
+    // Check holds are released
+    const holdsAAfterCancel = await get(`/reservation-holds?ownerType=registration&ownerId=${encodeURIComponent(regAId)}`);
+    const aHoldsAfter = Array.isArray(holdsAAfterCancel.body?.items) ? holdsAAfterCancel.body.items : [];
+    const allReleased = aHoldsAfter.length > 0 && aHoldsAfter.every(h => h?.state === "released");
+
+    // Check event counter decremented (should be 0 or absent)
+    const evtAfter = await get(`/objects/event/${encodeURIComponent(eventId)}`);
+    const reserved = Number(evtAfter.body?.linesReservedById?.[lineId] ?? 0);
+    const counterOk = reserved === 0;
+
+    // Reg B should now be able to reserve/assign with full capacity available
+    const regBRes = await post(`/registrations:public`, {
+      eventId,
+      lines: [{ classId, qty: 2 }],
+      party: { email: `release_b+${SMOKE_RUN_ID}@example.com` }
+    }, featureHeaders, { auth: "none" });
+    if (!regBRes.ok) {
+      return { test: "classes:release-on-cancel", result: "FAIL", reason: "regB-create-failed" };
+    }
+    const regBId = regBRes.body.registration.id;
+
+    const chkB = await post(`/events/registration/${encodeURIComponent(regBId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": regBRes.body.publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!chkB.ok) {
+      await dumpClassEntryHolds(regBId, eventId);
+    }
+    const checkoutBOk = chkB.ok;
+
+    const pass = allReleased && counterOk && checkoutBOk;
+    return {
+      test: "classes:release-on-cancel",
+      result: pass ? "PASS" : "FAIL",
+      regA: regAId,
+      regB: regBId,
+      holdsReleased: allReleased,
+      reserved,
       regBCheckoutOk: checkoutBOk,
       reason: !allReleased ? "holds-not-released" : !counterOk ? "counter-not-decremented" : !checkoutBOk ? "regB-checkout-failed" : null
     };

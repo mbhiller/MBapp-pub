@@ -1373,15 +1373,15 @@ paths:
       operationId: assignResources
       summary: Assign discrete resources to a registration (operator)
       description: |
-        Generalized endpoint to assign specific discrete resources (stalls, RV sites, or future types) to a registration.
+        Generalized endpoint to assign specific discrete resources (stalls, RV sites, class entries, or future types) to a registration.
         Converts a block resource hold (itemType per type, resourceId=null) into specific granular assignments.
         Validates that resourceIds length matches the block hold qty and that resources are available.
         Creates or updates ReservationHold records with resourceId set for each resource.
         Requires operator permission (registration:write).
         **Error Codes:**
-        - 400: invalid_item_type, invalid_resource_ids, duplicate_ids, block_hold_not_found, qty_mismatch, resource_not_for_event
+        - 400: invalid_item_type, invalid_resource_ids, duplicate_ids, block_hold_not_found, qty_mismatch, resource_not_for_event, class_not_in_event, event_line_not_found
         - 404: registration_not_found, resource_not_found
-        - 409: stall_already_assigned, rv_site_already_assigned (resource already assigned to another registration)
+        - 409: stall_already_assigned, rv_site_already_assigned, class_capacity_full (resource already assigned to another registration or class full)
       x-mbapp-permission: registration:write
       security:
         - bearerAuth: []
@@ -1419,6 +1419,8 @@ paths:
             - block_hold_not_found
             - qty_mismatch
             - resource_not_for_event
+            - class_not_in_event
+            - event_line_not_found
         '401':
           description: Unauthorized
           content:
@@ -1438,7 +1440,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
-          description: Conflict (resource already assigned by another registration)
+          description: Conflict (resource already assigned by another registration or class capacity reached)
           content:
             application/json:
               schema:
@@ -1446,6 +1448,7 @@ paths:
           x-error-codes:
             - stall_already_assigned
             - rv_site_already_assigned
+            - class_capacity_full
   /registrations/{id}:public:
     get:
       tags:
@@ -4054,6 +4057,11 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/EventLine'
+            linesReservedById:
+              type: object
+              additionalProperties:
+                type: number
+              description: Map of eventLineId to reserved quantity
           required:
             - type
             - name
@@ -4072,6 +4080,23 @@ components:
           type: number
           nullable: true
         note:
+          type: string
+          nullable: true
+        divisionId:
+          type: string
+          nullable: true
+        discipline:
+          type: string
+          nullable: true
+        scheduledStartAt:
+          type: string
+          format: date-time
+          nullable: true
+        scheduledEndAt:
+          type: string
+          format: date-time
+          nullable: true
+        location:
           type: string
           nullable: true
       required:
@@ -4676,6 +4701,7 @@ components:
                 - seat
                 - rv
                 - stall
+                - class_entry
             qty:
               type: number
               minimum: 1
@@ -5574,7 +5600,8 @@ components:
           enum:
             - stall
             - rv
-          description: Type of resource being assigned (extensible for future types like vip-suite, equipment)
+            - class_entry
+          description: Type of resource being assigned (extensible for future types like vip-suite, equipment, class entries)
         resourceIds:
           type: array
           description: List of resource IDs to assign

@@ -58,6 +58,39 @@
 - **Endpoint:** `POST /messages/{id}:retry` (authed, `message:write`).
 - **Eligibility:** Only `status="failed"` messages are retryable; other statuses return 400 with `currentStatus` in details.
 - **Channels:** Supports `channel="email" | "sms"`; validates required fields (`to`, `subject+body` for email, `body` for sms`).
+
+### Event Classes v1 (Sprint BOv2)
+
+Foundation for event class entry reservations using line-scoped capacity and the ReservationHold ledger.
+
+- **Event.lines:** Each event contains `lines[]` with stable line IDs and scheduling metadata.
+  - Fields: `id` (stable per event), `classId`, `capacity`, `divisionId`, `discipline`, `scheduledStartAt`, `scheduledEndAt`, `location`, `fee`.
+  - Line IDs are server-assigned and stable for the life of the event (examples: `L1`, `L2`). Clients should treat `lines[i].id` as canonical for capacity and assignment operations.
+
+- **ReservationHold itemType=class_entry:**
+  - Represents class entry holds tied to an event line.
+  - States: `held` (pre-payment), `confirmed` (post-payment), `released` (after conversion/cancel/expire).
+  - Quantity: `qty` is the number of entries reserved for a given line.
+  - Resource identity:
+    - Block hold (pre-assignment): `resourceId = null`, `metadata.eventLineId = <lineId>`.
+    - Per-entry hold (post-assignment): `resourceId = <lineId>` for each entry; duplicates are allowed and expected for multi-qty (e.g., two holds for `L1`).
+
+- **Assignment conversion via `assign-resources`:**
+  - Converts block holds into per-entry holds by duplicating holds per requested entry on the target line.
+  - Block holds are released with `releaseReason = "assigned"` once conversion succeeds.
+  - Duplicate `resourceId` entries are permitted for class entries (multi-qty on the same line), unlike discrete resource types.
+
+- **Event.linesReservedById counters:**
+  - Event documents maintain `linesReservedById: Record<lineId, number>`; incremented during checkout and decremented on cancel/refund or hold expiration.
+  - Counter changes use an optimistic read-compute-set pattern with bounded retries to avoid race conditions and negative values.
+  - Capacity guard: Attempts to reserve that exceed `lines[i].capacity` return a conflict without changing counters.
+
+- **Error codes (class-entry flows):**
+  - 400 `validation_error` → details.code:
+    - `class_not_in_event` — Registration requested a class not present on the event lines.
+    - `block_hold_not_found` — Assignment attempted without a matching block hold.
+  - 409 `class_capacity_full` — Line capacity would be exceeded; checkout guarded and leaves counters unchanged.
+
 - **Behavior:** Sets `status="sending"`, updates `lastAttemptAt`, clears `errorMessage`, and increments `retryCount` (defaults 0 → 1).
   - **Simulate on:** (`FEATURE_NOTIFY_SIMULATE=1` or header `X-Feature-Notify-Simulate: true`) immediately marks `status="sent"`, sets `sentAt`, assigns provider (`postmark`|`twilio`) and simulated `providerMessageId`.
   - **Real send:** Calls Postmark/Twilio; on success marks `sent` with provider ID; on failure marks `failed` with `errorMessage` and refreshed `lastAttemptAt`.
