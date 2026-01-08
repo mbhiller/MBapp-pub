@@ -1,0 +1,49 @@
+{
+  "smokeRunId": "smk-1767896023574-mebi",
+  "base": "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com",
+  "tenantHeader": "SmokeTenant",
+  "jwtTenant": null,
+  "startedAt": "2026-01-08T18:13:43.574Z",
+  "finishedAt": "2026-01-08T18:13:50.153Z",
+  "entries": [
+    {
+      "type": "class",
+      "id": "c6nrs4m5ff9ncnve555gy",
+      "route": "/objects/class",
+      "meta": {
+        "name": "OpRegs-L1-smk-1767896023574-mebi",
+        "status": 200
+      },
+      "createdAt": "2026-01-08T18:13:44.000Z"
+    },
+    {
+      "type": "class",
+      "id": "sxd4abpwmxk6q7evy540p",
+      "route": "/objects/class",
+      "meta": {
+        "name": "OpRegs-L2-smk-1767896023574-mebi",
+        "status": 200
+      },
+      "createdAt": "2026-01-08T18:13:44.302Z"
+    },
+    {
+      "type": "event",
+      "id": "9vx5l648zq6mdabawcw89m",
+      "route": "/objects/event",
+      "meta": {
+        "name": "smk-1767896023574-mebi-classes_opregs_evt",
+        "status": 200
+      },
+      "createdAt": "2026-01-08T18:13:44.415Z"
+    },
+    {
+      "type": "event",
+      "id": "9vx5l648zq6mdabawcw89m",
+      "route": "/objects/event",
+      "meta": {
+        "name": "smk-1767896023574-mebi-classes_opregs_evt"
+      },
+      "createdAt": "2026-01-08T18:13:44.415Z"
+    }
+  ]
+}

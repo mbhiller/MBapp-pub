@@ -9,6 +9,8 @@
 export const PERMISSIONS_BY_ENDPOINT = {
   "DELETE /views/{id}": "view:write",
   "DELETE /workspaces/{id}": "workspace:write",
+  "GET /events/{eventId}:classes-summary": "event:read registration:read",
+  "GET /events/{eventId}:registrations-by-line": "event:read registration:read",
   "GET /inventory/{id}/onhand": "inventory:read",
   "GET /inventory/{id}/onhand:by-location": "inventory:read",
   "GET /messages": "message:read",
@@ -78,6 +80,7 @@ export type EndpointKey = keyof typeof PERMISSIONS_BY_ENDPOINT;
  * Use these for cleaner permission checks in UI code.
  * Example: hasPerm(policy, PERM_OBJECTS_WRITE)
  */
+export const PERM_EVENT_READ_REGISTRATION_READ = "event:read registration:read" as const;
 export const PERM_INVENTORY_ADJUST = "inventory:adjust" as const;
 export const PERM_INVENTORY_READ = "inventory:read" as const;
 export const PERM_INVENTORY_WRITE = "inventory:write" as const;
@@ -108,6 +111,7 @@ export const PERM_WORKSPACE_WRITE = "workspace:write" as const;
  * Array of all unique permission keys (sorted).
  */
 export const PERMISSION_KEYS = [
+  "event:read registration:read",
   "inventory:adjust",
   "inventory:read",
   "inventory:write",

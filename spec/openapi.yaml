@@ -3072,6 +3072,98 @@ paths:
                     properties:
                       currentStatus:
                         type: string
+  /events/{eventId}:classes-summary:
+    get:
+      tags:
+        - Events
+      operationId: getEventClassesSummary
+      summary: Get event class lines capacity summary (operator reporting)
+      description: |
+        Operator endpoint to get per-line capacity summary for an event.
+        Returns reserved/remaining counts, registration count per line, and line schedule metadata.
+        Useful for operator dashboards and check-in workflows.
+      x-mbapp-permission: event:read registration:read
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - name: eventId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Event ID
+      responses:
+        '200':
+          description: Event classes summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventClassesSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Event not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /events/{eventId}:registrations-by-line:
+    get:
+      tags:
+        - Events
+      operationId: getRegistrationsByLine
+      summary: Get registrations for an event, optionally filtered by line (operator reporting)
+      description: |
+        Operator endpoint to list registrations for an event with optional per-line filtering.
+        Returns registration details (status, payment status, entry counts) with cursor pagination.
+        Useful for operator dashboards and check-in workflows.
+      x-mbapp-permission: event:read registration:read
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - name: eventId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Event ID
+        - name: eventLineId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Optional filter to specific event line ID (e.g., "L1"). If provided, only registrations with entries on this line are returned.
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Next'
+      responses:
+        '200':
+          description: Paginated registrations for event (optionally filtered by line)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistrationsByLinePage'
+        '400':
+          description: Bad request (e.g., invalid eventLineId)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Event not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /messages/{id}:retry:
     post:
       tags:
@@ -6934,3 +7026,134 @@ components:
           items:
             $ref: '#/components/schemas/Reservation'
           description: List of reservations blocking availability in the requested time range
+    EventClassLineSummary:
+      type: object
+      description: Operator reporting summary for a single event class line (reserved/remaining counts + registrations)
+      required:
+        - id
+        - classId
+        - reserved
+      properties:
+        id:
+          type: string
+          description: Event line ID (e.g., "L1", "L2")
+        classId:
+          type: string
+          description: Foreign key to Class object
+        capacity:
+          type: number
+          nullable: true
+          description: Max entries allowed on this line; null means unlimited
+        reserved:
+          type: number
+          description: Current count of reserved/held entries
+        remaining:
+          type: number
+          nullable: true
+          description: Calculated remaining capacity (capacity - reserved); null if capacity is null
+        registrationsWithEntries:
+          type: number
+          description: Count of unique registrations with at least 1 entry on this line
+        entriesRequested:
+          type: number
+          nullable: true
+          description: Optional; total qty requested across all registrations for this line
+        divisionId:
+          type: string
+          nullable: true
+        discipline:
+          type: string
+          nullable: true
+        scheduledStartAt:
+          type: string
+          format: date-time
+          nullable: true
+        scheduledEndAt:
+          type: string
+          format: date-time
+          nullable: true
+        location:
+          type: string
+          nullable: true
+        fee:
+          type: number
+          nullable: true
+        note:
+          type: string
+          nullable: true
+    EventClassesSummary:
+      type: object
+      description: Operator reporting endpoint response for event class line capacity summary
+      required:
+        - eventId
+        - lines
+      properties:
+        eventId:
+          type: string
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/EventClassLineSummary'
+    RegistrationByLineItem:
+      type: object
+      description: Registration summary for operator reporting (filtered by event + optional line)
+      required:
+        - registrationId
+        - status
+      properties:
+        registrationId:
+          type: string
+        partyId:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum:
+            - draft
+            - submitted
+            - confirmed
+            - cancelled
+        paymentStatus:
+          type: string
+          nullable: true
+          enum:
+            - pending
+            - paid
+            - failed
+            - refunded
+        entriesOnThisLine:
+          type: number
+          description: When filtered to a specific eventLineId, count of entries for this registration on that line. Omit or return 0 when unfiltered.
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+        confirmedAt:
+          type: string
+          format: date-time
+          nullable: true
+        cancelledAt:
+          type: string
+          format: date-time
+          nullable: true
+    RegistrationsByLinePage:
+      type: object
+      description: Paginated list of registrations for an event, optionally filtered by eventLineId
+      required:
+        - eventId
+        - items
+      properties:
+        eventId:
+          type: string
+        eventLineId:
+          type: string
+          nullable: true
+          description: If filtered to a specific line, the eventLineId; null if query was unfiltered
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RegistrationByLineItem'
+        next:
+          type: string
+          nullable: true
+          description: Opaque cursor for next page; null if no more pages

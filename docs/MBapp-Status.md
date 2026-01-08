@@ -1,8 +1,66 @@
 # MBapp Status / Working
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Foundations](MBapp-Foundations.md) · [Cadence](MBapp-Cadence.md) · [Verification](smoke-coverage.md)  
-**Last Updated:** 2026-01-07  
+**Last Updated:** 2026-01-08  
 **Workflow & DoD:** See [MBapp-Cadence.md](MBapp-Cadence.md) for canonical workflow, Definition of Done, and testing rules.
+
+---
+
+### Sprint BP — Event Classes Operator Reporting — ✅ Complete (2026-01-08)
+
+**Summary:** Added operator reporting endpoints for event class entries: per-line capacity summary and paged registrations-by-line query. Operators can now see reserved/remaining/requested metrics per class line and drill down into registrations filtered by specific line IDs. Includes comprehensive smoke coverage in the core CI tier.
+
+**Deliverables (E1–E5):**
+- **Spec (E1):** Extended [spec/MBapp-Modules.yaml](spec/MBapp-Modules.yaml):
+  - 4 new schemas: `EventClassLineSummary`, `EventClassesSummary`, `RegistrationByLineItem`, `RegistrationsByLinePage`
+  - `GET /events/{eventId}:classes-summary` — Returns per-line summary with reserved/remaining/registrationsWithEntries/entriesRequested metrics
+  - `GET /events/{eventId}:registrations-by-line` — Paged registrations (limit 1-200, default 50) with optional `eventLineId` filter; computes `entriesOnThisLine` per registration
+  - Both endpoints require `event:read` + `registration:read` permissions
+  - Verification: `npm run spec:lint`, `spec:bundle`, `spec:types:api`, `spec:types:mobile` ✅
+- **Backend - Classes Summary (E2):** Created [apps/api/src/events/classes-summary-get.ts](apps/api/src/events/classes-summary-get.ts):
+  - Fetches event by `eventId` (404 if not found)
+  - Computes reserved from `linesReservedById`, remaining from capacity - reserved
+  - Builds classId→lineIds map (handles ambiguous classId appearing in multiple lines)
+  - Lists registrations filtered by `eventId` (indexed query, limit 10000 for operators)
+  - Aggregates `entriesRequested` (sum of qty) and `registrationsWithEntries` (distinct count) per line
+  - Returns `EventClassesSummary` with all schedule metadata (discipline, times, location, fee)
+  - Registered route in [apps/api/src/index.ts](apps/api/src/index.ts) with permission checks
+  - Manual verification: L1 (reserved=2, remaining=1, registrationsWithEntries=1, entriesRequested=2), L2 (reserved=1, remaining=2) ✅
+- **Backend - Registrations By Line (E3):** Created [apps/api/src/events/registrations-by-line-get.ts](apps/api/src/events/registrations-by-line-get.ts):
+  - Validates event exists (404 if not found)
+  - Validates `eventLineId` if provided (400 if invalid line)
+  - Multi-page iteration (max 10 backend pages, 200 items each) to handle filtering reducing results below limit
+  - Filtering: Includes registration if has `registration.lines` entry with `classId==targetClassId` AND `qty > 0`
+  - Computes `entriesOnThisLine` by summing qty across matching `registration.lines`
+  - Cursor pagination (limit 1-200, default 50) with `next` token
+  - Returns `RegistrationsByLinePage` with minimal fields (no PII: `registrationId`, `partyId`, `status`, `paymentStatus`, timestamps)
+  - Registered route in [apps/api/src/index.ts](apps/api/src/index.ts)
+  - Manual verification: Unfiltered (entriesOnThisLine=0), L1 filter (entriesOnThisLine=2), L2 filter (entriesOnThisLine=1), invalid L99 returns 400 ✅
+- **Smokes (E4):** Added 2 CORE tests in [ops/smoke/smoke.mjs](ops/smoke/smoke.mjs) and registered in [ops/ci-smokes.json](ops/ci-smokes.json):
+  - `smoke:classes:operator-line-summary` — Creates 2 classes/lines, 3 registrations (RegA: 2xL1, RegB: 1xL1+1xL2, RegC: 2xL2); confirms+assigns A+B; calls summary endpoint; asserts L1 (reserved=3, remaining=2, registrationsWithEntries=2, entriesRequested=3), L2 (reserved=3, remaining=0, registrationsWithEntries=2, entriesRequested=3); validates order matches event.lines order. **Result: PASS** ✅
+  - `smoke:classes:operator-registrations-by-line` — Creates 2 classes/lines, 3 registrations (RegA: 2xL1, RegB: 1xL1+1xL2, RegC: 2xL2); calls endpoint with `eventLineId=L1`; asserts 2 items (RegA, RegB), entriesOnThisLine correct, next=null; calls with `eventLineId=L2`; asserts 2 items (RegB, RegC). **Result: PASS** ✅
+- **Fixes + Extended Coverage (E5):** Fixed classes-summary to exclude cancelled registrations from metrics; added EXTENDED test:
+  - `smoke:classes:operator-after-cancel` — Creates 1 line capacity 3, RegA (2 entries) + RegB (1 entry); confirms+assigns both; validates before-cancel metrics (reserved=3, remaining=0, regsWithEntries=2, entriesRequested=3); cancels RegA; validates after-cancel metrics (reserved=1, remaining=2, regsWithEntries=1, entriesRequested=1). **Result: PASS** ✅
+
+**Endpoints:**
+- `GET /events/{eventId}:classes-summary` — Returns `EventClassesSummary` with per-line metrics (reserved/remaining/registrationsWithEntries/entriesRequested)
+- `GET /events/{eventId}:registrations-by-line?eventLineId={lineId}&limit={1-200}&cursor={token}` — Returns `RegistrationsByLinePage` with filtered/paged registrations
+
+**Data Model & Semantics:**
+- **ClassId ambiguity:** Single `classId` can appear in multiple `event.lines` (e.g., same class in different time slots). Summary aggregates across all matching lines. Future enhancement: denormalize `registration.lines` with `eventLineId` for unambiguous mapping.
+- **Multi-page iteration:** Registrations-by-line fetches up to 10 backend pages (2000 items) when filtering by `eventLineId` to ensure complete limit collection despite filtering.
+- **Indexed access:** Both endpoints use indexed query on `eventId`; no full table scans.
+- **Minimal PII:** Registrations-by-line excludes sensitive fields (email, phone, payment details); returns only operational identifiers and statuses.
+
+**Verification:**
+- ✅ Typescript: `npm run typecheck --workspaces --if-present` (all workspaces clean)
+- ✅ Spec pipeline: lint/bundle/types clean (65 pre-existing warnings, no errors)
+- ✅ Manual endpoint testing: All scenarios verified (summary, filtered/unfiltered lists, error cases)
+- ✅ Smokes: 2 CORE tests PASS, 1 EXTENDED test PASS; existing class smokes PASS (no regressions)
+
+**Impact:**
+- Operators can now monitor per-line capacity utilization and drill down into specific registrations for operational management.
+- Foundation for future enhancements: denormalized eventLineId in registration.lines for unambiguous mapping, assignment status filtering, resource allocation views.
 
 ---
 

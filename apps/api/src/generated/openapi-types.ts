@@ -2072,6 +2072,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/events/{eventId}:classes-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get event class lines capacity summary (operator reporting)
+         * @description Operator endpoint to get per-line capacity summary for an event.
+         *     Returns reserved/remaining counts, registration count per line, and line schedule metadata.
+         *     Useful for operator dashboards and check-in workflows.
+         *
+         */
+        get: operations["getEventClassesSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/events/{eventId}:registrations-by-line": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get registrations for an event, optionally filtered by line (operator reporting)
+         * @description Operator endpoint to list registrations for an event with optional per-line filtering.
+         *     Returns registration details (status, payment status, entry counts) with cursor pagination.
+         *     Useful for operator dashboards and check-in workflows.
+         *
+         */
+        get: operations["getRegistrationsByLine"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/messages/{id}:retry": {
         parameters: {
             query?: never;
@@ -4064,6 +4110,63 @@ export interface components {
         ResourceAvailabilityResponse: {
             /** @description List of reservations blocking availability in the requested time range */
             busy: components["schemas"]["Reservation"][];
+        };
+        /** @description Operator reporting summary for a single event class line (reserved/remaining counts + registrations) */
+        EventClassLineSummary: {
+            /** @description Event line ID (e.g., "L1", "L2") */
+            id: string;
+            /** @description Foreign key to Class object */
+            classId: string;
+            /** @description Max entries allowed on this line; null means unlimited */
+            capacity?: number | null;
+            /** @description Current count of reserved/held entries */
+            reserved: number;
+            /** @description Calculated remaining capacity (capacity - reserved); null if capacity is null */
+            remaining?: number | null;
+            /** @description Count of unique registrations with at least 1 entry on this line */
+            registrationsWithEntries?: number;
+            /** @description Optional; total qty requested across all registrations for this line */
+            entriesRequested?: number | null;
+            divisionId?: string | null;
+            discipline?: string | null;
+            /** Format: date-time */
+            scheduledStartAt?: string | null;
+            /** Format: date-time */
+            scheduledEndAt?: string | null;
+            location?: string | null;
+            fee?: number | null;
+            note?: string | null;
+        };
+        /** @description Operator reporting endpoint response for event class line capacity summary */
+        EventClassesSummary: {
+            eventId: string;
+            lines: components["schemas"]["EventClassLineSummary"][];
+        };
+        /** @description Registration summary for operator reporting (filtered by event + optional line) */
+        RegistrationByLineItem: {
+            registrationId: string;
+            partyId?: string | null;
+            /** @enum {string} */
+            status: "draft" | "submitted" | "confirmed" | "cancelled";
+            /** @enum {string|null} */
+            paymentStatus?: "pending" | "paid" | "failed" | "refunded" | null;
+            /** @description When filtered to a specific eventLineId, count of entries for this registration on that line. Omit or return 0 when unfiltered. */
+            entriesOnThisLine?: number;
+            /** Format: date-time */
+            submittedAt?: string | null;
+            /** Format: date-time */
+            confirmedAt?: string | null;
+            /** Format: date-time */
+            cancelledAt?: string | null;
+        };
+        /** @description Paginated list of registrations for an event, optionally filtered by eventLineId */
+        RegistrationsByLinePage: {
+            eventId: string;
+            /** @description If filtered to a specific line, the eventLineId; null if query was unfiltered */
+            eventLineId?: string | null;
+            items: components["schemas"]["RegistrationByLineItem"][];
+            /** @description Opaque cursor for next page; null if no more pages */
+            next?: string | null;
         };
     };
     responses: {
@@ -6449,6 +6552,94 @@ export interface operations {
                             currentStatus?: string;
                         };
                     };
+                };
+            };
+        };
+    };
+    getEventClassesSummary: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-tenant-id": components["parameters"]["TenantHeader"];
+            };
+            path: {
+                /** @description Event ID */
+                eventId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Event classes summary */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventClassesSummary"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Event not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getRegistrationsByLine: {
+        parameters: {
+            query?: {
+                /** @description Optional filter to specific event line ID (e.g., "L1"). If provided, only registrations with entries on this line are returned. */
+                eventLineId?: string;
+                /** @description Maximum number of items to return */
+                limit?: components["parameters"]["Limit"];
+                next?: components["parameters"]["Next"];
+            };
+            header: {
+                "x-tenant-id": components["parameters"]["TenantHeader"];
+            };
+            path: {
+                /** @description Event ID */
+                eventId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paginated registrations for event (optionally filtered by line) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegistrationsByLinePage"];
+                };
+            };
+            /** @description Bad request (e.g., invalid eventLineId) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationError"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Event not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };

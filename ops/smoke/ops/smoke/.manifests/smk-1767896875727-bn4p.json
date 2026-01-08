@@ -1,0 +1,39 @@
+{
+  "smokeRunId": "smk-1767896875727-bn4p",
+  "base": "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com",
+  "tenantHeader": "SmokeTenant",
+  "jwtTenant": null,
+  "startedAt": "2026-01-08T18:27:55.728Z",
+  "finishedAt": "2026-01-08T18:28:07.402Z",
+  "entries": [
+    {
+      "type": "class",
+      "id": "4vucgkj2whvhgxivd4hv2j",
+      "route": "/objects/class",
+      "meta": {
+        "name": "OpCancel-L1-smk-1767896875727-bn4p",
+        "status": 200
+      },
+      "createdAt": "2026-01-08T18:27:56.330Z"
+    },
+    {
+      "type": "event",
+      "id": "3s5jo93woao4ch07peos3d",
+      "route": "/objects/event",
+      "meta": {
+        "name": "smk-1767896875727-bn4p-classes_opcancel_evt",
+        "status": 200
+      },
+      "createdAt": "2026-01-08T18:27:56.589Z"
+    },
+    {
+      "type": "event",
+      "id": "3s5jo93woao4ch07peos3d",
+      "route": "/objects/event",
+      "meta": {
+        "name": "smk-1767896875727-bn4p-classes_opcancel_evt"
+      },
+      "createdAt": "2026-01-08T18:27:56.589Z"
+    }
+  ]
+}
