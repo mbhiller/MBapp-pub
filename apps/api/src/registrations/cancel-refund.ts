@@ -7,6 +7,7 @@ import { guardRegistrations } from "./feature";
 import { createRefund } from "../common/stripe";
 import { REGISTRATION_STATUS, REGISTRATION_PAYMENT_STATUS } from "./constants";
 import { releaseReservationHoldsForOwner } from "../reservations/holds";
+import { computeCheckInStatus } from "./checkin-readiness";
 
 /**
  * Release class entry capacity counters by computing qty from holds.
@@ -140,7 +141,13 @@ export async function handle(event: APIGatewayProxyEventV2) {
     if (!(reg as any).cancelledAt) body.cancelledAt = nowIso;
     if (!(reg as any).refundedAt) body.refundedAt = nowIso;
 
-    const updated = await updateObject({ tenantId, type: "registration", id, body });
+    const regForSnapshot: any = {
+      ...reg,
+      status: REGISTRATION_STATUS.cancelled,
+      paymentStatus: REGISTRATION_PAYMENT_STATUS.refunded,
+    };
+    const snapshot = computeCheckInStatus({ tenantId, registration: regForSnapshot, holds: [] });
+    const updated = await updateObject({ tenantId, type: "registration", id, body: { ...body, checkInStatus: snapshot } });
 
     // Release capacity once when transitioning
     if (eventId) {

@@ -18423,6 +18423,339 @@ const tests = {
       testResults,
       awsCredsAvailable: hasAwsCreds
     };
+  },
+
+  // E6: Core smokes for Check-In readiness v0
+  "smoke:checkin:readiness-unpaid": async () => {
+    await ensureBearer();
+    // Create open event + registration, perform checkout, do NOT confirm payment
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+  const eventName = smokeTag("readiness_unpaid_evt");
+  const evt = await post("/objects/event", {
+    type: "event",
+    status: "open",
+    name: eventName,
+    capacity: 10,
+    reservedCount: 0
+  });
+  if (!evt.ok || !evt.body?.id) {
+    return { test: "checkin:readiness-unpaid", result: "FAIL", reason: "event-create-failed", evt };
+  }
+  const eventId = evt.body.id;
+  recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+  const regCreate = await post(
+    `/registrations:public`,
+    { eventId, party: { email: `unpaid+${SMOKE_RUN_ID}@example.com` } },
+    featureHeaders,
+    { auth: "none" }
+  );
+  if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+    return { test: "checkin:readiness-unpaid", result: "FAIL", reason: "reg-create-failed", regCreate };
+  }
+  const regId = regCreate.body.registration.id;
+  const publicToken = regCreate.body.publicToken;
+
+  const checkout = await post(
+    `/events/registration/${encodeURIComponent(regId)}:checkout`,
+    {},
+    { ...featureHeaders, "X-MBapp-Public-Token": publicToken, "Idempotency-Key": idem() },
+    { auth: "none" }
+  );
+  if (!checkout.ok || !checkout.body?.paymentIntentId) {
+    return { test: "checkin:readiness-unpaid", result: "FAIL", reason: "checkout-failed", checkout };
+  }
+
+  const readyRes = await get(`/registrations/${encodeURIComponent(regId)}:checkin-readiness`, undefined, { headers: featureHeaders });
+  const snap = readyRes.body || {};
+  const codes = Array.isArray(snap.blockers) ? snap.blockers.map(b => b?.code).filter(Boolean) : [];
+  const hasUnpaid = codes.includes("payment_unpaid");
+  const isReady = Boolean(snap.ready);
+
+  if (readyRes.ok && !isReady && hasUnpaid) {
+    return {
+      test: "checkin:readiness-unpaid",
+      result: "PASS",
+      summary: "Readiness shows payment_unpaid and ready=false after checkout",
+      snapshot: { ready: snap.ready, blockers: snap.blockers }
+    };
+  }
+  return {
+    test: "checkin:readiness-unpaid",
+    result: "FAIL",
+    reason: "expected ready=false with payment_unpaid",
+    http: { ok: readyRes.ok, status: readyRes.status },
+    snapshot: snap
+  };
+},
+
+  "smoke:checkin:readiness-stalls-unassigned": async () => {
+    await ensureBearer();
+    // Create event with stalls, confirm payment, do NOT assign stalls; expect stalls_unassigned and no payment_* blockers
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+  const eventName = smokeTag("readiness_stalls_evt");
+  const stallUnitAmount = 3000;
+  const evt = await post("/objects/event", {
+    type: "event",
+    status: "open",
+    name: eventName,
+    capacity: 10,
+    reservedCount: 0,
+    stallEnabled: true,
+    stallCapacity: 4,
+    stallReserved: 0,
+    stallUnitAmount
+  });
+  if (!evt.ok || !evt.body?.id) {
+    return { test: "checkin:readiness-stalls-unassigned", result: "FAIL", reason: "event-create-failed", evt };
+  }
+  const eventId = evt.body.id;
+  recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+  // Create 3 stall resources tagged to event
+  const stallIds = [];
+  for (let i = 1; i <= 3; i++) {
+    const stall = await post("/objects/resource", {
+      type: "resource",
+      resourceType: "stall",
+      name: `Stall-${i}`,
+      status: "available",
+      tags: [`event:${eventId}`, "group:BarnCore"]
+    });
+    if (!stall.ok || !stall.body?.id) {
+      return { test: "checkin:readiness-stalls-unassigned", result: "FAIL", reason: `stall-${i}-create-failed`, stall };
+    }
+    stallIds.push(stall.body.id);
+    recordCreated({ type: "resource", id: stall.body.id, route: "/objects/resource", meta: { name: `Stall-${i}`, eventId } });
+  }
+
+  const regCreate = await post(
+    `/registrations:public`,
+    { eventId, stallQty: 2, party: { email: `stalls_unassigned+${SMOKE_RUN_ID}@example.com` } },
+    featureHeaders,
+    { auth: "none" }
+  );
+  if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+    return { test: "checkin:readiness-stalls-unassigned", result: "FAIL", reason: "reg-create-failed", regCreate };
+  }
+  const regId = regCreate.body.registration.id;
+  const publicToken = regCreate.body.publicToken;
+
+  const checkout = await post(
+    `/events/registration/${encodeURIComponent(regId)}:checkout`,
+    {},
+    { ...featureHeaders, "X-MBapp-Public-Token": publicToken, "Idempotency-Key": idem() },
+    { auth: "none" }
+  );
+  if (!checkout.ok || !checkout.body?.paymentIntentId) {
+    return { test: "checkin:readiness-stalls-unassigned", result: "FAIL", reason: "checkout-failed", checkout };
+  }
+
+  // Confirm payment via Stripe webhook
+  const webhookBody = {
+    id: `evt_${SMOKE_RUN_ID}`,
+    type: "payment_intent.succeeded",
+    data: { object: { id: checkout.body.paymentIntentId, status: "succeeded", metadata: { registrationId: regId, eventId } } }
+  };
+  const whRes = await fetch(`${API}/webhooks/stripe`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "Stripe-Signature": "sim_valid_signature", ...featureHeaders, "x-tenant-id": TENANT },
+    body: JSON.stringify(webhookBody)
+  });
+  if (!whRes.ok) {
+    return { test: "checkin:readiness-stalls-unassigned", result: "FAIL", reason: "webhook-confirm-failed", whStatus: whRes.status };
+  }
+
+  // Readiness: should require stall assignments now
+  const readyRes = await get(`/registrations/${encodeURIComponent(regId)}:checkin-readiness`, undefined, { headers: featureHeaders });
+  const snap = readyRes.body || {};
+  const codes = Array.isArray(snap.blockers) ? snap.blockers.map(b => b?.code).filter(Boolean) : [];
+  const hasStallsUnassigned = codes.includes("stalls_unassigned");
+  const hasPaymentBlocker = codes.some(c => c === "payment_unpaid" || c === "payment_failed");
+
+  if (readyRes.ok && hasStallsUnassigned && !hasPaymentBlocker) {
+    return {
+      test: "checkin:readiness-stalls-unassigned",
+      result: "PASS",
+      summary: "Readiness shows stalls_unassigned without payment blockers after confirmation",
+      snapshot: { ready: snap.ready, blockers: snap.blockers }
+    };
+  }
+  return {
+    test: "checkin:readiness-stalls-unassigned",
+    result: "FAIL",
+    reason: "expected stalls_unassigned with no payment_*",
+    http: { ok: readyRes.ok, status: readyRes.status },
+    snapshot: snap
+  };
+  },
+
+  "smoke:checkin:readiness-classes-unassigned": async () => {
+    await ensureBearer();
+    // Create classes + event lines, confirm payment, do NOT assign classes; expect classes_unassigned
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+  // Create 2 Class objects
+  const class1 = await post("/objects/class", { type: "class", name: `Jump-${SMOKE_RUN_ID}`, status: "open" });
+  if (!class1.ok || !class1.body?.id) return { test: "checkin:readiness-classes-unassigned", result: "FAIL", reason: "class1-create-failed", class1 };
+  const classId1 = class1.body.id;
+  const class2 = await post("/objects/class", { type: "class", name: `Dress-${SMOKE_RUN_ID}`, status: "open" });
+  if (!class2.ok || !class2.body?.id) return { test: "checkin:readiness-classes-unassigned", result: "FAIL", reason: "class2-create-failed", class2 };
+  const classId2 = class2.body.id;
+
+  const eventName = smokeTag("readiness_classes_evt");
+  const evt = await post("/objects/event", {
+    type: "event",
+    status: "open",
+    name: eventName,
+    capacity: 20,
+    reservedCount: 0,
+    lines: [
+      { classId: classId1, capacity: 3, divisionId: null, discipline: "Jumping", scheduledStartAt: "2026-02-15T09:00:00Z", scheduledEndAt: "2026-02-15T10:00:00Z", location: "Arena A", fee: 5000 },
+      { classId: classId2, capacity: 3, divisionId: null, discipline: "Dressage", scheduledStartAt: "2026-02-15T11:00:00Z", scheduledEndAt: "2026-02-15T12:00:00Z", location: "Arena B", fee: 4500 }
+    ]
+  });
+  if (!evt.ok || !evt.body?.id || !Array.isArray(evt.body?.lines) || evt.body.lines.length < 2) {
+    return { test: "checkin:readiness-classes-unassigned", result: "FAIL", reason: "event-create-failed", evt };
+  }
+  const eventId = evt.body.id;
+  const L1 = evt.body.lines[0]?.id || "L1";
+  const L2 = evt.body.lines[1]?.id || "L2";
+  recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName, lines: [L1, L2] } });
+
+  const regCreate = await post(
+    `/registrations:public`,
+    { eventId, lines: [{ classId: classId1, qty: 2 }, { classId: classId2, qty: 1 }], party: { email: `classes_unassigned+${SMOKE_RUN_ID}@example.com` } },
+    featureHeaders,
+    { auth: "none" }
+  );
+  if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+    return { test: "checkin:readiness-classes-unassigned", result: "FAIL", reason: "reg-create-failed", regCreate };
+  }
+  const regId = regCreate.body.registration.id;
+  const publicToken = regCreate.body.publicToken;
+
+  const checkout = await post(
+    `/events/registration/${encodeURIComponent(regId)}:checkout`,
+    {},
+    { ...featureHeaders, "X-MBapp-Public-Token": publicToken, "Idempotency-Key": idem() },
+    { auth: "none" }
+  );
+  if (!checkout.ok || !checkout.body?.paymentIntentId) {
+    return { test: "checkin:readiness-classes-unassigned", result: "FAIL", reason: "checkout-failed", checkout };
+  }
+
+  // Confirm payment via Stripe webhook
+  const webhookBody = { id: `evt_${SMOKE_RUN_ID}`, type: "payment_intent.succeeded", data: { object: { id: checkout.body.paymentIntentId, status: "succeeded", metadata: { registrationId: regId, eventId } } } };
+  const whRes = await fetch(`${API}/webhooks/stripe`, { method: "POST", headers: { "content-type": "application/json", "Stripe-Signature": "sim_valid_signature", ...featureHeaders, "x-tenant-id": TENANT }, body: JSON.stringify(webhookBody) });
+  if (!whRes.ok) return { test: "checkin:readiness-classes-unassigned", result: "FAIL", reason: "webhook-confirm-failed", whStatus: whRes.status };
+
+  // Readiness: should require class assignments now
+  const readyRes = await get(`/registrations/${encodeURIComponent(regId)}:checkin-readiness`, undefined, { headers: featureHeaders });
+  const snap = readyRes.body || {};
+  const codes = Array.isArray(snap.blockers) ? snap.blockers.map(b => b?.code).filter(Boolean) : [];
+  const hasClassesUnassigned = codes.includes("classes_unassigned");
+  const hasPaymentBlocker = codes.some(c => c === "payment_unpaid" || c === "payment_failed");
+  if (readyRes.ok && hasClassesUnassigned && !hasPaymentBlocker) {
+    return { test: "checkin:readiness-classes-unassigned", result: "PASS", summary: "Readiness shows classes_unassigned after confirmation", snapshot: { ready: snap.ready, blockers: snap.blockers } };
+  }
+  return { test: "checkin:readiness-classes-unassigned", result: "FAIL", reason: "expected classes_unassigned with no payment_*", http: { ok: readyRes.ok, status: readyRes.status }, snapshot: snap };
+  },
+
+  "smoke:checkin:readiness-ready": async () => {
+    await ensureBearer();
+    // Create event with stalls, confirm payment, assign stalls; expect ready=true and no blockers
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+  const eventName = smokeTag("readiness_ready_evt");
+  const stallUnitAmount = 2000;
+  const evt = await post("/objects/event", {
+    type: "event",
+    status: "open",
+    name: eventName,
+    capacity: 10,
+    reservedCount: 0,
+    stallEnabled: true,
+    stallCapacity: 3,
+    stallReserved: 0,
+    stallUnitAmount
+  });
+  if (!evt.ok || !evt.body?.id) return { test: "checkin:readiness-ready", result: "FAIL", reason: "event-create-failed", evt };
+  const eventId = evt.body.id;
+  recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+  const stalls = [];
+  for (let i = 1; i <= 2; i++) {
+    const stall = await post("/objects/resource", { type: "resource", resourceType: "stall", name: `StallR-${i}`, status: "available", tags: [`event:${eventId}`, "group:BarnR"] });
+    if (!stall.ok || !stall.body?.id) return { test: "checkin:readiness-ready", result: "FAIL", reason: `stall-${i}-create-failed`, stall };
+    stalls.push(stall.body.id);
+  }
+
+  const regCreate = await post(`/registrations:public`, { eventId, stallQty: 2, party: { email: `ready+${SMOKE_RUN_ID}@example.com` } }, featureHeaders, { auth: "none" });
+  if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) return { test: "checkin:readiness-ready", result: "FAIL", reason: "reg-create-failed", regCreate };
+  const regId = regCreate.body.registration.id;
+  const publicToken = regCreate.body.publicToken;
+
+  const checkout = await post(`/events/registration/${encodeURIComponent(regId)}:checkout`, {}, { ...featureHeaders, "X-MBapp-Public-Token": publicToken, "Idempotency-Key": idem() }, { auth: "none" });
+  if (!checkout.ok || !checkout.body?.paymentIntentId) return { test: "checkin:readiness-ready", result: "FAIL", reason: "checkout-failed", checkout };
+
+  const webhookBody = { id: `evt_${SMOKE_RUN_ID}`, type: "payment_intent.succeeded", data: { object: { id: checkout.body.paymentIntentId, status: "succeeded", metadata: { registrationId: regId, eventId } } } };
+  const whRes = await fetch(`${API}/webhooks/stripe`, { method: "POST", headers: { "content-type": "application/json", "Stripe-Signature": "sim_valid_signature", ...featureHeaders, "x-tenant-id": TENANT }, body: JSON.stringify(webhookBody) });
+  if (!whRes.ok) return { test: "checkin:readiness-ready", result: "FAIL", reason: "webhook-confirm-failed", whStatus: whRes.status };
+
+  // Assign both stalls
+  const assignRes = await post(`/registrations/${encodeURIComponent(regId)}:assign-resources`, { itemType: "stall", resourceIds: [stalls[0], stalls[1]] }, featureHeaders);
+  if (!assignRes.ok) return { test: "checkin:readiness-ready", result: "FAIL", reason: "assign-resources-failed", assignRes };
+
+  const readyRes = await get(`/registrations/${encodeURIComponent(regId)}:checkin-readiness`, undefined, { headers: featureHeaders });
+  const snap = readyRes.body || {};
+  const blockersEmpty = Array.isArray(snap.blockers) && snap.blockers.length === 0;
+  if (readyRes.ok && snap.ready === true && blockersEmpty) {
+    return { test: "checkin:readiness-ready", result: "PASS", summary: "Readiness shows ready=true and no blockers after assignments", snapshot: snap };
+  }
+  return { test: "checkin:readiness-ready", result: "FAIL", reason: "expected ready=true with empty blockers", http: { ok: readyRes.ok, status: readyRes.status }, snapshot: snap };
+  },
+
+  // Core runner: execute readiness smokes in sequence
+  "smokes:run:core": async () => {
+    const names = [
+      "smoke:checkin:readiness-unpaid",
+      "smoke:checkin:readiness-stalls-unassigned",
+      "smoke:checkin:readiness-classes-unassigned",
+      "smoke:checkin:readiness-ready"
+    ];
+    const results = [];
+    for (const n of names) {
+      try {
+        const r = await tests[n]();
+        results.push({ name: n, result: r?.result, summary: r?.summary, snapshot: r?.snapshot });
+        if (r?.result !== "PASS") {
+          // Fail fast but include blockers for diagnosis
+          return { test: "smokes:run:core", result: "FAIL", failed: n, results };
+        }
+      } catch (err) {
+        return { test: "smokes:run:core", result: "FAIL", failed: n, error: err?.message || String(err), results };
+      }
+    }
+    return { test: "smokes:run:core", result: "PASS", summary: "All core readiness smokes passed", results };
   }
 };
 

@@ -98,6 +98,52 @@ Foundation for operator visibility into class entry capacity and registration de
 - **Endpoints:**
   - `GET /events/{eventId}:classes-summary` — Per-line capacity summary with operational metrics
   - `GET /events/{eventId}:registrations-by-line` — Paged registrations filtered by optional event line
+
+### Check-In Readiness v0 (Sprint BT)
+
+Provides a snapshot-based readiness contract for event check-in operations. The `Registration.checkInStatus` field stores a precomputed snapshot indicating whether a registration is ready for check-in and what blockers exist if not.
+
+**Contract:**
+- **Field:** `Registration.checkInStatus` (nullable `CheckInStatus` object)
+- **Structure:**
+  ```typescript
+  {
+    ready: boolean,
+    blockers: CheckInBlocker[],  // empty when ready=true
+    lastEvaluatedAt: ISO8601,
+    version: string | null       // versioning for future schema evolution
+  }
+  ```
+- **Blocker codes (v0):**
+  - `payment_unpaid` — Payment required (action: `view_payment`)
+  - `payment_failed` — Payment failed (action: `view_payment`)
+  - `cancelled` — Registration cancelled (no action)
+  - `stalls_unassigned` — Stalls requested but not assigned (action: `assign_stalls`)
+  - `rv_unassigned` — RV sites requested but not assigned (action: `assign_rv`)
+  - `classes_unassigned` — Class entries requested but not assigned (action: `assign_classes`)
+
+**Data Drivers:**
+- Payment status: `registration.status`, `registration.paymentStatus`
+- Resource assignments: Queries `ReservationHold` ledger for confirmed per-resource holds (stalls, RV, classes)
+- Cancellation: `registration.status === "cancelled"`
+
+**Auto-Update Triggers:**
+The snapshot is automatically recomputed and persisted whenever registration state or resource assignments change:
+- Checkout (draft → submitted)
+- Payment webhook (Stripe `payment_intent.succeeded` / `payment_intent.payment_failed`)
+- Resource assignment operations (`assign-resources`, `assign-stalls`, `assign-rv-sites`)
+- Cancel / cancel-refund
+- Hold expiration (via cleanup)
+
+**Endpoints:**
+- `GET /registrations/{id}:checkin-readiness` — Compute-only (no persistence); requires `registration:read`
+- `POST /registrations/{id}:recompute-checkin-status` — Persist snapshot; requires `registration:write`; supports idempotency via `X-Idempotency-Key`
+
+**Future Extensions (not in v0):**
+- Waivers signed/pending blockers (`waivers_unsigned`)
+- Documentation uploaded/pending blockers (`docs_missing`)
+- Printing status blockers (`print_not_ready`)
+- Atomic check-in action endpoint (`POST /registrations/{id}:checkin`) with timestamp and optional operator context
   - Both require `event:read` + `registration:read` permissions
 
 - **Summary derivation (`classes-summary`):**

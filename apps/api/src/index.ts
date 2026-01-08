@@ -127,6 +127,8 @@ import * as RegCancelRefund from "./registrations/cancel-refund";
 import * as RegAssignStalls from "./registrations/assign-stalls";
 import * as RegAssignRvSites from "./registrations/assign-rv-sites";
 import * as RegAssignResources from "./registrations/assign-resources";
+import * as RegCheckInReadiness from "./registrations/checkin-readiness-get";
+import * as RegRecomputeCheckInStatus from "./registrations/recompute-checkin-status-post";
 // Internal jobs
 import * as JobsRun from "./jobs/run";
 import { runBackgroundJobs } from "./jobs/background";
@@ -403,6 +405,26 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
         const [, id] = m;
         requirePerm(auth, "registration:write");
         return RegCancel.handle(withId(event, id));
+      }
+    }
+    
+    // Registrations: check-in readiness (compute only)
+    {
+      const m = path.match(/^\/registrations\/([^/]+):checkin-readiness$/i);
+      if (method === "GET" && m) {
+        const [, id] = m;
+        requirePerm(auth, "registration:read");
+        return RegCheckInReadiness.handle(withId(event, id));
+      }
+    }
+
+    // Registrations: recompute + persist check-in status
+    {
+      const m = path.match(/^\/registrations\/([^/]+):recompute-checkin-status$/i);
+      if (method === "POST" && m) {
+        const [, id] = m;
+        requirePerm(auth, "registration:write");
+        return RegRecomputeCheckInStatus.handle(withId(event, id));
       }
     }
 

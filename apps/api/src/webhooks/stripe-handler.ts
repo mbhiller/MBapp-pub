@@ -1,12 +1,13 @@
 // apps/api/src/webhooks/stripe-handler.ts
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
 import { verifyWebhook, type StripeEvent } from "../common/stripe";
-import { getObjectById, updateObject } from "../objects/repo";
+import { getObjectById, updateObject, listObjects } from "../objects/repo";
 import { getTenantId } from "../common/env";
 import { badRequest, ok, error as respondError } from "../common/responses";
 import { enqueueTemplatedEmail, enqueueTemplatedSMS } from "../common/notify";
 import { REGISTRATION_STATUS, REGISTRATION_PAYMENT_STATUS } from "../registrations/constants";
 import { confirmReservationHoldsForOwner } from "../reservations/holds";
+import { computeCheckInStatus } from "../registrations/checkin-readiness";
 
 /** 
  * Stripe webhook handler (POST /webhooks/stripe)
@@ -106,7 +107,23 @@ async function handlePaymentSucceeded(
     return;
   }
 
-  // Update registration: set status to confirmed, paymentStatus to paid, confirmedAt timestamp
+  // Compute readiness snapshot in confirmed/paid state
+  const holdsPage = await listObjects({
+    tenantId,
+    type: "reservationHold",
+    filters: { ownerType: "registration", ownerId: registrationId },
+    limit: 200,
+    fields: ["id", "itemType", "resourceId", "state"],
+  });
+  const holds = ((holdsPage.items as any[]) || []) as any[];
+  const regForSnapshot: any = {
+    ...registration,
+    status: REGISTRATION_STATUS.confirmed,
+    paymentStatus: REGISTRATION_PAYMENT_STATUS.paid,
+  };
+  const snapshot = computeCheckInStatus({ tenantId, registration: regForSnapshot, holds: holds as any });
+
+  // Update registration: set status to confirmed, paymentStatus to paid, confirmedAt timestamp + snapshot
   await updateObject({
     tenantId,
     type: "registration",
@@ -116,6 +133,7 @@ async function handlePaymentSucceeded(
       paymentStatus: REGISTRATION_PAYMENT_STATUS.paid,
       paymentIntentId: paymentIntent.id,
       confirmedAt: new Date().toISOString(),
+      checkInStatus: snapshot,
     },
   });
 
@@ -228,7 +246,22 @@ async function handlePaymentFailed(
     return;
   }
 
-  // Update registration: set paymentStatus to failed
+  // Compute readiness snapshot for failed payment state
+  const holdsPageFailed = await listObjects({
+    tenantId,
+    type: "reservationHold",
+    filters: { ownerType: "registration", ownerId: registrationId },
+    limit: 200,
+    fields: ["id", "itemType", "resourceId", "state"],
+  });
+  const holdsFailed = ((holdsPageFailed.items as any[]) || []) as any[];
+  const regForSnapshotFailed: any = {
+    ...registration,
+    paymentStatus: REGISTRATION_PAYMENT_STATUS.failed,
+  };
+  const snapshotFailed = computeCheckInStatus({ tenantId, registration: regForSnapshotFailed, holds: holdsFailed as any });
+
+  // Update registration: set paymentStatus to failed + snapshot
   await updateObject({
     tenantId,
     type: "registration",
@@ -236,6 +269,7 @@ async function handlePaymentFailed(
     body: {
       paymentStatus: REGISTRATION_PAYMENT_STATUS.failed,
       paymentIntentId: paymentIntent.id,
+      checkInStatus: snapshotFailed,
     },
   });
 

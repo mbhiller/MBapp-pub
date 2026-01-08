@@ -18,6 +18,7 @@ import {
 } from "../objects/repo";
 import { guardRegistrations } from "./feature";
 import { createPaymentIntent } from "../common/stripe";
+import { computeCheckInStatus } from "./checkin-readiness";
 import { REGISTRATION_STATUS, REGISTRATION_PAYMENT_STATUS } from "./constants";
 import { createHeldReservationHold, releaseReservationHoldsForOwner, createHeldStallBlockHold, createHeldClassBlockHold } from "../reservations/holds";
 
@@ -397,6 +398,23 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const ttlSecRaw = process.env.REGISTRATION_HOLD_TTL_SECONDS || "900";
     const ttlSec = Number.isFinite(parseInt(ttlSecRaw, 10)) ? parseInt(ttlSecRaw, 10) : 900;
     const holdUntil = new Date(Date.now() + ttlSec * 1000).toISOString();
+    // Compute readiness snapshot for submitted state
+    const holdsPage = await listObjects({
+      tenantId,
+      type: "reservationHold",
+      filters: { ownerType: "registration", ownerId: id },
+      limit: 200,
+      fields: ["id", "itemType", "resourceId", "state"],
+    });
+    const holds = ((holdsPage.items as any[]) || []) as any[];
+    const regForSnapshot: any = {
+      ...registration,
+      status: REGISTRATION_STATUS.submitted,
+      paymentStatus: REGISTRATION_PAYMENT_STATUS.pending,
+    };
+
+    const snapshot = computeCheckInStatus({ tenantId, registration: regForSnapshot, holds: holds as any });
+
     const updated = await updateObject({
       tenantId,
       type: "registration",
@@ -412,6 +430,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
         fees: computedFees,
         totalAmount: amount,
         currency: "usd",
+        checkInStatus: snapshot,
       },
     });
 

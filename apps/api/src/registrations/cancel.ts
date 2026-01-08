@@ -6,6 +6,7 @@ import { getObjectById, updateObject, releaseEventSeat, releaseEventRv, listObje
 import { REGISTRATION_STATUS, REGISTRATION_PAYMENT_STATUS } from "./constants";
 import { guardRegistrations } from "./feature";
 import { releaseReservationHoldsForOwner } from "../reservations/holds";
+import { computeCheckInStatus } from "./checkin-readiness";
 
 /**
  * Release class entry capacity counters by computing qty from holds.
@@ -126,8 +127,14 @@ export async function handle(event: APIGatewayProxyEventV2) {
     if (allowedSubmitted) {
       body.paymentStatus = REGISTRATION_PAYMENT_STATUS.failed; // ensure failed for pre-payment cancellation
     }
-
-    const updated = await updateObject({ tenantId, type: "registration", id, body });
+    // Compute terminal readiness snapshot (cancelled)
+    const regForSnapshot: any = {
+      ...reg,
+      status: REGISTRATION_STATUS.cancelled,
+      paymentStatus: body.paymentStatus || (reg as any).paymentStatus,
+    };
+    const snapshot = computeCheckInStatus({ tenantId, registration: regForSnapshot, holds: [] });
+    const updated = await updateObject({ tenantId, type: "registration", id, body: { ...body, checkInStatus: snapshot } });
 
     // Release capacity only when transitioning to cancelled from a non-cancelled state
     if (eventId) {

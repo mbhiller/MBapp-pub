@@ -1706,6 +1706,9 @@ components:
             description: Legacy field (line items)
             items:
               $ref: '#/components/schemas/RegistrationLine'
+          checkInStatus:
+            $ref: '#/components/schemas/CheckInStatus'
+            nullable: true
         required:
         - type
         - eventId
@@ -1878,6 +1881,59 @@ components:
             errorMessage:
               type: string
               nullable: true
+    CheckInAction:
+      type: object
+      description: Action hint for resolving a check-in blocker
+      required:
+      - type
+      - label
+      properties:
+        type:
+          type: string
+          enum: [view_payment, assign_stalls, assign_rv, assign_classes]
+        label:
+          type: string
+        target:
+          type: string
+          nullable: true
+          description: Optional target id or route key
+    CheckInBlocker:
+      type: object
+      description: Blocker preventing check-in readiness
+      required:
+      - code
+      - message
+      properties:
+        code:
+          type: string
+          enum: [payment_unpaid, payment_failed, cancelled, stalls_unassigned, rv_unassigned, classes_unassigned]
+        message:
+          type: string
+        action:
+          allOf:
+          - $ref: '#/components/schemas/CheckInAction'
+          - type: object
+            nullable: true
+    CheckInStatus:
+      type: object
+      description: Precomputed readiness snapshot for registration check-in
+      required:
+      - ready
+      - blockers
+      - lastEvaluatedAt
+      properties:
+        ready:
+          type: boolean
+        blockers:
+          type: array
+          items:
+            $ref: '#/components/schemas/CheckInBlocker'
+        lastEvaluatedAt:
+          type: string
+          format: date-time
+        version:
+          type: integer
+          nullable: true
     AssignStallsRequest:
       type: object
       description: Request to assign specific stalls to a registration (Sprint BK)
@@ -4680,6 +4736,91 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /registrations/{id}:checkin-readiness:
+    get:
+      tags:
+      - Registrations
+      operationId: getRegistrationCheckInReadiness
+      summary: Get check-in readiness snapshot for a registration
+      description: Computes readiness on-demand and returns a snapshot for UI/operators.
+      x-mbapp-permission: registration:read
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Readiness snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckInStatus'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /registrations/{id}:recompute-checkin-status:
+    post:
+      tags:
+      - Registrations
+      operationId: recomputeRegistrationCheckInStatus
+      summary: Recompute and persist check-in status on registration
+      description: Computes CheckInStatus and persists on Registration; returns the updated object.
+      x-mbapp-permission: registration:write
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Updated registration with check-in status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Registration'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /events:public:
     get:
       tags:
@@ -5941,6 +6082,9 @@ paths:
   /events/registration/{id}:checkin:
     post:
       summary: Check in a registration
+      description: |
+        Stub endpoint for future check-in. Do not implement in this sprint.
+        When implemented, server SHOULD require readiness (checkInStatus.ready=true) or return 409.
       parameters:
       - in: path
         name: id
