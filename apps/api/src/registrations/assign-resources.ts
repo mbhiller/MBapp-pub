@@ -13,6 +13,7 @@ import { parseNonEmptyStringArray } from "../common/registration-validators";
 import { loadRegistrationWithEvent } from "../common/registration-helpers";
 import { assertStallResourcesExistAndAvailable } from "../resources/stalls";
 import { assertRvResourcesExistAndAvailable } from "../resources/rv-sites";
+import { assertEventLinesExistAndAvailable } from "../resources/event-lines";
 
 type AssertResourcesFnArgs = {
   tenantId?: string;
@@ -40,6 +41,12 @@ const RESOURCE_ASSIGNMENT_REGISTRY: Record<string, ResourceAssignmentConfig> = {
     conflictCode: "rv_site_already_assigned",
     assertFn: ({ tenantId, resourceIds, rvSiteIds, eventId }) =>
       assertRvResourcesExistAndAvailable({ tenantId, rvSiteIds: rvSiteIds ?? resourceIds, eventId }),
+  },
+  class_entry: {
+    expectedResourceType: "class_entry",
+    conflictCode: "class_capacity_full",
+    assertFn: ({ tenantId, resourceIds, eventId }) =>
+      assertEventLinesExistAndAvailable({ tenantId, eventId, eventLineIds: resourceIds }),
   },
 };
 
@@ -75,7 +82,11 @@ export async function handle(event: APIGatewayProxyEventV2) {
     // Validate resourceIds using shared helper
     let resourceIds: string[];
     try {
-      resourceIds = parseNonEmptyStringArray(body.resourceIds, { field: "resourceIds" });
+      // For class_entry, allow duplicates (multiple entries from same line); for stalls/rv, enforce uniqueness
+      resourceIds = parseNonEmptyStringArray(body.resourceIds, {
+        field: "resourceIds",
+        allowDuplicates: itemType === "class_entry",
+      });
     } catch (err: any) {
       return badRequest(err.message, { code: err.code, field: err.field });
     }
@@ -102,6 +113,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
       conflictCode: config.conflictCode,
       expectedResourceType: config.expectedResourceType,
       assertResourcesFn: (args: Record<string, any>) => config.assertFn(args as AssertResourcesFnArgs),
+      options: itemType === "class_entry" ? { exclusiveResourceIds: false, blockHoldPerResourceId: true } : undefined,
     });
 
     // Return created holds (safe response: id, state, resourceId only)

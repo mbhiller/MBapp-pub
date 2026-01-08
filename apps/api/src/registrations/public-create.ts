@@ -92,6 +92,25 @@ export async function handle(event: APIGatewayProxyEventV2) {
       }
     }
 
+    // lines (optional): class entry registrations; validation occurs at checkout
+    const rawLines = body.lines;
+    let lines: Array<{ classId: string; qty: number }> = [];
+    if (rawLines !== undefined && rawLines !== null) {
+      if (!Array.isArray(rawLines)) {
+        return badRequest("lines must be an array", { field: "lines", code: "invalid_lines" });
+      }
+      for (const line of rawLines) {
+        if (!line.classId || typeof line.classId !== "string") {
+          return badRequest("each line must have a classId (string)", { field: "lines.classId" });
+        }
+        const qty = Number(line.qty ?? 0) || 0;
+        if (!Number.isInteger(qty) || qty <= 0) {
+          return badRequest("each line must have a qty > 0", { field: "lines.qty", code: "invalid_qty" });
+        }
+        lines.push({ classId: line.classId, qty });
+      }
+    }
+
     // Generate cryptographically secure public token (32 bytes = 64 hex chars)
     const publicToken = crypto.randomBytes(32).toString("hex");
     
@@ -115,6 +134,11 @@ export async function handle(event: APIGatewayProxyEventV2) {
     // Persist rvQty and stallQty on registration
     registrationBody.rvQty = rvQty;
     registrationBody.stallQty = stallQty;
+
+    // Persist class lines on registration
+    if (lines.length > 0) {
+      registrationBody.lines = lines;
+    }
 
     // Optional party information (guest details)
     if (body.party) {

@@ -20,6 +20,7 @@ export function parseNonEmptyStringArray(
     codeInvalid?: string;
     codeDuplicate?: string;
     label?: string;
+    allowDuplicates?: boolean;
   }
 ): string[] {
   const {
@@ -28,6 +29,7 @@ export function parseNonEmptyStringArray(
     codeInvalid = "invalid_resource_ids",
     codeDuplicate = "duplicate_ids",
     label = field,
+    allowDuplicates = false,
   } = opts;
 
   // Check if it's an array
@@ -56,14 +58,16 @@ export function parseNonEmptyStringArray(
     });
   }
 
-  // Check for duplicates
-  const unique = new Set(value);
-  if (unique.size !== value.length) {
-    throw Object.assign(new Error(`Duplicate entries in ${label}`), {
-      code: codeDuplicate,
-      statusCode: 400,
-      field,
-    });
+  // Check for duplicates (unless allowDuplicates is true)
+  if (!allowDuplicates) {
+    const unique = new Set(value);
+    if (unique.size !== value.length) {
+      throw Object.assign(new Error(`Duplicate entries in ${label}`), {
+        code: codeDuplicate,
+        statusCode: 400,
+        field,
+      });
+    }
   }
 
   return value;

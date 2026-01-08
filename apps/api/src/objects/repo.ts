@@ -80,6 +80,13 @@ export type DeleteArgs = {
     at?: string;
   };
 
+  export type ReserveEventLineArgs = {
+    tenantId?: string;
+    eventId: string;
+    lineId: string;
+    qty: number;
+  };
+
 // -------- Dynamo config --------
 const TABLE   = process.env.MBAPP_OBJECTS_TABLE || process.env.MBAPP_TABLE || "mbapp_objects";
 const PK_ATTR = process.env.MBAPP_TABLE_PK || "pk";
@@ -146,10 +153,16 @@ function project<T extends AnyRecord>(obj: T, fields?: string[]): Partial<T> | T
 
 export async function createObject({ tenantId, type, body }: CreateArgs) {
   const canonicalType = normalizeTypeParam(type) ?? type;
-  const needsLineIds = canonicalType === "salesOrder" || canonicalType === "purchaseOrder";
-  const normalizedBody = needsLineIds && Array.isArray((body as AnyRecord)?.lines)
+  const needsLineIds =
+    canonicalType === "salesOrder" || canonicalType === "purchaseOrder" || canonicalType === "event";
+  let normalizedBody = needsLineIds && Array.isArray((body as AnyRecord)?.lines)
     ? { ...body, lines: ensureLineIds((body as AnyRecord).lines as AnyRecord[]) }
     : body;
+
+  // For events, ensure linesReservedById is always an object (never null/undefined)
+  if (canonicalType === "event") {
+    normalizedBody = { ...normalizedBody, linesReservedById: (normalizedBody as AnyRecord).linesReservedById ?? {} };
+  }
 
   const id = (normalizedBody.id as string) || newId();
   const createdAt = (normalizedBody.createdAt as string) || nowIso();
@@ -469,7 +482,8 @@ export async function replaceObject({ tenantId, type, id, body }: ReplaceArgs) {
 
 export async function updateObject({ tenantId, type, id, body }: UpdateArgs) {
   const canonicalType = normalizeTypeParam(type) ?? type;
-  const needsLineIds = canonicalType === "salesOrder" || canonicalType === "purchaseOrder";
+  const needsLineIds =
+    canonicalType === "salesOrder" || canonicalType === "purchaseOrder" || canonicalType === "event";
   let normalizedBody: AnyRecord | UpdateArgs["body"] = body;
 
   if (needsLineIds && Array.isArray((body as AnyRecord)?.lines)) {
@@ -495,6 +509,16 @@ export async function updateObject({ tenantId, type, id, body }: UpdateArgs) {
       ...body,
       lines: ensureLineIds((body as AnyRecord).lines as AnyRecord[], { startAt, reserveIds }) as AnyRecord,
     };
+  }
+
+  // For events, ensure linesReservedById is always an object (never null/undefined)
+  if (canonicalType === "event") {
+    const existing = await getObjectById({ tenantId, type, id, fields: ["linesReservedById"] });
+    const existingMap = (existing as AnyRecord)?.linesReservedById as Record<string, unknown> | undefined;
+    // Only initialize if not provided in body AND existing event has none
+    if (!((normalizedBody as AnyRecord).linesReservedById) && !existingMap) {
+      (normalizedBody as AnyRecord).linesReservedById = {};
+    }
   }
   const identity = new Set([PK_ATTR, SK_ATTR, "tenantId", "type", "id", "createdAt", "updatedAt"]);
   const sets: string[] = [];
@@ -906,6 +930,188 @@ export async function releaseEventStalls({ tenantId, eventId, qty, at }: Reserve
     }
     throw err;
   }
+}
+
+/**
+ * Reserve class line capacity by incrementing linesReservedById[lineId] by qty.
+ * Enforces EventLine.capacity when set; null/undefined means unlimited.
+ * Uses retry loop (max 5 attempts) to handle concurrent modifications.
+ */
+export async function reserveEventLineCapacity({ tenantId, eventId, lineId, qty }: ReserveEventLineArgs) {
+  if (!qty || qty <= 0) {
+    throw Object.assign(new Error("Invalid class qty"), { code: "invalid_class_qty", statusCode: 400 });
+  }
+
+  const MAX_RETRIES = 5;
+  let lastErr: Error | null = null;
+
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      const event = await getObjectById({
+        tenantId,
+        type: "event",
+        id: eventId,
+        fields: ["id", "lines", "linesReservedById"],
+      });
+
+      const lines = Array.isArray((event as AnyRecord)?.lines) ? ((event as AnyRecord).lines as AnyRecord[]) : [];
+      const line = lines.find((l) => (l as AnyRecord)?.id === lineId);
+      if (!line) {
+        throw Object.assign(new Error("Event line not found"), { code: "event_line_not_found", statusCode: 400 });
+      }
+
+      const capacity = (line as AnyRecord)?.capacity as number | null | undefined;
+      const reservedMap = ((event as AnyRecord)?.linesReservedById as Record<string, unknown>) || {};
+      const reserved = Number(reservedMap[lineId] ?? 0) || 0;
+
+      // Check capacity (fail fast before DynamoDB call)
+      if (typeof capacity === "number" && capacity >= 0) {
+        if (reserved + qty > capacity) {
+          throw Object.assign(new Error("Class capacity full"), { code: "class_capacity_full", statusCode: 409 });
+        }
+      }
+
+      const Key: AnyRecord = {
+        [PK_ATTR]: tenantId,
+        [SK_ATTR]: `${normalizeTypeParam("event") ?? "event"}#${eventId}`,
+      };
+
+      const names = {
+        "#linesReservedById": "linesReservedById",
+        "#lid": lineId,
+        "#updatedAt": "updatedAt",
+      } as Record<string, string>;
+
+      const values: Record<string, unknown> = {
+        ":zero": 0,
+        ":qty": qty,
+        ":now": nowIso(),
+      };
+
+      // Build ConditionExpression: match expected value or attribute_not_exists
+      let conditionExpression: string;
+      if (reserved === 0) {
+        values[":zero_cond"] = 0;
+        conditionExpression = "attribute_not_exists(#linesReservedById.#lid) OR #linesReservedById.#lid = :zero_cond";
+      } else {
+        values[":expected"] = reserved;
+        conditionExpression = "#linesReservedById.#lid = :expected";
+      }
+
+      const res = await ddb.send(new UpdateCommand({
+        TableName: TABLE,
+        Key,
+        UpdateExpression: "SET #linesReservedById.#lid = if_not_exists(#linesReservedById.#lid, :zero) + :qty, #updatedAt = :now",
+        ConditionExpression: conditionExpression,
+        ExpressionAttributeNames: names,
+        ExpressionAttributeValues: values,
+        ReturnValues: "ALL_NEW",
+      }));
+      return res.Attributes as AnyRecord;
+    } catch (err: any) {
+      if (err?.name === "ConditionalCheckFailedException") {
+        // Concurrent modification; retry from scratch
+        lastErr = err;
+        continue;
+      }
+      // Non-retryable errors (capacity full, line not found, etc.)
+      if (err?.code === "class_capacity_full" || err?.code === "event_line_not_found" || err?.code === "invalid_class_qty") {
+        throw err;
+      }
+      // Other DynamoDB errors
+      throw err;
+    }
+  }
+
+  // Exhausted retries
+  throw Object.assign(new Error("Failed to reserve capacity after max retries"), {
+    code: "capacity_reserve_conflict",
+    statusCode: 409,
+    eventLineId: lineId,
+    cause: lastErr,
+  });
+}
+
+/**
+ * Release class line capacity by decrementing linesReservedById[lineId] by qty (clamped at 0).
+ * Uses retry loop (max 5 attempts) to handle concurrent modifications.
+ */
+export async function releaseEventLineCapacity({ tenantId, eventId, lineId, qty }: ReserveEventLineArgs) {
+  if (!qty || qty <= 0) return null as any;
+
+  const MAX_RETRIES = 5;
+  let lastErr: Error | null = null;
+
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      const event = await getObjectById({
+        tenantId,
+        type: "event",
+        id: eventId,
+        fields: ["id", "lines", "linesReservedById"],
+      });
+
+      const lines = Array.isArray((event as AnyRecord)?.lines) ? ((event as AnyRecord).lines as AnyRecord[]) : [];
+      const line = lines.find((l) => (l as AnyRecord)?.id === lineId);
+      if (!line) {
+        throw Object.assign(new Error("Event line not found"), { code: "event_line_not_found", statusCode: 400 });
+      }
+
+      const reservedMap = ((event as AnyRecord)?.linesReservedById as Record<string, unknown>) || {};
+      const reserved = Number(reservedMap[lineId] ?? 0) || 0;
+      if (reserved <= 0) return null as any;
+
+      // Compute new value clamped at 0
+      const newReserved = Math.max(0, reserved - qty);
+
+      const Key: AnyRecord = {
+        [PK_ATTR]: tenantId,
+        [SK_ATTR]: `${normalizeTypeParam("event") ?? "event"}#${eventId}`,
+      };
+
+      const names = {
+        "#linesReservedById": "linesReservedById",
+        "#lid": lineId,
+        "#updatedAt": "updatedAt",
+      } as Record<string, string>;
+
+      const values: Record<string, unknown> = {
+        ":now": nowIso(),
+        ":new": newReserved,
+        ":expected": reserved,
+      };
+
+      // Optimistic lock: ensure value matches what we read
+      const cond = "#linesReservedById.#lid = :expected";
+
+      const res = await ddb.send(new UpdateCommand({
+        TableName: TABLE,
+        Key,
+        UpdateExpression: "SET #linesReservedById.#lid = :new, #updatedAt = :now",
+        ConditionExpression: cond,
+        ExpressionAttributeNames: names,
+        ExpressionAttributeValues: values,
+        ReturnValues: "ALL_NEW",
+      }));
+      return res.Attributes as AnyRecord;
+    } catch (err: any) {
+      if (err?.name === "ConditionalCheckFailedException") {
+        // Concurrent modification; retry from scratch
+        lastErr = err;
+        continue;
+      }
+      // Non-retryable errors (line not found, etc.)
+      if (err?.code === "event_line_not_found") {
+        throw err;
+      }
+      // Other DynamoDB errors
+      throw err;
+    }
+  }
+
+  // Exhausted retries; log and continue (release is not critical)
+  console.warn("Failed to release capacity after max retries", { eventId, lineId, qty, cause: lastErr });
+  return null as any;
 }
 
 export async function deleteObject({ tenantId, type, id }: DeleteArgs) {

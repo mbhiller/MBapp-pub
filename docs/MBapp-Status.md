@@ -6,6 +6,28 @@
 
 ---
 
+### Sprint BOv2 — Event Classes Foundation — ✅ Complete (2026-01-08)
+
+**Summary:** Established class entry reservations on event lines with stable capacity counters, robust holds lifecycle, and deterministic error codes. Implemented block-hold creation at checkout, per-entry assignment conversion, and correct counter release on cancel/refund and hold expiration. Added focused smokes and CI-friendly diagnostics.
+
+**Deliverables (E1–E10):**
+- **Counters & concurrency:** `reserveEventLineCapacity` / `releaseEventLineCapacity` implemented with read-compute-set + bounded retry; `linesReservedById` normalization on create/update.
+- **Checkout + errors:** Public checkout returns stable error envelopes; 409 `class_capacity_full` guarded with no counter change; 400 `class_not_in_event` validation.
+- **Holds lifecycle:** Block hold idempotency fixed (exact metadata match), block → per-entry conversion via `assign-resources`, block release with `releaseReason="assigned"`.
+- **Cancel/refund + expire:** Per-entry-aware counter release helper used by cancel, refund, and expire paths; RV/stalls counters unchanged.
+- **Smokes + diagnostics:** Added core/extended class-entry smokes and conditional dump of holds on failures for fast triage.
+- **Docs:** Foundations, Status, and smoke coverage entries updated.
+
+**Verification:**
+- ✅ Typescript: `npm run typecheck -w apps/api` clean.
+- ✅ Smokes: core (`reserve-and-assign-happy-path`, `capacity-full-guard`, `not-in-event-guard`) and extended (`release-on-cancel`) PASS.
+- ✅ Spec pipeline: `npm run spec:lint`, `npm run spec:bundle`, `npm run spec:types:api`, `npm run spec:types:mobile` run clean; no schema-breaking changes.
+
+**What’s Next:**
+- Scoring/payout wiring for class entries.
+- Health documentation (status/alerts for holds/capacity anomalies).
+- EPC check-in and ledger reconciliation pathways.
+
 ### Sprint BN — Assign-Resources Consolidation + Coverage — ✅ Complete (2026-01-07)
 
 **Summary:** Unified the polymorphic assign-resources flow with shared validation/registration loading/tag parsing, hardened error remapping for legacy compatibility, and expanded smoke/spec/docs coverage to reflect real conflict codes.
