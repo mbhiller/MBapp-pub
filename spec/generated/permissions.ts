@@ -9,6 +9,7 @@
 export const PERMISSIONS_BY_ENDPOINT = {
   "DELETE /views/{id}": "view:write",
   "DELETE /workspaces/{id}": "workspace:write",
+  "GET /events/{eventId}:checkin-worklist": "event:read registration:read",
   "GET /events/{eventId}:classes-summary": "event:read registration:read",
   "GET /events/{eventId}:registrations-by-line": "event:read registration:read",
   "GET /inventory/{id}/onhand": "inventory:read",

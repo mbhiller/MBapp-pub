@@ -2172,6 +2172,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/events/{eventId}:checkin-worklist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get check-in worklist for an event (operator console)
+         * @description Operator check-in console endpoint to list registrations for an event with worklist filters.
+         *     Returns registrations segmented by check-in status (checked in vs not checked in) and readiness.
+         *     Supports filtering by blocker codes, status, and free-text search.
+         *     Designed for fast desk operations with deterministic cursor pagination.
+         *
+         */
+        get: operations["getCheckInWorklist"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/messages/{id}:retry": {
         parameters: {
             query?: never;
@@ -4256,6 +4280,19 @@ export interface components {
             /** @description If filtered to a specific line, the eventLineId; null if query was unfiltered */
             eventLineId?: string | null;
             items: components["schemas"]["RegistrationByLineItem"][];
+            /** @description Opaque cursor for next page; null if no more pages */
+            next?: string | null;
+        };
+        /** @description Paginated worklist for event check-in console (Sprint BV) */
+        CheckInWorklistPage: {
+            eventId: string;
+            /** @description Mirror of input filter for client clarity (false = not checked in list, true = checked in list) */
+            checkedIn: boolean;
+            /** @description Mirror of input filter (true = ready sublist, false = blocked sublist, null = all) */
+            ready?: boolean | null;
+            /** @description Mirror of input filter (comma-separated blocker codes if specified, null otherwise) */
+            blockerCode?: string | null;
+            items: components["schemas"]["Registration"][];
             /** @description Opaque cursor for next page; null if no more pages */
             next?: string | null;
         };
@@ -6818,6 +6855,68 @@ export interface operations {
                 };
             };
             /** @description Bad request (e.g., invalid eventLineId) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationError"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Event not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getCheckInWorklist: {
+        parameters: {
+            query?: {
+                /** @description Filter by check-in status (false = not checked in [default desk view], true = checked in list) */
+                checkedIn?: boolean;
+                /** @description Filter by readiness (true = ready to check in, false = blocked, omit = all). Derived from checkInStatus.ready. */
+                ready?: boolean;
+                /** @description Filter by specific blocker code(s). Comma-separated for multiple (OR logic).
+                 *     Examples: "payment_unpaid", "stalls_unassigned,rv_unassigned". Only applies when ready=false or omitted.
+                 *      */
+                blockerCode?: string;
+                /** @description Filter by registration status (typically "confirmed" for desk operations) */
+                status?: "draft" | "submitted" | "confirmed" | "cancelled";
+                /** @description Free-text search on partyId, registrationId, and other registration fields */
+                q?: string;
+                /** @description Maximum number of items to return (default 50, max 200) */
+                limit?: number;
+                /** @description Opaque pagination cursor for next page */
+                next?: string;
+            };
+            header: {
+                "x-tenant-id": components["parameters"]["TenantHeader"];
+            };
+            path: {
+                /** @description Event ID */
+                eventId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paginated check-in worklist for event */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckInWorklistPage"];
+                };
+            };
+            /** @description Bad request (e.g., invalid eventId, invalid filter combination) */
             400: {
                 headers: {
                     [name: string]: unknown;

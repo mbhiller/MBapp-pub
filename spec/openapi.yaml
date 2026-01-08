@@ -3258,6 +3258,104 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /events/{eventId}:checkin-worklist:
+    get:
+      tags:
+        - Events
+      operationId: getCheckInWorklist
+      summary: Get check-in worklist for an event (operator console)
+      description: |
+        Operator check-in console endpoint to list registrations for an event with worklist filters.
+        Returns registrations segmented by check-in status (checked in vs not checked in) and readiness.
+        Supports filtering by blocker codes, status, and free-text search.
+        Designed for fast desk operations with deterministic cursor pagination.
+      x-mbapp-permission: event:read registration:read
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - name: eventId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Event ID
+        - name: checkedIn
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: Filter by check-in status (false = not checked in [default desk view], true = checked in list)
+        - name: ready
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: Filter by readiness (true = ready to check in, false = blocked, omit = all). Derived from checkInStatus.ready.
+        - name: blockerCode
+          in: query
+          required: false
+          schema:
+            type: string
+          description: |
+            Filter by specific blocker code(s). Comma-separated for multiple (OR logic).
+            Examples: "payment_unpaid", "stalls_unassigned,rv_unassigned". Only applies when ready=false or omitted.
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - draft
+              - submitted
+              - confirmed
+              - cancelled
+          description: Filter by registration status (typically "confirmed" for desk operations)
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Free-text search on partyId, registrationId, and other registration fields
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+          description: Maximum number of items to return (default 50, max 200)
+        - name: next
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Opaque pagination cursor for next page
+      responses:
+        '200':
+          description: Paginated check-in worklist for event
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckInWorklistPage'
+        '400':
+          description: Bad request (e.g., invalid eventId, invalid filter combination)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Event not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /messages/{id}:retry:
     post:
       tags:
@@ -7345,6 +7443,35 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/RegistrationByLineItem'
+        next:
+          type: string
+          nullable: true
+          description: Opaque cursor for next page; null if no more pages
+    CheckInWorklistPage:
+      type: object
+      description: Paginated worklist for event check-in console (Sprint BV)
+      required:
+        - eventId
+        - checkedIn
+        - items
+      properties:
+        eventId:
+          type: string
+        checkedIn:
+          type: boolean
+          description: Mirror of input filter for client clarity (false = not checked in list, true = checked in list)
+        ready:
+          type: boolean
+          nullable: true
+          description: Mirror of input filter (true = ready sublist, false = blocked sublist, null = all)
+        blockerCode:
+          type: string
+          nullable: true
+          description: Mirror of input filter (comma-separated blocker codes if specified, null otherwise)
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Registration'
         next:
           type: string
           nullable: true

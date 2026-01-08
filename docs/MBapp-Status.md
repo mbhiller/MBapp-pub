@@ -6,6 +6,30 @@
 
 ---
 
+### Sprint BV — Check-In Worklists v0 — ✅ Complete (2026-01-08)
+
+**Summary:** Delivered the operator worklist endpoint to segment check-in queues by readiness and checked-in state, with blocker and status filtering. Built on the existing filtered path (limit/next pagination), ready for future index backing without API changes.
+
+**Deliverables (E1–E4):**
+- **Spec:** Added `CheckInWorklistPage` and `GET /events/{eventId}:checkin-worklist` with filters `checkedIn`, `ready`, `blockerCode`, `status`, `q`, `limit`, `next` in [spec/MBapp-Modules.yaml](spec/MBapp-Modules.yaml).
+- **Backend Route:** Wired the endpoint with `event:read` + `registration:read` permissions.
+- **Backend Handler:** Implemented filtered-path pagination with readiness/checked-in/blocker/status/q filters and bounded backend paging.
+- **Smokes (core):** Two CORE flows in [ops/smoke/smoke.mjs](ops/smoke/smoke.mjs) and [ops/ci-smokes.json](ops/ci-smokes.json):
+  - `smoke:checkin:worklist-ready-vs-blocked` — Confirms ready vs blocked segmentation and blocker filters for payment vs stalls.
+  - `smoke:checkin:worklist-checked-in` — Ensures checked-in items are excluded from unchecked queries and present in checked-in queries.
+
+**Endpoints:**
+- `GET /events/{eventId}:checkin-worklist` — Paged worklist with filters for checked-in state, readiness, blockers, status, and `q` (id/partyId).
+
+**Verification:**
+- ✅ Typecheck: `npm run typecheck --workspaces --if-present`
+- ⏭️ Smokes: Core suite available (see worklist smokes above).
+
+**Impact:**
+- Operators can pull ready or blocked queues without client-side filtering; API is stable for future index-backed optimizations.
+
+---
+
 ### Sprint BU — Atomic Registration Check-In — ✅ Complete (2026-01-08)
 
 **Summary:** Delivered the operator check-in action with blocker-aware 409s and idempotent stamping. The endpoint recomputes readiness on call, refuses when blockers exist, and stamps `checkedInAt/by/deviceId` plus a ready snapshot on success. Replays (same/different Idempotency-Key, or already checked-in) return the existing checked-in registration.

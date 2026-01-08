@@ -162,6 +162,15 @@ Implements the operator action to mark a registration as checked in while enforc
 **Audit:** Deferred until audit infra exists; current version stores actor + device on the registration for traceability.
   - Both require `event:read` + `registration:read` permissions
 
+### Check-In Worklists v0 (Sprint BV)
+
+Operator-facing list endpoint for check-in queues.
+
+- **Endpoint:** `GET /events/{eventId}:checkin-worklist`
+- **Filters:** `checkedIn` (boolean), `ready` (boolean), `blockerCode` (comma-delimited blocker codes), `status` (draft|submitted|confirmed|cancelled), `q` (matches `id` or `partyId`), pagination via `limit`/`next`.
+- **Behavior:** Uses the existing filtered path in v0 (limit default 50, max 200) to page registrations by eventId while applying readiness/checked-in/blocker/status/q filters in-memory; will remain API-stable if swapped to an index-backed path in a later sprint.
+- **Use with atomic check-in:** Call worklist with `checkedIn=false` + `ready=true` to fetch ready-to-check registrations, then POST `:checkin` per item; `checkedIn=true` surfaces completed check-ins.
+
 - **Summary derivation (`classes-summary`):**
   - **reserved/remaining:** Computed from `event.linesReservedById` (server-maintained counter) and `lines[i].capacity`
     - `reserved = linesReservedById[lineId] || 0`
