@@ -54,6 +54,19 @@ Smokes are organized by tier for targeted CI validation:
 
 ---
 
+## Sprint BP — Event Classes Operator Reporting
+
+**Scope:** Validates operator reporting endpoints for event class entries: per-line capacity summary and paged registrations-by-line query.
+
+### CORE
+- **`smoke:classes:operator-line-summary`** — Creates event with 2 classes/lines (L1 capacity=5, L2 capacity=3), 3 registrations (RegA: 2xL1, RegB: 1xL1+1xL2, RegC: 2xL2), confirms+assigns RegA+RegB. Calls `GET /events/{eventId}:classes-summary`. Asserts: L1 (reserved=3, remaining=2, registrationsWithEntries=2, entriesRequested=3), L2 (reserved=3, remaining=0, registrationsWithEntries=2, entriesRequested=3), ordering matches event.lines order.
+- **`smoke:classes:operator-registrations-by-line`** — Creates event with 2 classes/lines, 3 registrations (RegA: 2xL1, RegB: 1xL1+1xL2, RegC: 2xL2). Calls `GET /events/{eventId}:registrations-by-line?eventLineId=L1`. Asserts: 2 items (RegA, RegB), entriesOnThisLine correct (RegA=2, RegB=1), next=null. Calls with `eventLineId=L2`. Asserts: 2 items (RegB, RegC).
+
+### EXTENDED
+- **`smoke:classes:operator-after-cancel`** — Creates 1 line capacity 3; RegA (2 entries) + RegB (1 entry) both confirmed+assigned; validates summary before cancel (reserved=3, remaining=0, regsWithEntries=2, entriesRequested=3); cancels RegA; validates summary after cancel excludes cancelled registration (reserved=1, remaining=2, regsWithEntries=1, entriesRequested=1).
+
+---
+
 ## Sprint BOv2 — Event Classes v1
 
 **Scope:** Validates class entry reservation lifecycle with line-scoped capacity, block holds at checkout, per-entry assignment conversion, and correct counter release.

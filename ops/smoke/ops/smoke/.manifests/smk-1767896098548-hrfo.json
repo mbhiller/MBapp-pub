@@ -1,0 +1,53 @@
+{
+  "smokeRunId": "smk-1767896098548-hrfo",
+  "base": "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com",
+  "tenantHeader": "SmokeTenant",
+  "jwtTenant": null,
+  "startedAt": "2026-01-08T18:14:58.548Z",
+  "finishedAt": "2026-01-08T18:15:03.901Z",
+  "entries": [
+    {
+      "type": "class",
+      "id": "umunljm8u1r4ouqlfbe8kt",
+      "route": "/objects/class",
+      "meta": {
+        "name": "Jumping-smk-1767896098548-hrfo",
+        "status": 200
+      },
+      "createdAt": "2026-01-08T18:14:58.957Z"
+    },
+    {
+      "type": "class",
+      "id": "0kmm5el8wfwg13jxfyxv8dv",
+      "route": "/objects/class",
+      "meta": {
+        "name": "Dressage-smk-1767896098548-hrfo",
+        "status": 200
+      },
+      "createdAt": "2026-01-08T18:14:59.235Z"
+    },
+    {
+      "type": "event",
+      "id": "39unhdrm8k32d9n8lf99oj",
+      "route": "/objects/event",
+      "meta": {
+        "name": "smk-1767896098548-hrfo-classes_block_evt",
+        "status": 200
+      },
+      "createdAt": "2026-01-08T18:14:59.352Z"
+    },
+    {
+      "type": "event",
+      "id": "39unhdrm8k32d9n8lf99oj",
+      "route": "/objects/event",
+      "meta": {
+        "name": "smk-1767896098548-hrfo-classes_block_evt",
+        "lines": [
+          "L1",
+          "L2"
+        ]
+      },
+      "createdAt": "2026-01-08T18:14:59.352Z"
+    }
+  ]
+}

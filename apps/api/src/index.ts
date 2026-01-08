@@ -115,6 +115,8 @@ import * as StripeWebhook from "./webhooks/stripe-handler";
 
 // Public endpoints (Sprint AU)
 import * as EventsPublicList from "./events/public-list";
+import * as EventsClassesSummary from "./events/classes-summary-get";
+import * as EventsRegistrationsByLine from "./events/registrations-by-line-get";
 import * as RegPublicCreate from "./registrations/public-create";
 import * as RegCheckout from "./registrations/checkout";
 import * as RegPublicGet from "./registrations/public-get";
@@ -648,6 +650,28 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
     if (method === "GET" && path === "/reservation-holds") {
       requirePerm(auth, "registration:read");
       return ReservationHoldsList.handle(event);
+    }
+
+    // Events: classes capacity summary (operator reporting - Sprint BP)
+    {
+      const m = match(/^\/events\/([^/]+):classes-summary$/i, path);
+      if (m && method === "GET") {
+        const [eventId] = m;
+        requirePerm(auth, "event:read");
+        requirePerm(auth, "registration:read");
+        return EventsClassesSummary.handle({ ...event, pathParameters: { ...(event.pathParameters || {}), tenantId: auth.tenantId, eventId } });
+      }
+    }
+
+    // Events: registrations by line (operator reporting - Sprint BP)
+    {
+      const m = match(/^\/events\/([^/]+):registrations-by-line$/i, path);
+      if (m && method === "GET") {
+        const [eventId] = m;
+        requirePerm(auth, "event:read");
+        requirePerm(auth, "registration:read");
+        return EventsRegistrationsByLine.handle({ ...event, pathParameters: { ...(event.pathParameters || {}), tenantId: auth.tenantId, eventId } });
+      }
     }
 
     // Resources: availability query

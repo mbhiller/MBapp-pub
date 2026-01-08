@@ -3686,6 +3686,558 @@ const tests = {
     };
   },
 
+  "smoke:classes:operator-line-summary": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // Create 2 Class objects
+    const class1 = await post("/objects/class", {
+      type: "class",
+      name: `OpSum-L1-${SMOKE_RUN_ID}`,
+      status: "open"
+    });
+    if (!class1.ok || !class1.body?.id) {
+      return { test: "classes:operator-line-summary", result: "FAIL", reason: "class1-create-failed" };
+    }
+    const classId1 = class1.body.id;
+
+    const class2 = await post("/objects/class", {
+      type: "class",
+      name: `OpSum-L2-${SMOKE_RUN_ID}`,
+      status: "open"
+    });
+    if (!class2.ok || !class2.body?.id) {
+      return { test: "classes:operator-line-summary", result: "FAIL", reason: "class2-create-failed" };
+    }
+    const classId2 = class2.body.id;
+
+    // Create event with 2 lines: L1 capacity 5, L2 capacity 3
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: smokeTag("classes_opsum_evt"),
+      capacity: 10,
+      lines: [
+        { classId: classId1, capacity: 5, discipline: "Jumping", fee: 5000 },
+        { classId: classId2, capacity: 3, discipline: "Dressage", fee: 4500 }
+      ]
+    });
+    if (!evt.ok || !evt.body?.id || !Array.isArray(evt.body?.lines) || evt.body.lines.length < 2) {
+      return { test: "classes:operator-line-summary", result: "FAIL", reason: "event-create-failed" };
+    }
+    const eventId = evt.body.id;
+    const L1 = evt.body.lines[0]?.id || "L1";
+    const L2 = evt.body.lines[1]?.id || "L2";
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: smokeTag("classes_opsum_evt") } });
+
+    // RegA: 2 entries on L1
+    const regA = await post(`/registrations:public`, {
+      eventId,
+      lines: [{ classId: classId1, qty: 2 }],
+      party: { email: `opsum_a+${SMOKE_RUN_ID}@example.com` }
+    }, featureHeaders, { auth: "none" });
+    if (!regA.ok || !regA.body?.registration?.id) {
+      return { test: "classes:operator-line-summary", result: "FAIL", reason: "regA-create-failed" };
+    }
+    const regAId = regA.body.registration.id;
+
+    const chkA = await post(`/events/registration/${encodeURIComponent(regAId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": regA.body.publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!chkA.ok) {
+      return { test: "classes:operator-line-summary", result: "FAIL", reason: "chkA-failed" };
+    }
+
+    // Webhook confirm A
+    await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "Stripe-Signature": "sim_valid_signature", ...featureHeaders, "x-tenant-id": TENANT },
+      body: JSON.stringify({ id: `evt_opsum_a_${SMOKE_RUN_ID}`, type: "payment_intent.succeeded", data: { object: { id: chkA.body.paymentIntentId, status: "succeeded", metadata: { registrationId: regAId, eventId } } } })
+    });
+
+    // Assign A
+    const assignA = await post(`/registrations/${encodeURIComponent(regAId)}:assign-resources`, {
+      itemType: "class_entry",
+      resourceIds: [L1, L1]
+    }, featureHeaders);
+    if (!assignA.ok) {
+      return { test: "classes:operator-line-summary", result: "FAIL", reason: "assignA-failed" };
+    }
+
+    // RegB: 1 entry on L1, 1 entry on L2
+    const regB = await post(`/registrations:public`, {
+      eventId,
+      lines: [
+        { classId: classId1, qty: 1 },
+        { classId: classId2, qty: 1 }
+      ],
+      party: { email: `opsum_b+${SMOKE_RUN_ID}@example.com` }
+    }, featureHeaders, { auth: "none" });
+    if (!regB.ok || !regB.body?.registration?.id) {
+      return { test: "classes:operator-line-summary", result: "FAIL", reason: "regB-create-failed" };
+    }
+    const regBId = regB.body.registration.id;
+
+    const chkB = await post(`/events/registration/${encodeURIComponent(regBId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": regB.body.publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!chkB.ok) {
+      return { test: "classes:operator-line-summary", result: "FAIL", reason: "chkB-failed" };
+    }
+
+    // Webhook confirm B
+    await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "Stripe-Signature": "sim_valid_signature", ...featureHeaders, "x-tenant-id": TENANT },
+      body: JSON.stringify({ id: `evt_opsum_b_${SMOKE_RUN_ID}`, type: "payment_intent.succeeded", data: { object: { id: chkB.body.paymentIntentId, status: "succeeded", metadata: { registrationId: regBId, eventId } } } })
+    });
+
+    // Assign B
+    const assignB = await post(`/registrations/${encodeURIComponent(regBId)}:assign-resources`, {
+      itemType: "class_entry",
+      resourceIds: [L1, L2]
+    }, featureHeaders);
+    if (!assignB.ok) {
+      return { test: "classes:operator-line-summary", result: "FAIL", reason: "assignB-failed" };
+    }
+
+    // RegC: 2 entries on L2 (leave in confirmed state without assignment)
+    const regC = await post(`/registrations:public`, {
+      eventId,
+      lines: [{ classId: classId2, qty: 2 }],
+      party: { email: `opsum_c+${SMOKE_RUN_ID}@example.com` }
+    }, featureHeaders, { auth: "none" });
+    if (!regC.ok || !regC.body?.registration?.id) {
+      return { test: "classes:operator-line-summary", result: "FAIL", reason: "regC-create-failed" };
+    }
+    const regCId = regC.body.registration.id;
+
+    const chkC = await post(`/events/registration/${encodeURIComponent(regCId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": regC.body.publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!chkC.ok) {
+      return { test: "classes:operator-line-summary", result: "FAIL", reason: "chkC-failed" };
+    }
+
+    // Webhook confirm C
+    await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "Stripe-Signature": "sim_valid_signature", ...featureHeaders, "x-tenant-id": TENANT },
+      body: JSON.stringify({ id: `evt_opsum_c_${SMOKE_RUN_ID}`, type: "payment_intent.succeeded", data: { object: { id: chkC.body.paymentIntentId, status: "succeeded", metadata: { registrationId: regCId, eventId } } } })
+    });
+
+    // Call operator summary endpoint
+    const summary = await get(`/events/${encodeURIComponent(eventId)}:classes-summary`);
+    if (!summary.ok || !Array.isArray(summary.body?.lines)) {
+      return { test: "classes:operator-line-summary", result: "FAIL", reason: "summary-failed", summary };
+    }
+
+    const lines = summary.body.lines;
+    const line1 = lines.find(l => l.id === L1);
+    const line2 = lines.find(l => l.id === L2);
+
+    // Assertions for L1: RegA(2) + RegB(1) = 3 reserved, 2 regs with entries, 3 entries requested
+    const l1ReservedOk = line1?.reserved === 3;
+    const l1RemainingOk = line1?.remaining === 2; // 5 - 3
+    const l1RegsOk = line1?.registrationsWithEntries === 2; // RegA, RegB
+    const l1EntriesOk = line1?.entriesRequested === 3;
+
+    // Assertions for L2: RegB(1) + RegC(2) = 3 reserved, 2 regs with entries, 3 entries requested
+    const l2ReservedOk = line2?.reserved === 3;
+    const l2RemainingOk = line2?.remaining === 0; // 3 - 3
+    const l2RegsOk = line2?.registrationsWithEntries === 2; // RegB, RegC
+    const l2EntriesOk = line2?.entriesRequested === 3;
+
+    // Verify ordering matches event.lines order
+    const orderOk = lines[0]?.id === L1 && lines[1]?.id === L2;
+
+    const pass = l1ReservedOk && l1RemainingOk && l1RegsOk && l1EntriesOk &&
+                 l2ReservedOk && l2RemainingOk && l2RegsOk && l2EntriesOk &&
+                 orderOk;
+
+    return {
+      test: "classes:operator-line-summary",
+      result: pass ? "PASS" : "FAIL",
+      eventId,
+      registrations: { regAId, regBId, regCId },
+      line1: {
+        reserved: line1?.reserved,
+        remaining: line1?.remaining,
+        registrationsWithEntries: line1?.registrationsWithEntries,
+        entriesRequested: line1?.entriesRequested,
+        checks: { l1ReservedOk, l1RemainingOk, l1RegsOk, l1EntriesOk }
+      },
+      line2: {
+        reserved: line2?.reserved,
+        remaining: line2?.remaining,
+        registrationsWithEntries: line2?.registrationsWithEntries,
+        entriesRequested: line2?.entriesRequested,
+        checks: { l2ReservedOk, l2RemainingOk, l2RegsOk, l2EntriesOk }
+      },
+      orderOk,
+      reason: !pass ? "assertion-failed" : null
+    };
+  },
+
+  "smoke:classes:operator-registrations-by-line": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // Create 2 Class objects
+    const class1 = await post("/objects/class", {
+      type: "class",
+      name: `OpRegs-L1-${SMOKE_RUN_ID}`,
+      status: "open"
+    });
+    if (!class1.ok || !class1.body?.id) {
+      return { test: "classes:operator-registrations-by-line", result: "FAIL", reason: "class1-create-failed" };
+    }
+    const classId1 = class1.body.id;
+
+    const class2 = await post("/objects/class", {
+      type: "class",
+      name: `OpRegs-L2-${SMOKE_RUN_ID}`,
+      status: "open"
+    });
+    if (!class2.ok || !class2.body?.id) {
+      return { test: "classes:operator-registrations-by-line", result: "FAIL", reason: "class2-create-failed" };
+    }
+    const classId2 = class2.body.id;
+
+    // Create event with 2 lines
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: smokeTag("classes_opregs_evt"),
+      capacity: 10,
+      lines: [
+        { classId: classId1, capacity: 5, discipline: "Jumping", fee: 5000 },
+        { classId: classId2, capacity: 3, discipline: "Dressage", fee: 4500 }
+      ]
+    });
+    if (!evt.ok || !evt.body?.id || !Array.isArray(evt.body?.lines) || evt.body.lines.length < 2) {
+      return { test: "classes:operator-registrations-by-line", result: "FAIL", reason: "event-create-failed" };
+    }
+    const eventId = evt.body.id;
+    const L1 = evt.body.lines[0]?.id || "L1";
+    const L2 = evt.body.lines[1]?.id || "L2";
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: smokeTag("classes_opregs_evt") } });
+
+    // RegA: 2 entries on L1 only
+    const regA = await post(`/registrations:public`, {
+      eventId,
+      lines: [{ classId: classId1, qty: 2 }],
+      party: { email: `opregs_a+${SMOKE_RUN_ID}@example.com` }
+    }, featureHeaders, { auth: "none" });
+    if (!regA.ok || !regA.body?.registration?.id) {
+      return { test: "classes:operator-registrations-by-line", result: "FAIL", reason: "regA-create-failed" };
+    }
+    const regAId = regA.body.registration.id;
+
+    const chkA = await post(`/events/registration/${encodeURIComponent(regAId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": regA.body.publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!chkA.ok) {
+      return { test: "classes:operator-registrations-by-line", result: "FAIL", reason: "chkA-failed" };
+    }
+
+    // RegB: 1 entry on L1, 1 entry on L2
+    const regB = await post(`/registrations:public`, {
+      eventId,
+      lines: [
+        { classId: classId1, qty: 1 },
+        { classId: classId2, qty: 1 }
+      ],
+      party: { email: `opregs_b+${SMOKE_RUN_ID}@example.com` }
+    }, featureHeaders, { auth: "none" });
+    if (!regB.ok || !regB.body?.registration?.id) {
+      return { test: "classes:operator-registrations-by-line", result: "FAIL", reason: "regB-create-failed" };
+    }
+    const regBId = regB.body.registration.id;
+
+    const chkB = await post(`/events/registration/${encodeURIComponent(regBId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": regB.body.publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!chkB.ok) {
+      return { test: "classes:operator-registrations-by-line", result: "FAIL", reason: "chkB-failed" };
+    }
+
+    // RegC: 2 entries on L2 only
+    const regC = await post(`/registrations:public`, {
+      eventId,
+      lines: [{ classId: classId2, qty: 2 }],
+      party: { email: `opregs_c+${SMOKE_RUN_ID}@example.com` }
+    }, featureHeaders, { auth: "none" });
+    if (!regC.ok || !regC.body?.registration?.id) {
+      return { test: "classes:operator-registrations-by-line", result: "FAIL", reason: "regC-create-failed" };
+    }
+    const regCId = regC.body.registration.id;
+
+    const chkC = await post(`/events/registration/${encodeURIComponent(regCId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": regC.body.publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!chkC.ok) {
+      return { test: "classes:operator-registrations-by-line", result: "FAIL", reason: "chkC-failed" };
+    }
+
+    // Call operator endpoint: filter by L1
+    const byL1 = await get(`/events/${encodeURIComponent(eventId)}:registrations-by-line?eventLineId=${encodeURIComponent(L1)}&limit=50`);
+    if (!byL1.ok || !Array.isArray(byL1.body?.items)) {
+      return { test: "classes:operator-registrations-by-line", result: "FAIL", reason: "byL1-failed", byL1 };
+    }
+
+    const l1Items = byL1.body.items;
+    const l1RegIds = l1Items.map(i => i.registrationId).sort();
+    const l1ExpectedIds = [regAId, regBId].sort();
+    const l1CountOk = l1Items.length === 2;
+    const l1IdsOk = JSON.stringify(l1RegIds) === JSON.stringify(l1ExpectedIds);
+
+    const regAItem = l1Items.find(i => i.registrationId === regAId);
+    const regBItem = l1Items.find(i => i.registrationId === regBId);
+    const regAEntriesOk = regAItem?.entriesOnThisLine === 2;
+    const regBEntriesOk = regBItem?.entriesOnThisLine === 1;
+
+    const l1NextOk = byL1.body.next === null;
+
+    // Call operator endpoint: filter by L2
+    const byL2 = await get(`/events/${encodeURIComponent(eventId)}:registrations-by-line?eventLineId=${encodeURIComponent(L2)}&limit=50`);
+    if (!byL2.ok || !Array.isArray(byL2.body?.items)) {
+      return { test: "classes:operator-registrations-by-line", result: "FAIL", reason: "byL2-failed", byL2 };
+    }
+
+    const l2Items = byL2.body.items;
+    const l2RegIds = l2Items.map(i => i.registrationId).sort();
+    const l2ExpectedIds = [regBId, regCId].sort();
+    const l2CountOk = l2Items.length === 2;
+    const l2IdsOk = JSON.stringify(l2RegIds) === JSON.stringify(l2ExpectedIds);
+
+    const pass = l1CountOk && l1IdsOk && regAEntriesOk && regBEntriesOk && l1NextOk &&
+                 l2CountOk && l2IdsOk;
+
+    return {
+      test: "classes:operator-registrations-by-line",
+      result: pass ? "PASS" : "FAIL",
+      eventId,
+      registrations: { regAId, regBId, regCId },
+      l1Results: {
+        count: l1Items.length,
+        regIds: l1RegIds,
+        regAEntries: regAItem?.entriesOnThisLine,
+        regBEntries: regBItem?.entriesOnThisLine,
+        next: byL1.body.next,
+        checks: { l1CountOk, l1IdsOk, regAEntriesOk, regBEntriesOk, l1NextOk }
+      },
+      l2Results: {
+        count: l2Items.length,
+        regIds: l2RegIds,
+        checks: { l2CountOk, l2IdsOk }
+      },
+      reason: !pass ? "assertion-failed" : null
+    };
+  },
+
+  "smoke:classes:operator-after-cancel": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // Create 1 Class object
+    const class1 = await post("/objects/class", {
+      type: "class",
+      name: `OpCancel-L1-${SMOKE_RUN_ID}`,
+      status: "open"
+    });
+    if (!class1.ok || !class1.body?.id) {
+      return { test: "classes:operator-after-cancel", result: "FAIL", reason: "class1-create-failed" };
+    }
+    const classId1 = class1.body.id;
+
+    // Create event with 1 line: L1 capacity 3
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: smokeTag("classes_opcancel_evt"),
+      capacity: 10,
+      lines: [
+        { classId: classId1, capacity: 3, discipline: "Jumping", fee: 5000 }
+      ]
+    });
+    if (!evt.ok || !evt.body?.id || !Array.isArray(evt.body?.lines) || evt.body.lines.length < 1) {
+      return { test: "classes:operator-after-cancel", result: "FAIL", reason: "event-create-failed" };
+    }
+    const eventId = evt.body.id;
+    const L1 = evt.body.lines[0]?.id || "L1";
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: smokeTag("classes_opcancel_evt") } });
+
+    // RegA: 2 entries on L1
+    const regA = await post(`/registrations:public`, {
+      eventId,
+      lines: [{ classId: classId1, qty: 2 }],
+      party: { email: `opcancel_a+${SMOKE_RUN_ID}@example.com` }
+    }, featureHeaders, { auth: "none" });
+    if (!regA.ok || !regA.body?.registration?.id) {
+      return { test: "classes:operator-after-cancel", result: "FAIL", reason: "regA-create-failed" };
+    }
+    const regAId = regA.body.registration.id;
+
+    const chkA = await post(`/events/registration/${encodeURIComponent(regAId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": regA.body.publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!chkA.ok) {
+      return { test: "classes:operator-after-cancel", result: "FAIL", reason: "chkA-failed" };
+    }
+
+    // Webhook confirm A
+    await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "Stripe-Signature": "sim_valid_signature", ...featureHeaders, "x-tenant-id": TENANT },
+      body: JSON.stringify({ id: `evt_opcancel_a_${SMOKE_RUN_ID}`, type: "payment_intent.succeeded", data: { object: { id: chkA.body.paymentIntentId, status: "succeeded", metadata: { registrationId: regAId, eventId } } } })
+    });
+
+    // Assign A
+    const assignA = await post(`/registrations/${encodeURIComponent(regAId)}:assign-resources`, {
+      itemType: "class_entry",
+      resourceIds: [L1, L1]
+    }, featureHeaders);
+    if (!assignA.ok) {
+      return { test: "classes:operator-after-cancel", result: "FAIL", reason: "assignA-failed" };
+    }
+
+    // RegB: 1 entry on L1
+    const regB = await post(`/registrations:public`, {
+      eventId,
+      lines: [{ classId: classId1, qty: 1 }],
+      party: { email: `opcancel_b+${SMOKE_RUN_ID}@example.com` }
+    }, featureHeaders, { auth: "none" });
+    if (!regB.ok || !regB.body?.registration?.id) {
+      return { test: "classes:operator-after-cancel", result: "FAIL", reason: "regB-create-failed" };
+    }
+    const regBId = regB.body.registration.id;
+
+    const chkB = await post(`/events/registration/${encodeURIComponent(regBId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": regB.body.publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!chkB.ok) {
+      return { test: "classes:operator-after-cancel", result: "FAIL", reason: "chkB-failed" };
+    }
+
+    // Webhook confirm B
+    await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "Stripe-Signature": "sim_valid_signature", ...featureHeaders, "x-tenant-id": TENANT },
+      body: JSON.stringify({ id: `evt_opcancel_b_${SMOKE_RUN_ID}`, type: "payment_intent.succeeded", data: { object: { id: chkB.body.paymentIntentId, status: "succeeded", metadata: { registrationId: regBId, eventId } } } })
+    });
+
+    // Assign B
+    const assignB = await post(`/registrations/${encodeURIComponent(regBId)}:assign-resources`, {
+      itemType: "class_entry",
+      resourceIds: [L1]
+    }, featureHeaders);
+    if (!assignB.ok) {
+      return { test: "classes:operator-after-cancel", result: "FAIL", reason: "assignB-failed" };
+    }
+
+    // Call operator summary endpoint BEFORE cancel
+    const summaryBefore = await get(`/events/${encodeURIComponent(eventId)}:classes-summary`);
+    if (!summaryBefore.ok || !Array.isArray(summaryBefore.body?.lines)) {
+      return { test: "classes:operator-after-cancel", result: "FAIL", reason: "summary-before-failed", summaryBefore };
+    }
+
+    const linesBefore = summaryBefore.body.lines;
+    const line1Before = linesBefore.find(l => l.id === L1);
+
+    // Assertions BEFORE cancel
+    const beforeReservedOk = line1Before?.reserved === 3;
+    const beforeRemainingOk = line1Before?.remaining === 0; // 3 - 3
+    const beforeRegsOk = line1Before?.registrationsWithEntries === 2; // RegA, RegB
+    const beforeEntriesOk = line1Before?.entriesRequested === 3;
+
+    if (!beforeReservedOk || !beforeRemainingOk || !beforeRegsOk || !beforeEntriesOk) {
+      return {
+        test: "classes:operator-after-cancel",
+        result: "FAIL",
+        reason: "before-cancel-assertion-failed",
+        line1Before,
+        checks: { beforeReservedOk, beforeRemainingOk, beforeRegsOk, beforeEntriesOk }
+      };
+    }
+
+    // Cancel RegA
+    const cancelA = await post(`/registrations/${encodeURIComponent(regAId)}:cancel`, {}, featureHeaders);
+    if (!cancelA.ok) {
+      return { test: "classes:operator-after-cancel", result: "FAIL", reason: "cancelA-failed", cancelA };
+    }
+
+    // Call operator summary endpoint AFTER cancel
+    const summaryAfter = await get(`/events/${encodeURIComponent(eventId)}:classes-summary`);
+    if (!summaryAfter.ok || !Array.isArray(summaryAfter.body?.lines)) {
+      return { test: "classes:operator-after-cancel", result: "FAIL", reason: "summary-after-failed", summaryAfter };
+    }
+
+    const linesAfter = summaryAfter.body.lines;
+    const line1After = linesAfter.find(l => l.id === L1);
+
+    // Assertions AFTER cancel: RegA (2 entries) cancelled, only RegB (1 entry) remains
+    const afterReservedOk = line1After?.reserved === 1; // RegB only
+    const afterRemainingOk = line1After?.remaining === 2; // 3 - 1
+    const afterRegsOk = line1After?.registrationsWithEntries === 1; // RegB only
+    const afterEntriesOk = line1After?.entriesRequested === 1; // RegB only
+
+    const pass = afterReservedOk && afterRemainingOk && afterRegsOk && afterEntriesOk;
+
+    return {
+      test: "classes:operator-after-cancel",
+      result: pass ? "PASS" : "FAIL",
+      eventId,
+      registrations: { regAId, regBId },
+      before: {
+        reserved: line1Before?.reserved,
+        remaining: line1Before?.remaining,
+        registrationsWithEntries: line1Before?.registrationsWithEntries,
+        entriesRequested: line1Before?.entriesRequested,
+        checks: { beforeReservedOk, beforeRemainingOk, beforeRegsOk, beforeEntriesOk }
+      },
+      after: {
+        reserved: line1After?.reserved,
+        remaining: line1After?.remaining,
+        registrationsWithEntries: line1After?.registrationsWithEntries,
+        entriesRequested: line1After?.entriesRequested,
+        checks: { afterReservedOk, afterRemainingOk, afterRegsOk, afterEntriesOk }
+      },
+      reason: !pass ? "after-cancel-assertion-failed" : null
+    };
+  },
+
   // Sprint BM: Generalized :assign-resources endpoint smokes
 
   "smoke:resources:assign-generic-stalls": async () => {

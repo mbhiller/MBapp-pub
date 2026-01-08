@@ -91,6 +91,40 @@ Foundation for event class entry reservations using line-scoped capacity and the
     - `block_hold_not_found` — Assignment attempted without a matching block hold.
   - 409 `class_capacity_full` — Line capacity would be exceeded; checkout guarded and leaves counters unchanged.
 
+### Event Classes — Operator Reporting (Sprint BP)
+
+Foundation for operator visibility into class entry capacity and registration details.
+
+- **Endpoints:**
+  - `GET /events/{eventId}:classes-summary` — Per-line capacity summary with operational metrics
+  - `GET /events/{eventId}:registrations-by-line` — Paged registrations filtered by optional event line
+  - Both require `event:read` + `registration:read` permissions
+
+- **Summary derivation (`classes-summary`):**
+  - **reserved/remaining:** Computed from `event.linesReservedById` (server-maintained counter) and `lines[i].capacity`
+    - `reserved = linesReservedById[lineId] || 0`
+    - `remaining = capacity === null ? null : Math.max(0, capacity - reserved)`
+  - **registrationsWithEntries/entriesRequested:** Derived by aggregating `registration.lines[]` filtered by `eventId`
+    - Builds `classId → lineIds[]` map from `event.lines` (handles ambiguous classId in multiple lines)
+    - Iterates registrations (indexed query, excludes `status="cancelled"`), sums `qty` and counts unique registrationIds per line
+    - `entriesRequested = sum(qty)` for all registrations with matching classId
+    - `registrationsWithEntries = count(distinct registrationId)` for all registrations with matching classId
+
+- **ClassId ambiguity:**
+  - **Current behavior:** Single `classId` can appear in multiple `event.lines` (e.g., same class in different time slots). Summary/list endpoints attribute qty to **all matching lines**.
+  - **Future enhancement:** Denormalize `registration.lines` to include `eventLineId` alongside `classId` for unambiguous per-line attribution. Until then, operators should use unique classIds per line when precise attribution is critical.
+
+- **Registrations-by-line filtering:**
+  - Optional `eventLineId` query param filters to registrations having `registration.lines[]` entries with matching `classId` (resolved from event.lines) AND `qty > 0`
+  - Multi-page iteration (max 10 backend pages, 200 items each) ensures complete limit collection despite filtering
+  - Computes `entriesOnThisLine` per registration by summing `qty` across matching `registration.lines[]` entries
+  - Returns minimal fields (no PII): `registrationId`, `partyId`, `status`, `paymentStatus`, timestamps
+  - Cursor pagination: `limit` 1-200 (default 50), `next` token for continuation
+
+- **Status filtering:**
+  - Summary metrics exclude `status="cancelled"` registrations from counts
+  - Registrations-by-line includes all non-cancelled statuses (`draft`, `submitted`, `confirmed`)
+
 - **Behavior:** Sets `status="sending"`, updates `lastAttemptAt`, clears `errorMessage`, and increments `retryCount` (defaults 0 → 1).
   - **Simulate on:** (`FEATURE_NOTIFY_SIMULATE=1` or header `X-Feature-Notify-Simulate: true`) immediately marks `status="sent"`, sets `sentAt`, assigns provider (`postmark`|`twilio`) and simulated `providerMessageId`.
   - **Real send:** Calls Postmark/Twilio; on success marks `sent` with provider ID; on failure marks `failed` with `errorMessage` and refreshed `lastAttemptAt`.

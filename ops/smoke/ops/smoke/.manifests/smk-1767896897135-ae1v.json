@@ -1,0 +1,49 @@
+{
+  "smokeRunId": "smk-1767896897135-ae1v",
+  "base": "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com",
+  "tenantHeader": "SmokeTenant",
+  "jwtTenant": null,
+  "startedAt": "2026-01-08T18:28:17.135Z",
+  "finishedAt": "2026-01-08T18:28:28.275Z",
+  "entries": [
+    {
+      "type": "class",
+      "id": "ks3f139mh8lmw9y8p3k5",
+      "route": "/objects/class",
+      "meta": {
+        "name": "OpSum-L1-smk-1767896897135-ae1v",
+        "status": 200
+      },
+      "createdAt": "2026-01-08T18:28:17.500Z"
+    },
+    {
+      "type": "class",
+      "id": "y57kkdjgx1b17tz5dlwmnc",
+      "route": "/objects/class",
+      "meta": {
+        "name": "OpSum-L2-smk-1767896897135-ae1v",
+        "status": 200
+      },
+      "createdAt": "2026-01-08T18:28:17.751Z"
+    },
+    {
+      "type": "event",
+      "id": "u7v6sspfd0e99ss8yr3i2",
+      "route": "/objects/event",
+      "meta": {
+        "name": "smk-1767896897135-ae1v-classes_opsum_evt",
+        "status": 200
+      },
+      "createdAt": "2026-01-08T18:28:17.861Z"
+    },
+    {
+      "type": "event",
+      "id": "u7v6sspfd0e99ss8yr3i2",
+      "route": "/objects/event",
+      "meta": {
+        "name": "smk-1767896897135-ae1v-classes_opsum_evt"
+      },
+      "createdAt": "2026-01-08T18:28:17.861Z"
+    }
+  ]
+}
