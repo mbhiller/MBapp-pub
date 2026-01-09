@@ -212,6 +212,8 @@ Operator-facing list endpoint for check-in queues.
 
 **Operator Console (Sprint BF):** Web UI available at `/messages` (protected by `message:read`) with filters + cursor pagination; detail view at `/messages/:id` shows status/provider/template metadata and retry controls when `message:write` is granted. UI is API-backed (uses the endpoints above; no provider-side coupling).
 
+**Check-In Console (Sprint BX):** Web UI available at `/events/:eventId/checkin` (protected by `event:read registration:read`) for operator check-in management. Fetches worklist from `GET /events/{eventId}:checkin-worklist` with filters (checkedIn, ready, blockerCode, status, q) and cursor pagination. Table displays Registration ID, Party ID, Status, Checked In (✓/—), Ready (✓/✗/—), Blockers (comma-separated codes), Last Evaluated. UI currently uses inline styles (no Tailwind/shadcn yet; refactor planned). Filters reset items and refetch; "Load more" appends using opaque `next` cursor. Row actions (Check In, View Details, Recompute Status) planned for future sprint.
+
 ### Message Templates v1 (Sprint BA/BE)
 
 **Template System:** Minimal, deterministic template renderer with no external deps. Validates required vars at render time.
@@ -2432,13 +2434,13 @@ Artifacts are committed to the repo and should be regenerated whenever spec anno
 **Web UI Foundation:**
 - **Framework:** React 18+ with TypeScript
 - **Styling:** TailwindCSS (utility-first CSS framework)
-- **Component Library:** shadcn/ui (copy-paste components built on Radix UI primitives)
+- **Component Primitives:** shadcn-style components housed in `apps/web/src/components/ui` (copy-paste, Radix-inspired)
 - **Routing:** React Router v6
 - **State Management:** React hooks + Context API (no global state library by default)
 
 **Mobile UI Foundation:**
 - **Framework:** React Native (Expo managed workflow)
-- **Styling:** React Native StyleSheet API + useColors hook (custom theming)
+- **Styling:** React Native StyleSheet API + useColors hook (current); migrating to Tailwind-like utility helpers + shadcn-style primitives for RN in a future sprint — legacy inline styles may be overwritten during that migration.
 - **Navigation:** React Navigation v6 (native stack navigator)
 - **State Management:** React hooks + Context API
 
@@ -2452,7 +2454,7 @@ Artifacts are committed to the repo and should be regenerated whenever spec anno
 - Formalize component API contracts (props, states, events) for cross-platform consistency where applicable.
 - Mobile may adopt React Native Paper or similar if native component patterns diverge significantly from web.
 
-**Status:** ✅ **Locked** — All new web UI must use TailwindCSS + shadcn/ui; no alternative styling approaches without architectural review.
+**Status:** ✅ **Locked** — All new web UI must use TailwindCSS + the shadcn-style primitives in `apps/web/src/components/ui`; legacy inline styling will be refactored over time. Mobile will align to Tailwind-like utilities and shadcn-style primitives; expect legacy inline styles to be overwritten during that migration.
 
 ---
 

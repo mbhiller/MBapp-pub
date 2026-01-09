@@ -14,6 +14,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
+      '@': resolve(__dirname, './src'),
       '@mbapp/scan': resolve(repoRoot, 'packages/mbapp-scan/src/index.ts'),
       '@mbapp/scan/': resolve(repoRoot, 'packages/mbapp-scan/src/'),
     },

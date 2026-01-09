@@ -6,6 +6,43 @@
 
 ---
 
+### Sprint BX — Check-In Console UI (v0) — ✅ Complete (2026-01-08)
+
+**Summary:** Delivered minimal Check-In Console web UI for operator check-in management. Provides worklist table with filters (checked-in state, readiness, blockers, status, search) and cursor pagination using the existing `GET /events/{eventId}:checkin-worklist` endpoint. Foundation for future row actions and real-time updates.
+
+**Deliverables (E1–E4):**
+- **Web Route (E1):** Added `/events/:eventId/checkin` protected by `event:read registration:read` in [apps/web/src/App.tsx](apps/web/src/App.tsx); created stub [CheckInConsolePage.tsx](apps/web/src/pages/CheckInConsolePage.tsx).
+- **Web UI (E2):** Implemented full worklist fetch with filters (checkedIn, ready, blockerCode, status, q) and table (Registration ID, Party ID, Status, Checked In, Ready, Blockers, Last Evaluated); cursor pagination with "Load more" + "Refresh" buttons.
+- **Web Types (E3):** Created [apps/web/src/types/checkin.ts](apps/web/src/types/checkin.ts) with local types (`CheckInBlocker`, `CheckInAction`, `CheckInStatus`, `Registration`, `CheckInWorklistPage`) to avoid cross-workspace imports.
+- **Docs (E4):** Updated [MBapp-Status.md](docs/MBapp-Status.md) and [MBapp-Foundations.md](docs/MBapp-Foundations.md) with route, endpoint, filter semantics, and styling notes.
+
+**Route:**
+- `/events/:eventId/checkin` — Check-In Console for one event (permission guard: `event:read registration:read`)
+
+**Endpoint Usage:**
+- `GET /events/{eventId}:checkin-worklist` — Fetches worklist with filters; limit 50 per page
+- Filters surfaced: `checkedIn` (boolean toggle), `ready` (null/true/false), `blockerCode` (CSV string), `status` (dropdown: any/draft/submitted/confirmed/cancelled; default: confirmed), `q` (search for Party ID or Registration ID)
+- Cursor pagination: opaque `next` token for continuation; "Load more" appends items
+
+**UI Conventions:**
+- Inline styles (React.CSSProperties) — No Tailwind/shadcn yet; future sprint will refactor to shadcn/ui patterns.
+- Filter changes reset items and refetch first page.
+- Table columns: Registration ID, Party ID, Status, Checked In (✓/—), Ready (✓/✗/—), Blockers (comma-separated codes), Last Evaluated (timestamp).
+- Graceful handling of null `checkInStatus` (displays "—" for missing data).
+
+**Verification:**
+- ✅ Typecheck: `npm run typecheck --workspaces --if-present` (all clean)
+- ✅ Route accessible at `/events/:eventId/checkin` with permission enforcement
+- ⏭️ Manual smoke (local): Load page, apply filters, verify "Load more" pagination
+
+**Next Steps (E5+):**
+- Add row actions (Check In, View Details, Recompute Status)
+- Add Registration detail drawer/panel
+- Add real-time refresh capability
+- Migrate to shadcn/ui + Tailwind for consistent design system
+
+---
+
 ### Sprint BW — Event Indexing for Registrations — ✅ Complete (2026-01-08)
 
 **Summary:** Shipped event-scoped registration indexing via GSI4 to eliminate multi-page scans for worklist/summary endpoints. Implemented dual cursor support to allow safe rollout (filtered path → indexed path) without API-breaking changes. Includes backfill tool, smokes, and comprehensive docs.

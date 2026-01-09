@@ -38,6 +38,7 @@ import MessageDetailPage from "./pages/MessageDetailPage";
 import InventoryMovementsPage from "./pages/InventoryMovementsPage";
 import DocsPage from "./pages/DocsPage";
 import NotAuthorizedPage from "./pages/NotAuthorizedPage";
+import CheckInConsolePage from "./pages/CheckInConsolePage";
 
 const PublicBookingPage = lazy(() => import("./pages/PublicBookingPage"));
 
@@ -101,6 +102,7 @@ export default function App() {
           <Route path="/messages/:id" element={<ProtectedRoute requiredPerm="message:read"><MessageDetailPage /></ProtectedRoute>} />
           <Route path="/locations" element={<LocationsListPage />} />
           <Route path="/locations/:id" element={<LocationDetailPage />} />
+          <Route path="/events/:eventId/checkin" element={<ProtectedRoute requiredPerm="event:read registration:read"><CheckInConsolePage /></ProtectedRoute>} />
           <Route path="/docs" element={<DocsPage />} />
           <Route path="/public/book" element={<Suspense fallback={<div>Loading public booking...</div>}><PublicBookingPage /></Suspense>} />
         </Routes>
