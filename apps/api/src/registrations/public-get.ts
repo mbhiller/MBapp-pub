@@ -2,8 +2,9 @@ import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import crypto from "crypto";
 import { ok, badRequest, notFound, unauthorized, internalError } from "../common/responses";
 import { getTenantId } from "../common/env";
-import { getObjectById } from "../objects/repo";
+import { getObjectById, listObjects } from "../objects/repo";
 import { guardRegistrations } from "./feature";
+import { computeCheckInStatus } from "./checkin-readiness";
 
 function constantTimeEqual(a: string, b: string) {
   const bufA = Buffer.from(a);
@@ -52,6 +53,10 @@ export async function handle(event: APIGatewayProxyEventV2) {
         "publicTokenHash",
         "confirmationMessageId",
         "confirmationSmsMessageId",
+        "checkInStatus",
+        "stallQty",
+        "rvQty",
+        "lines",
       ],
     });
 
@@ -78,6 +83,27 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const rawPaymentStatus = (registration as any).paymentStatus as string | undefined;
     const paymentStatus = rawPaymentStatus === "succeeded" ? "paid" : rawPaymentStatus;
 
+    // Load or compute checkInStatus
+    let checkInStatus = (registration as any).checkInStatus || null;
+    
+    if (!checkInStatus) {
+      // Compute fresh snapshot if not persisted
+      const holdsPage = await listObjects({
+        tenantId,
+        type: "reservationHold",
+        filters: { ownerType: "registration", ownerId: id },
+        limit: 200,
+        fields: ["id", "itemType", "resourceId", "state"],
+      });
+      const holds = ((holdsPage.items as any[]) || []) as any[];
+      
+      checkInStatus = computeCheckInStatus({ 
+        tenantId, 
+        registration: registration as any, 
+        holds: holds as any 
+      });
+    }
+
     return ok({
       id: (registration as any).id,
       eventId: (registration as any).eventId,
@@ -88,6 +114,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
       cancelledAt: (registration as any).cancelledAt,
       refundedAt: (registration as any).refundedAt,
       holdExpiresAt: (registration as any).holdExpiresAt,
+      checkInStatus,
       emailStatus,
       smsStatus,
     });

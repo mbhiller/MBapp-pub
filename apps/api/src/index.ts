@@ -119,6 +119,7 @@ import * as EventsClassesSummary from "./events/classes-summary-get";
 import * as EventsRegistrationsByLine from "./events/registrations-by-line-get";
 import * as EventsCheckInWorklist from "./events/checkin-worklist-get";
 import * as RegPublicCreate from "./registrations/public-create";
+import * as RegLookupPublic from "./registrations/lookup-public";
 import * as RegCheckout from "./registrations/checkout";
 import * as RegPublicGet from "./registrations/public-get";
 import * as RegPublicResend from "./registrations/public-resend";
@@ -313,6 +314,10 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
     // Public registration create (Sprint AU)
     if (method === "POST" && path === "/registrations:public") {
       return RegPublicCreate.handle(event);
+    }
+    // Public registration lookup + magic link (Sprint CB)
+    if (method === "POST" && path === "/registrations:lookup-public") {
+      return RegLookupPublic.handle(event);
     }
     // Public registration checkout (Sprint AU)
     {

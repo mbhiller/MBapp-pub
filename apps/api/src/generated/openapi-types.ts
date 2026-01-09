@@ -535,6 +535,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/registrations:lookup-public": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Lookup registration and send magic link (no auth required) - Sprint CB
+         * @description Public endpoint for "My Check-In" flow. User submits eventId + email to request a magic link.
+         *     Security notes:
+         *     - Always returns success regardless of whether email exists (prevents email enumeration)
+         *     - Rate-limited by IP address (10 requests/hour) to prevent abuse
+         *     - Magic link contains registrationId + publicToken for secure access
+         *     - If multiple registrations exist for email+event, sends separate link for each
+         *
+         */
+        post: operations["lookupPublicRegistration"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/registrations:cleanup-expired-holds": {
         parameters: {
             query?: never;
@@ -3519,6 +3545,8 @@ export interface components {
             refundedAt?: string | null;
             /** Format: date-time */
             holdExpiresAt?: string | null;
+            /** @description Check-in readiness snapshot (Sprint CB) */
+            checkInStatus?: components["schemas"]["CheckInStatus"];
             emailStatus?: {
                 /** @enum {string} */
                 status?: "queued" | "sending" | "sent" | "failed" | "cancelled";
@@ -3736,6 +3764,26 @@ export interface components {
             division?: string | null;
             class?: string | null;
             notes?: string | null;
+        };
+        /** @description Request to lookup and send magic link for public check-in (Sprint CB) */
+        LookupPublicRegistrationRequest: {
+            /** @description ID of the event to search registrations for */
+            eventId: string;
+            /** @description Email address (normalized to lowercase) */
+            email: string;
+            /**
+             * @description Delivery channel for magic link
+             * @default email
+             * @enum {string}
+             */
+            deliveryMethod: "email" | "sms";
+        };
+        /** @description Response from public registration lookup (always returns success for security) */
+        LookupPublicRegistrationResponse: {
+            /** @description Always true (never reveals whether email exists) */
+            sent: boolean;
+            /** @description Generic message like "If we found a match, we sent a link." */
+            message?: string | null;
         };
         /** @description Server-owned fee line item used to compute totals */
         FeeLineItem: {
@@ -6515,6 +6563,57 @@ export interface operations {
                             capacity?: number;
                             currentRegistrations?: number;
                         };
+                    };
+                };
+            };
+        };
+    };
+    lookupPublicRegistration: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional idempotency key for safe retries. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LookupPublicRegistrationRequest"];
+            };
+        };
+        responses: {
+            /** @description Request processed (always success for security) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LookupPublicRegistrationResponse"];
+                };
+            };
+            /** @description Validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationError"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        code?: "rate_limit_exceeded";
+                        message?: string;
+                        /** @description Seconds until rate limit resets */
+                        retryAfter?: number;
                     };
                 };
             };
