@@ -2,7 +2,7 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import crypto from "crypto";
 import { ok, badRequest, error, forbidden } from "../common/responses";
-import { createObject, getObjectById } from "../objects/repo";
+import { createObject, getObjectById, listObjects } from "../objects/repo";
 import { getTenantId } from "../common/env";
 import { guardRegistrations } from "./feature";
 
@@ -11,6 +11,7 @@ import { guardRegistrations } from "./feature";
  * Public endpoint: create a registration without JWT auth
  * Generates a cryptographically secure publicToken for guest checkout
  * Stores SHA256 hash on registration object
+ * Requires party identification: either partyId or party.email
  */
 export async function handle(event: APIGatewayProxyEventV2) {
   try {
@@ -24,6 +25,74 @@ export async function handle(event: APIGatewayProxyEventV2) {
     // Validate required fields
     if (!body.eventId || typeof body.eventId !== "string") {
       return badRequest("eventId is required and must be a string", { field: "eventId" });
+    }
+
+    // Party identification: require either partyId or party.email
+    let finalPartyId: string | undefined;
+    
+    if (body.partyId && typeof body.partyId === "string") {
+      // Explicit partyId provided: validate it exists
+      const partyObj = await getObjectById({
+        tenantId,
+        type: "party",
+        id: body.partyId,
+        fields: ["id", "type"],
+      });
+      
+      if (!partyObj || (partyObj as any).type !== "party") {
+        return badRequest("Party not found", { field: "partyId", code: "party_not_found" });
+      }
+      
+      finalPartyId = body.partyId;
+    } else if (body.party?.email && typeof body.party.email === "string") {
+      // party.email provided: find or create Party
+      const email = String(body.party.email).trim().toLowerCase();
+      
+      if (!email) {
+        return badRequest("party.email must be a non-empty string", { field: "party.email", code: "invalid_email" });
+      }
+      
+      // Search for existing party by email
+      const partiesPage = await listObjects({
+        tenantId,
+        type: "party",
+        filters: { email },
+        limit: 1,
+        fields: ["id", "email"],
+      });
+      
+      if (partiesPage.items.length > 0) {
+        // Party exists: use it
+        finalPartyId = (partiesPage.items[0] as any).id;
+      } else {
+        // Party doesn't exist: create it
+        const newPartyBody: any = {
+          type: "party",
+          email,
+        };
+        
+        // Include optional party fields
+        if (body.party.name && typeof body.party.name === "string") {
+          newPartyBody.name = body.party.name;
+        }
+        if (body.party.phone && typeof body.party.phone === "string") {
+          newPartyBody.phone = body.party.phone;
+        }
+        
+        const newParty = await createObject({
+          tenantId,
+          type: "party",
+          body: newPartyBody,
+        });
+        
+        finalPartyId = (newParty as any).id;
+      }
+    } else {
+      // Neither partyId nor party.email provided
+      return badRequest(
+        "Public registration requires party identification: provide either partyId or party.email",
+        { code: "party_required" }
+      );
     }
 
     // Verify event exists and is open
@@ -124,6 +193,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
     const registrationBody: any = {
       type: "registration",
       eventId: body.eventId,
+      partyId: finalPartyId, // Always set partyId (required for badge issuance)
       status: "draft",
       paymentStatus: "pending",
       publicTokenHash,
@@ -140,7 +210,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
       registrationBody.lines = lines;
     }
 
-    // Optional party information (guest details)
+    // Optional party information (guest details) - kept for backward compatibility
     if (body.party) {
       registrationBody.party = body.party;
     }

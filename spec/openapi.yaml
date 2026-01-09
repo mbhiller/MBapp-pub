@@ -1635,6 +1635,86 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /registrations/{id}:issue-badge:
+    post:
+      tags:
+        - Registrations
+      operationId: issueBadge
+      summary: Issue or reissue a badge for a registration
+      description: |-
+        Issues an admission badge for a registration. Idempotent via Idempotency-Key header.
+        Registration must be checked in and payment status must be paid. Returns BadgeIssuance record with QR payload.
+      x-mbapp-permission: registration:write
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                badgeType:
+                  type: string
+                  enum:
+                    - admission
+                  default: admission
+                  description: Badge type to issue (defaults to admission)
+      responses:
+        '200':
+          description: Badge issued successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  issuance:
+                    $ref: '#/components/schemas/BadgeIssuance'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Registration not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflict - registration missing party, not checked in, or payment not complete
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    enum:
+                      - party_missing
+                      - not_checked_in
+                      - checkin_blocked
+                  message:
+                    type: string
+                  checkInStatus:
+                    $ref: '#/components/schemas/CheckInStatus'
+                    nullable: true
+                    description: Included when code=checkin_blocked
   /registrations:resolve-scan:
     post:
       tags:
@@ -7643,6 +7723,75 @@ components:
           type: string
           nullable: true
           description: Opaque cursor for next page; null if no more pages
+    BadgeIssuance:
+      allOf:
+        - $ref: '#/components/schemas/ObjectBase'
+        - type: object
+          description: Badge issuance record for event registration (Sprint BZ)
+          properties:
+            type:
+              type: string
+              enum:
+                - badgeIssuance
+            registrationId:
+              type: string
+              description: ID of the registration being badged
+            partyId:
+              type: string
+              description: ID of the party (denormalized for UI display)
+            eventId:
+              type: string
+              description: ID of the event this badge is for
+            badgeType:
+              type: string
+              enum:
+                - admission
+              default: admission
+              description: Type of badge being issued
+            issuedAt:
+              type: string
+              format: date-time
+              description: Timestamp when badge was issued
+            issuedBy:
+              type: string
+              description: User ID (operator) who issued the badge
+            reprintCount:
+              type: integer
+              minimum: 0
+              default: 0
+              description: Number of times badge has been reprinted
+            lastPrintedAt:
+              type: string
+              format: date-time
+              nullable: true
+              description: Timestamp of last print/reprint action
+            payload:
+              type: object
+              description: Badge payload (QR code, barcode data, etc.)
+              properties:
+                qrText:
+                  type: string
+                  description: QR code text payload
+              required:
+                - qrText
+            printStatus:
+              type: string
+              enum:
+                - not_printed
+                - printed
+                - reprinted
+              default: not_printed
+              description: Current print status of the badge
+          required:
+            - type
+            - registrationId
+            - partyId
+            - eventId
+            - badgeType
+            - issuedAt
+            - issuedBy
+            - payload
+            - printStatus
     CheckInWorklistPage:
       type: object
       description: Paginated worklist for event check-in console (Sprint BV)

@@ -152,6 +152,17 @@ function idem() {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 }
 
+// Helper: build party payload for public registrations with unique email per run/label
+function mkPublicParty(runId, label) {
+  const clean = String(label || "party").replace(/[^a-z0-9]+/gi, "-");
+  return {
+    party: {
+      email: `smoke+${clean}+${runId}@example.com`,
+      displayName: `Smoke ${clean}`,
+    },
+  };
+}
+
 // Debug helper: log request/response details when DEBUG=1
 function debugRequest(method, url, headers, status) {
   if (process.env.DEBUG !== "1" && process.env.MBAPP_DEBUG !== "1") return;
@@ -2345,7 +2356,12 @@ const tests = {
     recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
 
     // Single public registration requesting 2 RV with capacity=1 should fail deterministically
-    const r = await post(`/registrations:public`, { eventId, rvQty: 2 }, featureHeaders, { auth: "none" });
+    const r = await post(
+      `/registrations:public`,
+      { eventId, rvQty: 2, ...mkPublicParty(SMOKE_RUN_ID, "rv-capacity-guard") },
+      featureHeaders,
+      { auth: "none" }
+    );
     if (!r.ok || !r.body?.registration?.id || !r.body?.publicToken) {
       return { test: "public-booking:rv-capacity-guard", result: "FAIL", reason: "reg-create-failed", r };
     }
@@ -2449,7 +2465,12 @@ const tests = {
     const holdsExpired = holdsA.length > 0 && holdsA.every(h => h?.state === "cancelled" && h?.releaseReason === "expired" && h?.releasedAt);
 
     // Create public registration B with rvQty=1 and checkout should succeed
-    const rB = await post(`/registrations:public`, { eventId, rvQty: 1 }, featureHeaders, { auth: "none" });
+    const rB = await post(
+      `/registrations:public`,
+      { eventId, rvQty: 1, ...mkPublicParty(SMOKE_RUN_ID, "rv-hold-expiration-release-b") },
+      featureHeaders,
+      { auth: "none" }
+    );
     if (!rB.ok || !rB.body?.registration?.id || !rB.body?.publicToken) {
       return { test: "public-booking:rv-hold-expiration-release", result: "FAIL", reason: "regB-create-failed", rB };
     }
@@ -14770,8 +14791,13 @@ const tests = {
     const eventId = evt.body.id;
     recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
 
-    // Create public registration
-    const regCreate = await post(`/registrations:public`, { eventId }, featureHeaders, { auth: "none" });
+    // Create public registration with party identification (required)
+    const regCreate = await post(
+      `/registrations:public`,
+      { eventId, ...mkPublicParty(SMOKE_RUN_ID, "public-checkout") },
+      featureHeaders,
+      { auth: "none" }
+    );
     if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
       return { test:"registrations:public-checkout", result:"FAIL", reason:"reg-create-failed", regCreate };
     }
@@ -14818,7 +14844,12 @@ const tests = {
     const eventId = evt.body.id;
     recordCreated({ type: "event", id: eventId, route: "/objects/event" });
 
-    const regCreate = await post(`/registrations:public`, { eventId }, featureHeaders, { auth: "none" });
+    const regCreate = await post(
+      `/registrations:public`,
+      { eventId, ...mkPublicParty(SMOKE_RUN_ID, "public-checkout-idempotent") },
+      featureHeaders,
+      { auth: "none" }
+    );
     if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
       return { test:"registrations:public-checkout-idempotent", result:"FAIL", reason:"reg-create-failed", regCreate };
     }
@@ -14870,8 +14901,18 @@ const tests = {
     const eventId = evt.body.id;
     recordCreated({ type: "event", id: eventId, route: "/objects/event" });
 
-    const r1 = await post(`/registrations:public`, { eventId }, featureHeaders, { auth: "none" });
-    const r2 = await post(`/registrations:public`, { eventId }, featureHeaders, { auth: "none" });
+    const r1 = await post(
+      `/registrations:public`,
+      { eventId, ...mkPublicParty(SMOKE_RUN_ID, "capacity-guard-r1") },
+      featureHeaders,
+      { auth: "none" }
+    );
+    const r2 = await post(
+      `/registrations:public`,
+      { eventId, ...mkPublicParty(SMOKE_RUN_ID, "capacity-guard-r2") },
+      featureHeaders,
+      { auth: "none" }
+    );
 
     if (!r1.ok || !r1.body?.registration?.id || !r1.body?.publicToken) {
       return { test:"events:capacity-guard", result:"FAIL", reason:"reg1-create-failed", r1 };
@@ -14925,7 +14966,12 @@ const tests = {
     const eventId = evt.body.id;
     recordCreated({ type: "event", id: eventId, route: "/objects/event" });
 
-    const regCreate = await post(`/registrations:public`, { eventId }, featureHeaders, { auth: "none" });
+    const regCreate = await post(
+      `/registrations:public`,
+      { eventId, ...mkPublicParty(SMOKE_RUN_ID, "wh-stripe-pi-succeeded") },
+      featureHeaders,
+      { auth: "none" }
+    );
     if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
       return { test:"webhooks:stripe-payment-intent-succeeded", result:"FAIL", reason:"reg-create-failed", regCreate };
     }
@@ -15063,7 +15109,12 @@ const tests = {
     const cancelled = reg.ok && reg.body?.status === "cancelled";
 
     // Capacity release: create second registration and checkout succeeds
-    const reg2Create = await post(`/registrations:public`, { eventId }, featureHeaders, { auth: "none" });
+    const reg2Create = await post(
+      `/registrations:public`,
+      { eventId, ...mkPublicParty(SMOKE_RUN_ID, "hold-expiration-reg2") },
+      featureHeaders,
+      { auth: "none" }
+    );
     if (!reg2Create.ok || !reg2Create.body?.registration?.id || !reg2Create.body?.publicToken) {
       return { test:"registrations:hold-expiration", result:"FAIL", reason:"reg2-create-failed", reg2Create };
     }
@@ -15203,7 +15254,18 @@ const tests = {
     const eventId = evt.body.id;
     recordCreated({ type: "event", id: eventId, route: "/objects/event" });
 
-    const regCreate = await post(`/registrations:public`, { eventId, party: { phone: "+15555550123" } }, featureHeaders, { auth: "none" });
+    const regCreate = await post(
+      `/registrations:public`,
+      {
+        eventId,
+        party: {
+          email: `confirmationsms+${SMOKE_RUN_ID}@example.com`,
+          phone: "+15555550123",
+        },
+      },
+      featureHeaders,
+      { auth: "none" }
+    );
     if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
       return { test:"registrations:confirmation-sms", result:"FAIL", reason:"reg-create-failed", regCreate };
     }
@@ -15397,7 +15459,12 @@ const tests = {
     const eventId = evt.body.id;
     recordCreated({ type: "event", id: eventId, route: "/objects/event" });
 
-    const regCreate = await post(`/registrations:public`, { eventId }, featureHeaders, { auth: "none" });
+    const regCreate = await post(
+      `/registrations:public`,
+      { eventId, ...mkPublicParty(SMOKE_RUN_ID, "public-status-hold-expired") },
+      featureHeaders,
+      { auth: "none" }
+    );
     if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
       return { test:"registrations:public-status-hold-expired", result:"FAIL", reason:"reg-create-failed", regCreate };
     }
@@ -15499,7 +15566,12 @@ const tests = {
     recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
 
     // Public create with rvQty=1
-    const regCreate = await post(`/registrations:public`, { eventId, rvQty: 1 }, featureHeaders, { auth: "none" });
+    const regCreate = await post(
+      `/registrations:public`,
+      { eventId, rvQty: 1, ...mkPublicParty(SMOKE_RUN_ID, "cancel-refund-happy") },
+      featureHeaders,
+      { auth: "none" }
+    );
     if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
       return { test: "registrations:cancel-refund-happy-path", result: "FAIL", reason: "reg-create-failed", regCreate };
     }
@@ -15589,7 +15661,12 @@ const tests = {
     const guard1 = cr1.status === 409;
 
     // 2) Submitted (pending): disallow
-    const regCreate = await post(`/registrations:public`, { eventId }, featureHeaders, { auth: "none" });
+    const regCreate = await post(
+      `/registrations:public`,
+      { eventId, ...mkPublicParty(SMOKE_RUN_ID, "cancel-refund-guards") },
+      featureHeaders,
+      { auth: "none" }
+    );
     if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
       return { test: "registrations:cancel-refund-guards", result: "FAIL", reason: "reg-create-failed", regCreate };
     }
@@ -19446,6 +19523,446 @@ const tests = {
       summary: "Registration without seat hold is blocked by ticket_missing; worklist filters correctly; check-in action returns 409",
       eventId,
       registrationId: regId
+    };
+  },
+
+  // E4: Badge issuance with idempotency
+  "smoke:badging:issue-badge-idempotent": async () => {
+    await ensureBearer();
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // 1) Seed a party
+    const { partyId } = await seedParties(api);
+
+    // 2) Create event
+    const eventName = smokeTag("badge_idem_evt");
+    const stallUnitAmount = 1500;
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 5,
+      reservedCount: 0,
+      stallEnabled: true,
+      stallCapacity: 2,
+      stallReserved: 0,
+      stallUnitAmount
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "badging:issue-badge-idempotent", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+    // 3) Create stalls
+    const stalls = [];
+    for (let i = 1; i <= 2; i++) {
+      const stall = await post("/objects/resource", {
+        type: "resource",
+        resourceType: "stall",
+        name: `BadgeStall-${i}`,
+        status: "available",
+        tags: [`event:${eventId}`, "group:BadgeStall"]
+      });
+      if (!stall.ok || !stall.body?.id) {
+        return { test: "badging:issue-badge-idempotent", result: "FAIL", reason: `stall-${i}-create-failed`, stall };
+      }
+      stalls.push(stall.body.id);
+      recordCreated({ type: "resource", id: stall.body.id, route: "/objects/resource", meta: { name: `BadgeStall-${i}`, eventId } });
+    }
+
+    // 4) Create registration via public endpoint with partyId
+    const regCreate = await post(
+      `/registrations:public`,
+      { eventId, stallQty: 2, partyId, party: { email: `badge_idem+${SMOKE_RUN_ID}@example.com` } },
+      featureHeaders,
+      { auth: "none" }
+    );
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test: "badging:issue-badge-idempotent", result: "FAIL", reason: "reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+    recordCreated({ type: "registration", id: regId, route: "/registrations:public", meta: { eventId, partyId } });
+
+    // 4) Checkout
+    const checkout = await post(
+      `/events/registration/${encodeURIComponent(regId)}:checkout`,
+      {},
+      { ...featureHeaders, "X-MBapp-Public-Token": publicToken, "Idempotency-Key": idem() },
+      { auth: "none" }
+    );
+    if (!checkout.ok || !checkout.body?.paymentIntentId) {
+      return { test: "badging:issue-badge-idempotent", result: "FAIL", reason: "checkout-failed", checkout };
+    }
+
+    // 5) Confirm payment via webhook
+    const webhookBody = {
+      id: `evt_${SMOKE_RUN_ID}`,
+      type: "payment_intent.succeeded",
+      data: {
+        object: {
+          id: checkout.body.paymentIntentId,
+          status: "succeeded",
+          metadata: { registrationId: regId, eventId }
+        }
+      }
+    };
+    const whRes = await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "Stripe-Signature": "sim_valid_signature",
+        ...featureHeaders,
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify(webhookBody)
+    });
+    if (!whRes.ok) {
+      return { test: "badging:issue-badge-idempotent", result: "FAIL", reason: "webhook-confirm-failed", whStatus: whRes.status };
+    }
+
+    // 6) Assign stalls to mark ready
+    const assignRes = await post(
+      `/registrations/${encodeURIComponent(regId)}:assign-resources`,
+      { itemType: "stall", resourceIds: [stalls[0], stalls[1]] },
+      featureHeaders
+    );
+    if (!assignRes.ok) {
+      return { test: "badging:issue-badge-idempotent", result: "FAIL", reason: "assign-resources-failed", assignRes };
+    }
+
+    // 7) Ensure readiness is green before check-in
+    const readyRes = await get(`/registrations/${encodeURIComponent(regId)}:checkin-readiness`, undefined, { headers: featureHeaders });
+    if (!readyRes.ok || !readyRes.body?.ready) {
+      return { test: "badging:issue-badge-idempotent", result: "FAIL", reason: "not-ready-before-checkin", snapshot: readyRes.body };
+    }
+
+    // 8) Check-in the registration
+    const checkinRes = await post(
+      `/events/registration/${encodeURIComponent(regId)}:checkin`,
+      {},
+      { ...featureHeaders, "Idempotency-Key": idem() }
+    );
+    if (!checkinRes.ok || !checkinRes.body?.checkedInAt) {
+      return { test: "badging:issue-badge-idempotent", result: "FAIL", reason: "checkin-failed", checkinRes };
+    }
+
+    // 9) Issue badge with Idempotency-Key K1
+    const badgeKey1 = `badge-${SMOKE_RUN_ID}-k1`;
+    const issueBadge1 = await post(
+      `/registrations/${encodeURIComponent(regId)}:issue-badge`,
+      { badgeType: "admission" },
+      { ...featureHeaders, "Idempotency-Key": badgeKey1 }
+    );
+    if (!issueBadge1.ok || !issueBadge1.body?.issuance?.id) {
+      return { test: "badging:issue-badge-idempotent", result: "FAIL", reason: "first-badge-issue-failed", issueBadge1 };
+    }
+    const issuance1 = issueBadge1.body.issuance;
+    recordCreated({ type: "badgeIssuance", id: issuance1.id, route: "/registrations/{id}:issue-badge", meta: { eventId, registrationId: regId } });
+
+    // Validate first issuance fields
+    if (
+      !issuance1.eventId || issuance1.eventId !== eventId ||
+      !issuance1.registrationId || issuance1.registrationId !== regId ||
+      !issuance1.issuedAt ||
+      !issuance1.issuedBy ||
+      !issuance1.payload?.qrText ||
+      issuance1.reprintCount !== 0
+    ) {
+      return {
+        test: "badging:issue-badge-idempotent",
+        result: "FAIL",
+        reason: "first-issuance-missing-fields",
+        issuance: issuance1
+      };
+    }
+    const qrText1 = issuance1.payload.qrText;
+    const issuanceId1 = issuance1.id;
+
+    // 10) Replay with same Idempotency-Key K1 (should be idempotent)
+    const issueBadge2 = await post(
+      `/registrations/${encodeURIComponent(regId)}:issue-badge`,
+      { badgeType: "admission" },
+      { ...featureHeaders, "Idempotency-Key": badgeKey1 }
+    );
+    if (!issueBadge2.ok || !issueBadge2.body?.issuance?.id) {
+      return { test: "badging:issue-badge-idempotent", result: "FAIL", reason: "replay-badge-issue-failed", issueBadge2 };
+    }
+    const issuance2 = issueBadge2.body.issuance;
+
+    // Should return same issuance
+    if (issuance2.id !== issuanceId1 || issuance2.payload?.qrText !== qrText1) {
+      return {
+        test: "badging:issue-badge-idempotent",
+        result: "FAIL",
+        reason: "idempotent-replay-mismatch",
+        firstId: issuanceId1,
+        firstQr: qrText1,
+        replayId: issuance2.id,
+        replayQr: issuance2.payload?.qrText
+      };
+    }
+
+    return {
+      test: "badging:issue-badge-idempotent",
+      result: "PASS",
+      summary: "Badge issuance is idempotent; same Idempotency-Key returns same issuance",
+      eventId,
+      registrationId: regId,
+      issuanceId: issuanceId1,
+      issuedAt: issuance1.issuedAt,
+      issuedBy: issuance1.issuedBy
+    };
+  },
+
+  // E4: Badge issuance guard (not_checked_in)
+  "smoke:badging:issue-badge-guard-not-checked-in": async () => {
+    await ensureBearer();
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // 1) Create event
+    const eventName = smokeTag("badge_guard_evt");
+    const stallUnitAmount = 1500;
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 5,
+      reservedCount: 0,
+      stallEnabled: true,
+      stallCapacity: 2,
+      stallReserved: 0,
+      stallUnitAmount
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "badging:issue-badge-guard-not-checked-in", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+    // 2) Create stalls
+    const stalls = [];
+    for (let i = 1; i <= 2; i++) {
+      const stall = await post("/objects/resource", {
+        type: "resource",
+        resourceType: "stall",
+        name: `GuardStall-${i}`,
+        status: "available",
+        tags: [`event:${eventId}`, "group:GuardStall"]
+      });
+      if (!stall.ok || !stall.body?.id) {
+        return { test: "badging:issue-badge-guard-not-checked-in", result: "FAIL", reason: `stall-${i}-create-failed`, stall };
+      }
+      stalls.push(stall.body.id);
+      recordCreated({ type: "resource", id: stall.body.id, route: "/objects/resource", meta: { name: `GuardStall-${i}`, eventId } });
+    }
+
+    // 3) Create registration via public checkout flow with party.email (auto-creates party)
+    const regCreate = await post(
+      `/registrations:public`,
+      { eventId, stallQty: 2, party: { email: `badge_guard+${SMOKE_RUN_ID}@example.com` } },
+      featureHeaders,
+      { auth: "none" }
+    );
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test: "badging:issue-badge-guard-not-checked-in", result: "FAIL", reason: "reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+    recordCreated({ type: "registration", id: regId, route: "/registrations:public", meta: { eventId } });
+
+    // 4) Checkout
+    const checkout = await post(
+      `/events/registration/${encodeURIComponent(regId)}:checkout`,
+      {},
+      { ...featureHeaders, "X-MBapp-Public-Token": publicToken, "Idempotency-Key": idem() },
+      { auth: "none" }
+    );
+    if (!checkout.ok || !checkout.body?.paymentIntentId) {
+      return { test: "badging:issue-badge-guard-not-checked-in", result: "FAIL", reason: "checkout-failed", checkout };
+    }
+
+    // 5) Confirm payment via webhook
+    const webhookBody = {
+      id: `evt_${SMOKE_RUN_ID}`,
+      type: "payment_intent.succeeded",
+      data: {
+        object: {
+          id: checkout.body.paymentIntentId,
+          status: "succeeded",
+          metadata: { registrationId: regId, eventId }
+        }
+      }
+    };
+    const whRes = await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "Stripe-Signature": "sim_valid_signature",
+        ...featureHeaders,
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify(webhookBody)
+    });
+    if (!whRes.ok) {
+      return { test: "badging:issue-badge-guard-not-checked-in", result: "FAIL", reason: "webhook-confirm-failed", whStatus: whRes.status };
+    }
+
+    // 6) Assign stalls to make ready
+    const assignRes = await post(
+      `/registrations/${encodeURIComponent(regId)}:assign-resources`,
+      { itemType: "stall", resourceIds: [stalls[0], stalls[1]] },
+      featureHeaders
+    );
+    if (!assignRes.ok) {
+      return { test: "badging:issue-badge-guard-not-checked-in", result: "FAIL", reason: "assign-resources-failed", assignRes };
+    }
+
+    // 7) Verify readiness is ready but NOT checked in yet
+    const readyRes = await get(`/registrations/${encodeURIComponent(regId)}:checkin-readiness`, undefined, { headers: featureHeaders });
+    if (!readyRes.ok || !readyRes.body?.ready) {
+      return { test: "badging:issue-badge-guard-not-checked-in", result: "FAIL", reason: "not-ready-for-checkin", snapshot: readyRes.body };
+    }
+
+    const getRegRes = await get(`/registrations/${encodeURIComponent(regId)}`, undefined, { headers: featureHeaders });
+    const registrationBeforeBadge = getRegRes.body || {};
+    if (registrationBeforeBadge.checkedInAt) {
+      return {
+        test: "badging:issue-badge-guard-not-checked-in",
+        result: "FAIL",
+        reason: "registration-already-checked-in",
+        checkedInAt: registrationBeforeBadge.checkedInAt
+      };
+    }
+
+    // 8) Attempt badge issuance without check-in (should fail with 409 not_checked_in)
+    const badgeKeyGuard = `badge-guard-${SMOKE_RUN_ID}`;
+    const issueBadgeGuard = await post(
+      `/registrations/${encodeURIComponent(regId)}:issue-badge`,
+      { badgeType: "admission" },
+      { ...featureHeaders, "Idempotency-Key": badgeKeyGuard }
+    );
+
+    const guardStatus = issueBadgeGuard.status;
+    const guardBody = issueBadgeGuard.body || {};
+
+    if (guardStatus !== 409 || guardBody.code !== "not_checked_in") {
+      return {
+        test: "badging:issue-badge-guard-not-checked-in",
+        result: "FAIL",
+        reason: "expected 409 not_checked_in",
+        http: { ok: issueBadgeGuard.ok, status: guardStatus },
+        response: guardBody
+      };
+    }
+
+    return {
+      test: "badging:issue-badge-guard-not-checked-in",
+      result: "PASS",
+      summary: "Badge issuance blocked with 409 not_checked_in when registration ready but not checked in",
+      eventId,
+      registrationId: regId,
+      guardResponse: guardBody
+    };
+  },
+
+  // E4+: Badge issuance guard (party_required) - validates public registration requires party identification
+  "smoke:badging:issue-badge-guard-party-missing": async () => {
+    await ensureBearer();
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // 1) Create event
+    const eventName = smokeTag("badge_party_evt");
+    const stallUnitAmount = 1500;
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 5,
+      reservedCount: 0,
+      stallEnabled: true,
+      stallCapacity: 2,
+      stallReserved: 0,
+      stallUnitAmount
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "badging:issue-badge-guard-party-missing", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+    // 2) Attempt to create registration WITHOUT partyId and WITHOUT party.email (should fail with 400 validation_error)
+    const regCreate = await post(
+      `/registrations:public`,
+      { eventId, stallQty: 2 },
+      featureHeaders,
+      { auth: "none" }
+    );
+
+    // Should reject with 400 validation_error
+    if (regCreate.ok || regCreate.status !== 400) {
+      return {
+        test: "badging:issue-badge-guard-party-missing",
+        result: "FAIL",
+        reason: "expected 400 validation_error when creating registration without party info",
+        http: { ok: regCreate.ok, status: regCreate.status },
+        response: regCreate.body
+      };
+    }
+
+    // Verify validation error envelope structure
+    const body = regCreate.body || {};
+    if (body.code !== "validation_error") {
+      return {
+        test: "badging:issue-badge-guard-party-missing",
+        result: "FAIL",
+        reason: "expected body.code === validation_error",
+        actualCode: body.code,
+        response: body
+      };
+    }
+
+    if (body.details?.code !== "party_required") {
+      return {
+        test: "badging:issue-badge-guard-party-missing",
+        result: "FAIL",
+        reason: "expected body.details.code === party_required",
+        actualDetailsCode: body.details?.code,
+        response: body
+      };
+    }
+
+    // Optionally verify message mentions party identification
+    const message = String(body.message || "").toLowerCase();
+    if (!message.includes("party") || !message.includes("identification")) {
+      return {
+        test: "badging:issue-badge-guard-party-missing",
+        result: "FAIL",
+        reason: "expected message to mention party identification",
+        actualMessage: body.message,
+        response: body
+      };
+    }
+
+    return {
+      test: "badging:issue-badge-guard-party-missing",
+      result: "PASS",
+      summary: "Public registration correctly requires party identification (partyId or party.email)",
+      eventId,
+      guardResponse: body
     };
   }
 

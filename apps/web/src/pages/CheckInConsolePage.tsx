@@ -9,6 +9,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
 import type { CheckInWorklistPage, Registration, ScanResolutionResult, ScanResolutionCandidate } from "../types/checkin";
+import { v4 as uuidv4 } from "uuid";
+
+type BadgeIssuance = {
+  id: string;
+  issuedAt: string;
+  issuedBy: string;
+};
 
 function formatError(err: unknown): string {
   const e = err as any;
@@ -32,6 +39,11 @@ export default function CheckInConsolePage() {
   const [next, setNext] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Badge issuance state
+  const [badges, setBadges] = useState<Record<string, BadgeIssuance>>({});
+  const [issuingBadgeId, setIssuingBadgeId] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
   // Scan mode state
   const [scanString, setScanString] = useState("");
@@ -153,6 +165,41 @@ export default function CheckInConsolePage() {
     scanInputRef.current?.focus();
   };
 
+  const handleIssueBadge = async (registrationId: string) => {
+    setIssuingBadgeId(registrationId);
+    setToast(null);
+    try {
+      const idempotencyKey = uuidv4();
+      const res = await apiFetch<{ issuance: BadgeIssuance }>(
+        `/registrations/${encodeURIComponent(registrationId)}:issue-badge`,
+        {
+          method: "POST",
+          token: token || undefined,
+          tenantId,
+          body: { badgeType: "admission" },
+          headers: {
+            "Idempotency-Key": idempotencyKey,
+          },
+        }
+      );
+      if (res?.issuance) {
+        setBadges((prev) => ({ ...prev, [registrationId]: res.issuance }));
+        setToast({ kind: "success", message: `Badge issued for registration ${registrationId}` });
+      } else {
+        setToast({ kind: "error", message: "Badge issued but response was invalid" });
+      }
+    } catch (err: any) {
+      const errMsg = err?.code === "not_checked_in"
+        ? "Registration must be checked in first"
+        : err?.code === "checkin_blocked"
+        ? `Badge blocked: ${err?.message || "registration not ready"}`
+        : formatError(err);
+      setToast({ kind: "error", message: `Failed to issue badge: ${errMsg}` });
+    } finally {
+      setIssuingBadgeId(null);
+    }
+  };
+
   const handleFilterChange = (updates: {
     checkedIn?: boolean;
     ready?: boolean | null;
@@ -249,6 +296,18 @@ export default function CheckInConsolePage() {
           ) : null}
         </CardContent>
       </Card>
+
+      {toast ? (
+        <div
+          className={
+            toast.kind === "success"
+              ? "rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
+              : "rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+          }
+        >
+          {toast.message}
+        </div>
+      ) : null}
 
       <Card>
         <CardHeader className="pb-2">
@@ -379,6 +438,7 @@ export default function CheckInConsolePage() {
                 <TableHead className="text-xs uppercase text-center">Checked In</TableHead>
                 <TableHead className="text-xs uppercase text-center">Ready</TableHead>
                 <TableHead className="text-xs uppercase">Blockers</TableHead>
+                <TableHead className="text-xs uppercase">Badge</TableHead>
                 <TableHead className="text-xs uppercase">Last Evaluated</TableHead>
               </TableRow>
             </TableHeader>
@@ -397,6 +457,8 @@ export default function CheckInConsolePage() {
                   : "—";
 
                 const isHighlighted = highlightId && reg.id === highlightId;
+                const badge = badges[reg.id];
+                const isBadgeIssuing = issuingBadgeId === reg.id;
                 return (
                   <TableRow key={reg.id} className={isHighlighted ? "bg-yellow-50" : undefined}>
                     <TableCell className="font-mono text-xs text-slate-800">{reg.id}</TableCell>
@@ -409,6 +471,26 @@ export default function CheckInConsolePage() {
                       <Badge variant={readyVariant}>{readyDisplay}</Badge>
                     </TableCell>
                     <TableCell className="text-xs text-slate-700">{blockers}</TableCell>
+                    <TableCell className="text-center">
+                      {badge ? (
+                        <div className="flex flex-col items-center gap-1">
+                          <Badge variant="success">Issued</Badge>
+                          <span className="font-mono text-xs text-slate-600">
+                            {badge.issuedAt.substring(11, 19)}
+                          </span>
+                        </div>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleIssueBadge(reg.id)}
+                          disabled={isBadgeIssuing || !reg.checkedInAt}
+                          title={!reg.checkedInAt ? "Registration must be checked in first" : "Issue badge"}
+                        >
+                          {isBadgeIssuing ? "Issuing..." : "Issue"}
+                        </Button>
+                      )}
+                    </TableCell>
                     <TableCell className="font-mono text-xs text-slate-600">{lastEvaluated}</TableCell>
                   </TableRow>
                 );

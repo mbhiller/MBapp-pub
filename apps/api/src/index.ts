@@ -132,6 +132,7 @@ import * as RegCheckInReadiness from "./registrations/checkin-readiness-get";
 import * as RegRecomputeCheckInStatus from "./registrations/recompute-checkin-status-post";
 import * as RegResolveScan from "./registrations/resolve-scan-post";
 import * as RegCheckIn from "./registrations/checkin-post";
+import * as RegIssueBadge from "./registrations/issue-badge-post";
 // Internal jobs
 import * as JobsRun from "./jobs/run";
 import { runBackgroundJobs } from "./jobs/background";
@@ -474,6 +475,16 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
         const [, id] = m;
         requirePerm(auth, "registration:write");
         return RegAssignResources.handle(withId(event, id));
+      }
+    }
+
+    // Registrations: issue badge (Sprint BZ)
+    {
+      const m = path.match(/^\/registrations\/([^/]+):issue-badge$/i);
+      if (method === "POST" && m) {
+        const [, id] = m;
+        requirePerm(auth, "registration:write");
+        return RegIssueBadge.handle(withId(event, id));
       }
     }
 
