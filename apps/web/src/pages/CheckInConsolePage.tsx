@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
 import type { CheckInWorklistPage, Registration } from "../types/checkin";
@@ -88,9 +94,9 @@ export default function CheckInConsolePage() {
 
   if (!eventId) {
     return (
-      <div style={{ display: "grid", gap: 16 }}>
-        <h1>Check-In Console</h1>
-        <div style={{ color: "#b00020", padding: 16, background: "#ffebee", borderRadius: 4 }}>
+      <div className="flex flex-col gap-4">
+        <h1 className="text-2xl font-semibold">Check-In Console</h1>
+        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
           Error: Missing event ID. Please navigate to this page with a valid event ID.
         </div>
       </div>
@@ -98,242 +104,197 @@ export default function CheckInConsolePage() {
   }
 
   return (
-    <div style={{ display: "grid", gap: 16 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div>
-          <h1>Check-In Console</h1>
-          <div style={{ fontSize: 14, color: "#666", marginTop: 4 }}>Event ID: {eventId}</div>
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-semibold leading-tight">Check-In Console</h1>
+          <p className="text-sm text-slate-600">Event ID: {eventId}</p>
         </div>
-        <button onClick={handleRefresh} disabled={loading}>
+        <Button onClick={handleRefresh} disabled={loading} size="sm">
           {loading ? "Refreshing..." : "Refresh"}
-        </button>
+        </Button>
       </div>
 
-      {/* Filters */}
-      <div style={{ display: "grid", gap: 12, padding: 16, background: "#f9f9f9", borderRadius: 4 }}>
-        {/* Checked In Toggle */}
-        <div>
-          <label style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, display: "block" }}>
-            Check-In Status
-          </label>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button
-              onClick={() => handleFilterChange({ checkedIn: false })}
-              disabled={loading}
-              style={{
-                padding: "6px 12px",
-                background: !checkedIn ? "#0b3d91" : "#fff",
-                color: !checkedIn ? "#fff" : "#333",
-                border: "1px solid #ccc",
-                borderRadius: 4,
-                cursor: "pointer",
-              }}
-            >
-              Not Checked In
-            </button>
-            <button
-              onClick={() => handleFilterChange({ checkedIn: true })}
-              disabled={loading}
-              style={{
-                padding: "6px 12px",
-                background: checkedIn ? "#0b3d91" : "#fff",
-                color: checkedIn ? "#fff" : "#333",
-                border: "1px solid #ccc",
-                borderRadius: 4,
-                cursor: "pointer",
-              }}
-            >
-              Checked In
-            </button>
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle>Filters</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-4">
+          <div className="grid gap-2">
+            <Label>Check-In Status</Label>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant={!checkedIn ? "default" : "outline"}
+                size="sm"
+                onClick={() => handleFilterChange({ checkedIn: false })}
+                disabled={loading}
+              >
+                Not Checked In
+              </Button>
+              <Button
+                variant={checkedIn ? "default" : "outline"}
+                size="sm"
+                onClick={() => handleFilterChange({ checkedIn: true })}
+                disabled={loading}
+              >
+                Checked In
+              </Button>
+            </div>
           </div>
-        </div>
 
-        {/* Ready Toggle */}
-        <div>
-          <label style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, display: "block" }}>
-            Readiness
-          </label>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button
-              onClick={() => handleFilterChange({ ready: null })}
-              disabled={loading}
-              style={{
-                padding: "6px 12px",
-                background: ready === null ? "#0b3d91" : "#fff",
-                color: ready === null ? "#fff" : "#333",
-                border: "1px solid #ccc",
-                borderRadius: 4,
-                cursor: "pointer",
-              }}
-            >
-              All
-            </button>
-            <button
-              onClick={() => handleFilterChange({ ready: true })}
-              disabled={loading}
-              style={{
-                padding: "6px 12px",
-                background: ready === true ? "#0b3d91" : "#fff",
-                color: ready === true ? "#fff" : "#333",
-                border: "1px solid #ccc",
-                borderRadius: 4,
-                cursor: "pointer",
-              }}
-            >
-              Ready
-            </button>
-            <button
-              onClick={() => handleFilterChange({ ready: false })}
-              disabled={loading}
-              style={{
-                padding: "6px 12px",
-                background: ready === false ? "#0b3d91" : "#fff",
-                color: ready === false ? "#fff" : "#333",
-                border: "1px solid #ccc",
-                borderRadius: 4,
-                cursor: "pointer",
-              }}
-            >
-              Blocked
-            </button>
+          <div className="grid gap-2">
+            <Label>Readiness</Label>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant={ready === null ? "default" : "outline"}
+                size="sm"
+                onClick={() => handleFilterChange({ ready: null })}
+                disabled={loading}
+              >
+                All
+              </Button>
+              <Button
+                variant={ready === true ? "default" : "outline"}
+                size="sm"
+                onClick={() => handleFilterChange({ ready: true })}
+                disabled={loading}
+              >
+                Ready
+              </Button>
+              <Button
+                variant={ready === false ? "default" : "outline"}
+                size="sm"
+                onClick={() => handleFilterChange({ ready: false })}
+                disabled={loading}
+              >
+                Blocked
+              </Button>
+            </div>
           </div>
-        </div>
 
-        {/* Blocker Code Input */}
-        <div>
-          <label style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, display: "block" }}>
-            Blocker Code (comma-separated)
-          </label>
-          <input
-            type="text"
-            value={blockerCode}
-            onChange={(e) => setBlockerCode(e.target.value)}
-            onBlur={() => handleFilterChange({ blockerCode })}
-            placeholder="e.g., payment_unpaid,stalls_unassigned"
-            disabled={loading}
-            style={{ width: "100%", padding: "6px 8px", border: "1px solid #ccc", borderRadius: 4 }}
-          />
-        </div>
+          <div className="grid gap-2">
+            <Label htmlFor="blocker-code">Blocker Code (comma-separated)</Label>
+            <Input
+              id="blocker-code"
+              value={blockerCode}
+              onChange={(e) => setBlockerCode(e.target.value)}
+              onBlur={() => handleFilterChange({ blockerCode })}
+              placeholder="e.g., payment_unpaid,stalls_unassigned"
+              disabled={loading}
+            />
+          </div>
 
-        {/* Status Dropdown */}
-        <div>
-          <label style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, display: "block" }}>
-            Status
-          </label>
-          <select
-            value={status}
-            onChange={(e) => handleFilterChange({ status: e.target.value })}
-            disabled={loading}
-            style={{ width: "100%", padding: "6px 8px", border: "1px solid #ccc", borderRadius: 4 }}
-          >
-            <option value="">Any</option>
-            <option value="draft">Draft</option>
-            <option value="submitted">Submitted</option>
-            <option value="confirmed">Confirmed</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
-        </div>
+          <div className="grid gap-2">
+            <Label htmlFor="status-select">Status</Label>
+            <select
+              id="status-select"
+              value={status}
+              onChange={(e) => handleFilterChange({ status: e.target.value })}
+              disabled={loading}
+              className="h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-900/50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <option value="">Any</option>
+              <option value="draft">Draft</option>
+              <option value="submitted">Submitted</option>
+              <option value="confirmed">Confirmed</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </div>
 
-        {/* Search Input */}
-        <div>
-          <label style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, display: "block" }}>
-            Search (Party ID, Registration ID)
-          </label>
-          <input
-            type="text"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            onBlur={() => handleFilterChange({ q })}
-            placeholder="Search registrations..."
-            disabled={loading}
-            style={{ width: "100%", padding: "6px 8px", border: "1px solid #ccc", borderRadius: 4 }}
-          />
-        </div>
-      </div>
+          <div className="grid gap-2">
+            <Label htmlFor="search-input">Search (Party ID, Registration ID)</Label>
+            <Input
+              id="search-input"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onBlur={() => handleFilterChange({ q })}
+              placeholder="Search registrations..."
+              disabled={loading}
+            />
+          </div>
+        </CardContent>
+      </Card>
 
-      {/* Error Display */}
       {error ? (
-        <div style={{ color: "#b00020", padding: 12, background: "#ffebee", borderRadius: 4 }}>
+        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
           {error}
         </div>
       ) : null}
 
-      {/* Loading State */}
-      {loading && items.length === 0 ? <div>Loading worklist...</div> : null}
+      {loading && items.length === 0 ? (
+        <div className="rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+          Loading worklist...
+        </div>
+      ) : null}
 
-      {/* Empty State */}
       {!loading && items.length === 0 && !error ? (
-        <div style={{ color: "#666", padding: 16, textAlign: "center" }}>
+        <div className="rounded-md border border-slate-200 bg-white px-4 py-8 text-center text-slate-600">
           No registrations found for this filter combination.
         </div>
       ) : null}
 
-      {/* Table */}
       {items.length > 0 ? (
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr style={{ background: "#eee", textAlign: "left" }}>
-              <th style={{ padding: 8, border: "1px solid #ccc", fontSize: 12 }}>Registration ID</th>
-              <th style={{ padding: 8, border: "1px solid #ccc", fontSize: 12 }}>Party ID</th>
-              <th style={{ padding: 8, border: "1px solid #ccc", fontSize: 12 }}>Status</th>
-              <th style={{ padding: 8, border: "1px solid #ccc", fontSize: 12 }}>Checked In</th>
-              <th style={{ padding: 8, border: "1px solid #ccc", fontSize: 12 }}>Ready</th>
-              <th style={{ padding: 8, border: "1px solid #ccc", fontSize: 12 }}>Blockers</th>
-              <th style={{ padding: 8, border: "1px solid #ccc", fontSize: 12 }}>Last Evaluated</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((reg) => {
-              const blockers = Array.isArray(reg.checkInStatus?.blockers)
-                ? reg.checkInStatus!.blockers!.map((b) => b.code || "?").join(", ")
-                : "—";
-              const readyDisplay = reg.checkInStatus?.ready === true
-                ? "✓"
-                : reg.checkInStatus?.ready === false
-                ? "✗"
-                : "—";
-              const checkedInDisplay = reg.checkedInAt ? "✓" : "—";
-              const lastEvaluated = reg.checkInStatus?.lastEvaluatedAt
-                ? reg.checkInStatus.lastEvaluatedAt.substring(0, 19).replace("T", " ")
-                : "—";
+        <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-slate-50">
+                <TableHead className="text-xs uppercase">Registration ID</TableHead>
+                <TableHead className="text-xs uppercase">Party ID</TableHead>
+                <TableHead className="text-xs uppercase">Status</TableHead>
+                <TableHead className="text-xs uppercase text-center">Checked In</TableHead>
+                <TableHead className="text-xs uppercase text-center">Ready</TableHead>
+                <TableHead className="text-xs uppercase">Blockers</TableHead>
+                <TableHead className="text-xs uppercase">Last Evaluated</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map((reg) => {
+                const blockers = Array.isArray(reg.checkInStatus?.blockers)
+                  ? reg.checkInStatus.blockers!.map((b) => b.code || "?").join(", ")
+                  : "—";
+                const readyState = reg.checkInStatus?.ready;
+                const readyDisplay = readyState === true ? "Ready" : readyState === false ? "Blocked" : "—";
+                const readyVariant = readyState === true ? "success" : readyState === false ? "destructive" : "secondary";
+                const checkedInDisplay = reg.checkedInAt ? "Yes" : "No";
+                const checkedInVariant = reg.checkedInAt ? "success" : "secondary";
+                const lastEvaluated = reg.checkInStatus?.lastEvaluatedAt
+                  ? reg.checkInStatus.lastEvaluatedAt.substring(0, 19).replace("T", " ")
+                  : "—";
 
-              return (
-                <tr key={reg.id}>
-                  <td style={{ padding: 8, border: "1px solid #ccc", fontSize: 12 }}>{reg.id}</td>
-                  <td style={{ padding: 8, border: "1px solid #ccc", fontSize: 12 }}>
-                    {reg.partyId || "—"}
-                  </td>
-                  <td style={{ padding: 8, border: "1px solid #ccc", fontSize: 12 }}>
-                    {reg.status || "—"}
-                  </td>
-                  <td style={{ padding: 8, border: "1px solid #ccc", fontSize: 12, textAlign: "center" }}>
-                    {checkedInDisplay}
-                  </td>
-                  <td style={{ padding: 8, border: "1px solid #ccc", fontSize: 12, textAlign: "center" }}>
-                    {readyDisplay}
-                  </td>
-                  <td style={{ padding: 8, border: "1px solid #ccc", fontSize: 12 }}>{blockers}</td>
-                  <td style={{ padding: 8, border: "1px solid #ccc", fontSize: 12 }}>{lastEvaluated}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                return (
+                  <TableRow key={reg.id}>
+                    <TableCell className="font-mono text-xs text-slate-800">{reg.id}</TableCell>
+                    <TableCell className="text-xs text-slate-700">{reg.partyId || "—"}</TableCell>
+                    <TableCell className="text-xs text-slate-700">{reg.status || "—"}</TableCell>
+                    <TableCell className="text-center">
+                      <Badge variant={checkedInVariant}>{checkedInDisplay}</Badge>
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Badge variant={readyVariant}>{readyDisplay}</Badge>
+                    </TableCell>
+                    <TableCell className="text-xs text-slate-700">{blockers}</TableCell>
+                    <TableCell className="font-mono text-xs text-slate-600">{lastEvaluated}</TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
       ) : null}
 
-      {/* Pagination */}
       {next ? (
-        <button onClick={() => fetchWorklist(next)} disabled={loading}>
-          {loading ? "Loading..." : "Load more"}
-        </button>
+        <div className="flex justify-center">
+          <Button onClick={() => fetchWorklist(next)} disabled={loading} variant="outline">
+            {loading ? "Loading..." : "Load more"}
+          </Button>
+        </div>
       ) : null}
 
-      {/* Result Count */}
       {items.length > 0 ? (
-        <div style={{ fontSize: 13, color: "#666" }}>
+        <p className="text-sm text-slate-600">
           Showing {items.length} registration{items.length !== 1 ? "s" : ""}
           {next ? " (more available)" : ""}
-        </div>
+        </p>
       ) : null}
     </div>
   );

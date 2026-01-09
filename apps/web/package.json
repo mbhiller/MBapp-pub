@@ -13,17 +13,22 @@
     "@sentry/browser": "^7.114.0",
     "@stripe/react-stripe-js": "^3.10.0",
     "@stripe/stripe-js": "^4.10.0",
+    "clsx": "^2.1.1",
     "posthog-js": "^1.169.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^6.28.0",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "tailwind-merge": "^2.5.5"
   },
   "devDependencies": {
+    "autoprefixer": "^10.4.20",
     "@types/react": "^19.1.13",
     "@types/react-dom": "^19.1.9",
     "@vitejs/plugin-react": "^4.3.1",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.16",
     "typescript": "^5.9.2",
     "vite": "^5.4.20"
   }

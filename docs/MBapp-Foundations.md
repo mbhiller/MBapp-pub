@@ -2434,13 +2434,13 @@ Artifacts are committed to the repo and should be regenerated whenever spec anno
 **Web UI Foundation:**
 - **Framework:** React 18+ with TypeScript
 - **Styling:** TailwindCSS (utility-first CSS framework)
-- **Component Library:** shadcn/ui (copy-paste components built on Radix UI primitives)
+- **Component Primitives:** shadcn-style components housed in `apps/web/src/components/ui` (copy-paste, Radix-inspired)
 - **Routing:** React Router v6
 - **State Management:** React hooks + Context API (no global state library by default)
 
 **Mobile UI Foundation:**
 - **Framework:** React Native (Expo managed workflow)
-- **Styling:** React Native StyleSheet API + useColors hook (custom theming)
+- **Styling:** React Native StyleSheet API + useColors hook (current); migrating to Tailwind-like utility helpers + shadcn-style primitives for RN in a future sprint — legacy inline styles may be overwritten during that migration.
 - **Navigation:** React Navigation v6 (native stack navigator)
 - **State Management:** React hooks + Context API
 
@@ -2454,7 +2454,7 @@ Artifacts are committed to the repo and should be regenerated whenever spec anno
 - Formalize component API contracts (props, states, events) for cross-platform consistency where applicable.
 - Mobile may adopt React Native Paper or similar if native component patterns diverge significantly from web.
 
-**Status:** ✅ **Locked** — All new web UI must use TailwindCSS + shadcn/ui; no alternative styling approaches without architectural review.
+**Status:** ✅ **Locked** — All new web UI must use TailwindCSS + the shadcn-style primitives in `apps/web/src/components/ui`; legacy inline styling will be refactored over time. Mobile will align to Tailwind-like utilities and shadcn-style primitives; expect legacy inline styles to be overwritten during that migration.
 
 ---
 
