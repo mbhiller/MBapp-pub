@@ -446,6 +446,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/registrations/{id}:issue-badge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue or reissue a badge for a registration
+         * @description Issues an admission badge for a registration. Idempotent via Idempotency-Key header.
+         *     Registration must be checked in and payment status must be paid. Returns BadgeIssuance record with QR payload.
+         */
+        post: operations["issueBadge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/registrations:resolve-scan": {
         parameters: {
             query?: never;
@@ -4328,6 +4349,50 @@ export interface components {
             /** @description Opaque cursor for next page; null if no more pages */
             next?: string | null;
         };
+        BadgeIssuance: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "badgeIssuance";
+            /** @description ID of the registration being badged */
+            registrationId: string;
+            /** @description ID of the party (denormalized for UI display) */
+            partyId: string;
+            /** @description ID of the event this badge is for */
+            eventId: string;
+            /**
+             * @description Type of badge being issued
+             * @default admission
+             * @enum {string}
+             */
+            badgeType: "admission";
+            /**
+             * Format: date-time
+             * @description Timestamp when badge was issued
+             */
+            issuedAt: string;
+            /** @description User ID (operator) who issued the badge */
+            issuedBy: string;
+            /**
+             * @description Number of times badge has been reprinted
+             * @default 0
+             */
+            reprintCount: number;
+            /**
+             * Format: date-time
+             * @description Timestamp of last print/reprint action
+             */
+            lastPrintedAt?: string | null;
+            /** @description Badge payload (QR code, barcode data, etc.) */
+            payload: {
+                /** @description QR code text payload */
+                qrText: string;
+            };
+            /**
+             * @description Current print status of the badge
+             * @default not_printed
+             * @enum {string}
+             */
+            printStatus: "not_printed" | "printed" | "reprinted";
+        };
         /** @description Paginated worklist for event check-in console (Sprint BV) */
         CheckInWorklistPage: {
             eventId: string;
@@ -6224,6 +6289,87 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    issueBadge: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-tenant-id": components["parameters"]["TenantHeader"];
+                /** @description Optional idempotency key for safe retries. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description Badge type to issue (defaults to admission)
+                     * @default admission
+                     * @enum {string}
+                     */
+                    badgeType?: "admission";
+                };
+            };
+        };
+        responses: {
+            /** @description Badge issued successfully */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        issuance?: components["schemas"]["BadgeIssuance"];
+                    };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Registration not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflict - registration missing party, not checked in, or payment not complete */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        code?: "party_missing" | "not_checked_in" | "checkin_blocked";
+                        message?: string;
+                        /** @description Included when code=checkin_blocked */
+                        checkInStatus?: components["schemas"]["CheckInStatus"];
+                    };
                 };
             };
         };

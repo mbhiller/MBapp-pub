@@ -48,6 +48,7 @@ export const PERMISSIONS_BY_ENDPOINT = {
   "POST /registrations/{id}:assign-stalls": "registration:write",
   "POST /registrations/{id}:cancel": "registration:write",
   "POST /registrations/{id}:cancel-refund": "registration:write",
+  "POST /registrations/{id}:issue-badge": "registration:write",
   "POST /registrations/{id}:recompute-checkin-status": "registration:write",
   "POST /sales/so/{id}:cancel": "sales:cancel",
   "POST /sales/so/{id}:close": "sales:close",

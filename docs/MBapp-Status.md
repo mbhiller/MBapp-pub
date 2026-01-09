@@ -6,6 +6,14 @@
 
 ---
 
+### Public Registration Party Requirement — ✅ Live (2026-01-09)
+
+- **Contract:** `POST /registrations:public` now requires party identification: provide **either** `partyId` **or** `party.email` (phone-only payloads are rejected).
+- **Rationale:** Every human (guests/competitors) must be a Party for purchases, badging, and auditability.
+- **Error shape:** `400 validation_error` with `details.code = "party_required"` when missing.
+- **Example payload:** `{ eventId, party: { email: "guest@example.com", phone?: "+1..." } }`
+- **Smokes updated:** `registrations:public-checkout*`, `registrations:confirmation-sms` now pass party data; the guard smoke intentionally omits party and asserts `party_required`.
+
 ### Sprint BX — Check-In Console UI (v0) — ✅ Complete (2026-01-08)
 
 **Summary:** Delivered minimal Check-In Console web UI for operator check-in management. Provides worklist table with filters (checked-in state, readiness, blockers, status, search) and cursor pagination using the existing `GET /events/{eventId}:checkin-worklist` endpoint. Foundation for future row actions and real-time updates.
@@ -68,6 +76,48 @@
 **Verification:**
 - ✅ Typecheck: `npm run typecheck --workspaces --if-present`
 - ✅ Core smokes include the new resolver validation.
+
+---
+
+### Sprint BZ — Badge Issuance (MVP) — ✅ Complete (2026-01-09)
+
+**Summary:** Delivered badge issuance capability for event registrations. Operators issue admission badges from the Check-In Console after successful check-in. Idempotent endpoint uses deterministic ID generation; guards enforce registration ready + checked-in state. Includes spec, API handler, web UI with toast notifications, and comprehensive smoke coverage for idempotency and guard enforcement.
+
+**Deliverables (E1–E4):**
+- **Spec (E1):** Added `BadgeIssuance` schema with fields: `type`, `registrationId`, `partyId`, `eventId`, `badgeType` (enum: `[admission]`), `issuedAt`, `issuedBy`, `reprintCount`, `lastPrintedAt`, `payload` (with `qrText`), `printStatus` (enum: `[not_printed, printed, reprinted]`) in [spec/MBapp-Modules.yaml](spec/MBapp-Modules.yaml) at lines 3417–3485. Added `POST /registrations/{id}:issue-badge` endpoint at lines 5043–5140 with Idempotency-Key header (required), optional badgeType request body, 200 issuance response, and 409 guards (`not_checked_in`, `checkin_blocked`).
+- **API Handler (E2):** Implemented [apps/api/src/registrations/issue-badge-post.ts](apps/api/src/registrations/issue-badge-post.ts) with idempotent logic: validates Idempotency-Key header (required, 400 if missing); guards on `checkedInAt` (409 `not_checked_in` if not set) and readiness recompute (409 `checkin_blocked` with snapshot if blocked); generates deterministic issuance ID via SHA256 hash of `{registrationId}|{badgeType}|{idempotencyKey}` (12-char hex with `badge_` prefix); creates BadgeIssuance object with audit fields (`issuedAt`, `issuedBy`) and QR payload (`badge|{eventId}|{registrationId}|{issuanceId}`); stores via `createObject()`. Wired route in [apps/api/src/index.ts](apps/api/src/index.ts) with `registration:write` permission guard.
+- **Web UI (E3):** Added Badge issuance action to [apps/web/src/pages/CheckInConsolePage.tsx](apps/web/src/pages/CheckInConsolePage.tsx): new state for `badges` map (local session), `issuingBadgeId` (loading state), and `toast` (error/success messages); handler `handleIssueBadge()` generates UUID for Idempotency-Key, POSTs to `/registrations/{id}:issue-badge`, updates badges map on success, shows toast notification (green success or red error with human-readable message per error code). Extended table with "Badge" column (between Blockers and Last Evaluated): shows "Issue" button (disabled if not checked in) or "Issued" badge + time on success; loading text "Issuing..." while request in flight.
+- **Smokes (E4):** Added 2 CORE tests in [ops/smoke/smoke.mjs](ops/smoke/smoke.mjs) and registered in [ops/ci-smokes.json](ops/ci-smokes.json):
+  - `smoke:badging:issue-badge-idempotent` — Creates event, registration, drives to ready + checked-in via payment + stall assignment. Issues badge with Idempotency-Key K1; validates issuance fields (eventId, registrationId, partyId, issuedAt, issuedBy, qrText, reprintCount=0). Replays with K1; asserts same issuance ID (idempotent).
+  - `smoke:badging:issue-badge-guard-not-checked-in` — Creates event, registration, drives to ready state (paid, stalls assigned) but does NOT check in. Attempts badge issuance; asserts 409 `not_checked_in` with no issuance created. Proves guard enforcement before checked-in state.
+
+**Endpoints:**
+- `POST /registrations/{id}:issue-badge` — Idempotent badge issuance; requires Idempotency-Key header; guards on checkedInAt + readiness; returns BadgeIssuance on success (200) or error code + context on 409.
+
+**Payload Format (MVP):**
+- QR Text: `badge|{eventId}|{registrationId}|{issuanceId}` — Simple delimited format; no crypto/signing in MVP. Future: add vendor-specific QR encoding and print integration.
+- BadgeType: Enum `[admission]` in MVP; extensible for future badge types (staff, vendor, etc.).
+
+**UI Location:**
+- Check-In Console: `/events/:eventId/checkin` table row action. Badge column shows button or issued state; click "Issue" to trigger POST with idempotent key.
+
+**Idempotency Mechanism:**
+- Client generates UUID for Idempotency-Key header.
+- Server computes deterministic issuance ID: SHA256 hash of registration ID + badge type + idempotency key.
+- DynamoDB atomicity ensures same ID → no duplicates; retries or client replay return same issuance object.
+
+**Verification:**
+- ✅ Typecheck: `npm run typecheck --workspaces --if-present` (all 3 workspaces clean)
+- ✅ Core smokes: `smoke:badging:issue-badge-idempotent` and `smoke:badging:issue-badge-guard-not-checked-in` (both PASS)
+
+**Impact:**
+- Operators can now issue admission badges from the Check-In Console with clear feedback (error toast or issued confirmation). Idempotency ensures no duplicates on network retry or client replay. MVP scope defers print, reprint, and multi-badge types.
+
+**Next Steps (E5+):**
+- Reprint endpoint to increment reprintCount and update lastPrintedAt.
+- Print endpoint with hardware integration and printStatus transition (`not_printed` → `printed` → `reprinted`).
+- Multi-badge types: extend badgeType enum and UI selector.
+- QR signing: add HMAC/crypto for QR validation at print/scan time.
 
 ---
 
@@ -485,7 +535,7 @@
 - **Smokes (E7):** Added RV flows in [ops/smoke/smoke.mjs](../ops/smoke/smoke.mjs): happy path totals/fees, capacity guard, and expiry release.
 
 **Endpoints/fields:**
-- Public create: `POST /registrations:public { eventId, rvQty? }` (validates rv config)
+- Public create: `POST /registrations:public { eventId, party: { email, phone? } | partyId, rvQty? }` (requires party identification; validates RV config)
 - Checkout: `POST /events/registration/{id}:checkout` → reserves seat+RV, returns `paymentIntentId`, `clientSecret`, `totalAmount`, `currency`, `fees[]`
 - Expiry cleanup: `POST /registrations:cleanup-expired-holds` releases seat and RV
 - Public list: `GET /events:public` includes `rvEnabled`, `rvCapacity`, `rvUnitAmount`, `rvReserved`
