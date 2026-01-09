@@ -57,6 +57,35 @@
 - **Navigation:** Added “Events” to the main nav and a Home CTA “Browse Events” linking to `/events` (see [apps/web/src/components/Layout.tsx](../apps/web/src/components/Layout.tsx) and [apps/web/src/App.tsx](../apps/web/src/App.tsx)).
 - **Verification:** `npm run typecheck -w apps/web` clean; core + extended smokes green in current run set.
 
+### Sprint CB — Public “My Check-In” Magic Link Flow — ✅ Complete (2026-01-09)
+
+**Summary:** Enables a secure, public “My Check-In” flow for guests/competitors to request a magic link by email and view their registration’s safe status including check-in readiness. Prevents email enumeration and supports simulated notifications for testing.
+
+**Public Entry Route:**
+- `/events/:eventId/my-checkin` — Public page with two modes:
+  - Request Link: email form to request a magic link
+  - Session: consumes `regId` + `token` from query to display status
+
+**Endpoints:**
+- `POST /registrations:lookup-public` — Always returns `{ sent: true }`; never indicates existence; rate-limited per IP. Accepts `{ eventId, email, deliveryMethod? }` (default `email`).
+- Magic link format: `/events/:eventId/my-checkin?regId=<registrationId>&token=<publicToken>` (base URL configurable via `MBAPP_PUBLIC_WEB_BASE_URL`).
+- `GET /registrations/{id}:public` — Now includes `checkInStatus` snapshot (safe): `{ ready, blockers[], lastEvaluatedAt, version? }`. PII excluded.
+
+**Security Notes:**
+- No existence leak: `lookup-public` always returns success and sends nothing if no match.
+- Abuse control: simple per-IP limiter (recommend 10/hour); no token exposure in responses.
+- Testing: use `X-Feature-Notify-Simulate: true` to persist message records without real sends.
+
+**Web Integration:**
+- [apps/web/src/pages/PublicCheckInPage.tsx](../apps/web/src/pages/PublicCheckInPage.tsx) implements both modes and uses `apiFetch` with `VITE_MBAPP_PUBLIC_TENANT_ID` fallback.
+
+**Verification:**
+- Typecheck: `npm run typecheck --workspaces --if-present`
+- Targeted smokes:
+  - `node ops/smoke/smoke.mjs smoke:registrations:lookup-public-email-simulated`
+  - `node ops/smoke/smoke.mjs smoke:registrations:public-get-includes-checkinStatus-and-no-pii`
+- CI registration: core smokes added; notfound/no-leak covered in extended.
+
 ---
 
 ### Sprint BX+ — Scan-first Check-In Resolution — ✅ Complete (2026-01-09)

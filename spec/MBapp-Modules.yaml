@@ -1778,6 +1778,10 @@ components:
           type: string
           format: date-time
           nullable: true
+        checkInStatus:
+          $ref: '#/components/schemas/CheckInStatus'
+          nullable: true
+          description: Check-in readiness snapshot (Sprint CB)
         emailStatus:
           type: object
           nullable: true
@@ -2221,6 +2225,37 @@ components:
         notes:
           type: string
           nullable: true
+    LookupPublicRegistrationRequest:
+      type: object
+      description: Request to lookup and send magic link for public check-in (Sprint CB)
+      required:
+      - eventId
+      - email
+      properties:
+        eventId:
+          type: string
+          description: ID of the event to search registrations for
+        email:
+          type: string
+          description: Email address (normalized to lowercase)
+        deliveryMethod:
+          type: string
+          enum: [email, sms]
+          default: email
+          description: Delivery channel for magic link
+    LookupPublicRegistrationResponse:
+      type: object
+      description: Response from public registration lookup (always returns success for security)
+      required:
+      - sent
+      properties:
+        sent:
+          type: boolean
+          description: Always true (never reveals whether email exists)
+        message:
+          type: string
+          nullable: true
+          description: Generic message like "If we found a match, we sent a link."
     FeeLineItem:
       type: object
       description: Server-owned fee line item used to compute totals
@@ -5262,6 +5297,57 @@ paths:
                         type: number
                       currentRegistrations:
                         type: number
+  /registrations:lookup-public:
+    post:
+      tags:
+      - Registrations
+      - Public
+      operationId: lookupPublicRegistration
+      summary: Lookup registration and send magic link (no auth required) - Sprint CB
+      description: |
+        Public endpoint for "My Check-In" flow. User submits eventId + email to request a magic link.
+        Security notes:
+        - Always returns success regardless of whether email exists (prevents email enumeration)
+        - Rate-limited by IP address (10 requests/hour) to prevent abuse
+        - Magic link contains registrationId + publicToken for secure access
+        - If multiple registrations exist for email+event, sends separate link for each
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LookupPublicRegistrationRequest'
+      responses:
+        '200':
+          description: Request processed (always success for security)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LookupPublicRegistrationResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    enum: [rate_limit_exceeded]
+                  message:
+                    type: string
+                  retryAfter:
+                    type: integer
+                    description: Seconds until rate limit resets
   /registrations:cleanup-expired-holds:
     post:
       tags:

@@ -15999,6 +15999,158 @@ const tests = {
     };
   },
 
+  "smoke:registrations:lookup-public-email-simulated": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // Create event
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: smokeTag("lookup_public_evt"),
+      capacity: 5,
+      reservedCount: 0
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test:"registrations:lookup-public-email-simulated", result:"FAIL", reason:"event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event" });
+
+    const toEmail = `lookup+${SMOKE_RUN_ID}@example.com`;
+
+    // Create a public registration with party.email
+    const regCreate = await post(`/registrations:public`, { eventId, party: { email: toEmail } }, featureHeaders, { auth: "none" });
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test:"registrations:lookup-public-email-simulated", result:"FAIL", reason:"reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+
+    // Request lookup magic link (simulate notifications)
+    const lookup = await post(`/registrations:lookup-public`, { eventId, email: toEmail }, featureHeaders, { auth: "none" });
+    if (!lookup.ok || !lookup.body?.sent) {
+      return { test:"registrations:lookup-public-email-simulated", result:"FAIL", reason:"lookup-failed", lookup };
+    }
+
+    // Assert a message record was created to the email
+    const list = await get(`/messages`, { to: toEmail, limit: 5 }, featureHeaders);
+    if (!list.ok) {
+      return { test:"registrations:lookup-public-email-simulated", result:"FAIL", reason:"messages-list-failed", list };
+    }
+    const items = Array.isArray(list.body?.items) ? list.body.items : [];
+    const hasEmail = items.some(m => String(m?.to || "") === toEmail);
+    const bodyContainsLink = items.some(m => typeof m?.body === "string" && m.body.includes(`/events/${eventId}/my-checkin`) && m.body.includes("regId=") && m.body.includes("token="));
+
+    const pass = hasEmail && bodyContainsLink;
+    return {
+      test: "registrations:lookup-public-email-simulated",
+      result: pass ? "PASS" : "FAIL",
+      steps: { eventId, regId },
+      messages: { count: items.length, bodyContainsLink }
+    };
+  },
+
+  "smoke:registrations:lookup-public-notfound-does-not-leak": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // Create event
+    const evt = await post("/objects/event", { type: "event", status: "open", name: smokeTag("lookup_notfound_evt"), capacity: 5, reservedCount: 0 });
+    if (!evt.ok || !evt.body?.id) {
+      return { test:"registrations:lookup-public-notfound-does-not-leak", result:"FAIL", reason:"event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event" });
+
+    const ghostEmail = `ghost+${SMOKE_RUN_ID}@example.com`;
+
+    // Count messages before
+    const before = await get(`/messages`, { to: ghostEmail, limit: 5 }, featureHeaders);
+    const beforeCount = before.ok && Array.isArray(before.body?.items) ? before.body.items.length : 0;
+
+    // Lookup for non-existent email
+    const lookup = await post(`/registrations:lookup-public`, { eventId, email: ghostEmail }, featureHeaders, { auth: "none" });
+    if (!lookup.ok || !lookup.body?.sent) {
+      return { test:"registrations:lookup-public-notfound-does-not-leak", result:"FAIL", reason:"lookup-failed", lookup };
+    }
+
+    // Count messages after
+    const after = await get(`/messages`, { to: ghostEmail, limit: 5 }, featureHeaders);
+    const afterCount = after.ok && Array.isArray(after.body?.items) ? after.body.items.length : 0;
+
+    const pass = (afterCount === beforeCount);
+    return {
+      test: "registrations:lookup-public-notfound-does-not-leak",
+      result: pass ? "PASS" : "FAIL",
+      counts: { before: beforeCount, after: afterCount },
+      steps: { eventId }
+    };
+  },
+
+  "smoke:registrations:public-get-includes-checkinStatus-and-no-pii": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // Create event
+    const evt = await post("/objects/event", { type: "event", status: "open", name: smokeTag("public_get_checkin_evt"), capacity: 5, reservedCount: 0 });
+    if (!evt.ok || !evt.body?.id) {
+      return { test:"registrations:public-get-includes-checkinStatus-and-no-pii", result:"FAIL", reason:"event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event" });
+
+    // Create public registration
+    const toEmail = `publicget+${SMOKE_RUN_ID}@example.com`;
+    const regCreate = await post(`/registrations:public`, { eventId, party: { email: toEmail } }, featureHeaders, { auth: "none" });
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test:"registrations:public-get-includes-checkinStatus-and-no-pii", result:"FAIL", reason:"reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+
+    // GET public status
+    const pubStatus = await fetch(`${API}/registrations/${encodeURIComponent(regId)}:public`, {
+      headers: {
+        "X-MBapp-Public-Token": publicToken,
+        "x-tenant-id": TENANT,
+        "X-Feature-Registrations-Enabled": "true"
+      }
+    });
+    const pubBody = await pubStatus.json().catch(() => ({}));
+    if (!pubStatus.ok) {
+      return { test:"registrations:public-get-includes-checkinStatus-and-no-pii", result:"FAIL", reason:"public-status-failed", pubStatus: pubStatus.status, pubBody };
+    }
+
+    // Validate checkInStatus shape
+    const cis = pubBody?.checkInStatus || null;
+    const hasSnapshot = !!cis && typeof cis.ready === "boolean" && Array.isArray(cis.blockers) && !!cis.lastEvaluatedAt;
+
+    // Ensure no PII keys present
+    const forbiddenKeys = ["partyId", "party", "email", "phone", "fees", "lines", "paymentIntentId"];
+    const leaks = forbiddenKeys.filter(k => k in (pubBody || {}));
+
+    const pass = hasSnapshot && leaks.length === 0;
+    return {
+      test: "registrations:public-get-includes-checkinStatus-and-no-pii",
+      result: pass ? "PASS" : "FAIL",
+      checkInStatus: { ready: cis?.ready, blockers: Array.isArray(cis?.blockers) ? cis.blockers.length : null },
+      leaks,
+      steps: { eventId, regId }
+    };
+  },
+
   "smoke:jobs:background-cleanup-expired-holds": async () => {
     await ensureBearer();
 
