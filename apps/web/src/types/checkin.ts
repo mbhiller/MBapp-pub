@@ -36,3 +36,29 @@ export type CheckInWorklistPage = {
   items: Registration[];
   next: string | null;
 };
+
+// Scan resolution types (mirrors API union minimally for web usage)
+export type ScanResolutionCandidate = {
+  registrationId: string;
+  partyId: string | null;
+  status: "draft" | "submitted" | "confirmed" | "cancelled";
+};
+
+export type ScanResolutionResult =
+  | {
+      ok: true;
+      registrationId: string;
+      partyId: string | null;
+      status: "draft" | "submitted" | "confirmed" | "cancelled";
+      ready: boolean;
+      blockers?: CheckInBlocker[];
+      lastEvaluatedAt?: string | null;
+    }
+  | {
+      ok: false;
+      error: "not_found" | "not_in_event" | "ambiguous" | "invalid_scan";
+      reason: string;
+      candidates?: ScanResolutionCandidate[];
+      // Optional extra fields may be returned, tolerate them
+      [k: string]: unknown;
+    };

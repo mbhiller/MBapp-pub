@@ -1965,6 +1965,96 @@ components:
           type: string
         checkInStatus:
           $ref: '#/components/schemas/CheckInStatus'
+    ScanResolutionRequest:
+      type: object
+      description: Request to resolve a scan string (QR/barcode/EPC) to a registration for check-in
+      required:
+      - eventId
+      - scanString
+      properties:
+        eventId:
+          type: string
+          description: Event ID to scope registration lookup
+        scanString:
+          type: string
+          description: Raw scan data (QR payload, barcode, EPC, or inventory ID)
+        scanType:
+          type: string
+          enum: [auto, qr, barcode, epc]
+          default: auto
+          description: Scan type hint (auto = classify from scanString pattern)
+    ScanResolutionCandidate:
+      type: object
+      description: Candidate registration match when scan resolves ambiguously
+      required:
+      - registrationId
+      - partyId
+      - status
+      properties:
+        registrationId:
+          type: string
+        partyId:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [draft, submitted, confirmed, cancelled]
+    ScanResolutionResult:
+      oneOf:
+      - type: object
+        description: Successful scan resolution
+        required:
+        - ok
+        - registrationId
+        - partyId
+        - status
+        - ready
+        properties:
+          ok:
+            type: boolean
+            enum: [true]
+          registrationId:
+            type: string
+          partyId:
+            type: string
+            nullable: true
+          status:
+            type: string
+            enum: [draft, submitted, confirmed, cancelled]
+          ready:
+            type: boolean
+            description: Whether registration is ready for check-in (from checkInStatus.ready)
+          blockers:
+            type: array
+            description: Blockers preventing check-in if ready=false
+            items:
+              $ref: '#/components/schemas/CheckInBlocker'
+          lastEvaluatedAt:
+            type: string
+            format: date-time
+            nullable: true
+      - type: object
+        description: Failed scan resolution
+        required:
+        - ok
+        - error
+        - reason
+        properties:
+          ok:
+            type: boolean
+            enum: [false]
+          error:
+            type: string
+            enum: [not_found, not_in_event, ambiguous, invalid_scan]
+            description: Error code indicating cause of resolution failure
+          reason:
+            type: string
+            description: Human-readable error message
+          candidates:
+            type: array
+            description: Candidate matches if error=ambiguous
+            items:
+              $ref: '#/components/schemas/ScanResolutionCandidate'
     AssignStallsRequest:
       type: object
       description: Request to assign specific stalls to a registration (Sprint BK)
@@ -4881,6 +4971,53 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /registrations:resolve-scan:
+    post:
+      tags:
+      - Registrations
+      operationId: resolveRegistrationScan
+      summary: Resolve scan (QR/barcode/EPC) to a registration for check-in
+      description: |
+        Resolves a raw scan string (QR payload, ticket barcode, EPC, or inventory ID) to a registration
+        within a specified event. Returns registration details with check-in readiness snapshot.
+        On ambiguity (multiple registrations match scan), returns candidates for operator selection.
+        Supports auto-detection of scan format or explicit type hint.
+      x-mbapp-permission: registration:read
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScanResolutionRequest'
+      responses:
+        '200':
+          description: Scan resolved to registration(s)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanResolutionResult'
+        '400':
+          description: Validation error (missing eventId, empty scanString, invalid scanType)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /events:public:
     get:
       tags:
@@ -6687,27 +6824,67 @@ paths:
                 $ref: '#/components/schemas/Reservation'
   /epc/resolve:
     get:
-      summary: Resolve EPC to item
+      tags:
+      - Inventory
+      - Scanning
+      summary: Resolve EPC to inventory item
+      operationId: resolveEpc
+      description: |
+        Resolves an EPC (Electronic Product Code) string to a mapped inventory item ID.
+        Supports URN:EPC format, plain hex strings, and numeric formats.
+        Primarily used by warehouse/inventory operations (e.g., PO receive scans).
+      x-mbapp-permission: inventory:read
+      security:
+      - bearerAuth: []
       parameters:
+      - $ref: '#/components/parameters/TenantHeader'
       - in: query
         name: epc
         required: true
         schema:
           type: string
+        description: EPC string to resolve (e.g., URN:EPC:12345, or hex/numeric format)
       responses:
         '200':
-          description: OK
+          description: EPC resolved to item
           content:
             application/json:
               schema:
                 type: object
+                required:
+                - itemId
                 properties:
                   itemId:
                     type: string
+                    description: Mapped inventory item ID
                   status:
                     type: string
+                    nullable: true
+                    description: Optional status of the EPC mapping (e.g., active, retired)
+        '400':
+          description: Validation error (missing epc parameter)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
-          description: Not found
+          description: EPC not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /scanner/sessions:
     post:
       summary: Start/stop a scanner session

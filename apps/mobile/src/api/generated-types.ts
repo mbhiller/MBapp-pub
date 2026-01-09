@@ -446,6 +446,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/registrations:resolve-scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve scan (QR/barcode/EPC) to a registration for check-in
+         * @description Resolves a raw scan string (QR payload, ticket barcode, EPC, or inventory ID) to a registration
+         *     within a specified event. Returns registration details with check-in readiness snapshot.
+         *     On ambiguity (multiple registrations match scan), returns candidates for operator selection.
+         *     Supports auto-detection of scan format or explicit type hint.
+         *
+         */
+        post: operations["resolveRegistrationScan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/events:public": {
         parameters: {
             query?: never;
@@ -2413,39 +2437,14 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Resolve EPC to item */
-        get: {
-            parameters: {
-                query: {
-                    epc: string;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description OK */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            itemId?: string;
-                            status?: string;
-                        };
-                    };
-                };
-                /** @description Not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
+        /**
+         * Resolve EPC to inventory item
+         * @description Resolves an EPC (Electronic Product Code) string to a mapped inventory item ID.
+         *     Supports URN:EPC format, plain hex strings, and numeric formats.
+         *     Primarily used by warehouse/inventory operations (e.g., PO receive scans).
+         *
+         */
+        get: operations["resolveEpc"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3589,6 +3588,52 @@ export interface components {
             code: "checkin_blocked";
             message: string;
             checkInStatus: components["schemas"]["CheckInStatus"];
+        };
+        /** @description Request to resolve a scan string (QR/barcode/EPC) to a registration for check-in */
+        ScanResolutionRequest: {
+            /** @description Event ID to scope registration lookup */
+            eventId: string;
+            /** @description Raw scan data (QR payload, barcode, EPC, or inventory ID) */
+            scanString: string;
+            /**
+             * @description Scan type hint (auto = classify from scanString pattern)
+             * @default auto
+             * @enum {string}
+             */
+            scanType: "auto" | "qr" | "barcode" | "epc";
+        };
+        /** @description Candidate registration match when scan resolves ambiguously */
+        ScanResolutionCandidate: {
+            registrationId: string;
+            partyId: string | null;
+            /** @enum {string} */
+            status: "draft" | "submitted" | "confirmed" | "cancelled";
+        };
+        ScanResolutionResult: {
+            /** @enum {boolean} */
+            ok: true;
+            registrationId: string;
+            partyId: string | null;
+            /** @enum {string} */
+            status: "draft" | "submitted" | "confirmed" | "cancelled";
+            /** @description Whether registration is ready for check-in (from checkInStatus.ready) */
+            ready: boolean;
+            /** @description Blockers preventing check-in if ready=false */
+            blockers?: components["schemas"]["CheckInBlocker"][];
+            /** Format: date-time */
+            lastEvaluatedAt?: string | null;
+        } | {
+            /** @enum {boolean} */
+            ok: false;
+            /**
+             * @description Error code indicating cause of resolution failure
+             * @enum {string}
+             */
+            error: "not_found" | "not_in_event" | "ambiguous" | "invalid_scan";
+            /** @description Human-readable error message */
+            reason: string;
+            /** @description Candidate matches if error=ambiguous */
+            candidates?: components["schemas"]["ScanResolutionCandidate"][];
         };
         /** @description Request to assign specific stalls to a registration (Sprint BK) */
         AssignStallsRequest: {
@@ -6183,6 +6228,59 @@ export interface operations {
             };
         };
     };
+    resolveRegistrationScan: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-tenant-id": components["parameters"]["TenantHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScanResolutionRequest"];
+            };
+        };
+        responses: {
+            /** @description Scan resolved to registration(s) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScanResolutionResult"];
+                };
+            };
+            /** @description Validation error (missing eventId, empty scanString, invalid scanType) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     listPublicEvents: {
         parameters: {
             query?: {
@@ -7100,6 +7198,72 @@ export interface operations {
                         /** @example invalid_signature */
                         error?: string;
                     };
+                };
+            };
+        };
+    };
+    resolveEpc: {
+        parameters: {
+            query: {
+                /** @description EPC string to resolve (e.g., URN:EPC:12345, or hex/numeric format) */
+                epc: string;
+            };
+            header: {
+                "x-tenant-id": components["parameters"]["TenantHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description EPC resolved to item */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Mapped inventory item ID */
+                        itemId: string;
+                        /** @description Optional status of the EPC mapping (e.g., active, retired) */
+                        status?: string | null;
+                    };
+                };
+            };
+            /** @description Validation error (missing epc parameter) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description EPC not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };

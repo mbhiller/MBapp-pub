@@ -130,6 +130,7 @@ import * as RegAssignRvSites from "./registrations/assign-rv-sites";
 import * as RegAssignResources from "./registrations/assign-resources";
 import * as RegCheckInReadiness from "./registrations/checkin-readiness-get";
 import * as RegRecomputeCheckInStatus from "./registrations/recompute-checkin-status-post";
+import * as RegResolveScan from "./registrations/resolve-scan-post";
 import * as RegCheckIn from "./registrations/checkin-post";
 // Internal jobs
 import * as JobsRun from "./jobs/run";
@@ -398,6 +399,12 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
     if (method === "POST" && path === "/registrations:cleanup-expired-holds") {
       requirePerm(auth, "registration:write");
       return RegCleanupExpiredHolds.handle(event);
+    }
+
+    // Registrations: resolve scan to registration (Sprint BX)
+    if (method === "POST" && path === "/registrations:resolve-scan") {
+      requirePerm(auth, "registration:read");
+      return RegResolveScan.handle(event);
     }
 
     // Registrations: operator cancel

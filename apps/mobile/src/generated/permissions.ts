@@ -9,6 +9,7 @@
 export const PERMISSIONS_BY_ENDPOINT = {
   "DELETE /views/{id}": "view:write",
   "DELETE /workspaces/{id}": "workspace:write",
+  "GET /epc/resolve": "inventory:read",
   "GET /events/{eventId}:checkin-worklist": "event:read registration:read",
   "GET /events/{eventId}:classes-summary": "event:read registration:read",
   "GET /events/{eventId}:registrations-by-line": "event:read registration:read",
@@ -41,6 +42,7 @@ export const PERMISSIONS_BY_ENDPOINT = {
   "POST /purchasing/po/{id}:receive": "purchase:receive",
   "POST /purchasing/suggest-po": "purchase:write",
   "POST /registrations:cleanup-expired-holds": "registration:write",
+  "POST /registrations:resolve-scan": "registration:read",
   "POST /registrations/{id}:assign-resources": "registration:write",
   "POST /registrations/{id}:assign-rv-sites": "registration:write",
   "POST /registrations/{id}:assign-stalls": "registration:write",
