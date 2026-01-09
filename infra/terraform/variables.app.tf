@@ -45,3 +45,20 @@ variable "background_jobs_schedule_expression" {
   type        = string
   default     = "rate(10 minutes)"
 }
+
+variable "region" {
+  description = "AWS region"
+  type        = string
+  default     = "us-east-1"
+}
+
+variable "http_api_id" {
+  description = "HTTP API Gateway ID for the objects API"
+  type        = string
+}
+
+variable "objects_integration_id" {
+  description = "API Gateway integration ID for objects endpoint"
+  type        = string
+  default     = ""
+}
