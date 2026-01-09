@@ -1,7 +1,7 @@
 // apps/api/src/events/registrations-by-line-get.ts
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { ok, notFound, error, bad } from "../common/responses";
-import { getObjectById, listObjects } from "../objects/repo";
+import { getObjectById, listRegistrationsByEventId } from "../objects/repo";
 import type { components } from "../generated/openapi-types";
 
 type Event = components["schemas"]["Event"];
@@ -58,12 +58,12 @@ export async function handle(event: APIGatewayProxyEventV2) {
     let finalNext: string | null = null;
 
     while (pageIdx < maxBackendPages && collected.length < limit) {
-      const pageResult = await listObjects({
+      const pageResult = await listRegistrationsByEventId({
         tenantId,
-        type: "registration",
-        filters: { eventId },
-        limit: 200, // Fetch larger pages from backend
+        eventId,
+        limit: 200, // upstream page size
         next: nextCursor || undefined,
+        scanIndexForward: true,
       });
 
       const regs = pageResult.items as Registration[];

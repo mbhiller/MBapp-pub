@@ -76,6 +76,9 @@ Smokes are organized by tier for targeted CI validation:
 - **`smoke:checkin:worklist-ready-vs-blocked`** — Creates registrations across ready/unpaid/unassigned, confirms ready-only list and blocker-specific filters (`payment_unpaid`, `stalls_unassigned`).
 - **`smoke:checkin:worklist-checked-in`** — Marks one registration as checked in; asserts `checkedIn=false` list excludes it and `checkedIn=true` list includes it.
 
+### EXTENDED
+- **`smoke:checkin:worklist-pagination`** — Creates 5 ready registrations, fetches page 1 (`limit=2`), asserts 2 items + `next` cursor; fetches page 2 with cursor, asserts 1+ items with no duplicate ids from page 1. Validates cursor-agnostic pagination (offset or DynamoDB cursors both work; no cursor structure assertions).
+
 ---
 
 ## Sprint BP — Event Classes Operator Reporting

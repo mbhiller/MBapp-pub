@@ -711,6 +711,52 @@ Defines resource-based booking for event stalls using existing ledger + minimal 
 - `POST /registrations/{id}:assign-stalls` — assigns specific `stallIds`, creates per-stall holds, releases block.
 - `POST /registrations/{id}:cancel-refund` — releases stall counters via `releaseEventStalls()` and transitions holds with `releaseReason="refund"`.
 
+### Sprint BW — Event Indexing for Registrations
+
+Optimizes event-scoped registration queries using a dedicated GSI on the `eventId` dimension, enabling constant-time worklist/summary operations and single-page fetches for most events.
+
+**Index Structure:**
+- **GSI name:** `gsi4`
+- **Partition key:** `gsi4pk = tenantId|event|eventId` (e.g., `SmokeTenant|event|evt_xyz`)
+- **Sort key:** `gsi4sk = submittedAt||createdAt # id` (chronological + tiebreaker)
+- **Projection:** `ALL` (avoids per-item fetches; simplifies handler code)
+
+**Write-Path Behavior:**
+- Repository layer computes `gsi4pk` and `gsi4sk` during create/replace/update of `registration` objects.
+- Date component defaults to `submittedAt` (if present), else `createdAt`, else `updatedAt`, else `now()`.
+- Internal fields (`gsi4pk`, `gsi4sk`) are stripped from all API responses to avoid client confusion.
+
+**Read-Path Behavior:**
+- New helper `listRegistrationsByEventId({ tenantId, eventId, limit?, next?, scanIndexForward?, q? })` in [apps/api/src/objects/repo.ts](../apps/api/src/objects/repo.ts):
+  - **Cursor detection:** Decodes `next` to detect legacy offset cursors or `q` presence; forces fallback path if detected.
+  - **Indexed query:** Uses GSI4 Query (KeyConditionExpression on `gsi4pk`) when cursor is DynamoDB format and no `q` param.
+  - **Safe fallback:** On index errors (GSI not ready, throttle), falls back to filtered `listObjects` path; logs metric for observability.
+  - **Dual cursor support:** Preserves cursor format per path (offset cursors for filtered path; DynamoDB keys for GSI path); enables coexistence during rollout.
+- **Call sites:** `checkin-worklist`, `registrations-by-line`, `classes-summary` switched to `listRegistrationsByEventId`; endpoints remain API-stable.
+
+**Rollout Order:**
+1. **Terraform apply:** Add GSI4 attributes + index to DynamoDB table.
+2. **Deploy write-path:** Ship repo changes that populate `gsi4pk`/`gsi4sk` on create/update.
+3. **Backfill:** Run `ops/tools/backfill-registration-event-index.mjs` to populate keys for existing registrations.
+4. **Deploy read-path:** Ship handlers using `listRegistrationsByEventId` (prefer-index with fallback).
+
+**Performance Expectations:**
+- **Before rollout (filtered path):** Multi-page scans (10 pages × 200 items = 2000 scanned) for events with >500 registrations; ~1–2s latency for large events.
+- **After rollout (indexed path):** Single-page queries (~50–200ms) for most events; ~200–400ms for events with thousands of registrations.
+- **Cursor behavior:** Offset cursors from filtered path continue to work; new queries use DynamoDB cursors when available.
+- **Fallback transparency:** API clients see no difference; cursor format may vary but pagination remains functional.
+
+**q-Search Behavior:**
+- When `q` param is present (search by `id` or `partyId`), the helper **always** uses the filtered path regardless of index availability.
+- Rationale: Full-table scans with in-memory `q` filtering remain necessary until a dedicated text-search index is added.
+- Performance: Acceptable for operator search (bounded by limit); filtered path metrics remain in place.
+
+**Safety & Idempotency:**
+- Write-path is idempotent (recomputes keys on every update; safe for retries).
+- Read-path fallback prevents 500s when index is absent or throttled.
+- Dual cursor coexistence prevents breaking changes during rollout.
+- Backfill tool supports resume via cursor and dry-run mode for validation.
+
 ### Public Registration Status (Sprint AY)
 
 - **Endpoint:** `GET /registrations/{id}:public` — public (no JWT), authenticated via `X-MBapp-Public-Token` header.

@@ -34,7 +34,7 @@ module "api" {
   region                   = var.region
   http_api_id              = var.http_api_id
   lambda_function_name     = var.lambda_function_name
-  create_invoke_permission = true  # flip to true after the function exists
+  create_invoke_permission = true # flip to true after the function exists
 }
 
 # EventBridge schedule to trigger background jobs (feature-flagged)

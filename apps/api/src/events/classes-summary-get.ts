@@ -1,7 +1,7 @@
 // apps/api/src/events/classes-summary-get.ts
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { ok, notFound, error, bad } from "../common/responses";
-import { getObjectById, listObjects } from "../objects/repo";
+import { getObjectById, listRegistrationsByEventId } from "../objects/repo";
 import type { components } from "../generated/openapi-types";
 
 type Event = components["schemas"]["Event"];
@@ -50,13 +50,12 @@ export async function handle(event: APIGatewayProxyEventV2) {
       classIdToLineIds.set(line.classId, existing);
     }
 
-    // 3) Fetch registrations for this event (using indexed query on eventId)
-    // Use listObjects with filter to avoid full table scan
-    const regsResult = await listObjects({
+    // 3) Fetch registrations for this event using the eventId index
+    const regsResult = await listRegistrationsByEventId({
       tenantId,
-      type: "registration",
-      filters: { eventId },
+      eventId,
       limit: 10000, // Large cap; operator reporting is internal-only
+      scanIndexForward: true,
     });
 
     const registrations = regsResult.items as Registration[];

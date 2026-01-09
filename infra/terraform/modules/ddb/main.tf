@@ -2,7 +2,7 @@
 variable "environment" { type = string }
 variable "objects_table_name" { type = string }
 variable "devices_table_name" { type = string }
-variable "scans_table_name"   { type = string }
+variable "scans_table_name" { type = string }
 
 # Objects table (matches your current live schema)
 resource "aws_dynamodb_table" "objects" {
@@ -36,6 +36,14 @@ resource "aws_dynamodb_table" "objects" {
     type = "S"
   }
   attribute {
+    name = "gsi4pk"
+    type = "S"
+  }
+  attribute {
+    name = "gsi4sk"
+    type = "S"
+  }
+  attribute {
     name = "sku_lc"
     type = "S"
   }
@@ -61,6 +69,15 @@ resource "aws_dynamodb_table" "objects" {
   global_secondary_index {
     name            = "gsi3_sku"
     hash_key        = "sku_lc"
+    projection_type = "ALL"
+    read_capacity   = 0
+    write_capacity  = 0
+  }
+
+  global_secondary_index {
+    name            = "gsi4"
+    hash_key        = "gsi4pk"
+    range_key       = "gsi4sk"
     projection_type = "ALL"
     read_capacity   = 0
     write_capacity  = 0

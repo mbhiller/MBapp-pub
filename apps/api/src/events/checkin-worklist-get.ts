@@ -1,6 +1,6 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { ok, bad, error } from "../common/responses";
-import { listObjects } from "../objects/repo";
+import { listRegistrationsByEventId } from "../objects/repo";
 import type { components } from "../generated/openapi-types";
 
 const MAX_BACKEND_PAGES = 10;
@@ -97,12 +97,13 @@ export async function handle(event: APIGatewayProxyEventV2) {
     let pageCount = 0;
 
     while (pageCount < MAX_BACKEND_PAGES && collected.length < limit) {
-      const page = await listObjects({
+      const page = await listRegistrationsByEventId({
         tenantId,
-        type: "registration",
-        filters: { eventId },
+        eventId,
         limit,
         next: nextCursor || undefined,
+        scanIndexForward: true,
+        q,
       });
 
       const regs = page.items as Registration[];

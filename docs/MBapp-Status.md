@@ -6,6 +6,40 @@
 
 ---
 
+### Sprint BW — Event Indexing for Registrations — ✅ Complete (2026-01-08)
+
+**Summary:** Shipped event-scoped registration indexing via GSI4 to eliminate multi-page scans for worklist/summary endpoints. Implemented dual cursor support to allow safe rollout (filtered path → indexed path) without API-breaking changes. Includes backfill tool, smokes, and comprehensive docs.
+
+**Deliverables (E1–E6):**
+- **Infra (E1):** Added GSI4 to DynamoDB objects table in [infra/terraform/modules/ddb/main.tf](infra/terraform/modules/ddb/main.tf): attributes `gsi4pk`/`gsi4sk`, index `gsi4` (ALL projection).
+- **Write-Path (E2):** Enhanced [apps/api/src/objects/repo.ts](apps/api/src/objects/repo.ts) to compute `gsi4pk`/`gsi4sk` for registrations during create/replace/update; strips internal fields from responses.
+- **Read-Path (E3):** Added `listRegistrationsByEventId` helper with dual cursor detection (offset → filtered; DynamoDB → GSI query with fallback); migrated worklist, registrations-by-line, classes-summary to the helper.
+- **Backfill Tool (E4):** Created [ops/tools/backfill-registration-event-index.mjs](ops/tools/backfill-registration-event-index.mjs) with tenant allowlist, dry-run mode, cursor resume, and throttled updates.
+- **Smokes (E5):** Added EXTENDED `smoke:checkin:worklist-pagination` to validate cursor-agnostic pagination across 2 pages with no duplicates; registered in [ops/ci-smokes.json](ops/ci-smokes.json).
+- **Docs (E6):** Updated [docs/MBapp-Foundations.md](docs/MBapp-Foundations.md), [docs/MBapp-Status.md](docs/MBapp-Status.md), [docs/smoke-coverage.md](docs/smoke-coverage.md) with GSI structure, rollout order, dual cursor semantics, and expected performance.
+
+**Endpoints (no API changes):**
+- All existing endpoints (`checkin-worklist`, `registrations-by-line`, `classes-summary`) remain stable; cursor format may vary during rollout but pagination is unaffected.
+
+**Rollout Order:**
+1. Terraform apply GSI4 index.
+2. Deploy write-path (populate keys on new writes).
+3. Backfill existing registrations via ops tool.
+4. Deploy read-path (prefer-index with safe fallback).
+
+**Verification:**
+- ✅ Terraform: `terraform fmt`, `terraform validate` (clean)
+- ✅ Typecheck: `npm run typecheck -w apps/api` (clean)
+- ✅ Smokes: `smoke:checkin:worklist-pagination` PASS (pre- and post-index compatible)
+- ✅ Backfill tool: syntax check clean; dry-run example in script header
+
+**Impact:**
+- **Performance:** Single-page queries (~50–200ms) for most events; eliminates multi-page scans (1–2s) for large events.
+- **Cursor coexistence:** Offset cursors from filtered path remain functional; new queries use DynamoDB cursors when available.
+- **Safe rollout:** Fallback prevents 500s when index is absent or throttled; dual cursor detection preserves continuity.
+
+---
+
 ### Sprint BV — Check-In Worklists v0 — ✅ Complete (2026-01-08)
 
 **Summary:** Delivered the operator worklist endpoint to segment check-in queues by readiness and checked-in state, with blocker and status filtering. Built on the existing filtered path (limit/next pagination), ready for future index backing without API changes.

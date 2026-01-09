@@ -1,5 +1,5 @@
-variable "environment"        { type = string }
-variable "function_name"      { type = string }
+variable "environment" { type = string }
+variable "function_name" { type = string }
 variable "objects_table_name" { type = string }
 
 # Option A: Terraform does NOT manage the Lambda function (code stays with your script).
