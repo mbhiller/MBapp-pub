@@ -19341,6 +19341,112 @@ const tests = {
       eventId,
       registrationId: regId
     };
+  },
+
+  "smoke:checkin:ticket-missing-blocker": async () => {
+    await ensureBearer();
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true"
+    };
+
+    // Create event
+    const eventName = smokeTag("ticket_missing_evt");
+    const evt = await post("/objects/event", { type: "event", status: "open", name: eventName, capacity: 10, reservedCount: 0 });
+    if (!evt.ok || !evt.body?.id) return { test: "checkin:ticket-missing-blocker", result: "FAIL", reason: "event-create-failed", evt };
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+    // Create party
+    const partyRes = await post("/objects/party", { type: "party", name: "Ticket Missing Test", roles: ["customer"], email: `ticket_missing+${SMOKE_RUN_ID}@example.com` });
+    if (!partyRes.ok || !partyRes.body?.id) return { test: "checkin:ticket-missing-blocker", result: "FAIL", reason: "party-create-failed", partyRes };
+    const partyId = partyRes.body.id;
+    recordCreated({ type: "party", id: partyId, route: "/objects/party", meta: { eventId } });
+
+    // Create registration directly (bypasses checkout, no seat hold created)
+    const regRes = await post("/objects/registration", {
+      type: "registration",
+      eventId,
+      partyId,
+      status: "draft",
+      paymentStatus: "paid"
+    });
+    if (!regRes.ok || !regRes.body?.id) return { test: "checkin:ticket-missing-blocker", result: "FAIL", reason: "reg-create-failed", regRes };
+    const regId = regRes.body.id;
+    recordCreated({ type: "registration", id: regId, route: "/objects/registration", meta: { eventId } });
+
+    // Recompute readiness
+    const recompute = await post(`/registrations/${encodeURIComponent(regId)}:recompute-checkin-status`, {}, featureHeaders);
+    if (!recompute.ok) return { test: "checkin:ticket-missing-blocker", result: "FAIL", reason: "recompute-failed", http: { ok: recompute.ok, status: recompute.status }, recompute };
+
+    const snapshot = recompute.body?.checkInStatus || {};
+    const blockers = Array.isArray(snapshot.blockers) ? snapshot.blockers : [];
+    const codes = blockers.map(b => b?.code).filter(Boolean);
+    const hasTicketMissing = codes.includes("ticket_missing");
+    const ready = Boolean(snapshot.ready);
+
+    if (!hasTicketMissing || ready) {
+      return {
+        test: "checkin:ticket-missing-blocker",
+        result: "FAIL",
+        step: "readiness",
+        reason: "expected ready=false with ticket_missing blocker",
+        snapshot: { ready: snapshot.ready, blockers: snapshot.blockers }
+      };
+    }
+
+    // Worklist filter by ticket_missing
+    const worklistRes = await get(
+      `/events/${encodeURIComponent(eventId)}:checkin-worklist`,
+      { checkedIn: false, ready: false, blockerCode: "ticket_missing" },
+      { headers: featureHeaders }
+    );
+    if (!worklistRes.ok) {
+      return { test: "checkin:ticket-missing-blocker", result: "FAIL", step: "worklist", http: { ok: worklistRes.ok, status: worklistRes.status }, worklistRes };
+    }
+    const items = Array.isArray(worklistRes.body?.items) ? worklistRes.body.items : [];
+    const ids = items.map(r => r?.id).filter(Boolean);
+    if (!ids.includes(regId)) {
+      return {
+        test: "checkin:ticket-missing-blocker",
+        result: "FAIL",
+        step: "worklist",
+        reason: "registration not found in ticket_missing worklist",
+        ids,
+        expectedId: regId
+      };
+    }
+
+    // Check-in action blocked
+    const checkinRes = await post(
+      `/events/registration/${encodeURIComponent(regId)}:checkin`,
+      {},
+      { ...featureHeaders, "Idempotency-Key": idem() }
+    );
+    const status = checkinRes.status;
+    const body = checkinRes.body || {};
+    const actionSnap = body.checkInStatus || {};
+    const actionCodes = Array.isArray(actionSnap.blockers) ? actionSnap.blockers.map(b => b?.code).filter(Boolean) : [];
+    const actionHasTicketMissing = actionCodes.includes("ticket_missing");
+
+    if (status !== 409 || body.code !== "checkin_blocked" || !actionHasTicketMissing) {
+      return {
+        test: "checkin:ticket-missing-blocker",
+        result: "FAIL",
+        step: "action-blocked",
+        reason: "expected 409 checkin_blocked with ticket_missing",
+        http: { ok: checkinRes.ok, status },
+        response: body,
+        snapshot: actionSnap
+      };
+    }
+
+    return {
+      test: "checkin:ticket-missing-blocker",
+      result: "PASS",
+      summary: "Registration without seat hold is blocked by ticket_missing; worklist filters correctly; check-in action returns 409",
+      eventId,
+      registrationId: regId
+    };
   }
 
 

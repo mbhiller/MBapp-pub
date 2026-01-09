@@ -74,7 +74,15 @@ export function computeCheckInStatus({ tenantId, registration, holds }: ComputeA
     }
   }
 
-  // 3) Stalls assignment
+  // 3) Admission / ticket requirement (seat hold)
+  const seatHolds = holds.filter((h) => String(h.itemType) === "seat" && ACTIVE_STATES.has(String(h.state)));
+  if (seatHolds.length === 0) {
+    blockers.push(
+      buildCheckInBlocker("ticket_missing", "Admission ticket required")
+    );
+  }
+
+  // 4) Stalls assignment
   if (stallQty > 0) {
     const assigned = countAssigned("stall");
     if (assigned < stallQty) {
@@ -88,7 +96,7 @@ export function computeCheckInStatus({ tenantId, registration, holds }: ComputeA
     }
   }
 
-  // 4) RV assignment
+  // 5) RV assignment
   if (rvQty > 0) {
     const assigned = countAssigned("rv");
     if (assigned < rvQty) {
@@ -102,7 +110,7 @@ export function computeCheckInStatus({ tenantId, registration, holds }: ComputeA
     }
   }
 
-  // 5) Classes assignment
+  // 6) Classes assignment
   const totalRequested = Array.isArray(registration.lines)
     ? registration.lines.reduce((sum, line) => sum + Number(line?.qty || 0), 0)
     : 0;

@@ -3570,7 +3570,7 @@ export interface components {
         /** @description Blocker preventing check-in readiness */
         CheckInBlocker: {
             /** @enum {string} */
-            code: "payment_unpaid" | "payment_failed" | "cancelled" | "stalls_unassigned" | "rv_unassigned" | "classes_unassigned";
+            code: "payment_unpaid" | "payment_failed" | "cancelled" | "stalls_unassigned" | "rv_unassigned" | "classes_unassigned" | "ticket_missing";
             message: string;
             action?: components["schemas"]["CheckInAction"] & (Record<string, never> | null);
         };

@@ -5972,6 +5972,7 @@ components:
             - stalls_unassigned
             - rv_unassigned
             - classes_unassigned
+            - ticket_missing
         message:
           type: string
         action:
