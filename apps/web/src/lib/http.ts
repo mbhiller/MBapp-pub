@@ -4,6 +4,28 @@ if (!apiBase) {
   throw new Error("Missing VITE_API_BASE. Set it in your environment (.env). No localhost fallback is allowed.");
 }
 
+/**
+ * Get effective tenantId for API calls:
+ * - Prefer explicit tenantId from options (from AuthProvider context)
+ * - Fallback to VITE_MBAPP_PUBLIC_TENANT_ID for public pages
+ * - Throw clear error if neither is available
+ */
+function getEffectiveTenantId(explicitTenantId?: string): string {
+  if (explicitTenantId && explicitTenantId.trim().length > 0) {
+    return explicitTenantId;
+  }
+
+  const publicTenantId = import.meta.env.VITE_MBAPP_PUBLIC_TENANT_ID as string | undefined;
+  if (publicTenantId && publicTenantId.trim().length > 0) {
+    return publicTenantId;
+  }
+
+  throw new Error(
+    "Public tenantId missing. Set VITE_MBAPP_PUBLIC_TENANT_ID in apps/web/.env.local " +
+    "(e.g., VITE_MBAPP_PUBLIC_TENANT_ID=SmokeTenant)"
+  );
+}
+
 export type ApiFetchOptions = {
   method?: string;
   body?: any;
@@ -27,10 +49,8 @@ type ApiError = Error & { status?: number; code?: string; details?: unknown };
 export async function apiFetch<T>(path: string, opts: ApiFetchOptions = {}): Promise<T> {
   const { method = "GET", body, headers, token, tenantId, query } = opts;
 
-  // CRITICAL: Enforce tenantId is always provided to prevent silent defaults
-  if (!tenantId) {
-    throw new Error("apiFetch: tenantId is required. Ensure AuthProvider context is available.");
-  }
+  // Get effective tenantId: prefer explicit, fallback to public env
+  const effectiveTenantId = getEffectiveTenantId(tenantId);
 
   const search = new URLSearchParams();
   if (query) {
@@ -47,7 +67,7 @@ export async function apiFetch<T>(path: string, opts: ApiFetchOptions = {}): Pro
     method,
     headers: {
       ...(hasBody ? { "content-type": "application/json" } : {}),
-      "x-tenant-id": tenantId,
+      "x-tenant-id": effectiveTenantId,
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...headers,
     },
