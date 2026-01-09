@@ -212,6 +212,8 @@ Operator-facing list endpoint for check-in queues.
 
 **Operator Console (Sprint BF):** Web UI available at `/messages` (protected by `message:read`) with filters + cursor pagination; detail view at `/messages/:id` shows status/provider/template metadata and retry controls when `message:write` is granted. UI is API-backed (uses the endpoints above; no provider-side coupling).
 
+**Check-In Console (Sprint BX):** Web UI available at `/events/:eventId/checkin` (protected by `event:read registration:read`) for operator check-in management. Fetches worklist from `GET /events/{eventId}:checkin-worklist` with filters (checkedIn, ready, blockerCode, status, q) and cursor pagination. Table displays Registration ID, Party ID, Status, Checked In (✓/—), Ready (✓/✗/—), Blockers (comma-separated codes), Last Evaluated. UI currently uses inline styles (no Tailwind/shadcn yet; refactor planned). Filters reset items and refetch; "Load more" appends using opaque `next` cursor. Row actions (Check In, View Details, Recompute Status) planned for future sprint.
+
 ### Message Templates v1 (Sprint BA/BE)
 
 **Template System:** Minimal, deterministic template renderer with no external deps. Validates required vars at render time.
