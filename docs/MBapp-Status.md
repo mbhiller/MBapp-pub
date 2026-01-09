@@ -1,7 +1,7 @@
 # MBapp Status / Working
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Foundations](MBapp-Foundations.md) · [Cadence](MBapp-Cadence.md) · [Verification](smoke-coverage.md)  
-**Last Updated:** 2026-01-08  
+**Last Updated:** 2026-01-09  
 **Workflow & DoD:** See [MBapp-Cadence.md](MBapp-Cadence.md) for canonical workflow, Definition of Done, and testing rules.
 
 ---
@@ -40,6 +40,34 @@
 - Add Registration detail drawer/panel
 - Add real-time refresh capability
 - Migrate to shadcn/ui + Tailwind for consistent design system
+
+---
+
+### Sprint BX+ — Scan-first Check-In Resolution — ✅ Complete (2026-01-09)
+
+**Summary:** Added deterministic scan resolution endpoint and integrated a Scan mode in the Check-In Console. Operators can paste/scan a payload and jump directly to the matching registration, with clear success/error feedback and future-proof support for ambiguity.
+
+**API:**
+- `POST /registrations:resolve-scan` — Resolves scanString to a registration within an event; returns readiness snapshot union (`ok:true` or `ok:false` with error `not_found | not_in_event | ambiguous | invalid_scan`).
+  - Request: `{ eventId, scanString, scanType: "auto" }`
+  - Supported formats (Sprint BX): raw registrationId; JSON payload containing `id` or `registrationId`. (MBapp QR parsing reserved for future).
+
+**Web UI:**
+- Check-In Console now includes a “Scan” section above Filters:
+  - Input + Resolve button (Enter submits); shows success/error banner.
+  - On success: sets `q` to the resolved registrationId, resets pagination, refetches, and highlights the matching row.
+  - On ambiguous (future): simple chooser list of candidates.
+
+**Smokes:**
+- Added CORE smoke `smoke:checkin:resolve-scan-deterministic` proving:
+  - `ok:true` with correct registrationId for JSON `{ id: "..." }` payload.
+  - `ok:false` with `not_in_event` when event mismatched.
+  - `ok:false` with `not_found` for bogus ids.
+  - Repeat calls yield the same registration (no mutation).
+
+**Verification:**
+- ✅ Typecheck: `npm run typecheck --workspaces --if-present`
+- ✅ Core smokes include the new resolver validation.
 
 ---
 

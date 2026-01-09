@@ -66,6 +66,7 @@
     { "name": "smoke:checkin:readiness-ready", "tier": "core" },
     { "name": "smoke:checkin:worklist-ready-vs-blocked", "tier": "core" },
     { "name": "smoke:checkin:worklist-checked-in", "tier": "core" },
+    { "name": "smoke:checkin:resolve-scan-deterministic", "tier": "core" },
     { "name": "smoke:checkin:worklist-pagination", "tier": "extended" },
     { "name": "smoke:checkin:worklist-search", "tier": "extended" },
     { "name": "smoke:public-booking:rv-happy-path", "tier": "core" },

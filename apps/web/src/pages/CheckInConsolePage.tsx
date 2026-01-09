@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiFetch } from "../lib/http";
 import { useAuth } from "../providers/AuthProvider";
-import type { CheckInWorklistPage, Registration } from "../types/checkin";
+import type { CheckInWorklistPage, Registration, ScanResolutionResult, ScanResolutionCandidate } from "../types/checkin";
 
 function formatError(err: unknown): string {
   const e = err as any;
@@ -32,6 +32,14 @@ export default function CheckInConsolePage() {
   const [next, setNext] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Scan mode state
+  const [scanString, setScanString] = useState("");
+  const [resolving, setResolving] = useState(false);
+  const [scanBanner, setScanBanner] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const [ambiguous, setAmbiguous] = useState<ScanResolutionCandidate[] | null>(null);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const scanInputRef = useRef<HTMLInputElement | null>(null);
 
   const fetchWorklist = useCallback(
     async (cursor?: string) => {
@@ -76,6 +84,75 @@ export default function CheckInConsolePage() {
     fetchWorklist();
   };
 
+  // Apply a specific registrationId to the filter and refetch first page, with highlight
+  const applyResolvedRegistration = async (registrationId: string) => {
+    setQ(registrationId);
+    setItems([]);
+    setNext(null);
+    setHighlightId(registrationId);
+    await fetchWorklist();
+    // Clear highlight after a brief period
+    window.setTimeout(() => setHighlightId((hid) => (hid === registrationId ? null : hid)), 2500);
+  };
+
+  // Resolve scan via API
+  const handleScanResolve = async () => {
+    if (!eventId) return;
+    const s = scanString.trim();
+    if (!s) return;
+    setResolving(true);
+    setScanBanner(null);
+    setAmbiguous(null);
+    try {
+      const res = await apiFetch<ScanResolutionResult>("/registrations:resolve-scan", {
+        method: "POST",
+        token: token || undefined,
+        tenantId,
+        body: { eventId, scanString: s, scanType: "auto" },
+      });
+      if (res && (res as any).ok === true) {
+        const okRes = res as Extract<ScanResolutionResult, { ok: true }>;
+        setScanBanner({ kind: "success", message: `Matched registration ${okRes.registrationId}${okRes.partyId ? ` (party ${okRes.partyId})` : ""}` });
+        setScanString("");
+        await applyResolvedRegistration(okRes.registrationId);
+      } else {
+        const errRes = res as Extract<ScanResolutionResult, { ok: false }>;
+        if (errRes.error === "ambiguous" && Array.isArray(errRes.candidates) && errRes.candidates.length > 0) {
+          setAmbiguous(errRes.candidates);
+          setScanBanner({ kind: "error", message: `Ambiguous: ${errRes.reason || "multiple candidates"}` });
+        } else {
+          setScanBanner({ kind: "error", message: `${errRes.error}: ${errRes.reason}` });
+        }
+        // Focus back to input for retry
+        scanInputRef.current?.focus();
+      }
+    } catch (err) {
+      setScanBanner({ kind: "error", message: formatError(err) });
+      scanInputRef.current?.focus();
+    } finally {
+      setResolving(false);
+    }
+  };
+
+  const handleScanKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void handleScanResolve();
+    }
+  };
+
+  const clearScanFilter = () => {
+    setScanBanner(null);
+    setAmbiguous(null);
+    if (q.trim()) {
+      setQ("");
+      setItems([]);
+      setNext(null);
+      fetchWorklist();
+    }
+    scanInputRef.current?.focus();
+  };
+
   const handleFilterChange = (updates: {
     checkedIn?: boolean;
     ready?: boolean | null;
@@ -114,6 +191,64 @@ export default function CheckInConsolePage() {
           {loading ? "Refreshing..." : "Refresh"}
         </Button>
       </div>
+
+      {/* Scan mode */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle>Scan</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <Input
+              ref={scanInputRef}
+              placeholder="Scan or paste registration QR / ID"
+              value={scanString}
+              onChange={(e) => setScanString(e.target.value)}
+              onKeyDown={handleScanKeyDown}
+              disabled={resolving || loading}
+            />
+            <div className="flex gap-2">
+              <Button onClick={handleScanResolve} disabled={resolving || loading || !scanString.trim()}>
+                {resolving ? "Resolving..." : "Resolve"}
+              </Button>
+              {q.trim() ? (
+                <Button variant="outline" onClick={clearScanFilter} disabled={resolving || loading}>Clear scan filter</Button>
+              ) : null}
+            </div>
+          </div>
+
+          {scanBanner ? (
+            <div
+              className={
+                scanBanner.kind === "success"
+                  ? "rounded-md border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-800"
+                  : "rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800"
+              }
+            >
+              {scanBanner.message}
+            </div>
+          ) : null}
+
+          {ambiguous && ambiguous.length > 0 ? (
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
+              <div className="mb-2 text-sm font-medium text-amber-900">Multiple matches — choose one:</div>
+              <div className="flex flex-col gap-2">
+                {ambiguous.map((c) => (
+                  <div key={c.registrationId} className="flex items-center justify-between rounded-md bg-white px-3 py-2 text-sm shadow-sm ring-1 ring-slate-200">
+                    <div className="flex flex-col">
+                      <span className="font-mono text-xs text-slate-800">{c.registrationId}</span>
+                      <span className="text-xs text-slate-600">{c.partyId || "—"} • {c.status}</span>
+                    </div>
+                    <Button size="sm" onClick={() => applyResolvedRegistration(c.registrationId)} disabled={resolving || loading}>
+                      Select
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="pb-2">
@@ -261,8 +396,9 @@ export default function CheckInConsolePage() {
                   ? reg.checkInStatus.lastEvaluatedAt.substring(0, 19).replace("T", " ")
                   : "—";
 
+                const isHighlighted = highlightId && reg.id === highlightId;
                 return (
-                  <TableRow key={reg.id}>
+                  <TableRow key={reg.id} className={isHighlighted ? "bg-yellow-50" : undefined}>
                     <TableCell className="font-mono text-xs text-slate-800">{reg.id}</TableCell>
                     <TableCell className="text-xs text-slate-700">{reg.partyId || "—"}</TableCell>
                     <TableCell className="text-xs text-slate-700">{reg.status || "—"}</TableCell>

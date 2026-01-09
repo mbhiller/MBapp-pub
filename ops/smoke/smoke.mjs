@@ -19268,6 +19268,79 @@ const tests = {
       eventId,
       registrations: { target: r1.regId, others: [r2.regId, r3.regId] }
     };
+  },
+
+  "smoke:checkin:resolve-scan-deterministic": async () => {
+    await ensureBearer();
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // Create primary event
+    const eventName = smokeTag("resolve_scan_evt");
+    const evt = await post("/objects/event", { type: "event", status: "open", name: eventName, capacity: 5, reservedCount: 0 });
+    if (!evt.ok || !evt.body?.id) return { test: "checkin:resolve-scan-deterministic", result: "FAIL", reason: "event-create-failed", evt };
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+    // Create a second event (for not_in_event scenario)
+    const otherEvt = await post("/objects/event", { type: "event", status: "open", name: smokeTag("resolve_scan_other_evt"), capacity: 3, reservedCount: 0 });
+    if (!otherEvt.ok || !otherEvt.body?.id) return { test: "checkin:resolve-scan-deterministic", result: "FAIL", reason: "other-event-create-failed", otherEvt };
+    const otherEventId = otherEvt.body.id;
+    recordCreated({ type: "event", id: otherEventId, route: "/objects/event", meta: { name: "other" } });
+
+    // Create registration (public flow, simple draft is fine for resolution)
+    const regCreate = await post(
+      "/registrations:public",
+      { eventId, party: { email: `resolve+${SMOKE_RUN_ID}@example.com` } },
+      featureHeaders,
+      { auth: "none" }
+    );
+    if (!regCreate.ok || !regCreate.body?.registration?.id) {
+      return { test: "checkin:resolve-scan-deterministic", result: "FAIL", reason: "reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+
+    // Deterministic resolve with JSON payload { id: regId }
+    const scanBody = { eventId, scanString: JSON.stringify({ id: regId }), scanType: "auto" };
+    const res1 = await post("/registrations:resolve-scan", scanBody, featureHeaders);
+    const ok1 = res1.ok && res1.body && res1.body.ok === true && res1.body.registrationId === regId;
+    if (!ok1) {
+      return { test: "checkin:resolve-scan-deterministic", result: "FAIL", step: "resolve-json", http: { ok: res1.ok, status: res1.status }, body: res1.body, expected: { ok: true, registrationId: regId } };
+    }
+
+    // Idempotency-ish: resolving twice yields same id
+    const res2 = await post("/registrations:resolve-scan", scanBody, featureHeaders);
+    const ok2 = res2.ok && res2.body && res2.body.ok === true && res2.body.registrationId === regId;
+    if (!ok2) {
+      return { test: "checkin:resolve-scan-deterministic", result: "FAIL", step: "resolve-repeat", http: { ok: res2.ok, status: res2.status }, body: res2.body, expected: { ok: true, registrationId: regId } };
+    }
+
+    // not_in_event: same scan but wrong eventId
+    const wrongEventBody = { eventId: otherEventId, scanString: JSON.stringify({ id: regId }), scanType: "auto" };
+    const resNotInEvent = await post("/registrations:resolve-scan", wrongEventBody, featureHeaders);
+    const okNotInEvent = resNotInEvent.ok && resNotInEvent.body && resNotInEvent.body.ok === false && resNotInEvent.body.error === "not_in_event";
+    if (!okNotInEvent) {
+      return { test: "checkin:resolve-scan-deterministic", result: "FAIL", step: "not_in_event", http: { ok: resNotInEvent.ok, status: resNotInEvent.status }, body: resNotInEvent.body, expectedError: "not_in_event" };
+    }
+
+    // not_found: bogus id
+    const bogusId = `REG-BOGUS-${SMOKE_RUN_ID}`;
+    const resNotFound = await post("/registrations:resolve-scan", { eventId, scanString: JSON.stringify({ id: bogusId }), scanType: "auto" }, featureHeaders);
+    const okNotFound = resNotFound.ok && resNotFound.body && resNotFound.body.ok === false && resNotFound.body.error === "not_found";
+    if (!okNotFound) {
+      return { test: "checkin:resolve-scan-deterministic", result: "FAIL", step: "not_found", http: { ok: resNotFound.ok, status: resNotFound.status }, body: resNotFound.body, expectedError: "not_found" };
+    }
+
+    return {
+      test: "checkin:resolve-scan-deterministic",
+      result: "PASS",
+      summary: "Resolver deterministically maps JSON scan payload to registration; guards not_in_event and not_found",
+      eventId,
+      registrationId: regId
+    };
   }
 
 
