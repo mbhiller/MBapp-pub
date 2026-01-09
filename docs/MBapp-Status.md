@@ -88,6 +88,52 @@
 
 ---
 
+### Sprint CC — Public Self Check-In — ✅ Complete (2026-01-09)
+
+**Summary:** Enables guests/competitors to check themselves in from the public "My Check-In" page (`/events/:eventId/my-checkin`) when their registration is ready. Idempotent endpoint uses public token authentication and enforces readiness checks. Returns safe public status response with no PII leakage. Web UI displays "Check In Now" button when ready and shows success state with timestamp.
+
+**Deliverables (E1–E5):**
+- **Spec (E1):** Added `POST /registrations/{id}:public-checkin` endpoint in [spec/MBapp-Modules.yaml](spec/MBapp-Modules.yaml) at lines 5002–5084. Requires `X-MBapp-Public-Token` header (SHA256-validated) and `Idempotency-Key` header (required). Extended `PublicRegistrationStatusResponse` schema (lines 1781–1789) with `checkedInAt` and `checkedInBy` fields. Security notes document no existence leak, timing-safe token comparison, and safe blocker disclosure.
+- **API Handler (E2):** Implemented [apps/api/src/registrations/public-checkin-post.ts](apps/api/src/registrations/public-checkin-post.ts) with public token validation (SHA256 hash with `crypto.timingSafeEqual()` for timing-safe comparison); Idempotency-Key requirement (400 if missing); readiness enforcement via `computeCheckInStatus()` (409 `checkin_blocked` with blockers snapshot if not ready); mutation with audit fields (`checkedInAt`, `checkedInBy: "public-magic-link"`, `checkedInDeviceId: null`, `checkInIdempotencyKey`); safe response builder excluding PII (email, phone, fees, paymentIntentId). Wired route in [apps/api/src/index.ts](apps/api/src/index.ts) at lines 348–353 (before authentication check for public endpoint).
+- **Web UI (E3):** Updated [apps/web/src/pages/PublicCheckInPage.tsx](apps/web/src/pages/PublicCheckInPage.tsx) with check-in capability: added `generateUUID()` helper for client-side Idempotency-Key generation; extended type `PublicRegistrationStatus` with `checkedInAt` and `checkedInBy`; added state (`checkingIn`, `checkInError`, `checkInSuccess`); implemented `handleCheckIn()` function with error messaging and status updates; conditional "Check In Now" button (green, shows only when `ready=true && !checkedInAt`); success banner displaying checked-in timestamp; error messages with guidance for 401/404/409 responses.
+- **Smokes (E4):** Added 2 CORE tests in [ops/smoke/smoke.mjs](ops/smoke/smoke.mjs) and registered in [ops/ci-smokes.json](ops/ci-smokes.json):
+  - `smoke:registrations:public-checkin-idempotent` — Creates event + public registration, drives to ready state via checkout + webhook confirmation. Calls public check-in with Idempotency-Key K1; validates response includes `checkedInAt` and `checkedInBy === "public-magic-link"`; confirms no PII leaked (email, phone, fees, paymentIntentId absent). Replays with same K1; asserts same `checkedInAt` (idempotent). Calls with different K2; verifies original `checkedInAt` preserved (no re-checkin on different key).
+  - `smoke:registrations:public-checkin-blocked` — Creates event + registration, drives checkout but skips webhook (leaves payment unpaid). Calls public check-in; expects 409 `checkin_blocked` with `blockers` array containing `payment_unpaid` blocker; confirms no mutation (`checkedInAt` not set).
+- **Docs (E5):** Updated [docs/MBapp-Status.md](docs/MBapp-Status.md) with Sprint CC entry documenting endpoint, web integration, security notes, and verification steps.
+
+**Endpoints:**
+- `POST /registrations/{id}:public-checkin` — Public self check-in; requires `X-MBapp-Public-Token` + `Idempotency-Key` headers; guards on readiness; returns safe public status (200) or 409 `checkin_blocked` with `checkInStatus` snapshot when not ready.
+
+**Security Notes:**
+- Public token: SHA256 hash storage; timing-safe comparison via `crypto.timingSafeEqual()` prevents timing attacks.
+- No existence leak: Invalid token returns 401 without revealing registration existence.
+- Safe response: Excludes PII (email, phone, fees, paymentIntentId); includes id, eventId, status, paymentStatus, timestamps, checkInStatus.
+- Idempotency: Same key replays same response; different key after success preserves original `checkedInAt` (no re-checkin).
+
+**Web Integration:**
+- `/events/:eventId/my-checkin` — Session mode now shows "Check In Now" button when `checkInStatus.ready === true && !checkedInAt`.
+- Button click: generates client-side UUID for Idempotency-Key, POSTs to public-checkin endpoint, updates UI with success/error state.
+- Success: displays green banner with checked-in timestamp and hides button.
+- Error handling: 401/404 → "Magic link expired", 409 → "Not ready" with blocker hints.
+
+**Audit Trail:**
+- `checkedInAt`: ISO8601 timestamp when check-in occurred
+- `checkedInBy`: Set to `"public-magic-link"` for public self check-in (vs operator userId for operator check-in)
+- `checkedInDeviceId`: null for public (reserved for future QR/device tracking)
+- `checkInIdempotencyKey`: Stores idempotency key used for check-in
+
+**Verification:**
+- ✅ Typecheck: `npm run typecheck --workspaces --if-present` (all 3 workspaces clean)
+- ✅ Core smokes: `smoke:registrations:public-checkin-idempotent` and `smoke:registrations:public-checkin-blocked` (both PASS)
+- ✅ Safety validated: No PII in response; timing-safe token comparison; readiness enforcement; idempotency preserved
+
+**Impact:**
+- Guests/competitors can now self check-in without operator assistance when ready (payment confirmed, resources assigned).
+- Reduces operator workload at event entry/check-in desk.
+- Maintains security: public token required, readiness enforced, audit trail preserved.
+
+---
+
 ### Sprint BX+ — Scan-first Check-In Resolution — ✅ Complete (2026-01-09)
 
 **Summary:** Added deterministic scan resolution endpoint and integrated a Scan mode in the Check-In Console. Operators can paste/scan a payload and jump directly to the matching registration, with clear success/error feedback and future-proof support for ambiguity.
