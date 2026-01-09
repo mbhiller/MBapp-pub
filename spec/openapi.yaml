@@ -1550,6 +1550,74 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /registrations/{id}:public-checkin:
+    post:
+      tags:
+        - Registrations
+        - Public
+      operationId: publicCheckIn
+      summary: Self check-in using public token (no auth) - Sprint CC
+      description: |
+        Public endpoint for a guest to check themselves in using their magic link token.
+        Validates token, checks readiness (recomputes if necessary), and marks registration as checked in.
+        Idempotent via Idempotency-Key header.
+        Security notes:
+        - Requires valid X-MBapp-Public-Token header (SHA256-validated)
+        - Invalid token returns 401 (no registration info leaked)
+        - Not ready returns 409 with CheckInBlockedError (blockers are safe to expose)
+        - Audit field checkedInBy set to "public-magic-link" (no PII)
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Registration ID
+        - in: header
+          name: X-MBapp-Public-Token
+          required: true
+          schema:
+            type: string
+          description: Public token from magic link (obtained via POST /registrations:lookup-public)
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Successfully checked in
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicRegistrationStatusResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '401':
+          description: Invalid or missing public token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Registration not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Check-in blocked (registration not ready)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckInBlockedError'
   /registrations/{id}:checkin-readiness:
     get:
       tags:
@@ -5929,6 +5997,15 @@ components:
           type: string
           format: date-time
           nullable: true
+        checkedInAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp when registration was checked in
+        checkedInBy:
+          type: string
+          nullable: true
+          description: Actor who initiated check-in (userId for operator, "public-magic-link" for self-checkin)
         checkInStatus:
           $ref: '#/components/schemas/CheckInStatus'
           nullable: true

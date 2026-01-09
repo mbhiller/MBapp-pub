@@ -11,15 +11,19 @@ const DOCS = {
   },
   roadmap: {
     title: "Roadmap",
-    path: "/docs/MBapp-Roadmap-Master-v10.0.md",
+    path: "/docs/MBapp-Roadmap.md",
   },
   status: {
     title: "Status",
-    path: "/docs/MBapp-Working.md",
+    path: "/docs/MBapp-Status.md",
   },
   "smoke-coverage": {
     title: "Smoke Coverage",
     path: "/docs/smoke-coverage.md",
+  },
+  cadence: {
+    title: "Cadence",
+    path: "/docs/MBapp-Cadence.md",
   },
 } as const;
 

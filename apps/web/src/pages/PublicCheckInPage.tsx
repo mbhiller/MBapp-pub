@@ -6,6 +6,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiFetch } from "@/lib/http";
 
+// Helper to generate UUID for idempotency key
+function generateUUID(): string {
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 type PublicRegistrationStatus = {
   id: string;
   eventId: string;
@@ -16,6 +25,8 @@ type PublicRegistrationStatus = {
   cancelledAt?: string | null;
   refundedAt?: string | null;
   holdExpiresAt?: string | null;
+  checkedInAt?: string | null;
+  checkedInBy?: string | null;
   checkInStatus?: {
     ready: boolean;
     blockers: Array<{
@@ -45,6 +56,9 @@ export default function PublicCheckInPage() {
   const [registrationStatus, setRegistrationStatus] = useState<PublicRegistrationStatus | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
+  const [checkingIn, setCheckingIn] = useState(false);
+  const [checkInError, setCheckInError] = useState<string | null>(null);
+  const [checkInSuccess, setCheckInSuccess] = useState(false);
 
   // Extract token params
   const regId = searchParams.get("regId");
@@ -80,6 +94,54 @@ export default function PublicCheckInPage() {
 
     loadStatus();
   }, [isSessionMode, regId, token]);
+
+  const handleCheckIn = async () => {
+    if (!regId || !token) {
+      setCheckInError("Missing registration ID or token. Please request a new link.");
+      return;
+    }
+
+    setCheckingIn(true);
+    setCheckInError(null);
+    setCheckInSuccess(false);
+
+    try {
+      const idempotencyKey = generateUUID();
+      const result = await apiFetch<PublicRegistrationStatus>(
+        `/registrations/${regId}:public-checkin`,
+        {
+          method: "POST",
+          headers: {
+            "X-MBapp-Public-Token": token,
+            "Idempotency-Key": idempotencyKey,
+          },
+          body: {},
+        }
+      );
+
+      // Update the displayed status with the result
+      setRegistrationStatus(result);
+      setCheckInSuccess(true);
+      setCheckInError(null);
+    } catch (err: any) {
+      console.error("Check-in failed:", err);
+      
+      // Extract a user-friendly error message
+      let errorMsg = "Check-in failed. ";
+      
+      if (err.status === 401 || err.status === 404) {
+        errorMsg += "Your link may have expired. Please request a new one.";
+      } else if (err.status === 409) {
+        errorMsg += "You're not ready to check in yet. Please resolve the blockers above.";
+      } else {
+        errorMsg += err.message || "Please try again.";
+      }
+      
+      setCheckInError(errorMsg);
+    } finally {
+      setCheckingIn(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -226,6 +288,33 @@ export default function PublicCheckInPage() {
                     ✓ You're all set! Please proceed to the check-in desk.
                   </div>
                 )}
+              </div>
+            )}
+
+            {checkInSuccess && registrationStatus?.checkedInAt && (
+              <div className="rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+                <p className="font-semibold">✓ Successfully checked in!</p>
+                <p className="mt-1">
+                  Checked in at {new Date(registrationStatus.checkedInAt).toLocaleString()}
+                </p>
+              </div>
+            )}
+
+            {checkInError && (
+              <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+                {checkInError}
+              </div>
+            )}
+
+            {checkInStatus?.ready && !registrationStatus?.checkedInAt && (
+              <div className="mt-6">
+                <Button
+                  onClick={handleCheckIn}
+                  disabled={checkingIn}
+                  className="w-full bg-green-600 hover:bg-green-700"
+                >
+                  {checkingIn ? "Checking In..." : "Check In Now"}
+                </Button>
               </div>
             )}
 

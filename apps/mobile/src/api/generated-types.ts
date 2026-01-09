@@ -406,6 +406,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/registrations/{id}:public-checkin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Self check-in using public token (no auth) - Sprint CC
+         * @description Public endpoint for a guest to check themselves in using their magic link token.
+         *     Validates token, checks readiness (recomputes if necessary), and marks registration as checked in.
+         *     Idempotent via Idempotency-Key header.
+         *     Security notes:
+         *     - Requires valid X-MBapp-Public-Token header (SHA256-validated)
+         *     - Invalid token returns 401 (no registration info leaked)
+         *     - Not ready returns 409 with CheckInBlockedError (blockers are safe to expose)
+         *     - Audit field checkedInBy set to "public-magic-link" (no PII)
+         *
+         */
+        post: operations["publicCheckIn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/registrations/{id}:checkin-readiness": {
         parameters: {
             query?: never;
@@ -3545,6 +3573,13 @@ export interface components {
             refundedAt?: string | null;
             /** Format: date-time */
             holdExpiresAt?: string | null;
+            /**
+             * Format: date-time
+             * @description Timestamp when registration was checked in
+             */
+            checkedInAt?: string | null;
+            /** @description Actor who initiated check-in (userId for operator, "public-magic-link" for self-checkin) */
+            checkedInBy?: string | null;
             /** @description Check-in readiness snapshot (Sprint CB) */
             checkInStatus?: components["schemas"]["CheckInStatus"];
             emailStatus?: {
@@ -6233,6 +6268,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    publicCheckIn: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Public token from magic link (obtained via POST /registrations:lookup-public) */
+                "X-MBapp-Public-Token": string;
+                /** @description Optional idempotency key for safe retries. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description Registration ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Successfully checked in */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicRegistrationStatusResponse"];
+                };
+            };
+            /** @description Validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationError"];
+                };
+            };
+            /** @description Invalid or missing public token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Registration not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Check-in blocked (registration not ready) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckInBlockedError"];
                 };
             };
         };

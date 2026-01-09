@@ -123,6 +123,7 @@ import * as RegLookupPublic from "./registrations/lookup-public";
 import * as RegCheckout from "./registrations/checkout";
 import * as RegPublicGet from "./registrations/public-get";
 import * as RegPublicResend from "./registrations/public-resend";
+import * as RegPublicCheckIn from "./registrations/public-checkin-post";
 import * as RegCleanupExpiredHolds from "./registrations/cleanup-expired-holds";
 import * as RegCancel from "./registrations/cancel";
 import * as RegCancelRefund from "./registrations/cancel-refund";
@@ -341,6 +342,14 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
       if (method === "POST" && m) {
         const [, id] = m;
         return RegPublicResend.handle(withId(event, id));
+      }
+    }
+    // Public registration self check-in (Sprint CC)
+    {
+      const m = path.match(/^\/registrations\/([^/]+):public-checkin$/i);
+      if (method === "POST" && m) {
+        const [, id] = m;
+        return RegPublicCheckIn.handle(withId(event, id));
       }
     }
 

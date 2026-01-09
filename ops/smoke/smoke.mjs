@@ -20116,8 +20116,240 @@ const tests = {
       eventId,
       guardResponse: body
     };
-  }
+  },
 
+  "smoke:registrations:public-checkin-idempotent": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // Create event
+    const eventName = smokeTag("public_checkin_idem_evt");
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 5,
+      reservedCount: 0
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "public-checkin-idempotent", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+    // Create public registration
+    const regCreate = await post(`/registrations:public`, { 
+      eventId, 
+      party: { email: `public-checkin-idem+${SMOKE_RUN_ID}@example.com` } 
+    }, featureHeaders, { auth: "none" });
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test: "public-checkin-idempotent", result: "FAIL", reason: "reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+
+    // Checkout
+    const checkout = await post(`/events/registration/${encodeURIComponent(regId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!checkout.ok || !checkout.body?.paymentIntentId) {
+      return { test: "public-checkin-idempotent", result: "FAIL", reason: "checkout-failed", checkout };
+    }
+
+    // Simulate Stripe webhook to confirm registration and make it ready for check-in
+    const webhookBody = {
+      id: `evt_${SMOKE_RUN_ID}`,
+      type: "payment_intent.succeeded",
+      data: {
+        object: {
+          id: checkout.body.paymentIntentId,
+          status: "succeeded",
+          metadata: { registrationId: regId, eventId }
+        }
+      }
+    };
+    const whRes = await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "Stripe-Signature": "sim_valid_signature",
+        ...featureHeaders,
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify(webhookBody)
+    });
+    if (!whRes.ok) {
+      return { test: "public-checkin-idempotent", result: "FAIL", reason: "webhook-failed", whStatus: whRes.status };
+    }
+
+    // Call public check-in endpoint with Idempotency-Key K1
+    const k1 = idem();
+    const checkIn1 = await post(`/registrations/${encodeURIComponent(regId)}:public-checkin`, {}, {
+      "X-MBapp-Public-Token": publicToken,
+      "Idempotency-Key": k1,
+      ...featureHeaders
+    }, { auth: "none" });
+
+    if (!checkIn1.ok || checkIn1.status !== 200) {
+      return { test: "public-checkin-idempotent", result: "FAIL", reason: "first-checkin-failed", checkIn1 };
+    }
+
+    const checkedInAt1 = checkIn1.body?.checkedInAt;
+    const checkedInBy1 = checkIn1.body?.checkedInBy;
+    const hasCheckinData1 = !!checkedInAt1 && checkedInBy1 === "public-magic-link";
+
+    // Verify no PII fields in response
+    const hasPii = 
+      checkIn1.body?.email !== undefined || 
+      checkIn1.body?.phone !== undefined ||
+      checkIn1.body?.fees !== undefined ||
+      checkIn1.body?.paymentIntentId !== undefined;
+
+    // Replay with same K1 - should return same checkedInAt (idempotent)
+    const checkIn1Replay = await post(`/registrations/${encodeURIComponent(regId)}:public-checkin`, {}, {
+      "X-MBapp-Public-Token": publicToken,
+      "Idempotency-Key": k1,
+      ...featureHeaders
+    }, { auth: "none" });
+
+    if (!checkIn1Replay.ok || checkIn1Replay.status !== 200) {
+      return { test: "public-checkin-idempotent", result: "FAIL", reason: "replay-same-key-failed", checkIn1Replay };
+    }
+
+    const checkedInAtReplay = checkIn1Replay.body?.checkedInAt;
+    const idempotentOk = checkedInAtReplay === checkedInAt1;
+
+    // Call with different K2 - should preserve original checkedInAt (no re-checkin)
+    const k2 = idem();
+    const checkIn2 = await post(`/registrations/${encodeURIComponent(regId)}:public-checkin`, {}, {
+      "X-MBapp-Public-Token": publicToken,
+      "Idempotency-Key": k2,
+      ...featureHeaders
+    }, { auth: "none" });
+
+    if (!checkIn2.ok || checkIn2.status !== 200) {
+      return { test: "public-checkin-idempotent", result: "FAIL", reason: "second-key-failed", checkIn2 };
+    }
+
+    const checkedInAtK2 = checkIn2.body?.checkedInAt;
+    const preservedOk = checkedInAtK2 === checkedInAt1;
+
+    const pass = hasCheckinData1 && !hasPii && idempotentOk && preservedOk;
+
+    return {
+      test: "public-checkin-idempotent",
+      result: pass ? "PASS" : "FAIL",
+      registration: regId,
+      event: eventId,
+      checkedInAt: checkedInAt1,
+      checkedInBy: checkedInBy1,
+      checks: {
+        hasCheckinData: hasCheckinData1,
+        noPiiLeaked: !hasPii,
+        idempotentOnSameKey: idempotentOk,
+        preservedOnDifferentKey: preservedOk
+      },
+      reason: !pass ? "assertion-failed" : null
+    };
+  },
+
+  "smoke:registrations:public-checkin-blocked": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true"
+    };
+
+    // Create event
+    const eventName = smokeTag("public_checkin_blocked_evt");
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 5,
+      reservedCount: 0
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "public-checkin-blocked", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+    // Create public registration
+    const regCreate = await post(`/registrations:public`, { 
+      eventId, 
+      party: { email: `public-checkin-blocked+${SMOKE_RUN_ID}@example.com` } 
+    }, featureHeaders, { auth: "none" });
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test: "public-checkin-blocked", result: "FAIL", reason: "reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+
+    // Checkout (but skip webhook - leave registration unpaid)
+    const checkout = await post(`/events/registration/${encodeURIComponent(regId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+    if (!checkout.ok || !checkout.body?.paymentIntentId) {
+      return { test: "public-checkin-blocked", result: "FAIL", reason: "checkout-failed", checkout };
+    }
+
+    // DO NOT call webhook - leave payment unpaid
+
+    // Call public check-in endpoint - should fail with 409 (not ready)
+    const checkInFail = await post(`/registrations/${encodeURIComponent(regId)}:public-checkin`, {}, {
+      "X-MBapp-Public-Token": publicToken,
+      "Idempotency-Key": idem(),
+      ...featureHeaders
+    }, { auth: "none" });
+
+    if (checkInFail.status !== 409) {
+      return { 
+        test: "public-checkin-blocked", 
+        result: "FAIL", 
+        reason: "expected 409 when not ready", 
+        actualStatus: checkInFail.status,
+        response: checkInFail.body 
+      };
+    }
+
+    const blockerCode = checkInFail.body?.code;
+    const blockersArray = checkInFail.body?.checkInStatus?.blockers || [];
+    const hasPaymentBlocker = blockersArray.some(b => b?.code === "payment_unpaid");
+    const noCheckedInAt = !checkInFail.body?.checkedInAt;
+
+    const pass = checkInFail.status === 409 && hasPaymentBlocker && noCheckedInAt;
+
+    return {
+      test: "public-checkin-blocked",
+      result: pass ? "PASS" : "FAIL",
+      registration: regId,
+      event: eventId,
+      checkInResponse: {
+        status: checkInFail.status,
+        blockerCode,
+        blockersArray,
+        hasPaymentBlocker,
+        checkedInAtSet: !!checkInFail.body?.checkedInAt
+      },
+      checks: {
+        status409: checkInFail.status === 409,
+        hasPaymentBlocker,
+        noMutation: noCheckedInAt
+      },
+      reason: !pass ? "assertion-failed" : null
+    };
+  }
 
 };
 
