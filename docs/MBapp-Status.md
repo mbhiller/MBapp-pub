@@ -49,6 +49,14 @@
 - Add real-time refresh capability
 - Migrate to shadcn/ui + Tailwind for consistent design system
 
+### Sprint CA — Public Event Navigation & Tenant Fallback — ✅ Complete (2026-01-09)
+
+- **New public web routes:** `/events` (list), `/events/:eventId` (detail), `/events/:eventId/my-checkin` (public check-in placeholder).
+- **Operator route unchanged:** `/events/:eventId/checkin` remains protected via `event:read` + `registration:read` (ProtectedRoute).
+- **Tenant requirement:** Public pages still send tenant header; `apiFetch` now falls back to `VITE_MBAPP_PUBLIC_TENANT_ID` when AuthProvider tenantId is absent. Configure locally in `apps/web/.env.local` (example in [apps/web/.env.example](../apps/web/.env.example)).
+- **Navigation:** Added “Events” to the main nav and a Home CTA “Browse Events” linking to `/events` (see [apps/web/src/components/Layout.tsx](../apps/web/src/components/Layout.tsx) and [apps/web/src/App.tsx](../apps/web/src/App.tsx)).
+- **Verification:** `npm run typecheck -w apps/web` clean; core + extended smokes green in current run set.
+
 ---
 
 ### Sprint BX+ — Scan-first Check-In Resolution — ✅ Complete (2026-01-09)

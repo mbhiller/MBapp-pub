@@ -57,6 +57,9 @@ export function Layout({ children }: { children: ReactNode }) {
             <Link className="text-white/90 underline-offset-4 hover:underline" to="/">
               Home
             </Link>
+            <Link className="text-white/90 underline-offset-4 hover:underline" to="/events">
+              Events
+            </Link>
             {canViewParties && (
               <Link className="text-white/90 underline-offset-4 hover:underline" to="/parties">
                 Parties

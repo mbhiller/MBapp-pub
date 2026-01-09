@@ -1,9 +1,10 @@
-import { Link, Route, Routes } from "react-router-dom";
+import { Link, Route, Routes, useNavigate } from "react-router-dom";
 import { lazy, Suspense } from "react";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Layout } from "./components/Layout";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { PERM_VIEW_WRITE } from "./generated/permissions";
+import { Button } from "./components/ui/button";
 import CreatePartyPage from "./pages/CreatePartyPage";
 import EditPartyPage from "./pages/EditPartyPage";
 import PartiesListPage from "./pages/PartiesListPage";
@@ -39,14 +40,22 @@ import InventoryMovementsPage from "./pages/InventoryMovementsPage";
 import DocsPage from "./pages/DocsPage";
 import NotAuthorizedPage from "./pages/NotAuthorizedPage";
 import CheckInConsolePage from "./pages/CheckInConsolePage";
+import EventsListPage from "./pages/EventsListPage";
+import EventDetailPage from "./pages/EventDetailPage";
+import PublicCheckInPage from "./pages/PublicCheckInPage";
 
 const PublicBookingPage = lazy(() => import("./pages/PublicBookingPage"));
 
 function HomePage() {
+  const navigate = useNavigate();
+
   return (
     <div style={{ display: "grid", gap: 12 }}>
       <h1>Welcome to MBapp Web</h1>
       <p>This is the AWS-first web client foundation.</p>
+      <div style={{ display: "flex", gap: 12 }}>
+        <Button onClick={() => navigate("/events")}>Browse Events</Button>
+      </div>
       <div style={{ display: "flex", gap: 12 }}>
         <Link to="/parties">Parties</Link>
         <Link to="/products">Products</Link>
@@ -102,6 +111,9 @@ export default function App() {
           <Route path="/messages/:id" element={<ProtectedRoute requiredPerm="message:read"><MessageDetailPage /></ProtectedRoute>} />
           <Route path="/locations" element={<LocationsListPage />} />
           <Route path="/locations/:id" element={<LocationDetailPage />} />
+          <Route path="/events" element={<EventsListPage />} />
+          <Route path="/events/:eventId" element={<EventDetailPage />} />
+          <Route path="/events/:eventId/my-checkin" element={<PublicCheckInPage />} />
           <Route path="/events/:eventId/checkin" element={<ProtectedRoute requiredPerm="event:read registration:read"><CheckInConsolePage /></ProtectedRoute>} />
           <Route path="/docs" element={<DocsPage />} />
           <Route path="/public/book" element={<Suspense fallback={<div>Loading public booking...</div>}><PublicBookingPage /></Suspense>} />
