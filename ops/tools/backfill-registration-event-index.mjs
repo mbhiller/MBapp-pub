@@ -126,7 +126,7 @@ async function main() {
   let errors = 0;
   let sample = [];
   let cursor = decodeCursor(argv.cursor);
-  let resumeCursor = null;
+  let lastEvaluatedKey = null;
   const started = Date.now();
 
   console.log(`[backfill-registration-event-index] table=${TABLE} tenant=${argv.tenant} dryRun=${argv.dryRun} limit=${argv.limit} cursor=${argv.cursor ? "yes" : "no"} maxWPS=${argv.maxWritesPerSecond}`);
@@ -135,19 +135,23 @@ async function main() {
     const page = await ddb.send(new QueryCommand({
       TableName: TABLE,
       KeyConditionExpression: "#pk = :pk AND begins_with(#sk, :skprefix)",
-      ExpressionAttributeNames: { "#pk": PK, "#sk": SK },
+      ExpressionAttributeNames: { "#pk": PK, "#sk": SK, "#type": "type" },
       ExpressionAttributeValues: { ":pk": argv.tenant, ":skprefix": "registration#" },
       ExclusiveStartKey: cursor,
       Limit: Math.min(200, argv.limit - examined),
-      ProjectionExpression: "#pk, #sk, id, type, eventId, submittedAt, createdAt, updatedAt, gsi4pk, gsi4sk",
+      ProjectionExpression: "#pk, #sk, id, #type, eventId, submittedAt, createdAt, updatedAt, gsi4pk, gsi4sk",
       ConsistentRead: true,
     }));
 
     const items = page.Items || [];
+    const currentPageEsk = cursor?.sk || "none";
+    lastEvaluatedKey = page.LastEvaluatedKey || null;
+    const currentPageLek = lastEvaluatedKey?.sk || "none";
+    console.log(`[backfill-registration-event-index] page: exclusiveStartKey.sk=${currentPageEsk}, lastEvaluatedKey.sk=${currentPageLek}, items=${items.length}`);
 
     for (const item of items) {
       if (examined >= argv.limit) {
-        resumeCursor = encodeCursor({ [PK]: item[PK], [SK]: item[SK] });
+        lastEvaluatedKey = { [PK]: item[PK], [SK]: item[SK] };
         break outer;
       }
 
@@ -197,7 +201,6 @@ async function main() {
     }
 
     if (examined >= argv.limit) {
-      resumeCursor = resumeCursor || encodeCursor(page.LastEvaluatedKey);
       break;
     }
 
@@ -209,7 +212,7 @@ async function main() {
   }
 
   const durationMs = Date.now() - started;
-  const resumeToken = resumeCursor || encodeCursor(cursor);
+  const resumeToken = lastEvaluatedKey ? encodeCursor(lastEvaluatedKey) : null;
   const summary = {
     tenant: argv.tenant,
     dryRun: argv.dryRun,
@@ -227,6 +230,8 @@ async function main() {
   console.log(JSON.stringify(summary, null, 2));
   if (resumeToken) {
     console.log(`[backfill-registration-event-index] Resume with --cursor ${resumeToken}`);
+  } else {
+    console.log(`[backfill-registration-event-index] DONE (no resume cursor - all items processed)`);
   }
 
   if (errors > 0 && !argv.dryRun) {
