@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, useElements, useStripe, CardElement } from "@stripe/react-stripe-js";
+import { apiFetch } from "../lib/http";
+import { Label } from "../components/ui/label";
+import { Input } from "../components/ui/input";
 
 type EventSummary = {
   id: string;
@@ -27,49 +31,35 @@ type PaymentIntentResponse = {
   clientSecret: string;
 };
 
-type ApiOptions = {
-  method?: string;
-  body?: any;
-  headers?: Record<string, string>;
-};
-
-async function publicFetch<T>(apiBase: string, publicTenant: string, path: string, opts: ApiOptions = {}): Promise<T> {
-  const { method = "GET", body, headers } = opts;
-  const url = `${apiBase.replace(/\/$/, "")}${path}`;
-  const init: RequestInit = {
-    method,
-    headers: {
-      ...(body ? { "content-type": "application/json" } : {}),
-      "x-tenant-id": publicTenant,
-      ...headers,
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  };
-  const res = await fetch(url, init);
-  if (!res.ok) {
-    const payload = await res.json().catch(() => undefined);
-    const message = payload?.message || payload?.error || res.statusText;
-    const err: any = new Error(message);
-    err.status = res.status;
-    err.code = payload?.code;
-    err.details = payload;
-    throw err;
-  }
-  return res.json();
-}
-
 function randomKey() {
   if (crypto.randomUUID) return crypto.randomUUID();
   return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
 }
 
-function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant: string }) {
+function isValidEmail(email: string): boolean {
+  const normalized = email.trim();
+  if (!normalized) return false;
+  // Basic email validation: something@something.something
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(normalized);
+}
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+function BookingForm() {
   const stripe = useStripe();
   const elements = useElements();
+  const [searchParams] = useSearchParams();
 
   const [events, setEvents] = useState<EventSummary[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(false);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [pendingEventId, setPendingEventId] = useState<string | null>(() => searchParams.get("eventId"));
+  const [invalidEventId, setInvalidEventId] = useState<string | null>(null);
+  const [email, setEmail] = useState<string>("");
+  const [emailError, setEmailError] = useState<string>("");
   const [registration, setRegistration] = useState<any>(null);
   const [publicToken, setPublicToken] = useState<string | null>(null);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
@@ -89,6 +79,8 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
 
   function resetAll() {
     setSelectedEventId((prev) => prev);
+    setEmail("");
+    setEmailError("");
     setRegistration(null);
     setPublicToken(null);
     setClientSecret(null);
@@ -108,16 +100,34 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
     (async () => {
       try {
         setLoadingEvents(true);
-        const res = await publicFetch<{ items: EventSummary[] }>(apiBase, publicTenant, "/events:public", { method: "GET" });
-        setEvents(res.items || []);
-        if (res.items?.length) setSelectedEventId(res.items[0].id);
+        const res = await apiFetch<{ items: EventSummary[] }>("/events:public", { method: "GET" });
+        const loadedEvents = res.items || [];
+        setEvents(loadedEvents);
+
+        // Try to preselect pending eventId from query param
+        if (pendingEventId) {
+          const found = loadedEvents.find((e) => e.id === pendingEventId);
+          if (found) {
+            setSelectedEventId(pendingEventId);
+            setInvalidEventId(null);
+            setPendingEventId(null);
+          } else {
+            // Event not found
+            setInvalidEventId(pendingEventId);
+            setPendingEventId(null);
+            // Fall back to first event
+            if (loadedEvents.length) setSelectedEventId(loadedEvents[0].id);
+          }
+        } else if (loadedEvents.length) {
+          setSelectedEventId(loadedEvents[0].id);
+        }
       } catch (err: any) {
         setErrorMessage(err?.message || "Failed to load events");
       } finally {
         setLoadingEvents(false);
       }
     })();
-  }, []);
+  }, [pendingEventId]);
 
   useEffect(() => {
     if (!serverStatus?.holdExpiresAt) return;
@@ -176,9 +186,13 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
     setErrorMessage("");
     setStatusMessage("Creating reservation...");
     try {
-      const res = await publicFetch<RegistrationResponse>(apiBase, publicTenant, "/registrations:public", {
+      const res = await apiFetch<RegistrationResponse>("/registrations:public", {
         method: "POST",
-        body: { eventId: selectedEventId, ...(rvQty > 0 ? { rvQty } : {}) },
+        body: { 
+          eventId: selectedEventId, 
+          party: { email: normalizeEmail(email) },
+          ...(rvQty > 0 ? { rvQty } : {}) 
+        },
       });
       setRegistration(res.registration);
       setPublicToken(res.publicToken);
@@ -201,7 +215,7 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
     while (tries < maxTries) {
       tries += 1;
       try {
-        const status = await publicFetch<any>(apiBase, publicTenant, `/registrations/${regId}:public`, {
+        const status = await apiFetch<any>(`/registrations/${regId}:public`, {
           method: "GET",
           headers: { "X-MBapp-Public-Token": token },
         });
@@ -270,7 +284,7 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
     setStatusMessage("Starting checkout...");
     try {
       const idem = randomKey();
-      const res = await publicFetch<PaymentIntentResponse & { totalAmount?: number; currency?: string }>(apiBase, publicTenant, `/events/registration/${reg.id}:checkout`, {
+      const res = await apiFetch<PaymentIntentResponse & { totalAmount?: number; currency?: string }>(`/events/registration/${reg.id}:checkout`, {
         method: "POST",
         headers: {
           "X-MBapp-Public-Token": token,
@@ -300,7 +314,7 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
     setIsResending(true);
     setResendMessage("");
     try {
-      const result = await publicFetch<any>(apiBase, publicTenant, `/registrations/${registration.id}:public-resend`, {
+      const result = await apiFetch<any>(`/registrations/${registration.id}:public-resend`, {
         method: "POST",
         headers: { "X-MBapp-Public-Token": publicToken },
       });
@@ -310,7 +324,7 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
         setResendMessage("Resend requested. Refreshing status…");
         // Trigger immediate refresh of status
         await new Promise((res) => setTimeout(res, 1000));
-        const status = await publicFetch<any>(apiBase, publicTenant, `/registrations/${registration.id}:public`, {
+        const status = await apiFetch<any>(`/registrations/${registration.id}:public`, {
           method: "GET",
           headers: { "X-MBapp-Public-Token": publicToken },
         });
@@ -356,6 +370,11 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
   return (
     <div style={{ maxWidth: 520, margin: "0 auto", display: "grid", gap: 12 }}>
       <h1>Public Event Booking (AU)</h1>
+      {invalidEventId && (
+        <div style={{ padding: 8, backgroundColor: "#fff3cd", border: "1px solid #ffc107", borderRadius: 4, fontSize: 13, color: "#856404" }}>
+          Event "{invalidEventId}" not found. Please select an event below.
+        </div>
+      )}
       {loadingEvents && <div>Loading events...</div>}
       {events.length === 0 && !loadingEvents && <div>No open events found.</div>}
       {events.length > 0 && (
@@ -373,6 +392,31 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
             ))}
           </select>
         </label>
+      )}
+
+      {/* Email field */}
+      {events.length > 0 && (
+        <div style={{ display: "grid", gap: 4 }}>
+          <Label htmlFor="email">Email Address</Label>
+          <Input
+            id="email"
+            type="email"
+            placeholder="your@email.com"
+            value={email}
+            onChange={(e) => {
+              const val = e.target.value;
+              setEmail(val);
+              if (val.trim()) {
+                setEmailError(isValidEmail(val) ? "" : "Please enter a valid email address");
+              } else {
+                setEmailError("");
+              }
+            }}
+            disabled={isSubmitting}
+          />
+          {emailError && <div style={{ fontSize: 13, color: "#d32f2f" }}>{emailError}</div>}
+          <div style={{ fontSize: 12, color: "#666" }}>We'll email your confirmation &amp; check-in link.</div>
+        </div>
       )}
 
       {/* RV Add-on */}
@@ -397,10 +441,15 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
 
       <button
         onClick={async () => {
+          // Validate email before submitting
+          if (!isValidEmail(email)) {
+            setEmailError("Please enter a valid email address");
+            return;
+          }
           const res = await createRegistration();
           await checkout(res || null);
         }}
-        disabled={!selectedEventId || isSubmitting}
+        disabled={!selectedEventId || isSubmitting || !isValidEmail(email)}
       >
         Reserve 1 spot
       </button>
@@ -492,7 +541,6 @@ function BookingForm({ apiBase, publicTenant }: { apiBase: string; publicTenant:
 
 export default function PublicBookingPage() {
   const apiBase = import.meta.env.VITE_API_BASE;
-  const publicTenant = import.meta.env.VITE_PUBLIC_TENANT_ID || "DemoTenant";
   const stripePk = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
 
   const stripePromise = useMemo(() => (stripePk ? loadStripe(stripePk) : null), [stripePk]);
@@ -507,7 +555,7 @@ export default function PublicBookingPage() {
 
   return (
     <Elements stripe={stripePromise}>
-      <BookingForm apiBase={apiBase} publicTenant={publicTenant} />
+      <BookingForm />
     </Elements>
   );
 }

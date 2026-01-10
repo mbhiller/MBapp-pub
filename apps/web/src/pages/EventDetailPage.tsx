@@ -189,6 +189,17 @@ export default function EventDetailPage() {
         <div className="flex flex-col gap-4 sm:flex-row">
           <div className="flex flex-col items-start gap-1">
             <Button
+              onClick={() => navigate(`/public/book?eventId=${eventId}`)}
+              size="lg"
+            >
+              Register Now
+            </Button>
+            <div className="text-xs text-muted-foreground">
+              Book your spot and complete payment.
+            </div>
+          </div>
+          <div className="flex flex-col items-start gap-1">
+            <Button
               onClick={() => navigate(`/events/${eventId}/my-checkin`)}
               size="lg"
             >
