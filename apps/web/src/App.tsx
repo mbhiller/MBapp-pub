@@ -5,6 +5,7 @@ import { Layout } from "./components/Layout";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { PERM_VIEW_WRITE } from "./generated/permissions";
 import { Button } from "./components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import CreatePartyPage from "./pages/CreatePartyPage";
 import EditPartyPage from "./pages/EditPartyPage";
 import PartiesListPage from "./pages/PartiesListPage";
@@ -50,24 +51,28 @@ function HomePage() {
   const navigate = useNavigate();
 
   return (
-    <div style={{ display: "grid", gap: 12 }}>
-      <h1>Welcome to MBapp Web</h1>
-      <p>This is the AWS-first web client foundation.</p>
-      <div style={{ display: "flex", gap: 12 }}>
-        <Button onClick={() => navigate("/events")}>Browse Events</Button>
-      </div>
-      <div style={{ display: "flex", gap: 12 }}>
-        <Link to="/parties">Parties</Link>
-        <Link to="/products">Products</Link>
-        <Link to="/sales-orders">Sales Orders</Link>
-        <Link to="/backorders">Backorders</Link>
-        <Link to="/purchase-orders">Purchase Orders</Link>
-        <Link to="/inventory">Inventory</Link>
-        <Link to="/locations">Locations</Link>
-        <Link to="/views">Views</Link>
-        <Link to="/workspaces">Workspaces</Link>
-        <Link to="/messages">Messages</Link>
-      </div>
+    <div className="container mx-auto max-w-3xl p-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Welcome to MBapp</CardTitle>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Discover events and check in with ease.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <Button onClick={() => navigate("/events")} className="w-full sm:w-auto">
+              Browse Events
+            </Button>
+            <Button onClick={() => navigate("/events")} variant="outline" className="w-full sm:w-auto">
+              Find My Check-In
+            </Button>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Pick your event first. On the event page, select ‘My Check-In’.
+          </p>
+        </CardContent>
+      </Card>
     </div>
   );
 }
