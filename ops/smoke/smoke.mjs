@@ -2192,6 +2192,185 @@ const tests = {
     return { test:"ping", result:r.ok?"PASS":"FAIL", status:r.status, text:t };
   },
 
+  "smoke:public-booking:email-required": async () => {
+    // Test that POST /registrations:public without party.email is rejected
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // Create an event
+    const eventName = smokeTag("email_required_evt");
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 5,
+      reservedCount: 0
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "public-booking:email-required", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+    // Try to create registration WITHOUT party.email - should fail with 400 + party_required
+    const regCreate = await post(`/registrations:public`, { eventId }, featureHeaders, { auth: "none" });
+    
+    if (regCreate.ok) {
+      return { 
+        test: "public-booking:email-required", 
+        result: "FAIL", 
+        reason: "expected-error-but-succeeded",
+        regCreate 
+      };
+    }
+
+    const isValidationError = regCreate.status === 400;
+    const code = regCreate.body?.code;
+    const details = regCreate.body?.details;
+    const isPartyRequired = code === "validation_error" && details?.code === "party_required";
+
+    const pass = isValidationError && isPartyRequired;
+
+    return {
+      test: "public-booking:email-required",
+      result: pass ? "PASS" : "FAIL",
+      eventId,
+      response: {
+        status: regCreate.status,
+        code,
+        detailsCode: details?.code,
+        message: regCreate.body?.message
+      },
+      checks: {
+        status400: isValidationError,
+        partyRequired: isPartyRequired
+      },
+      reason: !pass ? "assertion-failed" : null
+    };
+  },
+
+  "smoke:public-booking:happy-path": async () => {
+    // Test happy path: event -> registration with email -> checkout -> webhook -> confirmed
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // Create an open event
+    const eventName = smokeTag("booking_happy_evt");
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 10,
+      reservedCount: 0
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "public-booking:happy-path", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+    // Create public registration with party.email
+    const email = `booking+${SMOKE_RUN_ID}@example.com`;
+    const regCreate = await post(`/registrations:public`, { 
+      eventId, 
+      party: { email } 
+    }, featureHeaders, { auth: "none" });
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test: "public-booking:happy-path", result: "FAIL", reason: "reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+
+    // Checkout
+    const checkout = await post(`/events/registration/${encodeURIComponent(regId)}:checkout`, {}, {
+      ...featureHeaders,
+      "X-MBapp-Public-Token": publicToken,
+      "Idempotency-Key": idem()
+    }, { auth: "none" });
+
+    if (!checkout.ok || !checkout.body?.paymentIntentId) {
+      return { test: "public-booking:happy-path", result: "FAIL", reason: "checkout-failed", checkout };
+    }
+
+    // Simulate Stripe webhook to confirm registration
+    const webhookBody = {
+      id: `evt_${SMOKE_RUN_ID}`,
+      type: "payment_intent.succeeded",
+      data: {
+        object: {
+          id: checkout.body.paymentIntentId,
+          status: "succeeded",
+          metadata: { registrationId: regId, eventId }
+        }
+      }
+    };
+    const whRes = await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "Stripe-Signature": "sim_valid_signature",
+        ...featureHeaders,
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify(webhookBody)
+    });
+    const whBody = await whRes.json().catch(() => ({}));
+    if (!whRes.ok) {
+      return { test: "public-booking:happy-path", result: "FAIL", reason: "webhook-failed", whStatus: whRes.status, whBody };
+    }
+
+    // Read registration to verify it's confirmed and has confirmation message
+    const regObj = await get(`/objects/registration/${encodeURIComponent(regId)}`);
+    const msgId = regObj?.body?.confirmationMessageId;
+    const isConfirmed = regObj?.body?.status === "confirmed";
+    const hasMsg = !!msgId;
+
+    if (!isConfirmed) {
+      return { test: "public-booking:happy-path", result: "FAIL", reason: "not-confirmed", status: regObj?.body?.status };
+    }
+    if (!hasMsg) {
+      return { test: "public-booking:happy-path", result: "FAIL", reason: "no-confirmation-message", reg: regObj.body };
+    }
+
+    // Verify message template
+    const msg = await get(`/objects/message/${encodeURIComponent(msgId)}`);
+    const tv = (msg?.body?.templateVars) || {};
+    const tmplOk = msg.ok && msg.body?.templateKey === "registration.confirmed.email"
+      && !!tv.registrationId && !!tv.paymentIntentId;
+
+    const pass = isConfirmed && hasMsg && tmplOk;
+    return {
+      test: "public-booking:happy-path",
+      result: pass ? "PASS" : "FAIL",
+      eventId,
+      registrationId: regId,
+      email,
+      checkout: {
+        status: checkout.status,
+        paymentIntentId: checkout.body?.paymentIntentId
+      },
+      registration: {
+        status: regObj.body?.status,
+        confirmationMessageId: msgId
+      },
+      message: msg?.ok ? {
+        templateKey: msg.body?.templateKey,
+        hasVars: !!tv.registrationId && !!tv.paymentIntentId
+      } : null,
+      reason: !pass ? "assertion-failed" : null
+    };
+  },
+
   "smoke:public-booking:rv-happy-path": async () => {
     await ensureBearer();
 

@@ -6,6 +6,52 @@
 
 ---
 
+### Sprint CF Part B — Public Booking Entry & Email Collection — ✅ Complete (2026-01-09)
+
+**Summary:** Delivered integrated public event booking flow with email collection and seamless entry from event detail. Standardized on shared `apiFetch()` client to ensure feature headers and public tenant fallback. Two new smoke tests lock in email-required validation and happy path confirmation.
+
+**Public Routes:**
+- `/` — Home (public)
+- `/events` — Event list (public, no auth)
+- `/events/:eventId` — Event detail (public, no auth)
+  - **New CTA:** "Register Now" button routes to `/public/book?eventId=...`
+  - Existing CTAs preserved: "My Check-In" (public), "Operator Console" (permission-gated)
+- `/events/:eventId/my-checkin` — Public check-in lookup flow (from Sprint CB)
+- `/public/book` — Public booking form (new in this sprint)
+
+**Deliverables (E1–E4 + E5):**
+- **E1: Standardize HTTP client:** Removed local `publicFetch()` helper from `PublicBookingPage.tsx`; replaced all 7 API calls with `apiFetch()` from `lib/http.ts`. Inherits feature headers (`X-Feature-Registrations-Enabled`, etc.) and public tenant fallback via `VITE_MBAPP_PUBLIC_TENANT_ID`.
+- **E2: Email collection:** Added email input field (shadcn `Label` + `Input` type="email") to booking form. Real-time validation; button disabled until valid email. Registration payload now includes `party: { email: normalizedEmail }`, satisfying the party-required contract.
+- **E3: Event detail CTA:** Added "Register Now" button to `/events/:eventId` pointing to `/public/book?eventId=...`. Preserves "My Check-In" and permission-gated "Operator Console" CTAs.
+- **E4: Event preselection:** Booking page reads `?eventId=` query param on mount; preselects event if found, shows yellow warning if invalid, falls back to first event. Enables direct deep-link from event detail.
+- **E5: Smoke tests + docs:** Added two core smokes (`smoke:public-booking:email-required`, `smoke:public-booking:happy-path`) to validate party-required guard and full confirmation flow; updated `ci-smokes.json`.
+
+**Key Implementation Notes:**
+- **HTTP client unification:** `apiFetch()` automatically includes:
+  - Tenant: `x-tenant-id` header; falls back to `VITE_MBAPP_PUBLIC_TENANT_ID` if no explicit `tenantId` provided
+  - Feature headers: `X-Feature-Registrations-Enabled`, `X-Feature-Stripe-Simulate`, `X-Feature-Notify-Simulate` (when enabled in `.env.local`)
+  - No `useAuth()` hook required; page works entirely within public tenant context
+- **Email normalization:** `email.trim().toLowerCase()` before submission; invalid emails block form submission
+- **Query param handling:** `useSearchParams()` reads `eventId` on mount; lazy validation after events load prevents race conditions
+- **Feature flagging:** Dev/nonprod can enable registrations feature via `VITE_MBAPP_FEATURE_REGISTRATIONS_ENABLED=true` in `.env.local`
+
+**Smoke Tests (New — Core):**
+1. `smoke:public-booking:email-required` — POST `/registrations:public` with `{ eventId }` only (no party) → asserts `400 validation_error` with `details.code = "party_required"`
+2. `smoke:public-booking:happy-path` — Full happy path: event create → register with `party.email` → checkout → webhook → confirmed status + confirmation message
+
+**Verification:**
+- ✅ Typecheck: `npm run typecheck -w apps/web` (clean)
+- ✅ Core smokes: `npm run smokes:run:core` (both new tests + all existing core)
+- ✅ Manual: `/public/book?eventId=XYZ` preselects event; invalid email blocks submit; event detail "Register Now" links correctly
+
+**Next Steps (Future Sprints):**
+- RV add-on pricing and multi-qty selection (existing `smoke:public-booking:rv-happy-path` already covers this)
+- Stall/class assignment in booking flow (if required by event config)
+- Payment retry and dispute handling improvements
+- Operator console enhancements for batch registration management
+
+---
+
 ### Sprint CE — Public Entry Flow Polish — ✅ Complete (2026-01-09)
 
 - **Home CTAs:** Public landing now presents clear actions — Browse Events and Find My Check-In — with concise guidance.

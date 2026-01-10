@@ -82,6 +82,8 @@
     { "name": "smoke:badging:issue-badge-guard-party-missing", "tier": "core" },
     { "name": "smoke:checkin:worklist-pagination", "tier": "extended" },
     { "name": "smoke:checkin:worklist-search", "tier": "extended" },
+    { "name": "smoke:public-booking:email-required", "tier": "core" },
+    { "name": "smoke:public-booking:happy-path", "tier": "core" },
     { "name": "smoke:public-booking:rv-happy-path", "tier": "core" },
     { "name": "smoke:stalls:block-reserve-and-assign", "tier": "core" },
     { "name": "smoke:rv-sites:block-reserve-and-assign", "tier": "core" },
