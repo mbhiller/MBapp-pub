@@ -25,3 +25,12 @@ export function resolveRegistrationScan(eventId: string, scanString: string, sca
     getFeatureHeaders()
   );
 }
+
+export function useTicket(ticketId: string, idempotencyKey: string) {
+  const headers = { ...getFeatureHeaders(), "Idempotency-Key": idempotencyKey };
+  return apiClient.post<{ ticket: components["schemas"]["Ticket"] }>(
+    `/tickets/${encodeURIComponent(ticketId)}:use`,
+    {},
+    headers
+  );
+}

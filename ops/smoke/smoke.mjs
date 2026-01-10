@@ -753,6 +753,152 @@ async function dumpClassEntryHolds(registrationId, eventId) {
   }
 }
 
+/* ---------- Ticket use shared fixture ---------- */
+async function setupTicketUseFixture(testName, label, { checkIn = false } = {}) {
+  await ensureBearer();
+  const featureHeaders = {
+    "X-Feature-Registrations-Enabled": "true",
+    "X-Feature-Stripe-Simulate": "true",
+    "X-Feature-Notify-Simulate": "true"
+  };
+
+  // 1) Create event
+  const eventName = smokeTag(label || "ticket_use_evt");
+  const evt = await post("/objects/event", {
+    type: "event",
+    status: "open",
+    name: eventName,
+    capacity: 5,
+    reservedCount: 0,
+    stallEnabled: true,
+    stallCapacity: 1,
+    stallReserved: 0,
+    stallUnitAmount: 1500
+  });
+  if (!evt.ok || !evt.body?.id) {
+    return { ok: false, failure: { test: testName, result: "FAIL", reason: "event-create-failed", evt } };
+  }
+  const eventId = evt.body.id;
+  recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+  // 2) Create stall resource to satisfy readiness without extra blockers
+  const stall = await post("/objects/resource", {
+    type: "resource",
+    resourceType: "stall",
+    name: `TicketUse-Stall-${SMOKE_RUN_ID}`,
+    status: "available",
+    tags: [`event:${eventId}`, "group:TicketUse"]
+  });
+  if (!stall.ok || !stall.body?.id) {
+    return { ok: false, failure: { test: testName, result: "FAIL", reason: "stall-create-failed", stall } };
+  }
+  const stallId = stall.body.id;
+  recordCreated({ type: "resource", id: stallId, route: "/objects/resource", meta: { eventId, name: "TicketUse-Stall" } });
+
+  // 3) Create registration (public) with payment intent
+  const regCreate = await post(
+    `/registrations:public`,
+    { eventId, stallQty: 1, party: { email: `ticket_use+${SMOKE_RUN_ID}@example.com` } },
+    featureHeaders,
+    { auth: "none" }
+  );
+  if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+    return { ok: false, failure: { test: testName, result: "FAIL", reason: "reg-create-failed", regCreate } };
+  }
+  const regId = regCreate.body.registration.id;
+  const publicToken = regCreate.body.publicToken;
+  recordCreated({ type: "registration", id: regId, route: "/registrations:public", meta: { eventId } });
+
+  // 4) Checkout
+  const checkout = await post(
+    `/events/registration/${encodeURIComponent(regId)}:checkout`,
+    {},
+    { ...featureHeaders, "X-MBapp-Public-Token": publicToken, "Idempotency-Key": idem() },
+    { auth: "none" }
+  );
+  if (!checkout.ok || !checkout.body?.paymentIntentId) {
+    return { ok: false, failure: { test: testName, result: "FAIL", reason: "checkout-failed", checkout } };
+  }
+
+  // 5) Confirm payment via webhook
+  const webhookBody = {
+    id: `evt_${SMOKE_RUN_ID}`,
+    type: "payment_intent.succeeded",
+    data: { object: { id: checkout.body.paymentIntentId, status: "succeeded", metadata: { registrationId: regId, eventId } } }
+  };
+  const whRes = await fetch(`${API}/webhooks/stripe`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "Stripe-Signature": "sim_valid_signature",
+      ...featureHeaders,
+      "x-tenant-id": TENANT
+    },
+    body: JSON.stringify(webhookBody)
+  });
+  if (!whRes.ok) {
+    return { ok: false, failure: { test: testName, result: "FAIL", reason: "webhook-confirm-failed", whStatus: whRes.status } };
+  }
+
+  // 6) Assign stall resource to registration to clear readiness blockers
+  const assignRes = await post(
+    `/registrations/${encodeURIComponent(regId)}:assign-resources`,
+    { itemType: "stall", resourceIds: [stallId] },
+    featureHeaders
+  );
+  if (!assignRes.ok) {
+    return { ok: false, failure: { test: testName, result: "FAIL", reason: "assign-resources-failed", assignRes } };
+  }
+
+  // 7) Verify readiness is green prior to check-in
+  const readyRes = await get(`/registrations/${encodeURIComponent(regId)}:checkin-readiness`, undefined, { headers: featureHeaders });
+  if (!readyRes.ok || !readyRes.body?.ready) {
+    return {
+      ok: false,
+      failure: { test: testName, result: "FAIL", reason: "not-ready-after-assign", snapshot: readyRes.body, http: { ok: readyRes.ok, status: readyRes.status } }
+    };
+  }
+
+  // 8) Issue ticket (idempotent key for determinism)
+  const ticketKey = `ticket-${SMOKE_RUN_ID}-${label || "use"}`;
+  const issue = await post(
+    `/registrations/${encodeURIComponent(regId)}:issue-ticket`,
+    { ticketType: "admission" },
+    { ...featureHeaders, "Idempotency-Key": ticketKey }
+  );
+  if (!issue.ok || !issue.body?.ticket?.id) {
+    return { ok: false, failure: { test: testName, result: "FAIL", reason: "issue-ticket-failed", issue } };
+  }
+  const ticket = issue.body.ticket;
+  recordCreated({ type: "ticket", id: ticket.id, route: "/registrations/{id}:issue-ticket", meta: { eventId, registrationId: regId } });
+
+  let checkedInAt = null;
+  if (checkIn) {
+    const checkinKey = `checkin-${SMOKE_RUN_ID}-${label || "use"}`;
+    const checkinRes = await post(
+      `/events/registration/${encodeURIComponent(regId)}:checkin`,
+      {},
+      { ...featureHeaders, "Idempotency-Key": checkinKey }
+    );
+    if (!checkinRes.ok || !checkinRes.body?.checkedInAt) {
+      return { ok: false, failure: { test: testName, result: "FAIL", reason: "checkin-failed", checkinRes } };
+    }
+    checkedInAt = checkinRes.body.checkedInAt;
+  }
+
+  return {
+    ok: true,
+    data: {
+      eventId,
+      regId,
+      ticket,
+      stallId,
+      checkedInAt,
+      featureHeaders
+    }
+  };
+}
+
 /* ---------- Tests ---------- */
 const tests = {
     "smoke:close-the-loop": async () => {
@@ -20906,6 +21052,173 @@ const tests = {
       registrationId: regId,
       ticketId: ticket.id,
       qrText: ticket.payload.qrText
+    };
+  },
+
+  "smoke:ticketing:use-ticket-happy-path": async () => {
+    const fixture = await setupTicketUseFixture("ticketing:use-ticket-happy-path", "use_ticket_happy", { checkIn: true });
+    if (!fixture.ok) return fixture.failure;
+    const { eventId, regId, ticket, checkedInAt, featureHeaders } = fixture.data;
+
+    // Optional: resolve scan should still succeed for the ticket QR
+    if (ticket?.payload?.qrText) {
+      const resolveRes = await post(
+        `/registrations:resolve-scan`,
+        { eventId, scanType: "auto", scanString: ticket.payload.qrText },
+        featureHeaders
+      );
+      if (!resolveRes.ok || !resolveRes.body?.ok) {
+        return {
+          test: "ticketing:use-ticket-happy-path",
+          result: "FAIL",
+          reason: "resolve-scan-failed",
+          http: { ok: resolveRes.ok, status: resolveRes.status },
+          body: resolveRes.body
+        };
+      }
+    }
+
+    const useKey = `use-${SMOKE_RUN_ID}-k1`;
+    const useRes = await post(
+      `/tickets/${encodeURIComponent(ticket.id)}:use`,
+      {},
+      { ...featureHeaders, "Idempotency-Key": useKey }
+    );
+
+    if (!useRes.ok || !useRes.body?.ticket) {
+      return { test: "ticketing:use-ticket-happy-path", result: "FAIL", reason: "use-ticket-failed", useRes };
+    }
+
+    const used = useRes.body.ticket;
+    if (used.status !== "used" || !used.usedAt || !used.usedBy) {
+      return {
+        test: "ticketing:use-ticket-happy-path",
+        result: "FAIL",
+        reason: "used-fields-missing",
+        ticket: used
+      };
+    }
+
+    if (EMAIL && typeof used.usedBy === "string" && used.usedBy !== EMAIL) {
+      return {
+        test: "ticketing:use-ticket-happy-path",
+        result: "FAIL",
+        reason: "usedBy-mismatch",
+        expected: EMAIL,
+        actual: used.usedBy
+      };
+    }
+
+    return {
+      test: "ticketing:use-ticket-happy-path",
+      result: "PASS",
+      summary: "Ticket use marks ticket as used with audit fields",
+      eventId,
+      registrationId: regId,
+      ticketId: used.id,
+      usedAt: used.usedAt,
+      usedBy: used.usedBy,
+      checkedInAt,
+      useKey
+    };
+  },
+
+  "smoke:ticketing:use-ticket-idempotent": async () => {
+    const fixture = await setupTicketUseFixture("ticketing:use-ticket-idempotent", "use_ticket_idem", { checkIn: true });
+    if (!fixture.ok) return fixture.failure;
+    const { eventId, regId, ticket, featureHeaders } = fixture.data;
+
+    const key1 = `use-${SMOKE_RUN_ID}-k1`;
+    const key2 = `use-${SMOKE_RUN_ID}-k2`;
+
+    const use1 = await post(
+      `/tickets/${encodeURIComponent(ticket.id)}:use`,
+      {},
+      { ...featureHeaders, "Idempotency-Key": key1 }
+    );
+    if (!use1.ok || !use1.body?.ticket) {
+      return { test: "ticketing:use-ticket-idempotent", result: "FAIL", reason: "first-use-failed", use1 };
+    }
+    const t1 = use1.body.ticket;
+    if (t1.status !== "used" || !t1.usedAt) {
+      return { test: "ticketing:use-ticket-idempotent", result: "FAIL", reason: "first-use-missing-fields", ticket: t1 };
+    }
+
+    const use2 = await post(
+      `/tickets/${encodeURIComponent(ticket.id)}:use`,
+      {},
+      { ...featureHeaders, "Idempotency-Key": key1 }
+    );
+    if (!use2.ok || !use2.body?.ticket) {
+      return { test: "ticketing:use-ticket-idempotent", result: "FAIL", reason: "same-key-replay-failed", use2 };
+    }
+    const t2 = use2.body.ticket;
+    if (t2.status !== "used" || !t2.usedAt) {
+      return { test: "ticketing:use-ticket-idempotent", result: "FAIL", reason: "same-key-replay-missing-fields", ticket: t2 };
+    }
+
+    const use3 = await post(
+      `/tickets/${encodeURIComponent(ticket.id)}:use`,
+      {},
+      { ...featureHeaders, "Idempotency-Key": key2 }
+    );
+    const body3 = use3.body || {};
+    if (use3.status !== 409 || body3.code !== "ticket_already_used") {
+      return {
+        test: "ticketing:use-ticket-idempotent",
+        result: "FAIL",
+        reason: "different-key-should-conflict",
+        http: { ok: use3.ok, status: use3.status },
+        response: body3
+      };
+    }
+
+    return {
+      test: "ticketing:use-ticket-idempotent",
+      result: "PASS",
+      summary: "Ticket use is idempotent for same key and rejects different key after use",
+      eventId,
+      registrationId: regId,
+      ticketId: ticket.id,
+      usedAt1: t1.usedAt,
+      usedAt2: t2.usedAt,
+      conflictStatus: use3.status,
+      conflictCode: body3.code
+    };
+  },
+
+  "smoke:ticketing:use-ticket-guard-not-checkedin": async () => {
+    const fixture = await setupTicketUseFixture("ticketing:use-ticket-guard-not-checkedin", "use_ticket_guard", { checkIn: false });
+    if (!fixture.ok) return fixture.failure;
+    const { eventId, regId, ticket, featureHeaders } = fixture.data;
+
+    const useKey = `use-${SMOKE_RUN_ID}-guard`;
+    const useRes = await post(
+      `/tickets/${encodeURIComponent(ticket.id)}:use`,
+      {},
+      { ...featureHeaders, "Idempotency-Key": useKey }
+    );
+    const body = useRes.body || {};
+
+    if (useRes.status !== 409 || body.code !== "registration_not_checkedin") {
+      return {
+        test: "ticketing:use-ticket-guard-not-checkedin",
+        result: "FAIL",
+        reason: "expected-registration-not-checkedin-guard",
+        http: { ok: useRes.ok, status: useRes.status },
+        response: body
+      };
+    }
+
+    return {
+      test: "ticketing:use-ticket-guard-not-checkedin",
+      result: "PASS",
+      summary: "Ticket use blocked until registration is checked in",
+      eventId,
+      registrationId: regId,
+      ticketId: ticket.id,
+      useKey,
+      guard: body.code
     };
   },
 

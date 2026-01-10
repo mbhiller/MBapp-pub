@@ -5,7 +5,7 @@ import { ScannerPanel } from "../features/_shared/ScannerPanel";
 import { useTheme } from "../providers/ThemeProvider";
 import { useToast } from "../features/_shared/Toast";
 import { parseBadgeQr, parseTicketQr } from "../lib/qr";
-import { resolveRegistrationScan, checkinRegistration } from "../features/registrations/actions";
+import { resolveRegistrationScan, checkinRegistration, useTicket } from "../features/registrations/actions";
 import type { components } from "../api/generated-types";
 
 const newIdempotencyKey = () => `mobile-checkin-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -20,12 +20,25 @@ export default function CheckInScannerScreen() {
   const [checkingIn, setCheckingIn] = React.useState(false);
   const [result, setResult] = React.useState<components["schemas"]["ScanResolutionResult"] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const [admitting, setAdmitting] = React.useState(false);
+  const [admittedTicketId, setAdmittedTicketId] = React.useState<string | null>(null);
 
   const derivedEventId = React.useMemo(() => {
     const ticket = parseTicketQr(scanText || "");
     const badge = parseBadgeQr(scanText || "");
     return (eventId || ticket?.eventId || badge?.eventId || "").trim();
   }, [eventId, scanText]);
+
+  const derivedTicketId = React.useMemo(() => {
+    const ticket = parseTicketQr(scanText || "");
+    return ticket?.ticketId || null;
+  }, [scanText]);
+
+  const resolvedCheckedInAt = React.useMemo(() => {
+    if (!result || !result.ok) return null;
+    const snap = (result as any).checkInStatus || {};
+    return snap.checkedInAt || (result as any).checkedInAt || null;
+  }, [result]);
 
   const handleResolve = React.useCallback(async () => {
     const trimmedScan = (scanText || "").trim();
@@ -73,6 +86,26 @@ export default function CheckInScannerScreen() {
     }
   }, [handleResolve, result, toast]);
 
+  const handleAdmit = React.useCallback(async () => {
+    if (!result || !result.ok || !derivedTicketId) return;
+    setAdmitting(true);
+    setError(null);
+    try {
+      const res = await useTicket(derivedTicketId, newIdempotencyKey());
+      setAdmittedTicketId(res?.ticket?.id || derivedTicketId);
+      toast("Ticket admitted", "success");
+      // Refresh resolution to reflect used state/readiness
+      await handleResolve();
+    } catch (err: any) {
+      const code = err?.code || err?.body?.code;
+      const reason = err?.body?.message || err?.message || "Admit failed";
+      toast(code ? `${code}` : reason, "error");
+      setError(reason);
+    } finally {
+      setAdmitting(false);
+    }
+  }, [derivedTicketId, handleResolve, result, toast]);
+
   const clear = React.useCallback(() => {
     setScanText("");
     setResult(null);
@@ -81,6 +114,14 @@ export default function CheckInScannerScreen() {
 
   const readyState = result && result.ok ? (result.ready ? "Ready" : "Blocked") : "";
   const canCheckIn = Boolean(result && result.ok && result.ready && !checkingIn && !resolving);
+  const canAdmit = Boolean(
+    derivedTicketId &&
+    result &&
+    result.ok &&
+    resolvedCheckedInAt &&
+    !admitting &&
+    !resolving
+  );
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: t.colors.bg }} contentContainerStyle={{ padding: 16 }}>
@@ -224,6 +265,24 @@ export default function CheckInScannerScreen() {
             <ActivityIndicator color={t.colors.primaryText} />
           ) : (
             <Text style={{ color: t.colors.primaryText, fontWeight: "700" }}>Check In</Text>
+          )}
+        </Pressable>
+        <Pressable
+          onPress={handleAdmit}
+          disabled={!canAdmit || Boolean(admittedTicketId && admittedTicketId === derivedTicketId)}
+          style={{
+            backgroundColor: !canAdmit || Boolean(admittedTicketId && admittedTicketId === derivedTicketId)
+              ? t.colors.border
+              : t.colors.primary,
+            paddingVertical: 12,
+            borderRadius: 8,
+            alignItems: "center",
+          }}
+        >
+          {admitting ? (
+            <ActivityIndicator color={t.colors.primaryText} />
+          ) : (
+            <Text style={{ color: t.colors.primaryText, fontWeight: "700" }}>Admit Ticket</Text>
           )}
         </Pressable>
         <Text style={{ color: t.colors.textMuted, fontSize: 12 }}>

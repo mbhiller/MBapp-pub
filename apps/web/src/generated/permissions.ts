@@ -59,6 +59,7 @@ export const PERMISSIONS_BY_ENDPOINT = {
   "POST /sales/so/{id}:release": "sales:reserve",
   "POST /sales/so/{id}:reserve": "sales:reserve",
   "POST /sales/so/{id}:submit": "sales:write",
+  "POST /tickets/{id}:use": "registration:write",
   "POST /views": "view:write",
   "POST /workspaces": "workspace:write",
   "PUT /views/{id}": "view:write",
