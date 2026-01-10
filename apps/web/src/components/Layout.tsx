@@ -11,6 +11,9 @@ export function Layout({ children }: { children: ReactNode }) {
   const [tokenInput, setTokenInput] = useState("");
   const tokenStatus = token ? "token set" : "token not set";
 
+  // Determine if user is authenticated with a valid policy
+  const isAuthenticated = !!(token && policy && Object.keys(policy).length > 0);
+
   // Permission checks for gated modules
   const canViewParties = hasPerm(policy, "party:read");
   const canViewProducts = hasPerm(policy, "product:read");
@@ -60,57 +63,71 @@ export function Layout({ children }: { children: ReactNode }) {
             <Link className="text-white/90 underline-offset-4 hover:underline" to="/events">
               Events
             </Link>
-            {canViewParties && (
-              <Link className="text-white/90 underline-offset-4 hover:underline" to="/parties">
-                Parties
-              </Link>
+            {/* Public nav: minimal links */}
+            {!isAuthenticated && (
+              <>
+                <span className="text-white/60">|</span>
+                <Link className="text-white/90 underline-offset-4 hover:underline" to="/docs">
+                  Docs
+                </Link>
+              </>
             )}
-            {canViewProducts && (
-              <Link className="text-white/90 underline-offset-4 hover:underline" to="/products">
-                Products
-              </Link>
+            {/* Authenticated nav: full internal app navigation per policy */}
+            {isAuthenticated && (
+              <>
+                {canViewParties && (
+                  <Link className="text-white/90 underline-offset-4 hover:underline" to="/parties">
+                    Parties
+                  </Link>
+                )}
+                {canViewProducts && (
+                  <Link className="text-white/90 underline-offset-4 hover:underline" to="/products">
+                    Products
+                  </Link>
+                )}
+                {canViewSalesOrders && (
+                  <Link className="text-white/90 underline-offset-4 hover:underline" to="/sales-orders">
+                    Sales Orders
+                  </Link>
+                )}
+                <Link className="text-white/90 underline-offset-4 hover:underline" to="/backorders">
+                  Backorders
+                </Link>
+                {canViewPurchaseOrders && (
+                  <Link className="text-white/90 underline-offset-4 hover:underline" to="/purchase-orders">
+                    Purchase Orders
+                  </Link>
+                )}
+                {canViewPurchaseOrders && (
+                  <Link className="text-white/90 underline-offset-4 hover:underline" to="/purchase-orders?vendorMode=1">
+                    Vendor Portal
+                  </Link>
+                )}
+                {canViewInventory && (
+                  <Link className="text-white/90 underline-offset-4 hover:underline" to="/inventory">
+                    Inventory
+                  </Link>
+                )}
+                {canViewMessages && (
+                  <Link className="text-white/90 underline-offset-4 hover:underline" to="/messages">
+                    Messages
+                  </Link>
+                )}
+                <Link className="text-white/90 underline-offset-4 hover:underline" to="/locations">
+                  Locations
+                </Link>
+                <Link className="text-white/90 underline-offset-4 hover:underline" to="/views">
+                  Views
+                </Link>
+                <Link className="text-white/90 underline-offset-4 hover:underline" to="/workspaces">
+                  Workspaces
+                </Link>
+                <span className="text-white/60">|</span>
+                <Link className="text-white/90 underline-offset-4 hover:underline" to="/docs">
+                  Docs
+                </Link>
+              </>
             )}
-            {canViewSalesOrders && (
-              <Link className="text-white/90 underline-offset-4 hover:underline" to="/sales-orders">
-                Sales Orders
-              </Link>
-            )}
-            <Link className="text-white/90 underline-offset-4 hover:underline" to="/backorders">
-              Backorders
-            </Link>
-            {canViewPurchaseOrders && (
-              <Link className="text-white/90 underline-offset-4 hover:underline" to="/purchase-orders">
-                Purchase Orders
-              </Link>
-            )}
-            {canViewPurchaseOrders && (
-              <Link className="text-white/90 underline-offset-4 hover:underline" to="/purchase-orders?vendorMode=1">
-                Vendor Portal
-              </Link>
-            )}
-            {canViewInventory && (
-              <Link className="text-white/90 underline-offset-4 hover:underline" to="/inventory">
-                Inventory
-              </Link>
-            )}
-            {canViewMessages && (
-              <Link className="text-white/90 underline-offset-4 hover:underline" to="/messages">
-                Messages
-              </Link>
-            )}
-            <Link className="text-white/90 underline-offset-4 hover:underline" to="/locations">
-              Locations
-            </Link>
-            <Link className="text-white/90 underline-offset-4 hover:underline" to="/views">
-              Views
-            </Link>
-            <Link className="text-white/90 underline-offset-4 hover:underline" to="/workspaces">
-              Workspaces
-            </Link>
-            <span className="text-white/60">|</span>
-            <Link className="text-white/90 underline-offset-4 hover:underline" to="/docs">
-              Docs
-            </Link>
           </nav>
         </div>
       </header>

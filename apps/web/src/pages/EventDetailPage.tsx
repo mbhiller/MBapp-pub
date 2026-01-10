@@ -106,7 +106,7 @@ function getStatusVariant(status?: string): "default" | "secondary" | "outline" 
 export default function EventDetailPage() {
   const { eventId } = useParams<{ eventId: string }>();
   const navigate = useNavigate();
-  const { token, tenantId, policy, policyLoading } = useAuth();
+  const { policy, policyLoading } = useAuth();
 
   // Check if user has permissions for check-in console
   const canAccessCheckIn = 
@@ -124,20 +124,12 @@ export default function EventDetailPage() {
     setLoading(true);
     setError(null);
 
-    // For now, fetch via public events list endpoint and filter by ID
-    // When authenticated GET /events/:id is added to spec, switch to that
-    apiFetch<{ items?: Event[] }>("/events:public", {
+    // Fetch event detail directly via public endpoint
+    apiFetch<Event>(`/events/${eventId}:public`, {
       method: "GET",
-      tenantId,
-      query: { limit: 100 },
     })
       .then((res) => {
-        const found = res.items?.find((e) => e.id === eventId);
-        if (found) {
-          setEvent(found);
-        } else {
-          setError("Event not found");
-        }
+        setEvent(res);
       })
       .catch((err) => {
         setError(formatError(err));
@@ -145,7 +137,7 @@ export default function EventDetailPage() {
       .finally(() => {
         setLoading(false);
       });
-  }, [eventId, tenantId]);
+  }, [eventId]);
 
   if (loading) {
     return (
