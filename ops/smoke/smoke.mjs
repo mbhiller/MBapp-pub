@@ -15719,6 +15719,118 @@ const tests = {
     };
   },
 
+  "smoke:integrations:simulated-checkout-and-notify": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // Create an open event for the simulated flow
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: smokeTag("sim_integrations_evt"),
+      capacity: 1,
+      reservedCount: 0
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "integrations:simulated-checkout-and-notify", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event" });
+
+    // Public registration with both email + phone to exercise email + SMS paths
+    const regCreate = await post(
+      `/registrations:public`,
+      { eventId, party: { email: `sim+${SMOKE_RUN_ID}@example.com`, phone: "+15555551234" } },
+      featureHeaders,
+      { auth: "none" }
+    );
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test: "integrations:simulated-checkout-and-notify", result: "FAIL", reason: "reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+
+    // Checkout in simulated Stripe mode
+    const checkout = await post(
+      `/events/registration/${encodeURIComponent(regId)}:checkout`,
+      {},
+      {
+        ...featureHeaders,
+        "X-MBapp-Public-Token": publicToken,
+        "Idempotency-Key": idem()
+      },
+      { auth: "none" }
+    );
+    if (!checkout.ok || !checkout.body?.paymentIntentId) {
+      return { test: "integrations:simulated-checkout-and-notify", result: "FAIL", reason: "checkout-failed", checkout };
+    }
+    const piId = checkout.body.paymentIntentId;
+
+    // Simulated Stripe webhook to confirm the registration
+    const webhookBody = {
+      id: `evt_${SMOKE_RUN_ID}`,
+      type: "payment_intent.succeeded",
+      data: {
+        object: {
+          id: piId,
+          status: "succeeded",
+          metadata: { registrationId: regId, eventId }
+        }
+      }
+    };
+    const whRes = await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "Stripe-Signature": "sim_valid_signature",
+        ...featureHeaders,
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify(webhookBody)
+    });
+    const whBody = await whRes.json().catch(() => ({}));
+    if (!whRes.ok) {
+      return { test: "integrations:simulated-checkout-and-notify", result: "FAIL", reason: "webhook-failed", whStatus: whRes.status, whBody };
+    }
+
+    // Wait for registration to move to confirmed/paid
+    const confirmed = await waitForStatus("registration", regId, ["confirmed"], { tries: 20, delayMs: 250 });
+    if (!confirmed.ok) {
+      return { test: "integrations:simulated-checkout-and-notify", result: "FAIL", reason: "wait-confirmed-timeout", confirmed };
+    }
+
+    // Fetch registration + messages
+    const reg = await get(`/objects/registration/${encodeURIComponent(regId)}`);
+    const statusOk = reg.ok && reg.body?.status === "confirmed";
+    const payOk = reg.body?.paymentStatus === "paid" || reg.body?.paymentStatus === "succeeded";
+
+    const emailId = reg.body?.confirmationMessageId;
+    const smsId = reg.body?.confirmationSmsMessageId;
+
+    const emailMsg = emailId ? await get(`/objects/message/${encodeURIComponent(emailId)}`) : null;
+    const smsMsg = smsId ? await get(`/objects/message/${encodeURIComponent(smsId)}`) : null;
+
+    const emailOk = !emailId || (emailMsg?.ok && emailMsg.body?.status === "sent");
+    const smsOk = !smsId || (smsMsg?.ok && smsMsg.body?.status === "sent");
+
+    const pass = statusOk && payOk && emailOk && smsOk;
+    return {
+      test: "integrations:simulated-checkout-and-notify",
+      result: pass ? "PASS" : "FAIL",
+      status: reg.body?.status,
+      paymentStatus: reg.body?.paymentStatus,
+      email: emailId ? { id: emailId, status: emailMsg?.body?.status, provider: emailMsg?.body?.provider } : null,
+      sms: smsId ? { id: smsId, status: smsMsg?.body?.status, provider: smsMsg?.body?.provider } : null,
+      webhookStatus: whRes.status,
+      steps: { eventId, regId, piId }
+    };
+  },
+
   "smoke:registrations:public-status-confirmed": async () => {
     await ensureBearer();
 
@@ -20037,10 +20149,11 @@ const tests = {
       featureHeaders,
       { auth: "none" }
     );
-    if (!regCreate.ok || !regCreate.body?.registration?.id) {
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
       return { test: "checkin:resolve-scan-deterministic", result: "FAIL", reason: "reg-create-failed", regCreate };
     }
     const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
 
     // Deterministic resolve with JSON payload { id: regId }
     const scanBody = { eventId, scanString: JSON.stringify({ id: regId }), scanType: "auto" };
@@ -20073,10 +20186,68 @@ const tests = {
       return { test: "checkin:resolve-scan-deterministic", result: "FAIL", step: "not_found", http: { ok: resNotFound.ok, status: resNotFound.status }, body: resNotFound.body, expectedError: "not_found" };
     }
 
+    // Badge issuance QR should resolve to the registration
+    const checkout = await post(
+      `/events/registration/${encodeURIComponent(regId)}:checkout`,
+      {},
+      {
+        ...featureHeaders,
+        "X-MBapp-Public-Token": publicToken,
+        "Idempotency-Key": idem()
+      },
+      { auth: "none" }
+    );
+    if (!checkout.ok || !checkout.body?.paymentIntentId) {
+      return { test: "checkin:resolve-scan-deterministic", result: "FAIL", step: "badge-checkout", checkout };
+    }
+
+    const webhookBody = {
+      id: `evt_${SMOKE_RUN_ID}`,
+      type: "payment_intent.succeeded",
+      data: { object: { id: checkout.body.paymentIntentId, status: "succeeded", metadata: { registrationId: regId, eventId } } }
+    };
+    const whRes = await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "Stripe-Signature": "sim_valid_signature", ...featureHeaders, "x-tenant-id": TENANT },
+      body: JSON.stringify(webhookBody)
+    });
+    if (!whRes.ok) {
+      return { test: "checkin:resolve-scan-deterministic", result: "FAIL", step: "badge-webhook", whStatus: whRes.status };
+    }
+
+    const checkinRes = await post(
+      `/events/registration/${encodeURIComponent(regId)}:checkin`,
+      {},
+      { ...featureHeaders, "Idempotency-Key": idem() }
+    );
+    if (!checkinRes.ok || !checkinRes.body?.checkedInAt) {
+      return { test: "checkin:resolve-scan-deterministic", result: "FAIL", step: "badge-checkin", checkinRes };
+    }
+
+    const issueBadge = await post(
+      `/registrations/${encodeURIComponent(regId)}:issue-badge`,
+      { badgeType: "admission" },
+      { ...featureHeaders, "Idempotency-Key": idem() }
+    );
+    const qrText = issueBadge.body?.issuance?.payload?.qrText;
+    if (!issueBadge.ok || !qrText) {
+      return { test: "checkin:resolve-scan-deterministic", result: "FAIL", step: "badge-issue", issueBadge };
+    }
+
+    const badgeResolve = await post(
+      `/registrations:resolve-scan`,
+      { eventId, scanString: qrText, scanType: "qr" },
+      featureHeaders
+    );
+    const badgeOk = badgeResolve.ok && badgeResolve.body?.ok === true && badgeResolve.body?.registrationId === regId;
+    if (!badgeOk) {
+      return { test: "checkin:resolve-scan-deterministic", result: "FAIL", step: "badge-resolve", body: badgeResolve.body, status: badgeResolve.status };
+    }
+
     return {
       test: "checkin:resolve-scan-deterministic",
       result: "PASS",
-      summary: "Resolver deterministically maps JSON scan payload to registration; guards not_in_event and not_found",
+      summary: "Resolver maps JSON payloads and badge QR to registration; guards not_in_event and not_found",
       eventId,
       registrationId: regId
     };
@@ -20379,6 +20550,362 @@ const tests = {
       issuanceId: issuanceId1,
       issuedAt: issuance1.issuedAt,
       issuedBy: issuance1.issuedBy
+    };
+  },
+
+  // E4: Ticket issuance with idempotency
+  "smoke:ticketing:issue-ticket-idempotent": async () => {
+    await ensureBearer();
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // 1) Create event
+    const eventName = smokeTag("ticket_idem_evt");
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 5,
+      reservedCount: 0,
+      stallEnabled: true,
+      stallCapacity: 2,
+      stallReserved: 0,
+      stallUnitAmount: 1500
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "ticketing:issue-ticket-idempotent", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+    // 2) Create registration via public endpoint
+    const regCreate = await post(
+      `/registrations:public`,
+      { eventId, stallQty: 1, party: { email: `ticket_idem+${SMOKE_RUN_ID}@example.com` } },
+      featureHeaders,
+      { auth: "none" }
+    );
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test: "ticketing:issue-ticket-idempotent", result: "FAIL", reason: "reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+    recordCreated({ type: "registration", id: regId, route: "/registrations:public", meta: { eventId } });
+
+    // 3) Checkout to create payment intent
+    const checkout = await post(
+      `/events/registration/${encodeURIComponent(regId)}:checkout`,
+      {},
+      { ...featureHeaders, "X-MBapp-Public-Token": publicToken, "Idempotency-Key": idem() },
+      { auth: "none" }
+    );
+    if (!checkout.ok || !checkout.body?.paymentIntentId) {
+      return { test: "ticketing:issue-ticket-idempotent", result: "FAIL", reason: "checkout-failed", checkout };
+    }
+
+    // 4) Confirm payment via webhook
+    const webhookBody = {
+      id: `evt_${SMOKE_RUN_ID}`,
+      type: "payment_intent.succeeded",
+      data: {
+        object: {
+          id: checkout.body.paymentIntentId,
+          status: "succeeded",
+          metadata: { registrationId: regId, eventId }
+        }
+      }
+    };
+    const whRes = await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "Stripe-Signature": "sim_valid_signature",
+        ...featureHeaders,
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify(webhookBody)
+    });
+    if (!whRes.ok) {
+      return { test: "ticketing:issue-ticket-idempotent", result: "FAIL", reason: "webhook-confirm-failed", whStatus: whRes.status };
+    }
+
+    // 5) Issue ticket twice with same Idempotency-Key
+    const ticketKey = `ticket-${SMOKE_RUN_ID}-k1`;
+    const issue1 = await post(
+      `/registrations/${encodeURIComponent(regId)}:issue-ticket`,
+      { ticketType: "admission" },
+      { ...featureHeaders, "Idempotency-Key": ticketKey }
+    );
+    if (!issue1.ok || !issue1.body?.ticket?.id) {
+      return { test: "ticketing:issue-ticket-idempotent", result: "FAIL", reason: "first-ticket-issue-failed", issue1 };
+    }
+    const ticket1 = issue1.body.ticket;
+    recordCreated({ type: "ticket", id: ticket1.id, route: "/registrations/{id}:issue-ticket", meta: { eventId, registrationId: regId } });
+
+    if (
+      ticket1.eventId !== eventId ||
+      ticket1.registrationId !== regId ||
+      ticket1.status !== "valid" ||
+      !ticket1.payload?.qrText
+    ) {
+      return {
+        test: "ticketing:issue-ticket-idempotent",
+        result: "FAIL",
+        reason: "first-ticket-missing-fields",
+        ticket: ticket1
+      };
+    }
+    const expectedQr = `ticket|${eventId}|${regId}|${ticket1.id}`;
+    if (ticket1.payload.qrText !== expectedQr) {
+      return {
+        test: "ticketing:issue-ticket-idempotent",
+        result: "FAIL",
+        reason: "qrText-mismatch",
+        expected: expectedQr,
+        actual: ticket1.payload.qrText
+      };
+    }
+
+    const issue2 = await post(
+      `/registrations/${encodeURIComponent(regId)}:issue-ticket`,
+      { ticketType: "admission" },
+      { ...featureHeaders, "Idempotency-Key": ticketKey }
+    );
+    if (!issue2.ok || !issue2.body?.ticket?.id) {
+      return { test: "ticketing:issue-ticket-idempotent", result: "FAIL", reason: "replay-ticket-issue-failed", issue2 };
+    }
+    const ticket2 = issue2.body.ticket;
+
+    if (ticket2.id !== ticket1.id || ticket2.payload?.qrText !== ticket1.payload?.qrText) {
+      return {
+        test: "ticketing:issue-ticket-idempotent",
+        result: "FAIL",
+        reason: "idempotent-replay-mismatch",
+        firstId: ticket1.id,
+        replayId: ticket2.id,
+        firstQr: ticket1.payload?.qrText,
+        replayQr: ticket2.payload?.qrText
+      };
+    }
+
+    return {
+      test: "ticketing:issue-ticket-idempotent",
+      result: "PASS",
+      summary: "Ticket issuance is idempotent; same Idempotency-Key returns same ticket",
+      eventId,
+      registrationId: regId,
+      ticketId: ticket1.id,
+      issuedAt: ticket1.issuedAt,
+      issuedBy: ticket1.issuedBy
+    };
+  },
+
+  // E4: Ticket issuance guard - payment unpaid
+  "smoke:ticketing:issue-ticket-guard-payment-unpaid": async () => {
+    await ensureBearer();
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // 1) Create event
+    const eventName = smokeTag("ticket_unpaid_evt");
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 5,
+      reservedCount: 0,
+      stallEnabled: true,
+      stallCapacity: 1,
+      stallReserved: 0,
+      stallUnitAmount: 1500
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "ticketing:issue-ticket-guard-payment-unpaid", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+    // 2) Create registration without checkout/payment
+    const regCreate = await post(
+      `/registrations:public`,
+      { eventId, stallQty: 1, party: { email: `ticket_unpaid+${SMOKE_RUN_ID}@example.com` } },
+      featureHeaders,
+      { auth: "none" }
+    );
+    if (!regCreate.ok || !regCreate.body?.registration?.id) {
+      return { test: "ticketing:issue-ticket-guard-payment-unpaid", result: "FAIL", reason: "reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    recordCreated({ type: "registration", id: regId, route: "/registrations:public", meta: { eventId } });
+
+    // 3) Issue ticket should fail due to unpaid status
+    const issue = await post(
+      `/registrations/${encodeURIComponent(regId)}:issue-ticket`,
+      { ticketType: "admission" },
+      { ...featureHeaders, "Idempotency-Key": `ticket-${SMOKE_RUN_ID}-guard` }
+    );
+
+    if (issue.status !== 409 || issue.body?.code !== "payment_unpaid") {
+      return {
+        test: "ticketing:issue-ticket-guard-payment-unpaid",
+        result: "FAIL",
+        reason: "expected-payment-guard",
+        http: { ok: issue.ok, status: issue.status },
+        body: issue.body
+      };
+    }
+
+    return {
+      test: "ticketing:issue-ticket-guard-payment-unpaid",
+      result: "PASS",
+      summary: "Issuing ticket without completed payment returns payment_unpaid guard",
+      eventId,
+      registrationId: regId
+    };
+  },
+
+  // E5: Ticket scan resolution via QR payload
+  "smoke:ticketing:resolve-ticket-scan": async () => {
+    await ensureBearer();
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // 1) Create event
+    const eventName = smokeTag("ticket_resolve_evt");
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 5,
+      reservedCount: 0,
+      stallEnabled: true,
+      stallCapacity: 1,
+      stallReserved: 0,
+      stallUnitAmount: 1500
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "ticketing:resolve-ticket-scan", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+    // 2) Create registration and pay
+    const regCreate = await post(
+      `/registrations:public`,
+      { eventId, stallQty: 1, party: { email: `ticket_resolve+${SMOKE_RUN_ID}@example.com` } },
+      featureHeaders,
+      { auth: "none" }
+    );
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test: "ticketing:resolve-ticket-scan", result: "FAIL", reason: "reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+    recordCreated({ type: "registration", id: regId, route: "/registrations:public", meta: { eventId } });
+
+    // Checkout
+    const checkout = await post(
+      `/events/registration/${encodeURIComponent(regId)}:checkout`,
+      {},
+      { ...featureHeaders, "X-MBapp-Public-Token": publicToken, "Idempotency-Key": idem() },
+      { auth: "none" }
+    );
+    if (!checkout.ok || !checkout.body?.paymentIntentId) {
+      return { test: "ticketing:resolve-ticket-scan", result: "FAIL", reason: "checkout-failed", checkout };
+    }
+
+    // Confirm payment
+    const webhookBody = {
+      id: `evt_${SMOKE_RUN_ID}`,
+      type: "payment_intent.succeeded",
+      data: {
+        object: {
+          id: checkout.body.paymentIntentId,
+          status: "succeeded",
+          metadata: { registrationId: regId, eventId }
+        }
+      }
+    };
+    const whRes = await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "Stripe-Signature": "sim_valid_signature",
+        ...featureHeaders,
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify(webhookBody)
+    });
+    if (!whRes.ok) {
+      return { test: "ticketing:resolve-ticket-scan", result: "FAIL", reason: "webhook-confirm-failed", whStatus: whRes.status };
+    }
+
+    // 3) Issue ticket to get QR text
+    const ticketKey = `ticket-${SMOKE_RUN_ID}-resolve`;
+    const issue = await post(
+      `/registrations/${encodeURIComponent(regId)}:issue-ticket`,
+      { ticketType: "admission" },
+      { ...featureHeaders, "Idempotency-Key": ticketKey }
+    );
+    if (!issue.ok || !issue.body?.ticket?.payload?.qrText) {
+      return { test: "ticketing:resolve-ticket-scan", result: "FAIL", reason: "issue-ticket-failed", issue };
+    }
+    const ticket = issue.body.ticket;
+    recordCreated({ type: "ticket", id: ticket.id, route: "/registrations/{id}:issue-ticket", meta: { eventId, registrationId: regId } });
+
+    // 4) Resolve scan using ticket QR
+    const resolveRes = await post(
+      `/registrations:resolve-scan`,
+      { eventId, scanType: "auto", scanString: ticket.payload.qrText },
+      featureHeaders
+    );
+
+    if (!resolveRes.ok || !resolveRes.body?.ok) {
+      return {
+        test: "ticketing:resolve-ticket-scan",
+        result: "FAIL",
+        reason: "resolve-scan-failed",
+        http: { ok: resolveRes.ok, status: resolveRes.status },
+        body: resolveRes.body
+      };
+    }
+
+    if (resolveRes.body.registrationId !== regId) {
+      return {
+        test: "ticketing:resolve-ticket-scan",
+        result: "FAIL",
+        reason: "registration-mismatch",
+        expected: regId,
+        actual: resolveRes.body.registrationId
+      };
+    }
+
+    if (typeof resolveRes.body.ready === "undefined" || !Array.isArray(resolveRes.body.blockers)) {
+      return {
+        test: "ticketing:resolve-ticket-scan",
+        result: "FAIL",
+        reason: "missing-checkin-snapshot",
+        body: resolveRes.body
+      };
+    }
+
+    return {
+      test: "ticketing:resolve-ticket-scan",
+      result: "PASS",
+      summary: "Ticket QR resolves to registration with readiness snapshot",
+      eventId,
+      registrationId: regId,
+      ticketId: ticket.id,
+      qrText: ticket.payload.qrText
     };
   },
 

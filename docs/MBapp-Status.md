@@ -6,6 +6,65 @@
 
 ---
 
+### Local Dev — Simulated Integrations (Stripe/Postmark/Twilio)
+
+- **API env:** set `FEATURE_STRIPE_SIMULATE=true` and `FEATURE_NOTIFY_SIMULATE=true` to avoid live provider calls. Real provider keys remain optional (`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `POSTMARK_API_TOKEN`, `POSTMARK_FROM_EMAIL`, `POSTMARK_MESSAGE_STREAM`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`).
+- **Dev headers:** non-prod can override per-request with `X-Feature-Stripe-Simulate: true` and `X-Feature-Notify-Simulate: true`; registrations still require `X-Feature-Registrations-Enabled: true`.
+- **Web env:** `VITE_MBAPP_PUBLIC_TENANT_ID` fallback plus `VITE_MBAPP_FEATURE_REGISTRATIONS_ENABLED=true`; include `VITE_STRIPE_PUBLISHABLE_KEY` when exercising public checkout locally.
+- **Examples:**
+  - apps/api/.env.local → `FEATURE_STRIPE_SIMULATE=true`, `FEATURE_NOTIFY_SIMULATE=true` (add real keys only when needed)
+  - apps/web/.env.local → `VITE_MBAPP_PUBLIC_TENANT_ID=SmokeTenant`, `VITE_MBAPP_FEATURE_REGISTRATIONS_ENABLED=true`, `VITE_STRIPE_PUBLISHABLE_KEY=pk_test_...`
+- **New smoke:** `smoke:integrations:simulated-checkout-and-notify` verifies public checkout + Stripe simulate + Notify simulate without real provider credentials.
+
+---
+
+### Mobile Dev Workflow — Expo Demo vs Smoke
+
+**Purpose:** Mobile app uses different expo startup scripts for curated testing (demo) vs rapid E2E validation (smoke). Both bypass feature gates via env vars to enable operator modules (Check-In Scanner, Registrations) during development.
+
+**Scripts:**
+- **`npm run expo:demo`** — Curated tenant with stable test data
+  - Tenant: `DemoTenant`
+  - API: Production AWS Gateway
+  - Feature flags: `EXPO_PUBLIC_MBAPP_FEATURE_REGISTRATIONS_ENABLED=true`
+  - Auto-login: `EXPO_PUBLIC_DEV_EMAIL=dev@example.com` (defaults to admin role via dev-login)
+  - Use for: Manual exploration, stakeholder demos, UI polish
+
+- **`npm run expo:smoke`** — Rapid validation tenant aligned with smoke harness
+  - Tenant: `SmokeTenant` (matches `ops/smoke/smoke.mjs` default)
+  - API: Production AWS Gateway
+  - Feature flags: `EXPO_PUBLIC_MBAPP_FEATURE_REGISTRATIONS_ENABLED=true`
+  - Auto-login: `EXPO_PUBLIC_DEV_EMAIL=dev@example.com` (admin role)
+  - Use for: Quick E2E validation, verifying API contract changes, parallel testing with backend smokes
+
+**Key Env Vars (both scripts):**
+- `EXPO_PUBLIC_MBAPP_TENANT_ID` — Tenant for API calls (DemoTenant vs SmokeTenant)
+- `EXPO_PUBLIC_MBAPP_API_BASE` — AWS API Gateway URL
+- `EXPO_PUBLIC_MBAPP_FEATURE_REGISTRATIONS_ENABLED=true` — Bypass registrations feature gate (matches `X-Feature-Registrations-Enabled` header used by smokes)
+- `EXPO_PUBLIC_DEV_EMAIL` — Email for auto-login via `/auth/dev-login` (DevAuthBootstrap component)
+
+**Auth Flow:**
+1. `DevAuthBootstrap` calls `POST /auth/dev-login` with `{ email, tenantId }` on mount
+2. Server derives policy from default `["admin"]` role → `{ "*": true }` (superuser)
+3. JWT stored in AsyncStorage; `PolicyProvider` fetches `/auth/policy` to populate module gates
+4. Module Hub shows tiles filtered by permissions (admin sees all modules including Check-In Scanner)
+
+**Smoke Harness Alignment:**
+- Smoke harness (`ops/smoke/smoke.mjs`) enforces `MBAPP_TENANT_ID` starts with `SmokeTenant` (unless `MBAPP_SMOKE_ALLOW_NON_SMOKE_TENANT=1`)
+- Mobile `expo:smoke` script uses same tenant to enable parallel testing (run smokes + mobile app simultaneously)
+- Both use same feature bypass pattern (mobile via env var → header in apiClient; smokes via direct header injection)
+
+**Verification:**
+- ✅ Module Hub debug banner (DEV only): shows `registrationsEnabled=true | visibleModules=X`
+- ✅ Check-In Scanner tile visible when admin role assigned
+- ✅ Resolve-scan and check-in endpoints return 200 (not 403) due to feature header
+
+**Next Steps:**
+- Remove debug banner from `ModuleHubScreen.tsx` after confirming tile appears
+- Future: Add `.env.example` template with all required vars documented
+
+---
+
 ### Sprint CF Part B — Public Booking Entry & Email Collection — ✅ Complete (2026-01-09)
 
 **Summary:** Delivered integrated public event booking flow with email collection and seamless entry from event detail. Standardized on shared `apiFetch()` client to ensure feature headers and public tenant fallback. Two new smoke tests lock in email-required validation and happy path confirmation.

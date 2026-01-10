@@ -1,5 +1,5 @@
 // apps/mobile/src/features/registrations/api.ts
-import { apiClient } from "../../api/client";
+import { apiClient, getFeatureHeaders } from "../../api/client";
 import type { Registration, Page } from "./types";
 
 export type RegistrationListParams = {
@@ -34,17 +34,13 @@ function toQuery(params?: RegistrationListParams): Record<string, string> {
 }
 
 export function listRegistrations(params?: RegistrationListParams): Promise<Page<Registration>> {
-  return apiClient.get<Page<Registration>>("/registrations", toQuery(params));
+  return apiClient.getQ<Page<Registration>>("/registrations", toQuery(params), getFeatureHeaders());
 }
 
 export function createRegistration(input: CreateRegistrationInput): Promise<Registration> {
-  return apiClient.post<Registration>("/registrations", input, {
-    "X-Feature-Registrations-Enabled": "1"
-  });
+  return apiClient.post<Registration>("/registrations", input, getFeatureHeaders());
 }
 
 export function getRegistration(id: string): Promise<Registration> {
-  return apiClient.get<Registration>(`/registrations/${encodeURIComponent(id)}`, {
-    "X-Feature-Registrations-Enabled": "1"
-  });
+  return apiClient.get<Registration>(`/registrations/${encodeURIComponent(id)}`, getFeatureHeaders());
 }

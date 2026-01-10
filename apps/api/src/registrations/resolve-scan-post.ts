@@ -5,6 +5,7 @@ import { getObjectById, listObjects } from "../objects/repo";
 import { guardRegistrations } from "./feature";
 import { computeCheckInStatus } from "./checkin-readiness";
 import type { components } from "../generated/openapi-types";
+import { parseBadgeQr, parseTicketQr } from "@mbapp/scan/qr";
 
 type ScanResolutionRequest = components["schemas"]["ScanResolutionRequest"];
 type ScanResolutionResult = components["schemas"]["ScanResolutionResult"];
@@ -38,7 +39,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
     }
 
     const eventId = req.eventId.trim();
-    const scanString = req.scanString.trim();
+    const scanString = String(req.scanString ?? "").trim();
     const scanType = req.scanType || "auto";
 
     // Validate scanType enum
@@ -48,11 +49,11 @@ export async function handle(event: APIGatewayProxyEventV2) {
 
     // Resolution order (Sprint BX minimal):
     // 1) If looks like JSON, try to extract id / registrationId field
-    // 2) If looks like MBapp QR payload (starts with specific prefix), parse it
+    // 2) If looks like MBapp QR payload (badge or ticket), parse it
     // 3) Otherwise treat as raw registrationId
     let candidateId: string | null = null;
 
-    if (scanType === "auto" || scanType === "qr") {
+    if (scanType === "auto" || scanType === "qr" || scanType === "barcode") {
       // Try JSON parsing first
       if (scanString.startsWith("{") && scanString.endsWith("}")) {
         try {
@@ -66,9 +67,32 @@ export async function handle(event: APIGatewayProxyEventV2) {
         }
       }
 
+      // Badge issuance QR: badge|{eventId}|{registrationId}|{issuanceId}
+      if (!candidateId) {
+        const badge = parseBadgeQr(scanString);
+        if (badge) {
+          candidateId = badge.registrationId;
+        }
+      }
+
+      // Ticket QR: ticket|{eventId}|{registrationId}|{ticketId}
+      if (!candidateId) {
+        const ticket = parseTicketQr(scanString);
+        if (ticket) {
+          candidateId = ticket.registrationId;
+
+          // Optional ticket lookup for audit; do not block if missing
+          try {
+            await getObjectById({ tenantId, type: "ticket", id: ticket.ticketId, fields: ["id"] });
+          } catch {
+            // ignore
+          }
+        }
+      }
+
       // If still no candidate, try MBapp QR format (simple heuristic for now)
       // MBapp QR might look like "mbapp:qr:..." or be a JSON with "id" field
-      if (!candidateId && scanType === "qr") {
+      if (!candidateId && (scanType === "qr" || scanType === "barcode")) {
         // Could parse more sophisticated formats here
         // For now, if it's not JSON, try to extract after known prefixes
         if (scanString.includes("registrationId=")) {

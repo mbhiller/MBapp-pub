@@ -79,5 +79,8 @@ export type RootStackParamList = {
   ProductDetail: DetailParams;
   CreateProduct: undefined;
   EditProduct: { id: string };
+
+  // Check-in tools
+  CheckInScanner: undefined;
   
 };

@@ -69,6 +69,8 @@ import SuggestPurchaseOrdersScreen from "../screens/SuggestPurchaseOrdersScreen"
 import RoutePlanListScreen from "../screens/RoutePlanListScreen";
 import RoutePlanDetailScreen from "../screens/RoutePlanDetailScreen";
 
+import CheckInScannerScreen from "../screens/CheckInScannerScreen";
+
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -157,6 +159,9 @@ export default function RootStack() {
     {/* Backorders */}
     <Stack.Screen name="BackordersList" component={BackordersListScreen} options={{ title: "Backorders" }} />
     <Stack.Screen name="BackorderDetail" component={BackorderDetailScreen} options={{ title: "Backorder" }} />
+
+    {/* Check-in tools */}
+    <Stack.Screen name="CheckInScanner" component={CheckInScannerScreen} options={{ title: "Check-In Scanner" }} />
 
   </Stack.Navigator>
   );

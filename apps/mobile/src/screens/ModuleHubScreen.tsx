@@ -4,6 +4,7 @@ import { ScrollView, View, Text, Pressable, RefreshControl } from "react-native"
 import MODULES, { visibleModules } from "../features/_shared/modules";
 import { useColors } from "../features/_shared/useColors";
 import { usePolicy } from "../providers/PolicyProvider";
+import { FEATURE_REGISTRATIONS_ENABLED } from "../features/_shared/flags";
 
 export default function ModuleHubScreen({ navigation }: any) {
   const t = useColors();
@@ -31,6 +32,15 @@ export default function ModuleHubScreen({ navigation }: any) {
         >
           <Text style={{ color: "#8a1f2d", fontWeight: "700" }}>
             Policy unavailable — check auth
+          </Text>
+        </View>
+      )}
+
+      {/* DEV DEBUG: Remove after confirming tile appears */}
+      {__DEV__ && (
+        <View style={{ padding: 8, backgroundColor: "#e8f4fd", borderRadius: 6, marginBottom: 12 }}>
+          <Text style={{ fontSize: 11, fontFamily: "monospace" }}>
+            registrationsEnabled={String(FEATURE_REGISTRATIONS_ENABLED)} | visibleModules={modules.length}
           </Text>
         </View>
       )}
