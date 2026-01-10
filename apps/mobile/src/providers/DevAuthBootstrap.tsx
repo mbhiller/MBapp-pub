@@ -10,7 +10,7 @@ const LEGACY_TOKEN_KEY  = "mbapp.dev.token";
 const TENANT_KEY        = "mbapp.dev.tenant";
 
 const DEV_EMAIL  = process.env.EXPO_PUBLIC_DEV_EMAIL  || "dev@example.com";
-const ENV_TENANT = process.env.EXPO_PUBLIC_MBAPP_TENANT_ID || process.env.EXPO_PUBLIC_TENANT_ID || null;
+const ENV_TENANT = process.env.EXPO_PUBLIC_TENANT_ID || process.env.EXPO_PUBLIC_MBAPP_TENANT_ID || null;  // canonical first, backward compat second
 const DEV_TENANT = ENV_TENANT || "DemoTenant";
 
 function normalizeKeyPart(value?: string | null) {
@@ -123,6 +123,36 @@ export function DevAuthBootstrap({ children }: { children: React.ReactNode }) {
           });
           loggedRef.current = true;
         }
+        
+        // Dev-only: warn if expo:smoke is misconfigured
+        if (__DEV__) {
+          const isExpoSmoke = process.env.EXPO_PUBLIC_TENANT_ID === "SmokeTenant";
+          if (isExpoSmoke) {
+            const missingHeaders: string[] = [];
+            if (!process.env.EXPO_PUBLIC_MBAPP_FEATURE_REGISTRATIONS_ENABLED) {
+              missingHeaders.push("EXPO_PUBLIC_MBAPP_FEATURE_REGISTRATIONS_ENABLED");
+            }
+            if (!process.env.EXPO_PUBLIC_FEATURE_STRIPE_SIMULATE) {
+              missingHeaders.push("EXPO_PUBLIC_FEATURE_STRIPE_SIMULATE");
+            }
+            if (!process.env.EXPO_PUBLIC_FEATURE_NOTIFY_SIMULATE) {
+              missingHeaders.push("EXPO_PUBLIC_FEATURE_NOTIFY_SIMULATE");
+            }
+            if (tenant !== "SmokeTenant") {
+              console.warn(
+                `⚠️ expo:smoke mismatch: EXPO_PUBLIC_TENANT_ID=SmokeTenant but runtime tenant="${tenant}". ` +
+                "Check apps/mobile/package.json expo:smoke script."
+              );
+            }
+            if (missingHeaders.length > 0) {
+              console.warn(
+                `⚠️ expo:smoke missing feature headers: ${missingHeaders.join(", ")}. ` +
+                "Registration/checkout flows may fail with 403. Update apps/mobile/package.json expo:smoke script."
+              );
+            }
+          }
+        }
+        
         setReady(true);
       }
     })();

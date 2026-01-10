@@ -672,6 +672,55 @@ async function waitForBackorders({ soId, itemId, status = "open", preferredVendo
   return { ok: true, items, vendorMatches, attemptsMade };
 }
 
+/**
+ * Generic polling helper: calls fn() repeatedly until it returns true or timeout elapses.
+ * 
+ * @param {string} name - label for diagnostics
+ * @param {Function} fn - async function that returns true when condition met
+ * @param {object} options - { timeoutMs=30000, intervalMs=500, backoff=1 }
+ * @returns {object} { ok, attempts, elapsedMs, finalError? }
+ * 
+ * Example:
+ *   const result = await pollUntil("wait for status change", async () => {
+ *     const r = await get(`/registrations/${id}`);
+ *     return r.ok && r.body.status === "cancelled";
+ *   }, { timeoutMs: 5000, intervalMs: 250 });
+ */
+async function pollUntil(name, fn, { timeoutMs = 30000, intervalMs = 500, backoff = 1 } = {}) {
+  const start = Date.now();
+  let attempts = 0;
+  let currentIntervalMs = intervalMs;
+
+  while (Date.now() - start < timeoutMs) {
+    attempts++;
+    try {
+      const result = await fn();
+      if (result === true) {
+        const elapsedMs = Date.now() - start;
+        return { ok: true, attempts, elapsedMs, name };
+      }
+    } catch (error) {
+      // Log but continue polling
+      if (attempts === 1) {
+        console.warn(`[pollUntil "${name}"] Attempt ${attempts} raised error (will retry): ${error.message}`);
+      }
+    }
+
+    // Check if we have time for another iteration
+    if (Date.now() - start < timeoutMs) {
+      await sleep(currentIntervalMs);
+      // Apply backoff multiplier if specified
+      if (backoff > 1) {
+        currentIntervalMs = Math.min(currentIntervalMs * backoff, 5000); // cap at 5s
+      }
+    }
+  }
+
+  const elapsedMs = Date.now() - start;
+  console.warn(`[pollUntil "${name}"] Timeout after ${attempts} attempts in ${elapsedMs}ms (interval: ${intervalMs}ms)`);
+  return { ok: false, attempts, elapsedMs, name, timedOut: true };
+}
+
 /** Try multiple movement payload shapes until on-hand increases. */
 const MV_TYPE=process.env.SMOKE_MOVEMENT_TYPE??"inventoryMovement";
 async function ensureOnHand(itemId, qty){
@@ -15623,13 +15672,45 @@ const tests = {
       return { test:"registrations:hold-expiration", result:"FAIL", reason:"set-past-failed", setPast };
     }
 
+    // Poll until holdExpiresAt is definitely in the past (verify time sync)
+    const pollExpiryCheck = await pollUntil("holdExpiresAt in past", async () => {
+      const r = await get(`/registrations/${encodeURIComponent(regId)}`, undefined, { headers: featureHeaders });
+      if (!r.ok || !r.body?.holdExpiresAt) return false;
+      const expiryTime = new Date(r.body.holdExpiresAt).getTime();
+      return Date.now() > expiryTime;
+    }, { timeoutMs: 5000, intervalMs: 250 });
+
+    if (!pollExpiryCheck.ok) {
+      // If time check fails, cleanup might still help; continue anyway
+      console.warn(`[registrations:hold-expiration] holdExpiresAt poll timed out after ${pollExpiryCheck.attempts} attempts`);
+    }
+
     // Cleanup expired holds
     const cleanup = await post(`/registrations:cleanup-expired-holds`, {}, { ...baseHeaders(), "X-Feature-Registrations-Enabled": "true" });
     if (!cleanup.ok) {
       return { test:"registrations:hold-expiration", result:"FAIL", reason:"cleanup-failed", cleanup };
     }
 
-    // Assert registration now cancelled
+    // Poll until registration status is confirmed cancelled (cleanup may be async)
+    const pollCancelledCheck = await pollUntil("registration cancelled", async () => {
+      const r = await get(`/objects/registration/${encodeURIComponent(regId)}`);
+      return r.ok && r.body?.status === "cancelled";
+    }, { timeoutMs: 5000, intervalMs: 250 });
+
+    if (!pollCancelledCheck.ok) {
+      const failureDetails = await get(`/objects/registration/${encodeURIComponent(regId)}`);
+      console.warn(`[registrations:hold-expiration] CANCELLED check timed out: status=${failureDetails.body?.status}, holdExpiresAt=${failureDetails.body?.holdExpiresAt}`);
+      return {
+        test: "registrations:hold-expiration",
+        result: "FAIL",
+        reason: "poll-cancelled-timeout",
+        pollAttempts: pollCancelledCheck.attempts,
+        regStatus: failureDetails.body?.status,
+        cleanup: { expiredCount: cleanup.body?.expiredCount }
+      };
+    }
+
+    // Fetch final registration state for diagnostics
     const reg = await get(`/objects/registration/${encodeURIComponent(regId)}`);
     const cancelled = reg.ok && reg.body?.status === "cancelled";
 

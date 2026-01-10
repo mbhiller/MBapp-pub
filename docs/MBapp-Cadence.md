@@ -5,6 +5,37 @@
 
 ---
 
+## Quick Reference — Local Demo Setup
+
+Before starting a sprint or feature work, set up a fresh local tenant with realistic demo data:
+
+```bash
+# 1. Wipe any existing data
+npm run wipe:demo
+
+# 2. Seed fresh dataset (parties, products, inventory, event, registrations, tickets)
+npm run seed:demo
+
+# 3. Web dev — login with dev@example.com (check script output for IDs)
+npm run dev -w apps/web
+
+# 4. Mobile dev (optional) — use same tenant ID for consistency
+npm run expo:demo
+```
+
+**For Smoke Testing:**
+```bash
+# Seed SmokeTenant separately for isolated testing
+npm run seed:smoke
+
+# Run core smoke suite (~40% faster than full)
+npm run smokes:run:core
+```
+
+Full details: [Demo Dataset Seeding](MBapp-Foundations.md#demo-dataset-seeding-deterministic-local-testing) (custom seeds, idempotency, output format, feature flags).
+
+---
+
 ## Step 1 — C1: Create branch off main
 - Branch: `<branch-name>`
 - Start clean:
