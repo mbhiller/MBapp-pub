@@ -368,6 +368,8 @@ baseURL: requireApiBase(),
 
 ### 1.2 Web (apps/web)
 
+**Env note (local dev):** Use apps/web/.env.local. Canonical tenant keys are VITE_TENANT (operator) and VITE_MBAPP_PUBLIC_TENANT_ID (public).
+
 **Primary Config:** [apps/web/src/lib/api.ts](../apps/web/src/lib/api.ts#L3-L4)
 ```typescript
 const API_BASE = import.meta.env.VITE_API_BASE!;
@@ -402,10 +404,6 @@ const TENANT = process.env.MBAPP_TENANT_ID ?? "DemoTenant";
 ```
 
 **Status:** ✅ **AWS-only** — Requires `MBAPP_API_BASE` (no localhost fallback); exits(2) if unset  
-**Auth:** Requires `MBAPP_BEARER` env var; smokes fail fast if missing (no dev-login fallback)
-
----
-
 ### 1.4 RBAC / Policy Consumption
 
 **Canonical Permission Model:** 
@@ -1882,15 +1880,6 @@ export async function smoke_module_flow(API_BASE, authToken) {
     // 2. Action sequence
     await submitDraft(obj.id);
     await performAction(obj.id);
-    
-    // 3. Assertions
-    assert.strictEqual(obj.status, 'expected-status');
-    
-    return { pass: true };
-  } catch (err) {
-    return { pass: false, error: err.message };
-  } finally {
-    await cleanup(ctx.createdIds);
   }
 }
 ```
