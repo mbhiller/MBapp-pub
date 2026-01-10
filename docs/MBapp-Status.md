@@ -6,6 +6,16 @@
 
 ---
 
+### Sprint CE — Public Entry Flow Polish — ✅ Complete (2026-01-09)
+
+- **Home CTAs:** Public landing now presents clear actions — Browse Events and Find My Check-In — with concise guidance.
+- **Auth-agnostic list:** Events list is decoupled from AuthProvider; relies on `VITE_MBAPP_PUBLIC_TENANT_ID` fallback (no token/tenant required).
+- **Detail CTA clarity:** Event detail button renamed to “My Check-In”; Operator Console remains permission-gated.
+- **Routes confirmed:** `/`, `/events`, `/events/:eventId`, `/events/:eventId/my-checkin`.
+- **Verification:** Web typecheck green; manual deep links validated while logged out (no AuthProvider/tenant errors).
+
+Impact: Clearer public-first flow, fewer confusion points versus operator console, and safer defaults for unauthenticated visitors.
+
 ### Public Registration Party Requirement — ✅ Live (2026-01-09)
 
 - **Contract:** `POST /registrations:public` now requires party identification: provide **either** `partyId` **or** `party.email` (phone-only payloads are rejected).

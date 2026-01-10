@@ -186,21 +186,31 @@ export default function EventDetailPage() {
             <p className="text-muted-foreground">{event.description}</p>
           )}
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Button
-            onClick={() => navigate(`/events/${eventId}/my-checkin`)}
-            size="lg"
-          >
-            Check In
-          </Button>
-          {canAccessCheckIn && (
+        <div className="flex flex-col gap-4 sm:flex-row">
+          <div className="flex flex-col items-start gap-1">
             <Button
-              variant="outline"
-              onClick={() => navigate(`/events/${eventId}/checkin`)}
+              onClick={() => navigate(`/events/${eventId}/my-checkin`)}
               size="lg"
             >
-              Operator Console
+              My Check-In
             </Button>
+            <div className="text-xs text-muted-foreground">
+              My Check-In is for competitors and guests.
+            </div>
+          </div>
+          {canAccessCheckIn && (
+            <div className="flex flex-col items-start gap-1">
+              <Button
+                variant="outline"
+                onClick={() => navigate(`/events/${eventId}/checkin`)}
+                size="lg"
+              >
+                Operator Console
+              </Button>
+              <div className="text-xs text-muted-foreground">
+                Operator Console is for staff only.
+              </div>
+            </div>
           )}
         </div>
       </div>

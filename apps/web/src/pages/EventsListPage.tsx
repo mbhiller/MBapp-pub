@@ -6,7 +6,6 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { apiFetch } from "../lib/http";
-import { useAuth } from "../providers/AuthProvider";
 
 type Event = {
   id: string;
@@ -88,7 +87,6 @@ function getStatusVariant(status?: string): "default" | "secondary" | "outline" 
 
 export default function EventsListPage() {
   const navigate = useNavigate();
-  const { tenantId } = useAuth();
 
   const [items, setItems] = useState<Event[]>([]);
   const [next, setNext] = useState<string | null>(null);
@@ -114,7 +112,6 @@ export default function EventsListPage() {
       try {
         const res = await apiFetch<EventPage>("/events:public", {
           method: "GET",
-          tenantId,
           query: { ...queryParams, next: cursor ?? undefined },
         });
         setItems((prev) => (cursor ? [...prev, ...(res.items ?? [])] : res.items ?? []));
@@ -125,7 +122,7 @@ export default function EventsListPage() {
         setLoading(false);
       }
     },
-    [tenantId, queryParams]
+    [queryParams]
   );
 
   useEffect(() => {
@@ -163,6 +160,14 @@ export default function EventsListPage() {
               ))}
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="mb-4">
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            Select an event to view details and use My Check-In.
+          </p>
         </CardContent>
       </Card>
 
