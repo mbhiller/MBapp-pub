@@ -2,6 +2,9 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
+      "@/*": [
+        "apps/web/src/*"
+      ],
       "@mbapp/scan": [
         "packages/mbapp-scan/src/index.ts"
       ],

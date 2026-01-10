@@ -1,4 +1,4 @@
-export { parseMbappQr, type MbappQr } from "./qr";
+export { parseMbappQr, parseBadgeQr, parseTicketQr, type MbappQr, type BadgeQr, type TicketQr } from "./qr";
 export {
   resolveScan,
   looksLikeEpc,

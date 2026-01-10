@@ -25,6 +25,20 @@ if (__DEV__) {
   console.log("[api/client] resolved config", { API_BASE, TENANT, hasBearer: Boolean(_bearerToken) });
 }
 
+/**
+ * Get feature-enabled headers for API requests.
+ * If the registrations feature is enabled via EXPO_PUBLIC_MBAPP_FEATURE_REGISTRATIONS_ENABLED,
+ * include the X-Feature-Registrations-Enabled header to bypass the API's feature gate.
+ */
+function getFeatureHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const registrationsEnabled = process.env.EXPO_PUBLIC_MBAPP_FEATURE_REGISTRATIONS_ENABLED;
+  if (registrationsEnabled?.toLowerCase() === "true" || registrationsEnabled === "1") {
+    headers["X-Feature-Registrations-Enabled"] = "true";
+  }
+  return headers;
+}
+
 export function setApiBase(url: string) { if (url) API_BASE = url.replace(/\/+$/, ""); }
 export function setTenantId(tenantId: string) { if (tenantId) TENANT = tenantId; }
 export function setBearerToken(token: string | null | undefined) { _bearerToken = token ?? null; }
@@ -215,3 +229,5 @@ export const apiClient = {
   patch: <T>(p: string, b: any, headers?: Record<string, string>) => request<T>(p, "PATCH", b, { headers }),
   del:  <T>(p: string, headers?: Record<string, string>) => request<T>(p, "DELETE", undefined, { headers }),
 };
+
+export { getFeatureHeaders };

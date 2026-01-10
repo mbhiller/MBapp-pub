@@ -495,6 +495,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/registrations/{id}:issue-ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue a ticket for a registration
+         * @description Issues a ticket for a registration. Idempotent via Idempotency-Key header.
+         *     Registration must meet the same guards as badge issuance (checked in, payment paid).
+         */
+        post: operations["issueTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/registrations:resolve-scan": {
         parameters: {
             query?: never;
@@ -4472,9 +4493,9 @@ export interface components {
              * Format: date-time
              * @description Timestamp when badge was issued
              */
-            issuedAt: string;
+            issuedAt?: string;
             /** @description User ID (operator) who issued the badge */
-            issuedBy: string;
+            issuedBy?: string;
             /**
              * @description Number of times badge has been reprinted
              * @default 0
@@ -4486,7 +4507,7 @@ export interface components {
              */
             lastPrintedAt?: string | null;
             /** @description Badge payload (QR code, barcode data, etc.) */
-            payload: {
+            payload?: {
                 /** @description QR code text payload */
                 qrText: string;
             };
@@ -4496,6 +4517,55 @@ export interface components {
              * @enum {string}
              */
             printStatus: "not_printed" | "printed" | "reprinted";
+        };
+        Ticket: components["schemas"]["ObjectBase"] & {
+            /** @enum {string} */
+            type: "ticket";
+            /** @description ID of the event this ticket is for */
+            eventId: string;
+            /** @description ID of the registration the ticket is associated with */
+            registrationId: string;
+            /** @description ID of the party receiving the ticket */
+            partyId: string;
+            /**
+             * @description Ticket type (defaults to admission)
+             * @default admission
+             * @enum {string}
+             */
+            ticketType: "admission";
+            /**
+             * @description Current state of the ticket
+             * @enum {string}
+             */
+            status: "valid" | "used" | "cancelled" | "expired";
+            /**
+             * Format: date-time
+             * @description Timestamp when the ticket was issued
+             */
+            issuedAt: string;
+            /** @description User ID (operator) who issued the ticket */
+            issuedBy: string;
+            /**
+             * Format: date-time
+             * @description Timestamp when the ticket was used
+             */
+            usedAt?: string | null;
+            /** @description User ID who processed the ticket use */
+            usedBy?: string | null;
+            /**
+             * Format: date-time
+             * @description Timestamp when the ticket was cancelled
+             */
+            cancelledAt?: string | null;
+            /** @description Optional operator notes */
+            notes?: string | null;
+            /** @description Ticket payload (QR / barcode data) */
+            payload: {
+                /** @description QR code text payload */
+                qrText?: string | null;
+                /** @description Barcode text payload */
+                barcodeText?: string | null;
+            };
         };
         /** @description Paginated worklist for event check-in console (Sprint BV) */
         CheckInWorklistPage: {
@@ -6500,6 +6570,87 @@ export interface operations {
                     "application/json": {
                         issuance?: components["schemas"]["BadgeIssuance"];
                     };
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Registration not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflict - registration missing party, not checked in, or payment not complete */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        code?: "party_missing" | "not_checked_in" | "checkin_blocked";
+                        message?: string;
+                        /** @description Included when code=checkin_blocked */
+                        checkInStatus?: components["schemas"]["CheckInStatus"];
+                    };
+                };
+            };
+        };
+    };
+    issueTicket: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-tenant-id": components["parameters"]["TenantHeader"];
+                /** @description Optional idempotency key for safe retries. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description Ticket type to issue (defaults to admission)
+                     * @default admission
+                     * @enum {string}
+                     */
+                    ticketType?: "admission";
+                };
+            };
+        };
+        responses: {
+            /** @description Ticket issued successfully */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        ticket?: components["schemas"]["Ticket"];
+                    };
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             /** @description Unauthorized */

@@ -3523,6 +3523,85 @@ components:
         - partyId
         - eventId
         - badgeType
+    Ticket:
+      allOf:
+      - $ref: '#/components/schemas/ObjectBase'
+      - type: object
+        description: Ticket record for event registration (QR/barcode payload)
+        properties:
+          type:
+            type: string
+            enum:
+            - ticket
+          eventId:
+            type: string
+            description: ID of the event this ticket is for
+          registrationId:
+            type: string
+            description: ID of the registration the ticket is associated with
+          partyId:
+            type: string
+            description: ID of the party receiving the ticket
+          ticketType:
+            type: string
+            enum:
+            - admission
+            default: admission
+            description: Ticket type (defaults to admission)
+          status:
+            type: string
+            enum:
+            - valid
+            - used
+            - cancelled
+            - expired
+            description: Current state of the ticket
+          issuedAt:
+            type: string
+            format: date-time
+            description: Timestamp when the ticket was issued
+          issuedBy:
+            type: string
+            description: User ID (operator) who issued the ticket
+          usedAt:
+            type: string
+            format: date-time
+            nullable: true
+            description: Timestamp when the ticket was used
+          usedBy:
+            type: string
+            nullable: true
+            description: User ID who processed the ticket use
+          cancelledAt:
+            type: string
+            format: date-time
+            nullable: true
+            description: Timestamp when the ticket was cancelled
+          notes:
+            type: string
+            nullable: true
+            description: Optional operator notes
+          payload:
+            type: object
+            description: Ticket payload (QR / barcode data)
+            properties:
+              qrText:
+                type: string
+                nullable: true
+                description: QR code text payload
+              barcodeText:
+                type: string
+                nullable: true
+                description: Barcode text payload
+        required:
+        - type
+        - eventId
+        - registrationId
+        - partyId
+        - ticketType
+        - status
+        - issuedAt
+        - issuedBy
         - issuedAt
         - issuedBy
         - payload
@@ -5222,6 +5301,86 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /registrations/{id}:issue-ticket:
+    post:
+      tags:
+      - Registrations
+      operationId: issueTicket
+      summary: Issue a ticket for a registration
+      description: |-
+        Issues a ticket for a registration. Idempotent via Idempotency-Key header.
+        Registration must meet the same guards as badge issuance (checked in, payment paid).
+      x-mbapp-permission: registration:write
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ticketType:
+                  type: string
+                  enum:
+                  - admission
+                  default: admission
+                  description: Ticket type to issue (defaults to admission)
+      responses:
+        '200':
+          description: Ticket issued successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ticket:
+                    $ref: '#/components/schemas/Ticket'
+        '409':
+          description: Conflict - registration missing party, not checked in, or payment not complete
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    enum:
+                    - party_missing
+                    - not_checked_in
+                    - checkin_blocked
+                  message:
+                    type: string
+                  checkInStatus:
+                    $ref: '#/components/schemas/CheckInStatus'
+                    nullable: true
+                    description: Included when code=checkin_blocked
+        '404':
+          description: Registration not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '400':
+          description: Bad Request
           content:
             application/json:
               schema:

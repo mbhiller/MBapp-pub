@@ -144,6 +144,9 @@ export const MODULES: readonly ModuleEntry[] = [
   // Sprint IV: Registrations (guarded by registration:read permission + feature flag)
   { key: "registrations", title: "Registrations", screen: "RegistrationsList", icon: "calendar", required: ["registration:read"], enabled: () => FEATURE_REGISTRATIONS_ENABLED },
 
+  // Sprint CG: Check-In Scanner (operator-only, requires registration:write for ticket issuance)
+  { key: "checkInScanner", title: "Check-In Scanner", screen: "CheckInScanner", icon: "qrcode", required: ["registration:write"], enabled: () => FEATURE_REGISTRATIONS_ENABLED },
+
   // Dev Tools (Sprint XIII)
   { key: "devtools", title: "Dev Tools", screen: "DevTools", icon: "wrench", enabled: () => __DEV__ },
 
