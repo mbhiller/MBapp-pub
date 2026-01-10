@@ -137,6 +137,7 @@ import * as RegResolveScan from "./registrations/resolve-scan-post";
 import * as RegCheckIn from "./registrations/checkin-post";
 import * as RegIssueBadge from "./registrations/issue-badge-post";
 import * as RegIssueTicket from "./registrations/issue-ticket-post";
+import * as TicketUse from "./tickets/use-ticket-post";
 // Internal jobs
 import * as JobsRun from "./jobs/run";
 import { runBackgroundJobs } from "./jobs/background";
@@ -519,6 +520,16 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
         const [, id] = m;
         requirePerm(auth, "registration:write");
         return RegIssueTicket.handle(withId(event, id));
+      }
+    }
+
+    // Tickets: use/admit (Sprint CH)
+    {
+      const m = match(/^\/tickets\/([^/]+):use$/i, path);
+      if (m && method === "POST") {
+        const [id] = m;
+        requirePerm(auth, "registration:write");
+        return TicketUse.handle(withId(event, id));
       }
     }
 

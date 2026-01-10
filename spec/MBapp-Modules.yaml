@@ -3572,6 +3572,10 @@ components:
             type: string
             nullable: true
             description: User ID who processed the ticket use
+          useIdempotencyKey:
+            type: string
+            nullable: true
+            description: Optional idempotency key used when marking the ticket as used
           cancelledAt:
             type: string
             format: date-time
@@ -3638,6 +3642,86 @@ components:
 security:
 - bearerAuth: []
 paths:
+  /tickets/{id}:use:
+    post:
+      tags:
+      - Registrations
+      operationId: useTicket
+      summary: Mark ticket as used/admitted (gate entry action)
+      description: |
+        Marks a ticket as used/admitted. Requires Idempotency-Key header.
+        Returns the updated Ticket on success. Conflicts include already used,
+        invalid (cancelled/expired) ticket, or registration not checked in.
+      x-mbapp-permission: registration:write
+      security:
+      - bearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/TenantHeader'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scannedVia:
+                  type: string
+                  enum:
+                  - qr
+                  - barcode
+                  - manual
+                  description: How the ticket was scanned (informational only)
+      responses:
+        200:
+          description: Ticket marked as used
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+        404:
+          description: Not found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    enum:
+                    - not_found
+                  message:
+                    type: string
+        409:
+          description: Conflict (already used, not valid, or not checked in)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    enum:
+                    - ticket_already_used
+                    - ticket_not_valid
+                    - registration_not_checkedin
+                  message:
+                    type: string
+                  details:
+                    type: object
+                    nullable: true
+                    properties:
+                      ticketStatus:
+                        type: string
+                        nullable: true
+                      registrationStatus:
+                        type: string
+                        nullable: true
   /reservation-holds/by-owner:
     get:
       tags:

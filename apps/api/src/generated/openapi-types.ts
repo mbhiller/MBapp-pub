@@ -4,6 +4,29 @@
  */
 
 export interface paths {
+    "/tickets/{id}:use": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark ticket as used/admitted (gate entry action)
+         * @description Marks a ticket as used/admitted. Requires Idempotency-Key header.
+         *     Returns the updated Ticket on success. Conflicts include already used,
+         *     invalid (cancelled/expired) ticket, or registration not checked in.
+         *
+         */
+        post: operations["useTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/reservation-holds/by-owner": {
         parameters: {
             query?: never;
@@ -4552,6 +4575,8 @@ export interface components {
             usedAt?: string | null;
             /** @description User ID who processed the ticket use */
             usedBy?: string | null;
+            /** @description Optional idempotency key used when marking the ticket as used */
+            useIdempotencyKey?: string | null;
             /**
              * Format: date-time
              * @description Timestamp when the ticket was cancelled
@@ -4668,6 +4693,72 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    useTicket: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-tenant-id": components["parameters"]["TenantHeader"];
+                /** @description Optional idempotency key for safe retries. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description How the ticket was scanned (informational only)
+                     * @enum {string}
+                     */
+                    scannedVia?: "qr" | "barcode" | "manual";
+                };
+            };
+        };
+        responses: {
+            /** @description Ticket marked as used */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ticket"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        code?: "not_found";
+                        message?: string;
+                    };
+                };
+            };
+            /** @description Conflict (already used, not valid, or not checked in) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        code?: "ticket_already_used" | "ticket_not_valid" | "registration_not_checkedin";
+                        message?: string;
+                        details?: {
+                            ticketStatus?: string | null;
+                            registrationStatus?: string | null;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
     listReservationHoldsByOwner: {
         parameters: {
             query: {
