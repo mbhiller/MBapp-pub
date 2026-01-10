@@ -14945,6 +14945,206 @@ const tests = {
     };
   },
 
+  "smoke:events:public-list-basic": async () => {
+    // Test GET /events:public basic functionality (no auth)
+    const publicListReq = await fetch(`${API}/events:public`, {
+      method: "GET",
+      headers: { "x-tenant-id": TENANT }
+    });
+
+    if (!publicListReq.ok) {
+      return { 
+        test: "events:public-list-basic", 
+        result: "FAIL", 
+        reason: "request-failed", 
+        status: publicListReq.status 
+      };
+    }
+
+    const body = await publicListReq.json().catch(() => ({}));
+    const hasItems = Array.isArray(body?.items);
+
+    return {
+      test: "events:public-list-basic",
+      result: hasItems ? "PASS" : "FAIL",
+      status: publicListReq.status,
+      itemsIsArray: hasItems,
+      itemCount: hasItems ? body.items.length : 0,
+      reason: !hasItems ? "items-not-array" : null
+    };
+  },
+
+  "smoke:events:public-list-filter-and-pagination": async () => {
+    await ensureBearer();
+
+    // Create two events: one open, one closed
+    const eventOpen = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: smokeTag("public_list_open"),
+      capacity: 10,
+      startsAt: new Date(Date.now() + 86400000).toISOString()
+    });
+
+    if (!eventOpen.ok || !eventOpen.body?.id) {
+      return { 
+        test: "events:public-list-filter-and-pagination", 
+        result: "FAIL", 
+        reason: "event-open-create-failed", 
+        eventOpen 
+      };
+    }
+    const openId = eventOpen.body.id;
+    recordCreated({ type: "event", id: openId, route: "/objects/event", meta: { status: "open" } });
+
+    const eventClosed = await post("/objects/event", {
+      type: "event",
+      status: "closed",
+      name: smokeTag("public_list_closed"),
+      capacity: 10,
+      startsAt: new Date(Date.now() - 86400000).toISOString()
+    });
+
+    if (!eventClosed.ok || !eventClosed.body?.id) {
+      return { 
+        test: "events:public-list-filter-and-pagination", 
+        result: "FAIL", 
+        reason: "event-closed-create-failed", 
+        eventClosed 
+      };
+    }
+    const closedId = eventClosed.body.id;
+    recordCreated({ type: "event", id: closedId, route: "/objects/event", meta: { status: "closed" } });
+
+    // Test filter: status=open with limit=1
+    const filterReq = await fetch(`${API}/events:public?status=open&limit=1`, {
+      method: "GET",
+      headers: { "x-tenant-id": TENANT }
+    });
+
+    if (!filterReq.ok) {
+      return { 
+        test: "events:public-list-filter-and-pagination", 
+        result: "FAIL", 
+        reason: "filter-request-failed", 
+        status: filterReq.status 
+      };
+    }
+
+    const filterBody = await filterReq.json().catch(() => ({}));
+    const items = filterBody?.items || [];
+    const allOpen = items.every(e => e.status === "open");
+
+    // Test pagination if next is present
+    let paginationValid = true;
+    if (filterBody?.next) {
+      const nextReq = await fetch(`${API}/events:public?status=open&limit=1&next=${encodeURIComponent(filterBody.next)}`, {
+        method: "GET",
+        headers: { "x-tenant-id": TENANT }
+      });
+      
+      if (nextReq.ok) {
+        const nextBody = await nextReq.json().catch(() => ({}));
+        paginationValid = Array.isArray(nextBody?.items);
+      } else {
+        paginationValid = false;
+      }
+    }
+
+    const pass = filterReq.ok && allOpen && paginationValid;
+
+    return {
+      test: "events:public-list-filter-and-pagination",
+      result: pass ? "PASS" : "FAIL",
+      filter: {
+        status: filterReq.status,
+        itemCount: items.length,
+        allOpen,
+        hasNext: !!filterBody?.next
+      },
+      pagination: {
+        tested: !!filterBody?.next,
+        valid: paginationValid
+      },
+      createdEvents: { openId, closedId },
+      reason: !pass ? "assertion-failed" : null
+    };
+  },
+
+  "smoke:events:public-detail": async () => {
+    await ensureBearer();
+
+    // Create an event with known ID
+    const eventName = smokeTag("public_detail");
+    const eventCreate = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      description: "Test event for public detail endpoint",
+      capacity: 25,
+      startsAt: new Date(Date.now() + 86400000).toISOString()
+    });
+
+    if (!eventCreate.ok || !eventCreate.body?.id) {
+      return { 
+        test: "events:public-detail", 
+        result: "FAIL", 
+        reason: "event-create-failed", 
+        eventCreate 
+      };
+    }
+    const eventId = eventCreate.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event", meta: { name: eventName } });
+
+    // Test GET /events/{id}:public (no auth)
+    const detailReq = await fetch(`${API}/events/${encodeURIComponent(eventId)}:public`, {
+      method: "GET",
+      headers: { "x-tenant-id": TENANT }
+    });
+
+    if (!detailReq.ok) {
+      return { 
+        test: "events:public-detail", 
+        result: "FAIL", 
+        reason: "detail-request-failed", 
+        status: detailReq.status,
+        eventId 
+      };
+    }
+
+    const detailBody = await detailReq.json().catch(() => ({}));
+    const idMatches = detailBody?.id === eventId;
+    const hasName = detailBody?.name === eventName;
+
+    // Test 404 for non-existent ID
+    const fakeId = `nonexistent-${Date.now()}`;
+    const notFoundReq = await fetch(`${API}/events/${encodeURIComponent(fakeId)}:public`, {
+      method: "GET",
+      headers: { "x-tenant-id": TENANT }
+    });
+
+    const is404 = notFoundReq.status === 404;
+
+    const pass = detailReq.ok && idMatches && hasName && is404;
+
+    return {
+      test: "events:public-detail",
+      result: pass ? "PASS" : "FAIL",
+      detail: {
+        status: detailReq.status,
+        idMatches,
+        hasName,
+        eventId: detailBody?.id
+      },
+      notFound: {
+        status: notFoundReq.status,
+        is404
+      },
+      createdEvent: eventId,
+      reason: !pass ? "assertion-failed" : null
+    };
+  },
+
   "smoke:webhooks:stripe-payment-intent-succeeded": async ()=>{
     await ensureBearer();
 

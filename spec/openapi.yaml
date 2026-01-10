@@ -1879,6 +1879,31 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ValidationError'
+  /events/{id}:public:
+    get:
+      tags:
+        - Events
+        - Public
+      operationId: getPublicEvent
+      summary: Get public event detail (no auth required)
+      description: |
+        Public endpoint for fetching event details by ID. Intended for anonymous/guest users.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Event detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+        '404':
+          description: Event not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /registrations:public:
     post:
       tags:

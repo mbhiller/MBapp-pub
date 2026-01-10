@@ -115,6 +115,7 @@ import * as StripeWebhook from "./webhooks/stripe-handler";
 
 // Public endpoints (Sprint AU)
 import * as EventsPublicList from "./events/public-list";
+import * as EventsPublicDetail from "./events/public-detail-get";
 import * as EventsClassesSummary from "./events/classes-summary-get";
 import * as EventsRegistrationsByLine from "./events/registrations-by-line-get";
 import * as EventsCheckInWorklist from "./events/checkin-worklist-get";
@@ -311,6 +312,14 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
     // Public event listing (Sprint AU)
     if (method === "GET" && path === "/events:public") {
       return EventsPublicList.handle(event);
+    }
+    // Public event detail (E1)
+    {
+      const m = path.match(/^\/events\/([^/]+):public$/i);
+      if (method === "GET" && m) {
+        const [, id] = m;
+        return EventsPublicDetail.handle(withId(event, id));
+      }
     }
     // Public registration create (Sprint AU)
     if (method === "POST" && path === "/registrations:public") {

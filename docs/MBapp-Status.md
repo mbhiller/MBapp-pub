@@ -134,6 +134,48 @@
 
 ---
 
+### Sprint CD — Public Event Detail Endpoint & Web Coherence — ✅ Complete (2026-01-09)
+
+**Summary:** Eliminated client-side "fetch list then filter" pattern for event detail pages by adding a dedicated public detail endpoint. Improved web navigation coherence for public users with simplified nav (hiding internal app links when not authenticated). Includes comprehensive smoke coverage for public event discovery patterns.
+
+**Deliverables (E1–E5):**
+- **Spec (E1):** Added `GET /events/{id}:public` endpoint in [spec/MBapp-Modules.yaml](spec/MBapp-Modules.yaml) at lines 5324–5347. No authentication required (`security: []`); path param `id`; responses: 200 (Event schema) or 404 (Error). Same Event schema used in `/events:public` list endpoint for consistency.
+- **API Handler (E2):** Implemented [apps/api/src/events/public-detail-get.ts](apps/api/src/events/public-detail-get.ts) with public tenant header (`getTenantId(event)`); loads event via `getObjectById({ tenantId, type: "event", id })`; returns 404 if not found; returns Event object with same field projection as public list (id, name, description, status, startsAt, endsAt, capacity, reservedCount, rvEnabled, rvCapacity, rvUnitAmount, rvReserved, createdAt). Wired route in [apps/api/src/index.ts](apps/api/src/index.ts) at lines 316–323 near existing `/events:public` route.
+- **Web EventDetailPage (E3):** Updated [apps/web/src/pages/EventDetailPage.tsx](apps/web/src/pages/EventDetailPage.tsx) to call `GET /events/${eventId}:public` directly instead of fetching full list with limit=100 then filtering. Removed explicit tenantId from `apiFetch` call to use `VITE_MBAPP_PUBLIC_TENANT_ID` fallback (public tenant auto-injection). Removed unused `token` and `tenantId` from `useAuth()` destructuring. Preserved loading/error UI behavior and operator console button permission checks.
+- **Web Layout (E4):** Updated [apps/web/src/components/Layout.tsx](apps/web/src/components/Layout.tsx) with authentication detection (`isAuthenticated = !!(token && policy && Object.keys(policy).length > 0)`). Public nav (when not authenticated) shows only: Home (/), Events (/events), Docs (/docs). Authenticated nav shows full internal app navigation with permission checks (Parties, Products, Sales Orders, Backorders, Purchase Orders, Vendor Portal, Inventory, Messages, Locations, Views, Workspaces, Docs). Prevents "broken internal app nav" for public users.
+- **Smokes (E5):** Added 3 CORE tests in [ops/smoke/smoke.mjs](ops/smoke/smoke.mjs) and registered in [ops/ci-smokes.json](ops/ci-smokes.json):
+  - `smoke:events:public-list-basic` — Tests `GET /events:public` without auth; asserts 200 and items is array.
+  - `smoke:events:public-list-filter-and-pagination` — Creates events with status=open and status=closed; queries with `status=open&limit=1`; validates filter (all items have status=open); tests pagination via next cursor if present.
+  - `smoke:events:public-detail` — Creates event; fetches via `GET /events/{id}:public` (no auth); asserts 200 and ID matches; tests 404 for non-existent ID.
+
+**Public Web Routes (coherent experience):**
+- `/` — Home (public)
+- `/events` — Public events list
+- `/events/:eventId` — Public event detail (now uses direct endpoint instead of list-then-filter)
+- `/events/:eventId/my-checkin` — Public check-in (magic link flow)
+- `/events/:eventId/checkin` — Operator console (protected: `event:read` + `registration:read`)
+
+**Endpoints:**
+- `GET /events:public` — Public events list with filters (status, limit, next)
+- `GET /events/{id}:public` — Public event detail by ID (no auth)
+
+**Navigation Changes:**
+- **Public users (not authenticated):** See minimal nav (Home, Events, Docs)
+- **Authenticated users:** See full nav with permission-gated links (Parties, Products, Sales, Purchase, Inventory, etc.)
+
+**Verification:**
+- ✅ Typecheck: `npm run typecheck --workspaces --if-present` (all 3 workspaces clean)
+- ✅ Spec pipeline: `npm run spec:lint`, `npm run spec:bundle`, `npm run spec:types:api`, `npm run spec:types:mobile` (all green)
+- ✅ Core smokes: `smoke:events:public-list-basic`, `smoke:events:public-list-filter-and-pagination`, `smoke:events:public-detail` (all PASS)
+
+**Impact:**
+- More efficient event detail loading: single GET request instead of fetching up to 100 events client-side.
+- Clearer public user experience: no broken internal nav links when not authenticated.
+- Better scalability: detail endpoint doesn't depend on list pagination limits.
+- Consistent API design: dedicated detail endpoint follows REST patterns.
+
+---
+
 ### Sprint BX+ — Scan-first Check-In Resolution — ✅ Complete (2026-01-09)
 
 **Summary:** Added deterministic scan resolution endpoint and integrated a Scan mode in the Check-In Console. Operators can paste/scan a payload and jump directly to the matching registration, with clear success/error feedback and future-proof support for ambiguity.
