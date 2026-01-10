@@ -60,6 +60,7 @@
     { "name": "smoke:registrations:public-resend", "tier": "core" },
     { "name": "smoke:registrations:lookup-public-notfound-does-not-leak", "tier": "extended" },
     { "name": "smoke:registrations:lookup-public-email-simulated", "tier": "core" },
+    { "name": "smoke:registrations:lookup-public-link-extractable", "tier": "core" },
     { "name": "smoke:registrations:public-get-includes-checkinStatus-and-no-pii", "tier": "core" },
     { "name": "smoke:jobs:background-cleanup-expired-holds", "tier": "core" },
     { "name": "smoke:jobs:background-retry-failed-messages", "tier": "core" },
