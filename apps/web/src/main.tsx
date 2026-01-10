@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import { AuthProvider } from "./providers/AuthProvider";
+import { DevAuthBootstrap } from "./providers/DevAuthBootstrap";
 import posthog from "posthog-js";
 import * as Sentry from "@sentry/browser";
 
@@ -34,10 +35,12 @@ const root = createRoot(document.getElementById("root")!);
 
 root.render(
 	<React.StrictMode>
-		<AuthProvider>
-			<BrowserRouter>
-				<App />
-			</BrowserRouter>
-		</AuthProvider>
+		<DevAuthBootstrap>
+			<AuthProvider>
+				<BrowserRouter>
+					<App />
+				</BrowserRouter>
+			</AuthProvider>
+		</DevAuthBootstrap>
 	</React.StrictMode>
 );

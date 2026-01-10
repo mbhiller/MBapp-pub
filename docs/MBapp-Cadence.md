@@ -51,8 +51,36 @@ Note: Include documentation updates in each labeled edit prompt when behavior or
 - All commands must be provided in fenced code blocks** for copy/paste.
 - All commands must be PowerShell-compatible** (assume Windows terminal).
 - If Copilot claims “typecheck is green,” it must actually run it** and paste the output (at least the command + last lines showing 0 errors).
+**Command formatting rules**
+- All commands must be provided in fenced code blocks** for copy/paste.
+- All commands must be PowerShell-compatible** (assume Windows terminal).
+- If Copilot claims "typecheck is green," it must actually run it** and paste the output (at least the command + last lines showing 0 errors).
 - PR wrap content must be provided in a fenced code block** for copy/paste.
 - Core suite currently 48 flows (see [smoke-coverage.md](smoke-coverage.md)); extended adds 24, all = 72.
+
+---
+
+## Manual Validation Checklists (DEV) — Quick Reference
+
+### Web Operator Console (DEV Login)
+1. Clear localStorage (open DevTools → Application → Storage → localStorage → delete all)
+2. Reload web app
+3. **Expect:** DevAuthBootstrap calls `POST /auth/dev-login` (see console.log)
+4. **Expect:** `GET /auth/policy` returns policy with `"*": true` (admin)
+5. Navigate to `/events/{eventId}/checkin` (Operator Console)
+6. **Expect:** Page loads (no "missing-permission" error)
+
+### Web Public/Unauthenticated Testing
+1. Clear localStorage key `mbapp_bearer`, reload
+   - OR set env `VITE_DEV_AUTH_DISABLED=true` before starting dev server
+2. **Expect:** App boots without token; public pages (events list, my-checkin) are accessible
+3. Authenticated pages redirect to `/not-authorized`
+
+### Tenant Switching in DEV
+- **Preferred:** Edit env vars (`VITE_TENANT`, `VITE_DEV_TENANT`, `VITE_MBAPP_PUBLIC_TENANT_ID`) and restart dev server
+- **Quick (DEV-only):** Set localStorage key `mbapp.tenantOverride` to desired tenant ID and reload
+  - Example: `localStorage.setItem('mbapp.tenantOverride', 'SmokeTenant')`
+  - Clear with: `localStorage.removeItem('mbapp.tenantOverride')`
 
 ### 3D) PR wrap
 - PR title

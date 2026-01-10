@@ -18,7 +18,24 @@
 
 ---
 
-### Sprint CH — Ticket Use/Admit (scan-to-admit foundation) — ✅ Complete (2026-01-10)
+### Sprint CG — Ticketing Foundation + Web Auth Fix (2026-01-10)
+
+**API:**
+- Ticket issuance: `POST /registrations/{id}:issue-ticket` (payment guard)
+- Scan resolution: Parses ticket QR format `ticket|eventId|registrationId|ticketId`
+- Ticket admit: `POST /tickets/{id}:use` (idempotent, requires check-in, sets usedAt/usedBy/useIdempotencyKey)
+
+**Web:**
+- DEV auth bootstrap: [DevAuthBootstrap](../docs/MBapp-Foundations.md#121-web-dev-auth-bootstrap-devauth-bootstrap) auto-calls `/auth/dev-login` in DEV mode
+- Permission gating: policy["*"]=true now honored as superuser; required permissions support whitespace-separated multi-permission gates
+- Operator Console unblocked for DemoTenant (admin role now grants event:read + registration:read via superuser)
+
+**Verification (green):**
+- `npm run typecheck --workspaces --if-present`
+- `npm run smokes:run:core` (includes 3 new ticketing smokes)
+- Web: clear localStorage → reload → DevAuthBootstrap calls dev-login → navigate to Operator Console → page loads
+
+---
 
 - **API:** Added `POST /tickets/{id}:use` (perm: `registration:write`; requires `Idempotency-Key`). Marks ticket `status=used`, stamps `usedAt` + `usedBy`, stores `useIdempotencyKey`.
 - **Guards (409):** `registration_not_checkedin`, `ticket_already_used` (different key after use), `ticket_not_valid` (cancelled/expired/etc). Intended operator flow: scan → resolve → check-in → use ticket.
