@@ -1,7 +1,7 @@
 # MBapp Development Cadence (copy/paste into a new chat)
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Status/Working](MBapp-Status.md) · [Foundations](MBapp-Foundations.md) · [Verification](smoke-coverage.md)  
-**Last Updated:** 2025-12-29
+**Last Updated:** 2026-01-10
 
 ---
 
@@ -52,6 +52,7 @@ Note: Include documentation updates in each labeled edit prompt when behavior or
 - All commands must be PowerShell-compatible** (assume Windows terminal).
 - If Copilot claims “typecheck is green,” it must actually run it** and paste the output (at least the command + last lines showing 0 errors).
 - PR wrap content must be provided in a fenced code block** for copy/paste.
+- Core suite currently 48 flows (see [smoke-coverage.md](smoke-coverage.md)); extended adds 24, all = 72.
 
 ### 3D) PR wrap
 - PR title

@@ -1,7 +1,7 @@
 # MBapp Status / Working
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Foundations](MBapp-Foundations.md) · [Cadence](MBapp-Cadence.md) · [Verification](smoke-coverage.md)  
-**Last Updated:** 2026-01-09  
+**Last Updated:** 2026-01-10  
 **Workflow & DoD:** See [MBapp-Cadence.md](MBapp-Cadence.md) for canonical workflow, Definition of Done, and testing rules.
 
 ---
@@ -15,6 +15,20 @@
   - apps/api/.env.local → `FEATURE_STRIPE_SIMULATE=true`, `FEATURE_NOTIFY_SIMULATE=true` (add real keys only when needed)
   - apps/web/.env.local → `VITE_MBAPP_PUBLIC_TENANT_ID=SmokeTenant`, `VITE_MBAPP_FEATURE_REGISTRATIONS_ENABLED=true`, `VITE_STRIPE_PUBLISHABLE_KEY=pk_test_...`
 - **New smoke:** `smoke:integrations:simulated-checkout-and-notify` verifies public checkout + Stripe simulate + Notify simulate without real provider credentials.
+
+---
+
+### Sprint CH — Ticket Use/Admit (scan-to-admit foundation) — ✅ Complete (2026-01-10)
+
+- **API:** Added `POST /tickets/{id}:use` (perm: `registration:write`; requires `Idempotency-Key`). Marks ticket `status=used`, stamps `usedAt` + `usedBy`, stores `useIdempotencyKey`.
+- **Guards (409):** `registration_not_checkedin`, `ticket_already_used` (different key after use), `ticket_not_valid` (cancelled/expired/etc). Intended operator flow: scan → resolve → check-in → use ticket.
+- **Mobile:** Check-In Scanner adds “Admit Ticket” when a ticket QR is present and the registration is checked in; posts with fresh Idempotency-Key and toasts success/conflicts.
+- **Verification (green):**
+  - `npm run typecheck --workspaces --if-present`
+  - `node ops/smoke/smoke.mjs smoke:ticketing:use-ticket-happy-path`
+  - `node ops/smoke/smoke.mjs smoke:ticketing:use-ticket-idempotent`
+  - `node ops/smoke/smoke.mjs smoke:ticketing:use-ticket-guard-not-checkedin`
+  - `npm run smokes:run:core`
 
 ---
 

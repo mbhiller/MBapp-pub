@@ -1,7 +1,7 @@
 # Smoke Test Coverage (Sprint S, 2025-12-31)
 
 **Navigation:** [Roadmap](MBapp-Roadmap.md) · [Status/Working](MBapp-Status.md) · [Foundations](MBapp-Foundations.md) · [Cadence](MBapp-Cadence.md)  
-**Last Updated:** 2026-01-07
+**Last Updated:** 2026-01-10
 
 ---
 
@@ -16,7 +16,7 @@ Smoke tests are integration tests for critical API flows. All tests use idempote
 **Before submitting a PR (PR parity — matches CI gating):**
 ```bash
 npm run typecheck --workspaces --if-present
-npm run smokes:run:core          # 43 core flows (~3-4 min)
+npm run smokes:run:core          # 48 core flows (~3-4 min)
 ```
 
 **Run one smoke:**
@@ -42,15 +42,24 @@ Smokes are organized by tier for targeted CI validation:
 
 | Tier | Flows | Duration | When | Command |
 |------|-------|----------|------|--------|
-| **core** | 45 | ~2–3 min | Every PR/push | `npm run smokes:run:core` |
+| **core** | 48 | ~2–3 min | Every PR/push | `npm run smokes:run:core` |
 | **extended** | 24 | ~2–3 min | Nightly (2 AM UTC) | `npm run smokes:run:extended` |
-| **all** | 69 | ~5–6 min | Nightly full | `npm run smokes:run:ci` |
+| **all** | 72 | ~5–6 min | Nightly full | `npm run smokes:run:ci` |
 
 **Core flows:** Foundation + critical domain workflows (auth, objects, line ID, sales/purchase orders, inventory, fulfillment, backorders, suggestions).
 
 **Extended flows:** Permission tests, views, workspaces, EPC/scanner, idempotency, advanced scenarios.
 
 **Reference:** See [ci-smokes-guide.md](ci-smokes-guide.md) for detailed tier breakdown.
+
+---
+
+## Recent Additions (Sprint CH)
+
+### CORE
+- **`smoke:ticketing:use-ticket-happy-path`** — Paid registration → ticket issued → checked in → `/tickets/{id}:use` returns used ticket with audit fields.
+- **`smoke:ticketing:use-ticket-idempotent`** — Same key replay returns 200 used; different key after use returns 409 `ticket_already_used`.
+- **`smoke:ticketing:use-ticket-guard-not-checkedin`** — Attempt use before check-in → 409 `registration_not_checkedin`.
 
 ---
 
