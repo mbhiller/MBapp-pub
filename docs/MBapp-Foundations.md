@@ -370,20 +370,62 @@ baseURL: requireApiBase(),
 
 **Env note (local dev):** Use apps/web/.env.local. Canonical tenant keys are VITE_TENANT (operator) and VITE_MBAPP_PUBLIC_TENANT_ID (public).
 
-**Primary Config:** [apps/web/src/lib/api.ts](../apps/web/src/lib/api.ts#L3-L4)
-```typescript
-const API_BASE = import.meta.env.VITE_API_BASE!;
-const TENANT   = import.meta.env.VITE_TENANT ?? "DemoTenant";
-```
+### 1.2.1 Web DEV Auth Bootstrap (DevAuthBootstrap)
 
-**Environment File:** `apps/web/.env` (expected, not checked in)
-```bash
-VITE_API_BASE=https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com
-VITE_TENANT=DemoTenant
-```
+**Purpose:** In DEV mode, auto-call `/auth/dev-login` to obtain a token with admin roles, eliminating manual auth setup for local testing.
 
-**Status:** ⚠️ **Missing .env handling** — Web requires manual .env setup; no sample file present  
-**Auth:** No auth implementation detected in web client (uses plain fetch, no bearer token)
+**Component:** [apps/web/src/providers/DevAuthBootstrap.tsx](../apps/web/src/providers/DevAuthBootstrap.tsx)
+- **When:** DEV mode + `VITE_DEV_TENANT === "DemoTenant"`; skipped if `VITE_DEV_AUTH_DISABLED === "true"`
+- **Flow:** Check localStorage for valid MBapp token (with `mbapp.tenantId`, `roles`/`policy`); if missing/invalid, POST `/auth/dev-login`, store token in `mbapp_bearer` key
+- **Storage keys:**
+  - `mbapp_bearer` — JWT token with `payload.mbapp` claim (userId, tenantId, roles, policy)
+  - `mbapp_tenant` — Tenant ID (synced from token or env fallback)
+  - `mbapp.tenantOverride` — DEV-only tenant override (set via AuthProvider; for quick dev testing)
+
+**Switching Auth Modes:**
+- **To test as operator (admin):** Default. DevAuthBootstrap auto-logs in with `VITE_DEV_TENANT=DemoTenant`, roles=["admin"] → policy["*"]=true (superuser)
+- **To test as public/unauthenticated:** Clear localStorage key `mbapp_bearer`, reload. Or set env `VITE_DEV_AUTH_DISABLED=true` before starting
+- **To switch tenant in DEV:** Preferred: update env vars (`VITE_TENANT`, `VITE_DEV_TENANT`) and restart. Quick: set localStorage key `mbapp.tenantOverride` and reload (DEV-only)
+
+**Env vars (required for dev-login):**
+- `VITE_DEV_EMAIL` (default: "dev@example.com") — Email in dev-login request
+- `VITE_DEV_TENANT` (default: VITE_TENANT or "DemoTenant") — Tenant for dev-login token
+- `VITE_DEV_AUTH_DISABLED` (optional: "true"|"1") — Skip dev-login entirely; app stays unauthenticated
+
+### 1.2.2 Permission Model (Policy Map)
+
+**Contract:** Server derives permission policy from JWT claim `payload.mbapp.roles` (or explicit `payload.mbapp.policy`). Web client receives policy via `GET /auth/policy`.
+
+**Policy Map Semantics:**
+- **Superuser:** `policy["*"] === true` grants all permissions (evaluated first)
+- **Exact match:** `policy["event:read"] === true` grants that exact permission
+- **Type wildcard:** `policy["event:*"] === true` grants all `event:` permissions
+- **Action wildcard:** `policy["*:read"] === true` grants all `:read` permissions
+- **All wildcard:** `policy["*:*"] === true` grants all permissions
+
+**Role-to-Policy Mapping (API):** See [apps/api/src/auth/derivePolicyFromRoles.ts](../apps/api/src/auth/derivePolicyFromRoles.ts)
+- `"admin"` → `{ "*": true }` (superuser)
+- `"operator"` → `{ "*:read": true, "sales:*", "purchase:*", "inventory:*", "view:*", "workspace:*", "scanner:use": true }`
+- `"viewer"` → `{ "*:read": true }`
+- `"warehouse"` → `{ "*:read": true, "inventory:*", "purchase:receive": true }`
+
+**Required Permissions (Multi-Permission Gating):**
+- Routes/components may require **multiple permissions** (all must be granted):
+  - Operator Console: `"event:read registration:read"` (space-separated)
+  - Parsed as: `["event:read", "registration:read"]` (normalized by `normalizeRequired()`)
+- Admin role via superuser satisfies any multi-permission gate
+
+**ProtectedRoute Behavior:** [apps/web/src/components/ProtectedRoute.tsx](../apps/web/src/components/ProtectedRoute.tsx)
+- Accepts `requiredPerm: string | string[]`
+- Normalizes space-separated strings to array (e.g., `"event:read registration:read"` → `["event:read", "registration:read"]`)
+- Checks all perms; if any missing → redirect `/not-authorized` with DEV-only diagnostic log (policy state, missing perm)
+
+**Environment Setup — Local Dev:**
+- **Primary file:** `apps/web/.env.local` (required, not checked in)
+- **Required vars:** `VITE_API_BASE` (API Gateway), `VITE_TENANT` (operator tenant), `VITE_MBAPP_PUBLIC_TENANT_ID` (public pages)
+- **Dev features:** `VITE_DEV_EMAIL`, `VITE_DEV_TENANT` (dev-login), `VITE_MBAPP_FEATURE_REGISTRATIONS_ENABLED` (gate), `VITE_DEV_AUTH_DISABLED=true` (skip auto-login)
+- **Status:** ✅ Env consolidated into `.env.local` — `.env.development.local` no longer required
+- **Auth:** [DevAuthBootstrap](#121-web-dev-auth-bootstrap-devauth-bootstrap) auto-calls `/auth/dev-login` in DEV (see section above)
 
 ### Web List-Page Enrichment: Avoid N+1 Fan-Out
 - **Symptom:** Parallel detail-enrichment calls on list pages can spike Lambda/API concurrency and surface intermittent 503s.

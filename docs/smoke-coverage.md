@@ -54,6 +54,18 @@ Smokes are organized by tier for targeted CI validation:
 
 ---
 
+## Recent Additions (Sprint CG)
+
+### CORE
+- **`smoke:ticketing:issue-ticket-idempotent`** — Payment confirmed → POST `/registrations/{id}:issue-ticket` with key A returns ticket; replay with key A returns same ticket (200 idempotent); different key B after issue returns 409 `ticket_already_issued`.
+- **`smoke:ticketing:issue-ticket-guard-payment-unpaid`** — Registration without payment → POST issue-ticket returns 409 `payment_unpaid`.
+- **`smoke:ticketing:resolve-ticket-scan`** — Issued ticket → resolve ticket QR (`ticket|eventId|registrationId|ticketId`) → ticket lookup matches resolved ticket ID.
+- **`smoke:ticketing:use-ticket-happy-path`** — Paid registration → ticket issued → checked in → `/tickets/{id}:use` returns used ticket with audit fields (usedAt, usedBy).
+- **`smoke:ticketing:use-ticket-idempotent`** — Same key replay returns 200 used; different key after use returns 409 `ticket_already_used`.
+- **`smoke:ticketing:use-ticket-guard-not-checkedin`** — Attempt use before check-in → 409 `registration_not_checkedin`.
+
+---
+
 ## Recent Additions (Sprint CH)
 
 ### CORE

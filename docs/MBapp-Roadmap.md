@@ -1,7 +1,7 @@
 # MBapp — Master Roadmap (Tiers 1 → 10)
 
 **Navigation:** [Status/Working](MBapp-Status.md) · [Foundations](MBapp-Foundations.md) · [Cadence](MBapp-Cadence.md) · [Verification](smoke-coverage.md)  
-**Last Updated:** 2026-01-06
+**Last Updated:** 2026-01-10
 
 This is the **living**, presentation‑ready roadmap for MBapp. It consolidates and supersedes prior versions (v3.2, v3.3, v4.0, v5.0).  
 Each Tier uses the same structure so we can later expand any Phase into a detailed sprint plan.
@@ -96,8 +96,50 @@ Each Tier uses the same structure so we can later expand any Phase into a detail
 - 🎯 Ring grid, on‑deck, leaderboards, auction presentation boards.
 - 🕓 Sprints: 0.5–1 (Estimated).
 
-### 2.6 Commerce Enhancers ⬜ Planned (Not Started)
-- 🎯 Packages/discounts tied to events; quick POS add‑ons.
+### 2.7 Ticketing Foundation ✅ Implemented (Sprint CG)
+- 🎯 Ticket issuance (idempotent, payment-guarded), scan resolution, ticket-use/admit (check-in gated).
+- 🧱 Schemas: Ticket (status, issuedAt, usedAt, useIdempotencyKey), Scan (resolution format).
+- 🔄 Flows: Issue ticket (Stripe payment confirm), resolve QR, admit ticket (operator scanner).
+- ⚙️ Guards: payment_unpaid, registration_not_checkedin, ticket_already_used (409 conflicts).
+- 💻 UI/UX: Mobile Check-In Scanner with "Admit Ticket" button (conditionally shown when ticket + checked-in); Operator Console now accessible (dev-login + permission fix).
+- 🧪 Smokes: 6 core flows (issue idempotent, issue guard, resolve-scan, use happy-path, use idempotent, use guard).
+- 🕓 Sprints: CG (Shipped).
+- 🏁 Outcome: End-to-end ticket→use foundation operational; ready for print/reprint and advanced credential flows.
+
+### 2.8 Ticket Printing & Reprint ⬜ Planned (Not Started)
+- 🎯 ZPL/Zebra integration for badge/wristband print; reprint workflows for operator.
+- 🧱 Schemas: TicketPrintJob (status, zpl, printerId, retries), PrinterConfig.
+- 🔄 Flows: Issue ticket → auto-queue print job, operator reprint from ticket detail.
+- ⚙️ Guards: Printer availability, print job failure + retry bounds.
+- 🕓 Sprints: 1–2 (Estimated).
+
+### 2.9 RFID/Credential Binding ⬜ Planned (Not Started)
+- 🎯 Bind RFID/NFC credential (EPC) to ticket; resolve-scan support for EPC.
+- 🧱 Schemas: TicketCredential (credentialId, epc, bindingStatus), CredentialType (RFID|NFC|Barcode).
+- 🔄 Flows: Scan-to-bind, resolve-scan returns credential metadata.
+- ⚙️ Guards: Credential already bound, binding window TTL.
+- 🕓 Sprints: 1–2 (Estimated).
+
+### 2.10 Multi-Badge Types & Access Levels ⬜ Planned (Not Started)
+- 🎯 Staff/Vendor/VIP/Spectator badge types with granular access rules (zones, times, resources).
+- 🧱 Schemas: BadgeType (name, accessLevel, rules[]), AccessRule (zone|resource, timeRange).
+- 🔄 Flows: Ticket→Badge conversion at check-in; access control enforcement (gate/checkpoint validation).
+- ⚙️ Guards: Out-of-bounds access attempts (time/zone/resource).
+- 🕓 Sprints: 2–3 (Estimated).
+
+### 2.11 Ticket→Badge Lifecycle ⬜ Planned (Not Started)
+- 🎯 Atomic pre-event ticket issue, onsite badge conversion, access validation.
+- 🔄 Flows: Sell ticket pre-event, convert to badge at check-in, validate access at gates.
+- 🕓 Sprints: 1 (Estimated).
+
+### 2.12 Operator Tooling & Hardening ⬜ Planned (Not Started)
+- 🎯 Worklists (print queue, reprint exceptions), audit trails, exception handling, multi-operator consistency.
+- 🧪 Smokes: Exception retry, concurrent operator actions, audit log coherence.
+- 🕓 Sprints: 2–3 (Estimated).
+
+### 2.13 Public Readiness & Remediation ⬜ Planned (Not Started)
+- 🎯 Public event booking polish (error messages, retry UX, status visibility), public support workflows (resend, refund, rebooking).
+- 🕓 Sprints: 1–2 (Estimated).
 - 🕓 Sprints: 0.5–1 (Estimated).
 - 🏁 Outcome: end‑to‑end ops ready for finance posting.
 
