@@ -16295,6 +16295,137 @@ const tests = {
     };
   },
 
+  "smoke:registrations:lookup-public-link-extractable": async () => {
+    await ensureBearer();
+
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // Create event
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: smokeTag("link_extract_evt"),
+      capacity: 5,
+      reservedCount: 0
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "registrations:lookup-public-link-extractable", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event" });
+
+    const toEmail = `linkextract+${SMOKE_RUN_ID}@example.com`;
+
+    // Create public registration with party.email
+    const regCreate = await post(`/registrations:public`, { eventId, party: { email: toEmail } }, featureHeaders, { auth: "none" });
+    if (!regCreate.ok || !regCreate.body?.registration?.id) {
+      return { test: "registrations:lookup-public-link-extractable", result: "FAIL", reason: "reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+
+    // First lookup (simulated)
+    const lookup1 = await post(`/registrations:lookup-public`, { eventId, email: toEmail }, featureHeaders, { auth: "none" });
+    if (!lookup1.ok || !lookup1.body?.sent) {
+      return { test: "registrations:lookup-public-link-extractable", result: "FAIL", reason: "lookup1-failed", lookup1 };
+    }
+
+    // Query messages (operator auth)
+    const list1 = await get(`/messages`, { to: toEmail, channel: "email", status: "sent", limit: 10 }, featureHeaders);
+    if (!list1.ok || !Array.isArray(list1.body?.items)) {
+      return { test: "registrations:lookup-public-link-extractable", result: "FAIL", reason: "messages-list-failed", list1 };
+    }
+
+    const items1 = list1.body.items;
+    if (items1.length === 0) {
+      return { test: "registrations:lookup-public-link-extractable", result: "FAIL", reason: "no-messages", items1 };
+    }
+
+    // Extract link using regex (mirrors dev tool)
+    const linkPattern1 = new RegExp(`/events/${eventId}/my-checkin\\?[^"\\s]+`, "i");
+    let extractedLink1 = null;
+    let extractedToken1 = null;
+
+    for (const msg of items1) {
+      if (typeof msg?.body === "string") {
+        const match = msg.body.match(linkPattern1);
+        if (match) {
+          extractedLink1 = match[0];
+          // Extract token param
+          const tokenMatch = extractedLink1.match(/token=([^&\s"]+)/i);
+          if (tokenMatch) extractedToken1 = tokenMatch[1];
+          break;
+        }
+      }
+    }
+
+    if (!extractedLink1) {
+      return { test: "registrations:lookup-public-link-extractable", result: "FAIL", reason: "link-not-found", items1 };
+    }
+
+    const hasRegId = extractedLink1.includes("regId=");
+    const hasToken = extractedLink1.includes("token=");
+
+    if (!hasRegId || !hasToken) {
+      return {
+        test: "registrations:lookup-public-link-extractable",
+        result: "FAIL",
+        reason: "link-missing-params",
+        link: extractedLink1,
+        hasRegId,
+        hasToken
+      };
+    }
+
+    // Second lookup to test token rotation
+    const lookup2 = await post(`/registrations:lookup-public`, { eventId, email: toEmail }, featureHeaders, { auth: "none" });
+    if (!lookup2.ok || !lookup2.body?.sent) {
+      return { test: "registrations:lookup-public-link-extractable", result: "FAIL", reason: "lookup2-failed", lookup2 };
+    }
+
+    // Query messages again
+    const list2 = await get(`/messages`, { to: toEmail, channel: "email", status: "sent", limit: 10 }, featureHeaders);
+    if (!list2.ok || !Array.isArray(list2.body?.items)) {
+      return { test: "registrations:lookup-public-link-extractable", result: "FAIL", reason: "messages-list2-failed", list2 };
+    }
+
+    const items2 = list2.body.items;
+    let extractedToken2 = null;
+
+    for (const msg of items2) {
+      if (typeof msg?.body === "string") {
+        const match = msg.body.match(linkPattern1);
+        if (match) {
+          const tokenMatch = match[0].match(/token=([^&\s"]+)/i);
+          if (tokenMatch) {
+            extractedToken2 = tokenMatch[1];
+            break;
+          }
+        }
+      }
+    }
+
+    // Tokens should rotate (second lookup generates new token)
+    const tokensRotated = extractedToken1 && extractedToken2 && extractedToken1 !== extractedToken2;
+
+    const pass = hasRegId && hasToken && tokensRotated;
+    return {
+      test: "registrations:lookup-public-link-extractable",
+      result: pass ? "PASS" : "FAIL",
+      steps: { eventId, regId },
+      extraction: {
+        link: extractedLink1,
+        hasRegId,
+        hasToken,
+        tokensRotated,
+        messagesCount1: items1.length,
+        messagesCount2: items2.length
+      }
+    };
+  },
+
   "smoke:registrations:public-get-includes-checkinStatus-and-no-pii": async () => {
     await ensureBearer();
 

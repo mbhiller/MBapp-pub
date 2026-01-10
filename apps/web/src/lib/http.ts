@@ -26,6 +26,27 @@ function getEffectiveTenantId(explicitTenantId?: string): string {
   );
 }
 
+/**
+ * Build feature headers from Vite env vars (dev/nonprod only).
+ * Returns an object with X-Feature-* headers if the corresponding env vars are set to "true".
+ * This allows local dev to enable feature flags without modifying code.
+ */
+function getFeatureHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+
+  const registrationsEnabled = import.meta.env.VITE_MBAPP_FEATURE_REGISTRATIONS_ENABLED as string | undefined;
+  if (registrationsEnabled === "true") {
+    headers["X-Feature-Registrations-Enabled"] = "true";
+  }
+
+  const notifySimulate = import.meta.env.VITE_MBAPP_FEATURE_NOTIFY_SIMULATE as string | undefined;
+  if (notifySimulate === "true") {
+    headers["X-Feature-Notify-Simulate"] = "true";
+  }
+
+  return headers;
+}
+
 export type ApiFetchOptions = {
   method?: string;
   body?: any;
@@ -63,12 +84,16 @@ export async function apiFetch<T>(path: string, opts: ApiFetchOptions = {}): Pro
   const url = `${apiBase.replace(/\/$/, "")}${path}${search.toString() ? `?${search.toString()}` : ""}`;
   const hasBody = body !== undefined && body !== null && method.toUpperCase() !== "GET";
 
+  // Merge feature headers (from env) + caller headers (caller wins)
+  const featureHeaders = getFeatureHeaders();
+
   const init: RequestInit = {
     method,
     headers: {
       ...(hasBody ? { "content-type": "application/json" } : {}),
       "x-tenant-id": effectiveTenantId,
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...featureHeaders,
       ...headers,
     },
     body: hasBody ? JSON.stringify(body) : undefined,

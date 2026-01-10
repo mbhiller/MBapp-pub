@@ -98,6 +98,72 @@ Impact: Clearer public-first flow, fewer confusion points versus operator consol
 
 ---
 
+### Sprint CF — Dev Utilities: Retrieve Magic Link (Simulated) — ✅ Complete (2026-01-09)
+
+**Summary:** Documents the workflow for testing public "My Check-In" locally without real email delivery. Uses simulate mode and operator message queries to retrieve magic links from stored message bodies—no new public API surface needed.
+
+**Dev Workflow (3 Steps):**
+
+1. **Generate Link (Simulated):**
+   - Call `POST /registrations:lookup-public` with headers:
+     ```
+     X-Feature-Notify-Simulate: true
+     x-tenant-id: <your-tenant-id>
+     ```
+   - Body: `{ eventId, email: "dev@example.com" }`
+   - Link is assembled and stored in a message object but not sent.
+
+2. **Retrieve Link (Operator-Only):**
+   - Use the ops tool to query `/messages` by recipient email.
+   - Tool extracts the latest message body containing `/events/{eventId}/my-checkin?regId=...&token=...` and prints the link.
+   - Requires `message:read` permission (operator token).
+   
+   **Usage:**
+   ```powershell
+   # Set environment (ensure MBAPP_API_BASE, MBAPP_BEARER, MBAPP_TENANT_ID are set)
+   node ops/tools/dev-get-public-magic-link.mjs --email dev@example.com --eventId evt_abc123
+   ```
+   
+   **Output:**
+   ```
+   https://localhost:5173/events/evt_abc123/my-checkin?regId=reg_xyz&token=abc123...
+   ```
+
+3. **Open Link in Browser:**
+   - Paste the returned URL into your browser.
+   - You'll land in "My Check-In" session mode immediately with the registration visible.
+
+**Security Notes:**
+- This is an **operator/dev workflow**—not a public endpoint.
+- Relies on `/messages` API (permission: `message:read`) and simulated messages.
+- No new public API surface; no production token exposure.
+
+**Verification:**
+- Manual: Run the tool and confirm it prints a valid URL containing:
+  - `/events/{eventId}/my-checkin`
+  - `regId=`
+  - `token=`
+
+**Local Dev Setup (Web UI):**
+
+If you see **"Registrations feature is disabled"** in the browser when opening public links, you need to enable feature headers in your local web dev environment:
+
+1. Create `apps/web/.env.local` (gitignored):
+   ```
+   VITE_MBAPP_PUBLIC_TENANT_ID=SmokeTenant
+   VITE_MBAPP_FEATURE_REGISTRATIONS_ENABLED=true
+   ```
+
+2. **Restart the Vite dev server** after changing `.env.local` (env vars are loaded at build time).
+
+3. Open the extracted magic link on localhost and confirm it loads without 403 errors.
+
+**Optional:** Add `VITE_MBAPP_FEATURE_NOTIFY_SIMULATE=true` if you want fully simulated notification flows from the UI.
+
+**Impact:** Devs can test the full public magic link flow locally with fake emails without SMTP/email provider setup.
+
+---
+
 ### Sprint CC — Public Self Check-In — ✅ Complete (2026-01-09)
 
 **Summary:** Enables guests/competitors to check themselves in from the public "My Check-In" page (`/events/:eventId/my-checkin`) when their registration is ready. Idempotent endpoint uses public token authentication and enforces readiness checks. Returns safe public status response with no PII leakage. Web UI displays "Check In Now" button when ready and shows success state with timestamp.
