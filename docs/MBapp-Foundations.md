@@ -1,3 +1,28 @@
+### Credential Types (Sprint CJ)
+
+**Capability Model:**
+Credential types (badge and ticket) are a **data-layer capability** shipped in Sprint CJ. Users can select from 4 types during issuance:
+- `"admission"` — Default; general event access
+- `"staff"` — Staff/crew access (future: fast-path, premium zones)
+- `"vendor"` — Vendor/supplier access (future: loading zones, staging)
+- `"vip"` — VIP guest access (future: premium lounges, early access)
+
+**What CJ Shipped (Data Layer):**
+- Spec enums for BadgeType + TicketType (all 4 values)
+- Issue-badge/issue-ticket endpoints accept optional `{ badgeType }` / `{ ticketType }` body; default to "admission"
+- Resolve-scan + worklist endpoints return ticketType field in responses
+- Web UI: Badge type selector dropdown on Check-In Console
+- Idempotency remains scoped correctly: same key same type → cached; different type → re-issue or error
+
+**What's Deferred (Policy Layer):**
+- Type-specific access rules (e.g., staff→fast-path verification, VIP→premium zone entry)
+- Gate/checkpoint enforcement of type-based rules
+- Type-specific print templates and binding (RFID/NFC)
+- Planned for later explicit sprint (CK) once policy rules are defined
+
+**Developer Note:**
+When planning type-specific features, remember: data types are now queryable and filterable; policy rules should be additive and gated by feature flags, not dependent on database migrations.
+
 ### Registration Hold TTL (Sprint AV)
 
 - On checkout (draft → submitted), the server sets `submittedAt` and `holdExpiresAt = now + TTL`, where TTL comes from `REGISTRATION_HOLD_TTL_SECONDS` (default 900 seconds).

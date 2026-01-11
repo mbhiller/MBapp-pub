@@ -153,7 +153,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
       type: "ticket",
       filters: { eventId },
       limit: 500,
-      fields: ["id", "registrationId", "status", "usedAt", "eventId"],
+      fields: ["id", "registrationId", "status", "usedAt", "eventId", "ticketType"],
     });
 
     // Build map of tickets by registrationId (take first ticket per registration)
@@ -180,6 +180,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
       const enriched = {
         ...reg,
         ticketId: ticket?.id || null,
+        ticketType: ticket?.ticketType || null,
         ticketStatus: ticketStatus || null,
         ticketUsedAt: ticket?.usedAt || null,
         nextAction,

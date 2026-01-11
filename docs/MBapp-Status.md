@@ -6,6 +6,67 @@
 
 ---
 
+### Sprint CJ — Credential Multi-Type Support (admission/staff/vendor/vip) — ✅ Complete (2026-01-10)
+
+**Summary:** Delivered data-layer support for multi-type credentials (badges and tickets). Users can now select credential types (admission, staff, vendor, VIP) during issuance, and operators can see ticket types in scan resolution and worklist views. Type-specific policy rules (e.g., fast-path access for staff) deferred to future sprints.
+
+**Spec Changes:**
+- **BadgeType enum:** Expanded from implicit "admission" default to explicit enum: `"admission" | "staff" | "vendor" | "vip"` in [spec/MBapp-Modules.yaml](spec/MBapp-Modules.yaml)
+- **TicketType enum:** Expanded from implicit "admission" default to explicit enum: `"admission" | "staff" | "vendor" | "vip"` in [spec/MBapp-Modules.yaml](spec/MBapp-Modules.yaml)
+- **Issue-Badge & Issue-Ticket requests:** Now accept optional `{ badgeType }` and `{ ticketType }` bodies; default to "admission" if omitted
+- **Resolve-Scan response:** Now includes `{ ticketType }` field when ticket present
+- **Worklist response:** Now includes `{ ticketType }` field per row when ticket present
+
+**API Endpoints:**
+- `POST /registrations/{id}:issue-badge` — Accepts `{ badgeType: "admission" | "staff" | "vendor" | "vip" }`; returns issued badge with matching type. All existing guards (payment, check-in) unchanged.
+- `POST /registrations/{id}:issue-ticket` — Accepts `{ ticketType: "admission" | "staff" | "vendor" | "vip" }`; returns issued ticket with matching type. All existing guards (payment) unchanged.
+- `POST /registrations:resolve-scan` — Response now includes `{ ticketType, ticketStatus, ... }` when ticket present
+- `GET /events/{eventId}:checkin-worklist` — Rows now include `{ ticketType }` when ticket present
+
+**Web UI:**
+- **Badge Type Selector:** [apps/web/src/pages/CheckInConsolePage.tsx](apps/web/src/pages/CheckInConsolePage.tsx) - Added dropdown selector for badge issuance with 4 options (Admission / Staff / Vendor / VIP); defaults to Admission
+- **Issue Badge Action:** Updates workflow to prompt for type before issuance
+- **Type Display:** Worklist and detail views now show ticket type when present
+
+**Smoke Tests (Extended Tier — 5 new tests):**
+- `smoke:credentials:issue-badge-multi-type` — Full registration lifecycle; issues 4 badges (admission, staff, vendor, vip) each with distinct idempotency key; asserts each badge includes correct `badgeType` field and all IDs unique
+- `smoke:credentials:issue-ticket-multi-type` — Full registration lifecycle; issues 4 tickets (admission, staff, vendor, vip) each with distinct idempotency key; asserts each ticket includes correct `ticketType` field and all IDs unique
+- `smoke:credentials:idempotency-scoped-by-type` — Validates idempotency key behavior across type changes; shared key across two ticket types returns cached response, changing type on replay returns error or re-issues
+- `smoke:credentials:resolve-scan-includes-ticketType` — Issues VIP ticket, resolves via QR, asserts `ticketType="vip"` present in response
+- `smoke:credentials:worklist-includes-ticketType` — Creates 2 registrations with different ticket types; fetches worklist and validates `ticketType` field present in each row
+
+**Files Modified:**
+- [spec/MBapp-Modules.yaml](spec/MBapp-Modules.yaml) — BadgeType + TicketType enums, request/response schema updates
+- [apps/api/src/registrations/issue-badge-post.ts](apps/api/src/registrations/issue-badge-post.ts) — Accepts `{ badgeType }` body parameter
+- [apps/api/src/registrations/issue-ticket-post.ts](apps/api/src/registrations/issue-ticket-post.ts) — Accepts `{ ticketType }` body parameter
+- [apps/api/src/registrations/resolve-scan-post.ts](apps/api/src/registrations/resolve-scan-post.ts) — Returns `ticketType` in response
+- [apps/api/src/events/checkin-worklist-get.ts](apps/api/src/events/checkin-worklist-get.ts) — Includes `ticketType` in enriched row data
+- [apps/web/src/pages/CheckInConsolePage.tsx](apps/web/src/pages/CheckInConsolePage.tsx) — Type selector dropdown + display of types in UI
+- [ops/smoke/smoke.mjs](ops/smoke/smoke.mjs) — 5 new extended-tier tests (~721 lines added)
+- [ops/ci-smokes.json](ops/ci-smokes.json) — Registered 5 new extended tests
+- [docs/smoke-coverage.md](docs/smoke-coverage.md) — Documented Sprint CJ tests
+
+**Verification:**
+- ✅ Typecheck: `npm run typecheck -w apps/api && npm run typecheck -w apps/web && npm run typecheck -w apps/mobile` (PASS)
+- ✅ Spec pipeline: `npm run spec:lint`, `npm run spec:bundle`, `npm run spec:types:api`, `npm run spec:types:mobile` (all PASS)
+- ✅ Syntax validation: `node -c ops/smoke/smoke.mjs` (PASS)
+- ✅ Test registration: All 5 new tests found in ops/ci-smokes.json with `"tier": "extended"`
+- ✅ Documentation: Sprint CJ section added to smoke-coverage.md
+
+**Impact:**
+- Users can now issue credentials with specific types (admission/staff/vendor/vip) instead of implicit default
+- Operators see ticket types in resolution and worklist views (foundation for type-specific rules later)
+- Idempotency remains scoped correctly: same key on same type returns cached response; changing type returns error or re-issues
+- All existing guards and workflows unchanged; types are purely additive at data layer
+
+**Next Steps (Future Sprints — Type-Specific Policy):**
+- Define type-specific access rules (e.g., staff→fast-path, VIP→premium lounge)
+- Implement enforcement at gates/checkpoints (zone-based, time-based, resource-based)
+- Badge printing integration with type-specific print templates
+- Credential binding and RFID/NFC support for type validation at gates
+
+---
+
 ### Sprint CI.1 — Check-In Operator Polish (Gate-Ready Scan-to-Admit UX) — ✅ Complete (2026-01-10)
 
 **Summary:** Delivered operator experience polish for Check-In Console, focusing on reducing confusion and enabling continuous keyboard-driven workflow. Operators can now see all registrations by default, understand blockers immediately, and scan continuously without repetitive clicking.

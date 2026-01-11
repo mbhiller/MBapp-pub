@@ -2082,6 +2082,11 @@ components:
             type: string
             nullable: true
             description: Ticket ID if a ticket QR was scanned (E1 enhancement for ticket summary)
+          ticketType:
+            type: string
+            enum: [admission, staff, vendor, vip]
+            nullable: true
+            description: Ticket type if a ticket QR was scanned (Sprint CJ E3 - multi-type support)
           ticketStatus:
             type: string
             enum: [valid, used, cancelled, expired]
@@ -3536,6 +3541,9 @@ components:
             type: string
             enum:
             - admission
+            - staff
+            - vendor
+            - vip
             default: admission
             description: Type of badge being issued
           issuedAt:
@@ -3601,6 +3609,9 @@ components:
             type: string
             enum:
             - admission
+            - staff
+            - vendor
+            - vip
             default: admission
             description: Ticket type (defaults to admission)
           status:

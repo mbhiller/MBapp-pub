@@ -66,12 +66,14 @@ Smokes are organized by tier for targeted CI validation:
 
 ---
 
-## Recent Additions (Sprint CH)
+## Recent Additions (Sprint CJ)
 
-### CORE
-- **`smoke:ticketing:use-ticket-happy-path`** — Paid registration → ticket issued → checked in → `/tickets/{id}:use` returns used ticket with audit fields.
-- **`smoke:ticketing:use-ticket-idempotent`** — Same key replay returns 200 used; different key after use returns 409 `ticket_already_used`.
-- **`smoke:ticketing:use-ticket-guard-not-checkedin`** — Attempt use before check-in → 409 `registration_not_checkedin`.
+### EXTENDED
+- **`smoke:credentials:issue-badge-multi-type`** — Checks out + confirms payment for registration; checks in; issues 4 badges (admission, staff, vendor, vip) each with distinct idempotency key. Asserts: each badge includes correct `badgeType` field; all 4 badges issued successfully with unique IDs and matching types.
+- **`smoke:credentials:issue-ticket-multi-type`** — Checks out + confirms payment for registration; checks in; issues 4 tickets (admission, staff, vendor, vip) each with distinct idempotency key. Asserts: each ticket includes correct `ticketType` field; all 4 tickets have `status="valid"`; all 4 tickets issued successfully with unique IDs.
+- **`smoke:credentials:idempotency-scoped-by-type`** — Checks out + confirms + checks in; issues admission ticket with key K; replays key K (same type) → same ticket ID (idempotent); issues vip ticket with same key K → either returns 409 conflict or cached admission response (idempotency key is scoped at request level, not by credential type). Validates idempotency semantics across type changes.
+- **`smoke:credentials:resolve-scan-includes-ticketType`** — Issues vip ticket for checked-in registration; calls POST `/registrations:resolve-scan` with ticket QR; asserts: `ok=true`, response includes `ticket` object with `ticketType="vip"` matching issued type. Validates resolve-scan enrichment with type field.
+- **`smoke:credentials:worklist-includes-ticketType`** — Creates 2 registrations, both checked in, issues admission ticket for reg1 and vip ticket for reg2; fetches worklist; asserts: each row with ticket includes `ticket.ticketType` field with correct value (admission for reg1, vip for reg2). Validates worklist includes type for operator visibility.
 
 ---
 

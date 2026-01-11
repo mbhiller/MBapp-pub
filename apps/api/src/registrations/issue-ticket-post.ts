@@ -28,7 +28,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
         const body = JSON.parse(event.body);
         if (body.ticketType) {
           ticketType = String(body.ticketType).trim();
-          if (!["admission"].includes(ticketType)) {
+          if (!["admission", "staff", "vendor", "vip"].includes(ticketType)) {
             return badRequest("Invalid ticketType", { field: "ticketType" });
           }
         }
