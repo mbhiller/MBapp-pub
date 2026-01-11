@@ -71,9 +71,10 @@ export async function handle(event: APIGatewayProxyEventV2) {
           email,
         };
         
-        // Include optional party fields
-        if (body.party.name && typeof body.party.name === "string") {
-          newPartyBody.name = body.party.name;
+        // Include optional party fields (prefer name, fallback to displayName)
+        const partyName = body.party.name || body.party.displayName;
+        if (partyName && typeof partyName === "string") {
+          newPartyBody.name = partyName;
         }
         if (body.party.phone && typeof body.party.phone === "string") {
           newPartyBody.phone = body.party.phone;

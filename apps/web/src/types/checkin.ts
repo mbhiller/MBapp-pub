@@ -53,6 +53,11 @@ export type ScanResolutionResult =
       ready: boolean;
       blockers?: CheckInBlocker[];
       lastEvaluatedAt?: string | null;
+      nextAction?: "checkin" | "admit" | "already_admitted" | "blocked" | null;
+      nextActionLabel?: string | null;
+      ticketId?: string | null;
+      ticketStatus?: "valid" | "used" | null;
+      ticketUsedAt?: string | null;
     }
   | {
       ok: false;

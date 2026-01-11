@@ -529,8 +529,9 @@ export interface paths {
         put?: never;
         /**
          * Issue a ticket for a registration
-         * @description Issues a ticket for a registration. Idempotent via Idempotency-Key header.
-         *     Registration must meet the same guards as badge issuance (checked in, payment paid).
+         * @description Issues a ticket for a registration (Sprint CI E5 alignment).
+         *     Requires: partyId present, paymentStatus=paid, registration checked in, and readiness snapshot ready=true.
+         *     Idempotent via Idempotency-Key header. Matches guards of badge issuance.
          */
         post: operations["issueTicket"];
         delete?: never;
@@ -3613,6 +3614,23 @@ export interface components {
             checkInIdempotencyKey?: string | null;
             checkInStatusIdempotencyKey?: string | null;
             checkInStatus?: components["schemas"]["CheckInStatus"];
+            /** @description ID of admission ticket (if any) associated with this registration (worklist only) */
+            ticketId?: string | null;
+            /**
+             * @description Status of the admission ticket (worklist only)
+             * @enum {string|null}
+             */
+            ticketStatus?: "valid" | "issued" | "used" | "cancelled" | "expired" | null;
+            /**
+             * Format: date-time
+             * @description Timestamp when ticket was used/admitted (worklist only)
+             */
+            ticketUsedAt?: string | null;
+            /**
+             * @description Operator's next recommended action for this registration (worklist only)
+             * @enum {string|null}
+             */
+            nextAction?: "checkin" | "admit" | "already_admitted" | "blocked" | null;
         };
         /** @description Public-safe registration status snapshot (no PII/financials) */
         PublicRegistrationStatusResponse: {
@@ -3771,6 +3789,25 @@ export interface components {
             blockers?: components["schemas"]["CheckInBlocker"][];
             /** Format: date-time */
             lastEvaluatedAt?: string | null;
+            /** @description Ticket ID if a ticket QR was scanned (E1 enhancement for ticket summary) */
+            ticketId?: string | null;
+            /**
+             * @description Current state of the ticket if ticket QR scanned
+             * @enum {string|null}
+             */
+            ticketStatus?: "valid" | "used" | "cancelled" | "expired" | null;
+            /**
+             * Format: date-time
+             * @description Timestamp when ticket was used (if applicable)
+             */
+            ticketUsedAt?: string | null;
+            /**
+             * @description Recommended next operator action for fast-path decisions (E1 enhancement)
+             * @enum {string|null}
+             */
+            nextAction?: "checkin" | "admit" | "already_admitted" | "blocked" | null;
+            /** @description Human-readable label for nextAction (e.g. "Check In Required", "Admit Ticket") */
+            nextActionLabel?: string | null;
         } | {
             /** @enum {boolean} */
             ok: false;
@@ -6771,7 +6808,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Conflict - registration missing party, not checked in, or payment not complete */
+            /** @description Conflict - registration missing party, payment incomplete, not checked in, or blocked by readiness */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6779,7 +6816,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        code?: "party_missing" | "not_checked_in" | "checkin_blocked";
+                        code?: "party_missing" | "payment_unpaid" | "not_checked_in" | "checkin_blocked";
                         message?: string;
                         /** @description Included when code=checkin_blocked */
                         checkInStatus?: components["schemas"]["CheckInStatus"];

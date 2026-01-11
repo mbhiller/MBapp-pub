@@ -106,7 +106,33 @@ Each Tier uses the same structure so we can later expand any Phase into a detail
 - 🕓 Sprints: CG (Shipped).
 - 🏁 Outcome: End-to-end ticket→use foundation operational; ready for print/reprint and advanced credential flows.
 
-### 2.8 Ticket Printing & Reprint ⬜ Planned (Not Started)
+### 2.7.1 Check-In Console Fast-Path Actions ✅ Implemented (Sprint CI)
+- 🎯 Operator worklist with inline Check In / Admit / Admitted actions; server-computed nextAction; ticket enrichment; idempotent handlers.
+- 🧱 Schemas: Extended Registration with ticketId, ticketStatus, ticketUsedAt, nextAction fields.
+- 🔄 Flows: Worklist fetch → server enriches rows with ticket data + nextAction → web renders buttons → operator clicks → action POST with Idempotency-Key → refresh worklist.
+- ⚙️ Guards: All existing check-in and ticket-use guards (readiness, payment, ticket validity, idempotency).
+- 💻 UI/UX: Check-In Console table now includes Actions column with per-row buttons (Check In | Admit | Admitted badge); filter defaults may hide checked-in registrations (toggle to "Show all" to see demo seed).
+- 🧪 Smokes: worklist-ready-vs-blocked, ticketing:use-ticket-idempotent (core); seed-demo creates realistic event + 2 regs + 2 tickets.
+- 🕓 Sprints: CI (Shipped).
+- 🏁 Outcome: Operators can process check-ins and admissions without leaving worklist; demo seed provides end-to-end manual testing dataset.
+
+### 2.7.2 Operator Polish 🔶 Next Sprint (CI.1 — Planned)
+- 🎯 Improve Check-In Console UX: scan-to-row focus, clearer filter defaults, better blocker presentation, reduce confusion for new operators.
+- 🔄 Flows: Scan → highlight row in viewport (scroll + visual focus), filter defaults show seeded demo regs by default, blocker tooltip/drawer with remediation hints.
+- 💻 UI/UX: Prominent "Show checked-in / Show all" toggle, default filters adjusted (e.g., "Show all statuses" instead of "confirmed only"), blocker detail drawer with specific codes and operator guidance.
+- 🧪 Smokes: multi-scan workflow (scan → action → scan next), already-used ticket error handling, invalid QR format validation, cancelled ticket guard enforcement.
+- 🕓 Sprints: CI.1 (Next, estimated 0.5–1 sprint).
+- 🏁 Outcome: Smoother operator experience with fewer "where are my registrations?" moments; comprehensive edge-case coverage for scan/admit flows.
+
+### 2.8 Credential Lifecycle & Multi-Badge Types ⬜ Planned (Sprint CJ — After Operator Polish)
+- 🎯 Staff/Vendor/VIP/Spectator badge types; credential binding (RFID/NFC); pre-event ticket issuance vs onsite badge conversion.
+- 🧱 Schemas: BadgeType (name, accessLevel, rules[]), TicketCredential (credentialId, epc, bindingStatus), AccessRule (zone|resource, timeRange).
+- 🔄 Flows: Sell ticket pre-event → check-in → convert to badge with access rules → validate at gates/checkpoints.
+- ⚙️ Guards: Credential already bound, binding window TTL, out-of-bounds access (time/zone/resource).
+- 🕓 Sprints: CJ (Estimated 1–2).
+- 🏁 Outcome: Full credential lifecycle operational; ready for zone/access enforcement.
+
+### 2.9 Ticket Printing & Reprint ⬜ Planned (Sprint CK)
 - 🎯 ZPL/Zebra integration for badge/wristband print; reprint workflows for operator.
 - 🧱 Schemas: TicketPrintJob (status, zpl, printerId, retries), PrinterConfig.
 - 🔄 Flows: Issue ticket → auto-queue print job, operator reprint from ticket detail.

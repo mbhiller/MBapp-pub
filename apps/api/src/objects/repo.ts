@@ -617,6 +617,7 @@ export async function updateObject({ tenantId, type, id, body }: UpdateArgs) {
 
   for (const [k, v] of Object.entries(normalizedBody || {})) {
     if (identity.has(k)) continue;
+    if (v === undefined) continue;
     const nk = `#n_${k.replace(/[^A-Za-z0-9_]/g, "_")}`;
     const vk = `:v_${k.replace(/[^A-Za-z0-9_]/g, "_")}`;
     names[nk] = k;

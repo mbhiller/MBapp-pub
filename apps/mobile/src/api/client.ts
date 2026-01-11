@@ -6,16 +6,16 @@ import type { PatchLinesOp } from "../lib/patchLinesDiff";
 const env = process.env as Record<string, string | undefined>;
 
 let API_BASE = (
-  env.EXPO_PUBLIC_MBAPP_API_BASE ??
-  env.MBAPP_API_BASE ??
   env.EXPO_PUBLIC_API_BASE ??
+  env.EXPO_PUBLIC_MBAPP_API_BASE ??  // backward compat
+  env.MBAPP_API_BASE ??              // backward compat
   "https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com"
 ).replace(/\/+$/, "");
 
 let TENANT =
-  env.EXPO_PUBLIC_MBAPP_TENANT_ID ??
-  env.MBAPP_TENANT_ID ??
   env.EXPO_PUBLIC_TENANT_ID ??
+  env.EXPO_PUBLIC_MBAPP_TENANT_ID ??  // backward compat
+  env.MBAPP_TENANT_ID ??              // backward compat
   "DemoTenant";
 
 let _bearerToken: string | null =
@@ -27,15 +27,29 @@ if (__DEV__) {
 
 /**
  * Get feature-enabled headers for API requests.
- * If the registrations feature is enabled via EXPO_PUBLIC_MBAPP_FEATURE_REGISTRATIONS_ENABLED,
- * include the X-Feature-Registrations-Enabled header to bypass the API's feature gate.
+ * Maps EXPO_PUBLIC env vars to X-Feature-* headers for smoke testing and dev.
+ * - EXPO_PUBLIC_MBAPP_FEATURE_REGISTRATIONS_ENABLED → X-Feature-Registrations-Enabled
+ * - EXPO_PUBLIC_FEATURE_STRIPE_SIMULATE → X-Feature-Stripe-Simulate
+ * - EXPO_PUBLIC_FEATURE_NOTIFY_SIMULATE → X-Feature-Notify-Simulate
  */
 function getFeatureHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
+  
   const registrationsEnabled = process.env.EXPO_PUBLIC_MBAPP_FEATURE_REGISTRATIONS_ENABLED;
   if (registrationsEnabled?.toLowerCase() === "true" || registrationsEnabled === "1") {
     headers["X-Feature-Registrations-Enabled"] = "true";
   }
+  
+  const stripeSimulate = process.env.EXPO_PUBLIC_FEATURE_STRIPE_SIMULATE;
+  if (stripeSimulate?.toLowerCase() === "true" || stripeSimulate === "1") {
+    headers["X-Feature-Stripe-Simulate"] = "true";
+  }
+  
+  const notifySimulate = process.env.EXPO_PUBLIC_FEATURE_NOTIFY_SIMULATE;
+  if (notifySimulate?.toLowerCase() === "true" || notifySimulate === "1") {
+    headers["X-Feature-Notify-Simulate"] = "true";
+  }
+  
   return headers;
 }
 
@@ -108,12 +122,14 @@ async function tryDevRelogin(): Promise<boolean> {
 }
 
 async function request<T>(path: string, method: HttpMethod = "GET", body?: any, opts: RequestOpts = {}, _retried = false): Promise<T> {
+  const featureHeaders = getFeatureHeaders();
   const headers: Record<string, string> = {
     "accept": "application/json",
     "content-type": "application/json",
     // send both casings for tenant & auth (some middlewares normalize differently)
     "X-Tenant-Id": TENANT,
     "x-tenant-id": TENANT,
+    ...featureHeaders,
     ...opts.headers,
   };
   if (_bearerToken) {

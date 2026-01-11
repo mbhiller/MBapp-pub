@@ -6,8 +6,8 @@
   "scripts": {
     "start": "expo start",
     "start:dev": "set EXPO_PUBLIC_API_BASE=https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com&& set EXPO_PUBLIC_TENANT_ID=DemoTenant&& expo start -c",
-    "expo:demo": "cross-env EXPO_PUBLIC_MBAPP_TENANT_ID=DemoTenant EXPO_PUBLIC_MBAPP_API_BASE=https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com EXPO_PUBLIC_MBAPP_FEATURE_REGISTRATIONS_ENABLED=true EXPO_PUBLIC_DEV_EMAIL=dev@example.com npx expo start -c",
-    "expo:smoke": "cross-env EXPO_PUBLIC_MBAPP_TENANT_ID=SmokeTenant EXPO_PUBLIC_MBAPP_API_BASE=https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com EXPO_PUBLIC_MBAPP_FEATURE_REGISTRATIONS_ENABLED=true EXPO_PUBLIC_DEV_EMAIL=dev@example.com npx expo start -c",
+    "expo:demo": "cross-env EXPO_PUBLIC_TENANT_ID=DemoTenant EXPO_PUBLIC_API_BASE=https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com EXPO_PUBLIC_MBAPP_FEATURE_REGISTRATIONS_ENABLED=true EXPO_PUBLIC_DEV_EMAIL=dev@example.com npx expo start -c",
+    "expo:smoke": "cross-env EXPO_PUBLIC_TENANT_ID=SmokeTenant EXPO_PUBLIC_API_BASE=https://ki8kgivz1f.execute-api.us-east-1.amazonaws.com EXPO_PUBLIC_MBAPP_FEATURE_REGISTRATIONS_ENABLED=true EXPO_PUBLIC_FEATURE_STRIPE_SIMULATE=true EXPO_PUBLIC_FEATURE_NOTIFY_SIMULATE=true EXPO_PUBLIC_DEV_EMAIL=dev@example.com npx expo start -c",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",

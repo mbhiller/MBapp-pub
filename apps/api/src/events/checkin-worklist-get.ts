@@ -1,6 +1,6 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { ok, bad, error } from "../common/responses";
-import { listRegistrationsByEventId } from "../objects/repo";
+import { listRegistrationsByEventId, listObjects } from "../objects/repo";
 import type { components } from "../generated/openapi-types";
 
 const MAX_BACKEND_PAGES = 10;
@@ -9,6 +9,24 @@ const MIN_LIMIT = 1;
 const MAX_LIMIT = 200;
 
 const STATUS_ALLOWLIST = new Set(["draft", "submitted", "confirmed", "cancelled"]);
+
+type TicketStatus = "valid" | "issued" | "used" | "cancelled" | "expired";
+
+/**
+ * Compute nextAction for a registration based on check-in and ticket state.
+ */
+function computeNextAction(
+  reg: Registration,
+  isCheckedIn: boolean,
+  isReady: boolean,
+  ticketStatus?: TicketStatus | null
+): string {
+  if (!isReady) return "blocked";
+  if (!isCheckedIn) return "checkin";
+  if (ticketStatus === "used") return "already_admitted";
+  if (ticketStatus === "valid" || ticketStatus === "issued") return "admit";
+  return "blocked";
+}
 
 type Registration = components["schemas"]["Registration"];
 type CheckInWorklistPage = components["schemas"]["CheckInWorklistPage"];
@@ -129,12 +147,53 @@ export async function handle(event: APIGatewayProxyEventV2) {
       pageCount += 1;
     }
 
+    // Fetch tickets for the event to enrich worklist rows with nextAction
+    const ticketsPage = await listObjects({
+      tenantId,
+      type: "ticket",
+      filters: { eventId },
+      limit: 500,
+      fields: ["id", "registrationId", "status", "usedAt", "eventId"],
+    });
+
+    // Build map of tickets by registrationId (take first ticket per registration)
+    const ticketByRegistrationId: Record<string, any> = {};
+    if (Array.isArray(ticketsPage.items)) {
+      for (const ticket of ticketsPage.items as any[]) {
+        const regId = ticket?.registrationId;
+        if (regId && !ticketByRegistrationId[regId]) {
+          ticketByRegistrationId[regId] = ticket;
+        }
+      }
+    }
+
+    // Enrich collected registrations with ticket info and compute nextAction
+    const enrichedItems = collected.map((reg) => {
+      const regId = (reg as any).id;
+      const ticket = ticketByRegistrationId[regId];
+      const isCheckedIn = !!(reg as any).checkedInAt;
+      const isReady = (reg as any).checkInStatus?.ready === true;
+      const ticketStatus = ticket?.status as TicketStatus | undefined;
+
+      const nextAction = computeNextAction(reg, isCheckedIn, isReady, ticketStatus);
+
+      const enriched = {
+        ...reg,
+        ticketId: ticket?.id || null,
+        ticketStatus: ticketStatus || null,
+        ticketUsedAt: ticket?.usedAt || null,
+        nextAction,
+      } as any;
+
+      return enriched;
+    });
+
     const response: CheckInWorklistPage = {
       eventId,
       checkedIn,
       ready: readyFilter ?? null,
       blockerCode: blockerCodeRaw ?? null,
-      items: collected,
+      items: enrichedItems,
       next: finalNext,
     };
 

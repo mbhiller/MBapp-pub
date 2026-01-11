@@ -40,6 +40,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
 
     const eventId = req.eventId.trim();
     const scanString = String(req.scanString ?? "").trim();
+    const trimmedScanString = scanString.trim();
     const scanType = req.scanType || "auto";
 
     // Validate scanType enum
@@ -52,41 +53,88 @@ export async function handle(event: APIGatewayProxyEventV2) {
     // 2) If looks like MBapp QR payload (badge or ticket), parse it
     // 3) Otherwise treat as raw registrationId
     let candidateId: string | null = null;
+    let ticketSummary: { ticketId: string; ticketStatus: "valid" | "used" | "cancelled" | "expired"; ticketUsedAt: string | null } | null = null;
 
     if (scanType === "auto" || scanType === "qr" || scanType === "barcode") {
-      // Try JSON parsing first
-      if (scanString.startsWith("{") && scanString.endsWith("}")) {
+      // Try JSON parsing first (malformed JSON should return invalid_scan)
+      if (trimmedScanString.startsWith("{") || trimmedScanString.startsWith("[")) {
         try {
-          const parsed = JSON.parse(scanString);
+          const parsed = JSON.parse(trimmedScanString);
           if (typeof parsed === "object" && parsed !== null) {
-            // Look for id, registrationId, or similar fields
-            candidateId = parsed.registrationId || parsed.id || null;
+            candidateId = (parsed as any).registrationId || (parsed as any).id || null;
           }
         } catch {
-          // Not valid JSON, continue
-        }
-      }
-
-      // Badge issuance QR: badge|{eventId}|{registrationId}|{issuanceId}
-      if (!candidateId) {
-        const badge = parseBadgeQr(scanString);
-        if (badge) {
-          candidateId = badge.registrationId;
+          return ok({
+            ok: false,
+            error: "invalid_scan",
+            reason: "malformed_json",
+          } as ScanResolutionResult);
         }
       }
 
       // Ticket QR: ticket|{eventId}|{registrationId}|{ticketId}
-      if (!candidateId) {
-        const ticket = parseTicketQr(scanString);
-        if (ticket) {
-          candidateId = ticket.registrationId;
+      if (!candidateId && trimmedScanString.startsWith("ticket|")) {
+        const parts = trimmedScanString.split("|");
+        if (parts.length !== 4) {
+          return ok({
+            ok: false,
+            error: "invalid_scan",
+            reason: "malformed_ticket_qr",
+          } as ScanResolutionResult);
+        }
+        const ticketId = parts[3];
+        const regIdFromQr = parts[2];
 
-          // Optional ticket lookup for audit; do not block if missing
-          try {
-            await getObjectById({ tenantId, type: "ticket", id: ticket.ticketId, fields: ["id"] });
-          } catch {
-            // ignore
+        // Attempt to fetch ticket up-front; missing ticket should return not_found and not fall through
+        try {
+          const ticketObj = await getObjectById({
+            tenantId,
+            type: "ticket",
+            id: ticketId,
+            fields: ["id", "type", "status", "usedAt", "registrationId", "eventId"],
+          });
+
+          if (!ticketObj || (ticketObj as any).type !== "ticket") {
+            return ok({
+              ok: false,
+              error: "not_found",
+              reason: "ticket_not_found",
+            } as ScanResolutionResult);
           }
+
+          // Keep ticket summary for nextAction and admission guidance
+          ticketSummary = {
+            ticketId: (ticketObj as any).id,
+            ticketStatus: (ticketObj as any).status as "valid" | "used" | "cancelled" | "expired",
+            ticketUsedAt: (ticketObj as any).usedAt || null,
+          };
+
+          // Resolve registration from QR (fallback to ticket record if provided)
+          candidateId = regIdFromQr || (ticketObj as any).registrationId || null;
+          (event as any).__parsedTicketId = ticketId;
+        } catch {
+          return ok({
+            ok: false,
+            error: "not_found",
+            reason: "ticket_not_found",
+          } as ScanResolutionResult);
+        }
+      }
+
+      // Badge issuance QR: badge|{eventId}|{registrationId}|{issuanceId}
+      if (!candidateId && trimmedScanString.startsWith("badge|")) {
+        const parts = trimmedScanString.split("|");
+        if (parts.length !== 4) {
+          return ok({
+            ok: false,
+            error: "invalid_scan",
+            reason: "malformed_badge_qr",
+          } as ScanResolutionResult);
+        }
+
+        const badge = parseBadgeQr(trimmedScanString) ?? { registrationId: parts[2] };
+        if (badge?.registrationId) {
+          candidateId = badge.registrationId;
         }
       }
 
@@ -176,7 +224,67 @@ export async function handle(event: APIGatewayProxyEventV2) {
       holds: holds as any,
     });
 
-    // Build success response with check-in readiness
+    // E1: Fetch ticket summary if ticket QR was scanned via registration/badge flows (and ticket not already fetched)
+    const parsedTicketId = (event as any).__parsedTicketId as string | undefined;
+    if (parsedTicketId) {
+      try {
+        const ticket = await getObjectById({
+          tenantId,
+          type: "ticket",
+          id: parsedTicketId,
+          fields: ["id", "type", "status", "usedAt"],
+        });
+        if (ticket && (ticket as any).type === "ticket") {
+          ticketSummary = {
+            ticketId: (ticket as any).id,
+            ticketStatus: (ticket as any).status as "valid" | "used" | "cancelled" | "expired",
+            ticketUsedAt: (ticket as any).usedAt || null,
+          };
+        }
+      } catch {
+        // Ticket not found: include in response as missing (not blocking)
+        ticketSummary = null;
+      }
+    }
+
+    // E1: Compute nextAction + nextActionLabel for operator guidance (always include, even if null)
+    const isCheckedIn = !!(registration as any).checkedInAt;
+    const isReady = checkInStatus.ready === true;
+    const isBlocked = checkInStatus.ready === false;
+
+    let nextAction: "checkin" | "admit" | "already_admitted" | "blocked" | null = null;
+    let nextActionLabel: string | null = null;
+
+    // Base nextAction for non-ticket scans
+    if (isBlocked) {
+      nextAction = "blocked";
+      nextActionLabel = "Blocked";
+    } else if (!isCheckedIn) {
+      nextAction = "checkin";
+      nextActionLabel = "Check In";
+    }
+
+    // Ticket-aware overrides (if a ticket QR was parsed)
+    if (ticketSummary) {
+      if (isBlocked) {
+        nextAction = "blocked";
+        nextActionLabel = "Blocked";
+      } else if (!isCheckedIn) {
+        nextAction = "checkin";
+        nextActionLabel = "Check In";
+      } else if (ticketSummary.ticketStatus === "used") {
+        nextAction = "already_admitted";
+        nextActionLabel = "Already Admitted";
+      } else if (ticketSummary.ticketStatus === "valid") {
+        nextAction = "admit";
+        nextActionLabel = "Admit Ticket";
+      } else {
+        nextAction = "blocked";
+        nextActionLabel = "Ticket Not Valid";
+      }
+    }
+
+    // Build success response with check-in readiness + E1 ticket summary + nextAction
     const result: ScanResolutionResult = {
       ok: true,
       registrationId: (registration as any).id,
@@ -185,6 +293,11 @@ export async function handle(event: APIGatewayProxyEventV2) {
       ready: checkInStatus.ready ?? false,
       blockers: checkInStatus.blockers || [],
       lastEvaluatedAt: checkInStatus.lastEvaluatedAt || null,
+      ticketId: ticketSummary ? ticketSummary.ticketId : undefined,
+      ticketStatus: ticketSummary ? ticketSummary.ticketStatus : undefined,
+      ticketUsedAt: ticketSummary ? ticketSummary.ticketUsedAt : undefined,
+      nextAction,
+      nextActionLabel,
     };
 
     return ok(result);

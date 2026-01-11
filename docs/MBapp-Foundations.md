@@ -3128,3 +3128,136 @@ function ErrorBoundary({ children }: { children: React.ReactNode }) {
 **End of Report**
 
 </details>
+
+## Demo Dataset Seeding (Deterministic Local Testing)
+
+### Overview
+
+The `seed-demo-tenant.mjs` script creates a complete, deterministic demo dataset for the DemoTenant or SmokeTenant. This enables local development, testing, and CI scenarios without manually creating entities via UI or API.
+
+**What it creates per run:**
+- **Parties (2):** Customer (Emma Lawson) + Vendor (Red Oak Tack & Supply) with appropriate roles
+- **Products (2):** Weekend Grounds Pass + Event T-Shirt with stable SKU patterns
+- **Inventory Items (2):** Paired to products with on-hand receive movements (250 + 80 units)
+- **Event (1):** Demo Show Weekend, capacity 250, stall capacity 120, 2-day duration (starts +7 days from now, ends +2 days after start)
+- **Stall Resources (3):** Linked to event with resource tag filtering
+- **Registrations (2):** Public registrations for demo events:
+  - `demo.reg1+{seed}@example.com` — confirmed, ticket issued, checked-in, ticket used
+  - `demo.reg2+{seed}@example.com` — confirmed, ticket issued, NOT checked-in, NOT used
+- **Tickets (2):** QR-encoded tickets with status tracking
+
+### Running the Seed Script
+
+**Quick start:**
+`ash
+npm run seed:demo        # Seed DemoTenant with today's date as seed
+npm run seed:smoke       # Seed SmokeTenant with today's date as seed
+`
+
+**With custom seed date (YYYYMMDD):**
+`ash
+node ops/tools/seed-demo-tenant.mjs --tenant DemoTenant --seed 20260110
+node ops/tools/seed-demo-tenant.mjs --tenant SmokeTenant --seed 20260110
+`
+
+**With custom API base (for remote API testing):**
+`ash
+node ops/tools/seed-demo-tenant.mjs --tenant DemoTenant --api-base https://staging.api.mbapp.dev
+`
+
+**With output to JSON file (for CI verification):**
+`ash
+node ops/tools/seed-demo-tenant.mjs --tenant DemoTenant --output ./seed-output.json
+`
+
+**Other options:**
+- `--email <email>` — Auth email for token acquisition (default: dev@example.com)
+- `--verbose` — Detailed logging of all API calls
+- `--allow-any-tenant` — Bypass tenant allowlist (default: DemoTenant, SmokeTenant only)
+- `--help` — Show full usage documentation
+
+### Idempotency & Rerun Safety
+
+**By design, the script is fully idempotent:**
+
+- **Parties:** Query by name before create; reuse if found. Roles added only if missing.
+- **Products:** Query by name before create; reuse if found. SKU patterns stable per seed (e.g., `DEMO-GPASS-20260110` when seed is `2026-01-10`).
+- **Inventory items:** Query by name before create; reuse if found.
+- **Receive movements:** Check on-hand quantity before receive. Skips if qty > 0; creates only if 0 or unknown. Safe to rerun without duplicating stock.
+- **Events:** Query by name before create; reuse if found.
+- **Stall resources:** Created fresh each run (non-fatal on failure; logged but doesn't block event success).
+- **Registrations:** Public endpoint handles creation; ticket issuance uses stable idempotency keys (`seed-{seed}-{reg1|reg2}-ticket`), preventing duplicate tickets on rerun.
+
+**Rerunning safely:**
+`ash
+# Safe to rerun multiple times on same tenant
+npm run seed:demo
+npm run seed:demo  # No errors; reuses existing entities
+`
+
+### Cleanup (Before Reseeding with Fresh Data)
+
+If you need to wipe the tenant and reseed:
+`ash
+npm run wipe:demo && npm run seed:demo   # Clean slate with fresh entities
+`
+
+### Output & Verification
+
+By default, the script outputs a JSON summary to stdout. Save to file with `--output` flag for CI assertions:
+
+`ash
+npm run seed:demo --output ./seed-output.json
+`
+
+JSON includes:
+- `success`, `seed`, `tenant`, `apiBase`, `createdAt`
+- `summary` — counts (parties, products, inventoryItems, events, resources, registrations, tickets)
+- `entities` — full objects with IDs, names, emails, statuses, QR codes, timestamps
+- `auth` — token acquisition result
+
+### Feature Headers & Simulation
+
+The script automatically includes feature headers for deterministic behavior:
+- `X-Feature-Registrations-Enabled: true` — Enable registration system
+- `X-Feature-Stripe-Simulate: true` — Simulate payment (no real Stripe calls)
+- `X-Feature-Notify-Simulate: true` — Simulate notifications (no real SMS/email)
+
+No real payments, SMS, or emails are sent; all flows are deterministic and CI-friendly.
+
+### Check-In Console Workflow (Manual Testing)
+
+After seeding, use the web Check-In Console to validate operator workflows:
+
+**1. Navigate to Console:**
+- Web: Login with `dev@example.com` → Events list → click seeded event → "Operator Console" button
+- URL: `/events/{eventId}/checkin` (permission required: `event:read` + `registration:read`)
+
+**2. Worklist Filters (Important):**
+- **Default view:** Shows "confirmed" status + "not checked-in" registrations only
+- **To see REG1 (already checked-in):** Toggle "Checked In" filter to "Show all" or "Show checked-in only"
+- **To see all statuses:** Change Status dropdown from "Confirmed" to "Any"
+- **Search:** Use Party ID or Registration ID to filter (e.g., paste registrationId from seed output)
+
+**3. Actions Column (Per-Row Buttons):**
+- **REG1:** Shows **"Admitted"** badge (green) with timestamp — already used via seed script
+- **REG2:** Shows **"Admit"** button (blue) — ready to click for ticket use
+- Click "Admit" → POST `/tickets/{id}:use` with Idempotency-Key → row updates to "Admitted" badge
+
+**4. Scan Section (Above Filters):**
+- Paste ticket QR text (e.g., `ticket|{eventId}|{registrationId}|{ticketId}` from seed output)
+- Click "Resolve" → jumps to matching row and highlights it in worklist
+- Useful for testing QR scanner integration without physical scanner hardware
+
+**5. Expected Behavior:**
+- **REG1:** "Admitted" badge displays `ticketUsedAt` timestamp from seed (already processed)
+- **REG2:** Click "Admit" → loading state → success → refreshes worklist → shows "Admitted" badge with new timestamp
+- **Idempotency:** Clicking "Admit" again uses same Idempotency-Key → returns same result (no duplicate)
+- **Blockers:** If registration not ready (e.g., unpaid), shows "Blocked" with blocker codes instead of action buttons
+
+### Use Cases
+
+1. **Local development:** Run `npm run seed:demo` after `npm run wipe:demo` to start fresh with realistic data for UI/mobile testing.
+2. **Integration testing:** CI can seed SmokeTenant before running extended smoke tests.
+3. **Manual testing:** Verify registration checkout, ticket issuance, check-in workflows without manual API calls. Check-In Console provides end-to-end operator experience with seeded registrations.
+4. **Audit & debugging:** Output JSON captures all created IDs and state for troubleshooting. Use eventId, registrationIds, and ticketIds from output to navigate directly to specific entities in web UI.
