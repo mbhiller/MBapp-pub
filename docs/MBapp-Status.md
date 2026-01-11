@@ -6,6 +6,68 @@
 
 ---
 
+### Sprint CI.1 — Check-In Operator Polish (Gate-Ready Scan-to-Admit UX) — ✅ Complete (2026-01-10)
+
+**Summary:** Delivered operator experience polish for Check-In Console, focusing on reducing confusion and enabling continuous keyboard-driven workflow. Operators can now see all registrations by default, understand blockers immediately, and scan continuously without repetitive clicking.
+
+**Web Check-In Console Improvements:**
+- **Filter Defaults:** Changed default filters to show ALL registrations (checkedIn=null, status="", ready=null). Eliminates initial confusion when seeded demo registrations appeared hidden.
+- **Check-In Status Control:** Added "All / Not Checked In / Checked In" button group for one-click checkedIn filter toggle.
+- **Clear Filters Button:** Added reset button with disable logic when filters match defaults. Helps operators recover from complex filter combinations.
+- **Sticky Scan Errors:** Scan errors now persist in a dismissible banner (shows error, reason, scanned string). Errors remain visible until dismissed or next successful scan.
+- **Empty State Guidance:** Enhanced empty worklist with Clear Filters button and operator guidance ("Try clearing filters..."). Guards against pagination artifacts.
+- **Auto-Focus Scan Input:** Scan input auto-focuses after successful scan resolution and after Check In / Admit / Issue Badge actions. Enables continuous keyboard-driven workflow without mouse clicks.
+- **Blocker Tooltips:** Blocker codes now show human-readable explanations on hover. Uses HTML title attribute with underlined dotted styling. Prefers server-provided `blocker.reason` when present, falls back to client `BLOCKER_EXPLANATIONS` map.
+
+**API + Spec:**
+- **CheckInBlocker.reason Field:** Added optional `reason` field (nullable string) to CheckInBlocker schema in [spec/MBapp-Modules.yaml](spec/MBapp-Modules.yaml) (lines 1957-1977). Documents: "Human-readable explanation of the blocker (e.g. 'Payment not confirmed') for operator UI."
+- **Server-Side Reason Enrichment:** Added `BLOCKER_REASONS` map in [apps/api/src/registrations/checkin-readiness.ts](apps/api/src/registrations/checkin-readiness.ts) (lines 20-27). Updated `buildCheckInBlocker()` to auto-populate reason from map. All API responses now include reason field in blockers.
+- **Reason Consistency:** Web `BLOCKER_EXPLANATIONS` matches server `BLOCKER_REASONS` exactly for backward compatibility and consistent UX.
+
+**Smokes (Extended Tier — 5 new tests):**
+- `smoke:checkin:resolve-scan-wrong-event` — Validates cross-event registration rejection (scan with wrong eventId → `not_in_event` error)
+- `smoke:checkin:resolve-scan-not-found` — Validates missing registration error path (non-existent registrationId → `not_found` error)
+- `smoke:checkin:resolve-scan-ticket-missing-blocker-reason` — Validates E5 server-side reason enrichment (registration without ticket → blocker includes `reason="Admission ticket required"`)
+- `smoke:checkin:worklist-filter-combinations` — Validates filter interactions (checkedIn true/false, blockerCode, ready filters work correctly)
+- `smoke:checkin:blocker-reason-present` — Validates E5 enrichment across all blocker types (payment_unpaid, stalls_unassigned, etc. all include non-empty reason field)
+
+**Files Modified:**
+- [apps/web/src/pages/CheckInConsolePage.tsx](apps/web/src/pages/CheckInConsolePage.tsx) — Filter defaults, Clear Filters button, auto-focus, sticky errors, blocker tooltips, empty-state (~60 lines changed)
+- [apps/api/src/registrations/checkin-readiness.ts](apps/api/src/registrations/checkin-readiness.ts) — BLOCKER_REASONS map, buildCheckInBlocker update (~20 lines changed)
+- [spec/MBapp-Modules.yaml](spec/MBapp-Modules.yaml) — CheckInBlocker.reason field documented (~5 lines changed)
+- [ops/smoke/smoke.mjs](ops/smoke/smoke.mjs) — 5 new extended-tier tests (~220 lines added)
+- [ops/ci-smokes.json](ops/ci-smokes.json) — Registered 5 new tests in extended tier
+- [docs/smoke-coverage.md](docs/smoke-coverage.md) — Documented Sprint CI.1 section
+
+**Operator Workflow (Post-CI.1):**
+1. Navigate to Event Detail → "Operator Console" button → Check-In Console
+2. Worklist loads with ALL registrations visible by default (no hidden rows)
+3. Scan box is auto-focused → paste QR → jump to matching row
+4. Click Check In or Admit → scan box auto-refocuses → paste next QR (continuous workflow)
+5. Hover blocker codes → see explanation tooltip (e.g., "Payment not confirmed")
+6. Filter errors → Clear Filters button resets to defaults
+7. Empty list → guidance message with Clear Filters CTA
+
+**Verification:**
+- ✅ Typecheck: `npm run typecheck --workspaces --if-present` (PASS — apps/api, apps/web, apps/mobile)
+- ✅ Spec pipeline: `npm run spec:lint`, `npm run spec:bundle`, `npm run spec:types:api`, `npm run spec:types:mobile` (all PASS)
+- ✅ Extended smokes: `npm run smokes:run:extended` (51 flows, 112.86s, all PASS)
+- ✅ Individual test verification: All 5 new CI.1 smokes pass individually
+
+**Impact:**
+- Operators no longer confused by empty worklist on first load (default filters now show all)
+- Continuous scan workflow enabled (no mouse clicks required between scans)
+- Blocker codes immediately understandable (hover explanations)
+- Filter recovery simple (one-click Clear Filters)
+- API contract enriched (reason field ensures server is source of truth for explanations)
+
+**Next Steps (Sprint CJ — planned):**
+- Badge printing integration
+- Advanced scan types (badge verify, equipment check-out)
+- Operator audit log visibility
+
+---
+
 ### Sprint CI — Check-In Console Fast-Path Actions — ✅ Complete (2026-01-10)
 
 **Summary:** Delivered operator fast-path actions for Check-In Console worklist. Operators can now execute Check In and Admit actions directly from the worklist table without navigating to detail pages. API enriches worklist rows server-side with ticket information and computed nextAction, eliminating client-side logic duplication and ensuring consistent action availability.

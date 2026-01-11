@@ -6403,6 +6403,10 @@ components:
             - ticket_missing
         message:
           type: string
+        reason:
+          type: string
+          description: Human-readable explanation of the blocker (e.g. "Payment not confirmed") for operator UI
+          nullable: true
         action:
           allOf:
             - $ref: '#/components/schemas/CheckInAction'

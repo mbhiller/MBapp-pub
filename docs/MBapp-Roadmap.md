@@ -98,6 +98,13 @@ Each Tier uses the same structure so we can later expand any Phase into a detail
 
 ### 2.7 Ticketing Foundation ✅ Implemented (Sprint CG)
 - 🎯 Ticket issuance (idempotent, payment-guarded), scan resolution, ticket-use/admit (check-in gated).
+
+### 2.8 Check-In Operator Polish ✅ Shipped (Sprint CI.1)
+- 🎯 Hardened operator UX before expanding scope: default filters show all registrations, scan-to-admit continuous workflow (auto-focus), sticky error state, blocker tooltips with human-readable explanations.
+- 💻 UI/UX: Clear Filters button, empty-state guidance, auto-focus after actions, dual-fetch workaround for "show all" filter mode.
+- 🔄 API: Server-side blocker reason enrichment (CheckInBlocker.reason field), consistent BLOCKER_REASONS map.
+- 🧪 Smokes: 5 new extended-tier tests (resolve-scan edge cases, filter combinations, blocker reason verification).
+- 🏁 Outcome: Gate-ready scan-to-admit UX; operators can process check-ins/admissions without UI confusion or repetitive clicking.
 - 🧱 Schemas: Ticket (status, issuedAt, usedAt, useIdempotencyKey), Scan (resolution format).
 - 🔄 Flows: Issue ticket (Stripe payment confirm), resolve QR, admit ticket (operator scanner).
 - ⚙️ Guards: payment_unpaid, registration_not_checkedin, ticket_already_used (409 conflicts).

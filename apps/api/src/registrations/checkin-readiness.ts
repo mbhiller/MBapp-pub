@@ -14,14 +14,30 @@ export type ComputeArgs = {
 
 const ACTIVE_STATES = new Set<string>(["held", "confirmed"]);
 
+/**
+ * Human-readable explanations for blocker codes.
+ * Used to populate the reason field for operator UI.
+ */
+const BLOCKER_REASONS: Record<string, string> = {
+  payment_unpaid: "Payment not confirmed",
+  payment_failed: "Payment failed",
+  cancelled: "Registration cancelled",
+  stalls_unassigned: "Stall assignment required",
+  rv_unassigned: "RV site assignment required",
+  classes_unassigned: "Class assignment required",
+  ticket_missing: "Admission ticket required",
+};
+
 export function buildCheckInBlocker(
   code: CheckInBlocker["code"],
   message: string,
   action?: CheckInAction | null
 ): CheckInBlocker {
+  const reason = BLOCKER_REASONS[code] || null;
   return {
     code,
     message,
+    reason,
     ...(action ? { action } : {}),
   } as CheckInBlocker;
 }
