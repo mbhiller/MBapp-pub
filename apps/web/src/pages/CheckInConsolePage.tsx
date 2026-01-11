@@ -122,6 +122,9 @@ export default function CheckInConsolePage() {
   const [nextActions, setNextActions] = useState<Record<string, NextActionInfo>>({});
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
 
+  // Credential type selection (E4: Sprint CJ)
+  const [selectedBadgeType, setSelectedBadgeType] = useState<"admission" | "staff" | "vendor" | "vip">("admission");
+
   // Scan mode state
   const [scanString, setScanString] = useState("");
   const [resolving, setResolving] = useState(false);
@@ -322,7 +325,7 @@ export default function CheckInConsolePage() {
           method: "POST",
           token: token || undefined,
           tenantId,
-          body: { badgeType: "admission" },
+          body: { badgeType: selectedBadgeType },
           headers: {
             "Idempotency-Key": idempotencyKey,
           },
@@ -650,6 +653,21 @@ export default function CheckInConsolePage() {
                 Checked In
               </Button>
             </div>
+          </div>
+
+          <div className="grid gap-2">
+            <Label>Badge Type (for issuance)</Label>
+            <select
+              value={selectedBadgeType}
+              onChange={(e) => setSelectedBadgeType(e.target.value as "admission" | "staff" | "vendor" | "vip")}
+              disabled={loading}
+              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="admission">Admission</option>
+              <option value="staff">Staff</option>
+              <option value="vendor">Vendor</option>
+              <option value="vip">VIP</option>
+            </select>
           </div>
 
           <div className="grid gap-2">

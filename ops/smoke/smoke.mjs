@@ -20,7 +20,9 @@ const allowNonSmokeTenant = process.env.MBAPP_SMOKE_ALLOW_NON_SMOKE_TENANT === "
 if (!process.env.MBAPP_TENANT_ID || !process.env.MBAPP_TENANT_ID.trim()) {
   process.env.MBAPP_TENANT_ID = DEFAULT_TENANT;
 }
+
 const TENANT = process.env.MBAPP_TENANT_ID;
+
 if (!allowNonSmokeTenant && !TENANT.startsWith(DEFAULT_TENANT)) {
   console.error(
     `[smokes] MBAPP_TENANT_ID is "${TENANT}" but must start with "${DEFAULT_TENANT}". Set MBAPP_SMOKE_ALLOW_NON_SMOKE_TENANT=1 to override.`
@@ -22966,7 +22968,753 @@ const tests = {
     }
 
     return { test: "checkin:blocker-reason-present", result: "PASS", summary: "All blockers include proper reason fields" };
-  }
+  },
+
+  // E5: Sprint CJ — Multi-type credentials (extended)
+  "smoke:credentials:issue-badge-multi-type": async () => {
+    await ensureBearer();
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // 1) Seed a party
+    const { partyId } = await seedParties(api);
+
+    // 2) Create event
+    const eventName = smokeTag("badge_multi_type_evt");
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 5,
+      reservedCount: 0,
+      stallEnabled: true,
+      stallCapacity: 2,
+      stallReserved: 0,
+      stallUnitAmount: 1500
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "credentials:issue-badge-multi-type", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+
+    // 3) Create stalls
+    const stalls = [];
+    for (let i = 1; i <= 2; i++) {
+      const stall = await post("/objects/resource", {
+        type: "resource",
+        resourceType: "stall",
+        name: `MultiTypeBadgeStall-${i}`,
+        status: "available",
+        tags: [`event:${eventId}`, "group:MultiTypeBadge"]
+      });
+      if (!stall.ok || !stall.body?.id) {
+        return { test: "credentials:issue-badge-multi-type", result: "FAIL", reason: `stall-${i}-create-failed`, stall };
+      }
+      stalls.push(stall.body.id);
+      recordCreated({ type: "resource", id: stall.body.id, route: "/objects/resource", meta: { name: `MultiTypeBadgeStall-${i}`, eventId } });
+    }
+
+    // 4) Create registration via public endpoint
+    const regCreate = await post(
+      `/registrations:public`,
+      { eventId, stallQty: 2, partyId, party: { email: `badge_multi_type+${SMOKE_RUN_ID}@example.com` } },
+      featureHeaders,
+      { auth: "none" }
+    );
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test: "credentials:issue-badge-multi-type", result: "FAIL", reason: "reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+    recordCreated({ type: "registration", id: regId, route: "/registrations:public", meta: { eventId, partyId } });
+
+    // 5) Checkout
+    const checkout = await post(
+      `/events/registration/${encodeURIComponent(regId)}:checkout`,
+      {},
+      { ...featureHeaders, "X-MBapp-Public-Token": publicToken, "Idempotency-Key": idem() },
+      { auth: "none" }
+    );
+    if (!checkout.ok || !checkout.body?.paymentIntentId) {
+      return { test: "credentials:issue-badge-multi-type", result: "FAIL", reason: "checkout-failed", checkout };
+    }
+
+    // 6) Confirm payment via webhook
+    const webhookBody = {
+      id: `evt_${SMOKE_RUN_ID}`,
+      type: "payment_intent.succeeded",
+      data: {
+        object: {
+          id: checkout.body.paymentIntentId,
+          status: "succeeded",
+          metadata: { registrationId: regId, eventId }
+        }
+      }
+    };
+    const whRes = await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "Stripe-Signature": "sim_valid_signature",
+        ...featureHeaders,
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify(webhookBody)
+    });
+    if (!whRes.ok) {
+      return { test: "credentials:issue-badge-multi-type", result: "FAIL", reason: "webhook-confirm-failed", whStatus: whRes.status };
+    }
+
+    // 7) Assign stalls
+    const assignRes = await post(
+      `/registrations/${encodeURIComponent(regId)}:assign-resources`,
+      { itemType: "stall", resourceIds: [stalls[0], stalls[1]] },
+      featureHeaders
+    );
+    if (!assignRes.ok) {
+      return { test: "credentials:issue-badge-multi-type", result: "FAIL", reason: "assign-resources-failed", assignRes };
+    }
+
+    // 8) Check-in
+    const checkinRes = await post(
+      `/events/registration/${encodeURIComponent(regId)}:checkin`,
+      {},
+      { ...featureHeaders, "Idempotency-Key": idem() }
+    );
+    if (!checkinRes.ok || !checkinRes.body?.checkedInAt) {
+      return { test: "credentials:issue-badge-multi-type", result: "FAIL", reason: "checkin-failed", checkinRes };
+    }
+
+    // 9) Issue badges of all types
+    const badgeTypes = ["admission", "staff", "vendor", "vip"];
+    const issuedBadges = {};
+    for (const badgeType of badgeTypes) {
+      const issueBadge = await post(
+        `/registrations/${encodeURIComponent(regId)}:issue-badge`,
+        { badgeType },
+        { ...featureHeaders, "Idempotency-Key": `badge-${SMOKE_RUN_ID}-${badgeType}` }
+      );
+      if (!issueBadge.ok || !issueBadge.body?.issuance?.id) {
+        return { test: "credentials:issue-badge-multi-type", result: "FAIL", reason: `badge-issue-failed-${badgeType}`, issueBadge };
+      }
+      const issuance = issueBadge.body.issuance;
+      if (!issuance.badgeType || issuance.badgeType !== badgeType) {
+        return { test: "credentials:issue-badge-multi-type", result: "FAIL", reason: `badge-type-mismatch-${badgeType}`, expected: badgeType, got: issuance.badgeType };
+      }
+      issuedBadges[badgeType] = issuance;
+      recordCreated({ type: "badgeIssuance", id: issuance.id, route: "/registrations/{id}:issue-badge", meta: { eventId, registrationId: regId, badgeType } });
+    }
+
+    return {
+      test: "credentials:issue-badge-multi-type",
+      result: "PASS",
+      summary: "All badge types issued successfully with correct badgeType field",
+      eventId,
+      registrationId: regId,
+      badgeTypes: Object.keys(issuedBadges),
+      badgeIds: Object.entries(issuedBadges).reduce((acc, [type, badge]) => { acc[type] = badge.id; return acc; }, {})
+    };
+  },
+
+  "smoke:credentials:issue-ticket-multi-type": async () => {
+    await ensureBearer();
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // 1) Seed party
+    const { partyId } = await seedParties(api);
+
+    // 2) Create event
+    const eventName = smokeTag("ticket_multi_type_evt");
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 5,
+      reservedCount: 0,
+      stallEnabled: false,
+      stallCapacity: 0,
+      stallReserved: 0,
+      stallUnitAmount: 0
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "credentials:issue-ticket-multi-type", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+
+    // 3) Create registration
+    const regCreate = await post(
+      `/registrations:public`,
+      { eventId, stallQty: 0, partyId, party: { email: `ticket_multi_type+${SMOKE_RUN_ID}@example.com` } },
+      featureHeaders,
+      { auth: "none" }
+    );
+    if (!regCreate.ok || !regCreate.body?.registration?.id || !regCreate.body?.publicToken) {
+      return { test: "credentials:issue-ticket-multi-type", result: "FAIL", reason: "reg-create-failed", regCreate };
+    }
+    const regId = regCreate.body.registration.id;
+    const publicToken = regCreate.body.publicToken;
+    recordCreated({ type: "registration", id: regId, route: "/registrations:public", meta: { eventId, partyId } });
+
+    // 4) Checkout
+    const checkout = await post(
+      `/events/registration/${encodeURIComponent(regId)}:checkout`,
+      {},
+      { ...featureHeaders, "X-MBapp-Public-Token": publicToken, "Idempotency-Key": idem() },
+      { auth: "none" }
+    );
+    if (!checkout.ok || !checkout.body?.paymentIntentId) {
+      return { test: "credentials:issue-ticket-multi-type", result: "FAIL", reason: "checkout-failed", checkout };
+    }
+
+    // 5) Confirm payment
+    const webhookBody = {
+      id: `evt_${SMOKE_RUN_ID}`,
+      type: "payment_intent.succeeded",
+      data: {
+        object: {
+          id: checkout.body.paymentIntentId,
+          status: "succeeded",
+          metadata: { registrationId: regId, eventId }
+        }
+      }
+    };
+    const whRes = await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "Stripe-Signature": "sim_valid_signature",
+        ...featureHeaders,
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify(webhookBody)
+    });
+    if (!whRes.ok) {
+      return { test: "credentials:issue-ticket-multi-type", result: "FAIL", reason: "webhook-confirm-failed", whStatus: whRes.status };
+    }
+
+    // 6) Check-in
+    const checkinRes = await post(
+      `/events/registration/${encodeURIComponent(regId)}:checkin`,
+      {},
+      { ...featureHeaders, "Idempotency-Key": idem() }
+    );
+    if (!checkinRes.ok) {
+      return { test: "credentials:issue-ticket-multi-type", result: "FAIL", reason: "checkin-failed", checkinRes };
+    }
+
+    // 7) Issue tickets of all types
+    const ticketTypes = ["admission", "staff", "vendor", "vip"];
+    const issuedTickets = {};
+    for (const ticketType of ticketTypes) {
+      const issueTicket = await post(
+        `/registrations/${encodeURIComponent(regId)}:issue-ticket`,
+        { ticketType },
+        { ...featureHeaders, "Idempotency-Key": `ticket-${SMOKE_RUN_ID}-${ticketType}` }
+      );
+      if (!issueTicket.ok || !issueTicket.body?.ticket?.id) {
+        return { test: "credentials:issue-ticket-multi-type", result: "FAIL", reason: `ticket-issue-failed-${ticketType}`, issueTicket };
+      }
+      const ticket = issueTicket.body.ticket;
+      if (!ticket.ticketType || ticket.ticketType !== ticketType) {
+        return { test: "credentials:issue-ticket-multi-type", result: "FAIL", reason: `ticket-type-mismatch-${ticketType}`, expected: ticketType, got: ticket.ticketType };
+      }
+      if (ticket.status !== "valid") {
+        return { test: "credentials:issue-ticket-multi-type", result: "FAIL", reason: `ticket-status-invalid-${ticketType}`, status: ticket.status };
+      }
+      issuedTickets[ticketType] = ticket;
+      recordCreated({ type: "ticket", id: ticket.id, route: "/registrations/{id}:issue-ticket", meta: { eventId, registrationId: regId, ticketType } });
+    }
+
+    return {
+      test: "credentials:issue-ticket-multi-type",
+      result: "PASS",
+      summary: "All ticket types issued successfully with correct ticketType and status",
+      eventId,
+      registrationId: regId,
+      ticketTypes: Object.keys(issuedTickets),
+      ticketIds: Object.entries(issuedTickets).reduce((acc, [type, ticket]) => { acc[type] = ticket.id; return acc; }, {})
+    };
+  },
+
+  "smoke:credentials:idempotency-scoped-by-type": async () => {
+    await ensureBearer();
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // 1) Seed party
+    const { partyId } = await seedParties(api);
+
+    // 2) Create event
+    const eventName = smokeTag("idem_type_evt");
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 5,
+      reservedCount: 0,
+      stallEnabled: false,
+      stallCapacity: 0,
+      stallReserved: 0,
+      stallUnitAmount: 0
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "credentials:idempotency-scoped-by-type", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+
+    // 3) Create registration
+    const regCreate = await post(
+      `/registrations:public`,
+      { eventId, stallQty: 0, partyId, party: { email: `idem_type+${SMOKE_RUN_ID}@example.com` } },
+      featureHeaders,
+      { auth: "none" }
+    );
+    const regId = regCreate.body?.registrationId || regCreate.body?.registration?.id;
+    const publicToken = regCreate.body?.publicToken || regCreate.body?.registration?.publicToken;
+    if (!regCreate.ok || !regId || !publicToken) {
+      return { test: "credentials:idempotency-scoped-by-type", result: "FAIL", reason: "registration-create-failed", regCreate };
+    }
+    recordCreated({ type: "registration", id: regId, route: "/registrations:public", meta: { eventId } });
+
+    // 4) Checkout
+    const checkout = await post(
+      `/events/registration/${encodeURIComponent(regId)}:checkout`,
+      { partyId },
+      { ...featureHeaders, "X-MBapp-Public-Token": publicToken, "Idempotency-Key": idem() },
+      { auth: "none" }
+    );
+    if (!checkout.ok || !checkout.body?.paymentIntentId) {
+      return { test: "credentials:idempotency-scoped-by-type", result: "FAIL", reason: "checkout-failed", checkout };
+    }
+
+    // 5) Webhook confirm payment
+    const webhookBody = {
+      id: `evt_${SMOKE_RUN_ID}`,
+      type: "payment_intent.succeeded",
+      data: {
+        object: {
+          id: checkout.body.paymentIntentId,
+          status: "succeeded",
+          metadata: { registrationId: regId, eventId }
+        }
+      }
+    };
+    const whRes = await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "Stripe-Signature": "sim_valid_signature",
+        ...featureHeaders,
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify(webhookBody)
+    });
+    if (!whRes.ok) {
+      return { test: "credentials:idempotency-scoped-by-type", result: "FAIL", reason: "webhook-failed", whStatus: whRes.status };
+    }
+
+    // 6) Check in
+    const checkin = await post(
+      `/events/registration/${encodeURIComponent(regId)}:checkin`,
+      {},
+      { ...featureHeaders, "Idempotency-Key": `checkin-${SMOKE_RUN_ID}` }
+    );
+    if (!checkin.ok || !checkin.body?.checkedInAt) {
+      return { test: "credentials:idempotency-scoped-by-type", result: "FAIL", reason: "checkin-failed", checkin };
+    }
+
+    // 7) Issue admission ticket with key K
+    const sharedKey = `shared-key-${SMOKE_RUN_ID}`;
+    const issueAdmission1 = await post(
+      `/registrations/${encodeURIComponent(regId)}:issue-ticket`,
+      { ticketType: "admission" },
+      { ...featureHeaders, "Idempotency-Key": sharedKey }
+    );
+    if (!issueAdmission1.ok || !issueAdmission1.body?.ticket?.id) {
+      return { test: "credentials:idempotency-scoped-by-type", result: "FAIL", reason: "admission1-issue-failed", issueAdmission1 };
+    }
+    const admissionId1 = issueAdmission1.body.ticket.id;
+    recordCreated({ type: "ticket", id: admissionId1, route: "/registrations/{id}:issue-ticket", meta: { eventId, registrationId: regId, ticketType: "admission" } });
+
+    // 8) Replay admission with same key K -> should return same ticket
+    const issueAdmission1Replay = await post(
+      `/registrations/${encodeURIComponent(regId)}:issue-ticket`,
+      { ticketType: "admission" },
+      { ...featureHeaders, "Idempotency-Key": sharedKey }
+    );
+    if (!issueAdmission1Replay.ok || !issueAdmission1Replay.body?.ticket?.id) {
+      return { test: "credentials:idempotency-scoped-by-type", result: "FAIL", reason: "admission1-replay-failed", issueAdmission1Replay };
+    }
+    if (issueAdmission1Replay.body.ticket.id !== admissionId1) {
+      return { test: "credentials:idempotency-scoped-by-type", result: "FAIL", reason: "admission-replay-mismatch", firstId: admissionId1, replayId: issueAdmission1Replay.body.ticket.id };
+    }
+
+    // 9) Issue VIP with same key K -> TYPE-SCOPED IDEMPOTENCY -> should issue NEW vip ticket (not return cached admission)
+    const issueVip1 = await post(
+      `/registrations/${encodeURIComponent(regId)}:issue-ticket`,
+      { ticketType: "vip" },
+      { ...featureHeaders, "Idempotency-Key": sharedKey }
+    );
+    if (!issueVip1.ok || !issueVip1.body?.ticket?.id) {
+      return { test: "credentials:idempotency-scoped-by-type", result: "FAIL", reason: "vip1-issue-failed", issueVip1 };
+    }
+    const vipId1 = issueVip1.body.ticket.id;
+
+    // Validate: VIP ticket should be DIFFERENT from admission (type-scoped idempotency)
+    if (vipId1 === admissionId1) {
+      return {
+        test: "credentials:idempotency-scoped-by-type",
+        result: "FAIL",
+        reason: "type-scoped-idempotency-failed",
+        admissionId: admissionId1,
+        vipId: vipId1,
+        summary: "Expected new vip ticket with same key K, but got cached admission (idempotency should be scoped by type)"
+      };
+    }
+    recordCreated({ type: "ticket", id: vipId1, route: "/registrations/{id}:issue-ticket", meta: { eventId, registrationId: regId, ticketType: "vip" } });
+
+    // 10) Replay VIP with same key K -> should return same vip ticket
+    const issueVip1Replay = await post(
+      `/registrations/${encodeURIComponent(regId)}:issue-ticket`,
+      { ticketType: "vip" },
+      { ...featureHeaders, "Idempotency-Key": sharedKey }
+    );
+    if (!issueVip1Replay.ok || !issueVip1Replay.body?.ticket?.id) {
+      return { test: "credentials:idempotency-scoped-by-type", result: "FAIL", reason: "vip1-replay-failed", issueVip1Replay };
+    }
+    if (issueVip1Replay.body.ticket.id !== vipId1) {
+      return { test: "credentials:idempotency-scoped-by-type", result: "FAIL", reason: "vip-replay-mismatch", firstVipId: vipId1, replayVipId: issueVip1Replay.body.ticket.id };
+    }
+
+    return {
+      test: "credentials:idempotency-scoped-by-type",
+      result: "PASS",
+      summary: "Type-scoped idempotency: admission(K)->cached, VIP(K)->new ticket, VIP(K)->cached",
+      eventId,
+      registrationId: regId,
+      admissionTicketId: admissionId1,
+      vipTicketId: vipId1,
+      details: "Validated type-scoped idempotency: same key + type=admission -> same ticket; same key + type=vip -> different (new) ticket; replays return cached"
+    };
+  },
+
+  "smoke:credentials:resolve-scan-includes-ticketType": async () => {
+    await ensureBearer();
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // 1) Seed party
+    const { partyId } = await seedParties(api);
+
+    // 2) Create event
+    const eventName = smokeTag("resolve_scan_type_evt");
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 5,
+      reservedCount: 0,
+      stallEnabled: false,
+      stallCapacity: 0,
+      stallReserved: 0,
+      stallUnitAmount: 0
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "credentials:resolve-scan-includes-ticketType", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+
+    // 3) Create registration
+    const regCreate = await post(
+      `/registrations:public`,
+      { eventId, stallQty: 0, partyId, party: { email: `resolve_scan_type+${SMOKE_RUN_ID}@example.com` } },
+      featureHeaders,
+      { auth: "none" }
+    );
+    const regId = regCreate.body?.registrationId || regCreate.body?.registration?.id;
+    const publicToken = regCreate.body?.publicToken || regCreate.body?.registration?.publicToken;
+    if (!regCreate.ok || !regId || !publicToken) {
+      return { test: "credentials:resolve-scan-includes-ticketType", result: "FAIL", reason: "registration-create-failed", regCreate };
+    }
+    recordCreated({ type: "registration", id: regId, route: "/registrations:public", meta: { eventId } });
+
+    // 4) Checkout
+    const checkout = await post(
+      `/events/registration/${encodeURIComponent(regId)}:checkout`,
+      { partyId },
+      { ...featureHeaders, "X-MBapp-Public-Token": publicToken, "Idempotency-Key": idem() },
+      { auth: "none" }
+    );
+    if (!checkout.ok || !checkout.body?.paymentIntentId) {
+      return { test: "credentials:resolve-scan-includes-ticketType", result: "FAIL", reason: "checkout-failed", checkout };
+    }
+
+    // 5) Webhook confirm payment
+    const webhookBody = {
+      id: `evt_${SMOKE_RUN_ID}`,
+      type: "payment_intent.succeeded",
+      data: {
+        object: {
+          id: checkout.body.paymentIntentId,
+          status: "succeeded",
+          metadata: { registrationId: regId, eventId }
+        }
+      }
+    };
+    const whRes = await fetch(`${API}/webhooks/stripe`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "Stripe-Signature": "sim_valid_signature",
+        ...featureHeaders,
+        "x-tenant-id": TENANT
+      },
+      body: JSON.stringify(webhookBody)
+    });
+    if (!whRes.ok) {
+      return { test: "credentials:resolve-scan-includes-ticketType", result: "FAIL", reason: "webhook-failed", whStatus: whRes.status };
+    }
+
+    // 6) Check in
+    const checkin = await post(
+      `/events/registration/${encodeURIComponent(regId)}:checkin`,
+      {},
+      { ...featureHeaders, "Idempotency-Key": `checkin-${SMOKE_RUN_ID}` }
+    );
+    if (!checkin.ok || !checkin.body?.checkedInAt) {
+      return { test: "credentials:resolve-scan-includes-ticketType", result: "FAIL", reason: "checkin-failed", checkin };
+    }
+
+    // 7) Issue VIP ticket
+    const issueTicket = await post(
+      `/registrations/${encodeURIComponent(regId)}:issue-ticket`,
+      { ticketType: "vip" },
+      { ...featureHeaders, "Idempotency-Key": `issue-vip-${SMOKE_RUN_ID}` }
+    );
+    if (!issueTicket.ok || !issueTicket.body?.ticket?.id) {
+      return { test: "credentials:resolve-scan-includes-ticketType", result: "FAIL", reason: "ticket-issue-failed", issueTicket };
+    }
+    const ticketId = issueTicket.body.ticket.id;
+    recordCreated({ type: "ticket", id: ticketId, route: "/registrations/{id}:issue-ticket", meta: { eventId, registrationId: regId, ticketType: "vip" } });
+
+    // 8) Build canonical QR scan string and resolve
+    const scanString = `ticket|${eventId}|${regId}|${ticketId}`;
+    const scanBody = {
+      eventId,
+      scanString,
+      scanType: "qr"
+    };
+    const scanRes = await post("/registrations:resolve-scan", scanBody, featureHeaders);
+    if (!scanRes.ok) {
+      return { test: "credentials:resolve-scan-includes-ticketType", result: "FAIL", reason: "resolve-scan-request-failed", scanRes };
+    }
+    if (!scanRes.body?.ok) {
+      return { test: "credentials:resolve-scan-includes-ticketType", result: "FAIL", reason: "resolve-scan-ok-false", scanRes };
+    }
+
+    // 9) Verify ticketType is present in resolve-scan response
+    if (scanRes.body.ticketType === undefined) {
+      return { test: "credentials:resolve-scan-includes-ticketType", result: "FAIL", reason: "ticketType-missing-in-resolve-scan", scanRes };
+    }
+    if (scanRes.body.ticketType !== "vip") {
+      return { test: "credentials:resolve-scan-includes-ticketType", result: "FAIL", reason: "ticketType-mismatch", expected: "vip", got: scanRes.body.ticketType };
+    }
+
+    return {
+      test: "credentials:resolve-scan-includes-ticketType",
+      result: "PASS",
+      summary: "resolve-scan response includes ticketType field with correct value",
+      eventId,
+      registrationId: regId,
+      ticketId,
+      ticketType: scanRes.body.ticketType
+    };
+  },
+
+  "smoke:credentials:worklist-includes-ticketType": async () => {
+    await ensureBearer();
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // 1) Seed party
+    const { partyId } = await seedParties(api);
+
+    // 2) Create ONE event
+    const eventName = smokeTag("worklist_type_evt");
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: eventName,
+      capacity: 10,
+      reservedCount: 0,
+      stallEnabled: false,
+      stallCapacity: 0,
+      stallReserved: 0,
+      stallUnitAmount: 0
+    });
+    if (!evt.ok || !evt.body?.id) {
+      return { test: "credentials:worklist-includes-ticketType", result: "FAIL", reason: "event-create-failed", evt };
+    }
+    const eventId = evt.body.id;
+    recordCreated({ type: "event", id: eventId, route: "/objects/event" });
+
+    // 3) Create TWO registrations for the SAME event
+    const registrations = [];
+    for (let i = 0; i < 2; i++) {
+      const regCreate = await post(
+        `/registrations:public`,
+        { eventId, stallQty: 0, partyId, party: { email: `worklist_type_${i}+${SMOKE_RUN_ID}@example.com` } },
+        featureHeaders,
+        { auth: "none" }
+      );
+      const regId = regCreate.body?.registrationId || regCreate.body?.registration?.id;
+      const publicToken = regCreate.body?.publicToken || regCreate.body?.registration?.publicToken;
+      if (!regCreate.ok || !regId || !publicToken) {
+        return { test: "credentials:worklist-includes-ticketType", result: "FAIL", reason: `registration${i}-create-failed`, regCreate };
+      }
+      registrations.push({ id: regId, publicToken });
+      recordCreated({ type: "registration", id: regId, route: "/registrations:public", meta: { eventId } });
+    }
+    const regIds = registrations.map(r => r.id);
+    const [reg1, reg2] = regIds;
+
+    // 4) Checkout and confirm payment for both
+    for (const reg of registrations) {
+      const regId = reg.id;
+      const checkout = await post(
+        `/events/registration/${encodeURIComponent(regId)}:checkout`,
+        { partyId },
+        { ...featureHeaders, "X-MBapp-Public-Token": reg.publicToken, "Idempotency-Key": idem() },
+        { auth: "none" }
+      );
+      if (!checkout.ok || !checkout.body?.paymentIntentId) {
+        return { test: "credentials:worklist-includes-ticketType", result: "FAIL", reason: `checkout-${regId}-failed`, checkout };
+      }
+
+      // Webhook confirm
+      const webhookBody = {
+        id: `evt_${SMOKE_RUN_ID}_${regId}`,
+        type: "payment_intent.succeeded",
+        data: {
+          object: {
+            id: checkout.body.paymentIntentId,
+            status: "succeeded",
+            metadata: { registrationId: regId, eventId }
+          }
+        }
+      };
+      const whRes = await fetch(`${API}/webhooks/stripe`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "Stripe-Signature": "sim_valid_signature",
+          ...featureHeaders,
+          "x-tenant-id": TENANT
+        },
+        body: JSON.stringify(webhookBody)
+      });
+      if (!whRes.ok) {
+        return { test: "credentials:worklist-includes-ticketType", result: "FAIL", reason: `webhook-${regId}-failed`, whStatus: whRes.status };
+      }
+    }
+
+    // 5) Check in both registrations
+    for (const reg of registrations) {
+      const regId = reg.id;
+      const checkin = await post(
+        `/events/registration/${encodeURIComponent(regId)}:checkin`,
+        {},
+        { ...featureHeaders, "Idempotency-Key": `checkin-${regId}-${SMOKE_RUN_ID}` }
+      );
+      if (!checkin.ok || !checkin.body?.checkedInAt) {
+        return { test: "credentials:worklist-includes-ticketType", result: "FAIL", reason: `checkin-${regId}-failed`, checkin };
+      }
+    }
+
+    // 6) Issue tickets: admission for reg1, vip for reg2
+    const ticketTypes = ["admission", "vip"];
+    for (let i = 0; i < registrations.length; i++) {
+      const regId = registrations[i].id;
+      const ticketType = ticketTypes[i];
+      const issueTicket = await post(
+        `/registrations/${encodeURIComponent(regId)}:issue-ticket`,
+        { ticketType },
+        { ...featureHeaders, "Idempotency-Key": `issue-${regId}-${SMOKE_RUN_ID}` }
+      );
+      if (!issueTicket.ok || !issueTicket.body?.ticket?.id) {
+        return { test: "credentials:worklist-includes-ticketType", result: "FAIL", reason: `ticket-${ticketType}-issue-failed`, issueTicket };
+      }
+      recordCreated({ type: "ticket", id: issueTicket.body.ticket.id, route: "/registrations/{id}:issue-ticket", meta: { eventId, registrationId: regId, ticketType } });
+    }
+
+    // 7) Fetch worklist for the event
+    const worklist = await get(
+      `/events/${encodeURIComponent(eventId)}:checkin-worklist`,
+      { status: "confirmed", checkedIn: true },
+      { headers: featureHeaders }
+    );
+    if (!worklist.ok) {
+      return { test: "credentials:worklist-includes-ticketType", result: "FAIL", reason: "worklist-fetch-failed", worklist };
+    }
+    if (!Array.isArray(worklist.body?.items)) {
+      return { test: "credentials:worklist-includes-ticketType", result: "FAIL", reason: "worklist-items-missing", worklist };
+    }
+
+    // 8) Validate worklist includes ticketType for rows with tickets
+    const worklistItems = worklist.body.items;
+    const foundReg1 = worklistItems.find(row => row.registrationId === reg1 || row.id === reg1);
+    const foundReg2 = worklistItems.find(row => row.registrationId === reg2 || row.id === reg2);
+
+    if (!foundReg1) {
+      return { test: "credentials:worklist-includes-ticketType", result: "FAIL", reason: "reg1-not-in-worklist", worklistCount: worklistItems.length };
+    }
+    if (!foundReg2) {
+      return { test: "credentials:worklist-includes-ticketType", result: "FAIL", reason: "reg2-not-in-worklist", worklistCount: worklistItems.length };
+    }
+
+    // Validate ticketType field presence and correctness
+    const reg1TicketType = foundReg1.ticketType ?? foundReg1.ticket?.ticketType;
+    const reg2TicketType = foundReg2.ticketType ?? foundReg2.ticket?.ticketType;
+
+    if (reg1TicketType === undefined) {
+      return { test: "credentials:worklist-includes-ticketType", result: "FAIL", reason: "reg1-ticketType-missing", row: foundReg1 };
+    }
+    if (reg1TicketType !== "admission") {
+      return { test: "credentials:worklist-includes-ticketType", result: "FAIL", reason: "reg1-ticketType-mismatch", expected: "admission", got: reg1TicketType };
+    }
+
+    if (reg2TicketType === undefined) {
+      return { test: "credentials:worklist-includes-ticketType", result: "FAIL", reason: "reg2-ticketType-missing", row: foundReg2 };
+    }
+    if (reg2TicketType !== "vip") {
+      return { test: "credentials:worklist-includes-ticketType", result: "FAIL", reason: "reg2-ticketType-mismatch", expected: "vip", got: reg2TicketType };
+    }
+
+    return {
+      test: "credentials:worklist-includes-ticketType",
+      result: "PASS",
+      summary: "Worklist rows include ticketType field with correct values",
+      eventId,
+      registrations: [{ id: reg1, ticketType: "admission" }, { id: reg2, ticketType: "vip" }],
+      worklistRowCount: worklistItems.length
+    };
+  },
 
 };
 

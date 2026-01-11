@@ -3794,6 +3794,11 @@ export interface components {
             /** @description Ticket ID if a ticket QR was scanned (E1 enhancement for ticket summary) */
             ticketId?: string | null;
             /**
+             * @description Ticket type if a ticket QR was scanned (Sprint CJ E3 - multi-type support)
+             * @enum {string|null}
+             */
+            ticketType?: "admission" | "staff" | "vendor" | "vip" | null;
+            /**
              * @description Current state of the ticket if ticket QR scanned
              * @enum {string|null}
              */
@@ -4550,7 +4555,7 @@ export interface components {
              * @default admission
              * @enum {string}
              */
-            badgeType: "admission";
+            badgeType: "admission" | "staff" | "vendor" | "vip";
             /**
              * Format: date-time
              * @description Timestamp when badge was issued
@@ -4594,7 +4599,7 @@ export interface components {
              * @default admission
              * @enum {string}
              */
-            ticketType: "admission";
+            ticketType: "admission" | "staff" | "vendor" | "vip";
             /**
              * @description Current state of the ticket
              * @enum {string}

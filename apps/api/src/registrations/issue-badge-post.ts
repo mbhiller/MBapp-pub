@@ -28,7 +28,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
         const body = JSON.parse(event.body);
         if (body.badgeType) {
           badgeType = String(body.badgeType).trim();
-          if (!["admission"].includes(badgeType)) {
+          if (!["admission", "staff", "vendor", "vip"].includes(badgeType)) {
             return badRequest("Invalid badgeType", { field: "badgeType" });
           }
         }

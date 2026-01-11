@@ -53,7 +53,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
     // 2) If looks like MBapp QR payload (badge or ticket), parse it
     // 3) Otherwise treat as raw registrationId
     let candidateId: string | null = null;
-    let ticketSummary: { ticketId: string; ticketStatus: "valid" | "used" | "cancelled" | "expired"; ticketUsedAt: string | null } | null = null;
+    let ticketSummary: { ticketId: string; ticketType: string; ticketStatus: "valid" | "used" | "cancelled" | "expired"; ticketUsedAt: string | null } | null = null;
 
     if (scanType === "auto" || scanType === "qr" || scanType === "barcode") {
       // Try JSON parsing first (malformed JSON should return invalid_scan)
@@ -105,6 +105,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
           // Keep ticket summary for nextAction and admission guidance
           ticketSummary = {
             ticketId: (ticketObj as any).id,
+            ticketType: (ticketObj as any).ticketType || "admission",
             ticketStatus: (ticketObj as any).status as "valid" | "used" | "cancelled" | "expired",
             ticketUsedAt: (ticketObj as any).usedAt || null,
           };
@@ -232,11 +233,12 @@ export async function handle(event: APIGatewayProxyEventV2) {
           tenantId,
           type: "ticket",
           id: parsedTicketId,
-          fields: ["id", "type", "status", "usedAt"],
+          fields: ["id", "type", "status", "usedAt", "ticketType"],
         });
         if (ticket && (ticket as any).type === "ticket") {
           ticketSummary = {
             ticketId: (ticket as any).id,
+            ticketType: (ticket as any).ticketType || "admission",
             ticketStatus: (ticket as any).status as "valid" | "used" | "cancelled" | "expired",
             ticketUsedAt: (ticket as any).usedAt || null,
           };
@@ -294,6 +296,7 @@ export async function handle(event: APIGatewayProxyEventV2) {
       blockers: checkInStatus.blockers || [],
       lastEvaluatedAt: checkInStatus.lastEvaluatedAt || null,
       ticketId: ticketSummary ? ticketSummary.ticketId : undefined,
+      ticketType: ticketSummary ? (ticketSummary.ticketType as "admission" | "staff" | "vendor" | "vip") : undefined,
       ticketStatus: ticketSummary ? ticketSummary.ticketStatus : undefined,
       ticketUsedAt: ticketSummary ? ticketSummary.ticketUsedAt : undefined,
       nextAction,

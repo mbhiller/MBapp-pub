@@ -131,7 +131,17 @@ Each Tier uses the same structure so we can later expand any Phase into a detail
 - 🕓 Sprints: CI.1 (Next, estimated 0.5–1 sprint).
 - 🏁 Outcome: Smoother operator experience with fewer "where are my registrations?" moments; comprehensive edge-case coverage for scan/admit flows.
 
-### 2.8 Credential Lifecycle & Multi-Badge Types ⬜ Planned (Sprint CJ — After Operator Polish)
+### 2.8 Credential Multi-Type Support ✅ Shipped (Sprint CJ)
+- 🎯 Data-layer support for multi-type credentials (admission/staff/vendor/vip); operators can see types in scan/worklist; type-specific policy rules deferred.
+- 🧱 Schemas: BadgeType + TicketType enums expanded to include all 4 types; request bodies now accept optional type parameter (default: admission); resolve-scan and worklist responses include ticketType field.
+- 🔄 Flows: Issue badge/ticket → select type → confirm → response includes type. Resolve-scan → includes ticketType when ticket present. Worklist → rows include ticketType when ticket present.
+- ⚙️ Guards: All existing guards (payment, check-in, readiness) unchanged; type is purely additive at data layer.
+- 💻 UI/UX: Web Check-In Console adds badge type selector dropdown (4 options); worklist and detail views display ticket type.
+- 🧪 Smokes: 5 new extended-tier tests — issue 4 badge types, issue 4 ticket types, idempotency scoping across types, resolve-scan includes type, worklist includes type.
+- 🕓 Sprints: CJ (Shipped).
+- 🏁 Outcome: Foundation for type-specific features (access rules, fast-path, premium zones); ready for policy sprint.
+
+### 2.8.1 Credential Policy Rules (Type-Specific Access) ⬜ Planned (Sprint CK — Later)
 - 🎯 Staff/Vendor/VIP/Spectator badge types; credential binding (RFID/NFC); pre-event ticket issuance vs onsite badge conversion.
 - 🧱 Schemas: BadgeType (name, accessLevel, rules[]), TicketCredential (credentialId, epc, bindingStatus), AccessRule (zone|resource, timeRange).
 - 🔄 Flows: Sell ticket pre-event → check-in → convert to badge with access rules → validate at gates/checkpoints.

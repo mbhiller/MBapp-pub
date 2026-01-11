@@ -154,6 +154,11 @@
     { "name": "smoke:salesOrders:fulfill-idempotency-key-reuse-different-payload", "tier": "extended" },
     { "name": "smoke:suggest-po:skip-reasons", "tier": "extended" },
     { "name": "smoke:views-workspaces:permissions", "tier": "extended" },
-    { "name": "smoke:migrate-legacy-workspaces:safety-guards", "tier": "extended" }
+    { "name": "smoke:migrate-legacy-workspaces:safety-guards", "tier": "extended" },
+    { "name": "smoke:credentials:issue-badge-multi-type", "tier": "extended" },
+    { "name": "smoke:credentials:issue-ticket-multi-type", "tier": "extended" },
+    { "name": "smoke:credentials:idempotency-scoped-by-type", "tier": "extended" },
+    { "name": "smoke:credentials:resolve-scan-includes-ticketType", "tier": "extended" },
+    { "name": "smoke:credentials:worklist-includes-ticketType", "tier": "extended" }
   ]
 }
