@@ -6,6 +6,66 @@
 
 ---
 
+### Sprint CI — Check-In Console Fast-Path Actions — ✅ Complete (2026-01-10)
+
+**Summary:** Delivered operator fast-path actions for Check-In Console worklist. Operators can now execute Check In and Admit actions directly from the worklist table without navigating to detail pages. API enriches worklist rows server-side with ticket information and computed nextAction, eliminating client-side logic duplication and ensuring consistent action availability.
+
+**Deliverables (E1–E5):**
+- **API Enrichment (E1):** Enhanced [apps/api/src/events/checkin-worklist-get.ts](apps/api/src/events/checkin-worklist-get.ts) to fetch tickets for the event (limit 500), build `ticketByRegistrationId` map, and enrich each worklist row with `ticketId`, `ticketStatus`, `ticketUsedAt`, and server-computed `nextAction` (enum: `checkin|admit|already_admitted|blocked`). Action computation considers registration readiness, check-in state, and ticket validity.
+- **Spec Schema (E2):** Added 4 new fields to Registration schema in [spec/MBapp-Modules.yaml](spec/MBapp-Modules.yaml) (lines 1743–1771): `ticketId` (string|null), `ticketStatus` (enum: valid|issued|used|cancelled|expired, nullable), `ticketUsedAt` (date-time|null), `nextAction` (enum: checkin|admit|already_admitted|blocked, nullable). Fields enable web UI to render actions without re-computing business logic.
+- **Type Generation (E3):** Regenerated OpenAPI types via full spec pipeline: `spec:lint`, `spec:bundle`, `spec:permissions`, `spec:types:api`, `spec:types:mobile` (all PASS). Generated types include new Registration fields in both API and mobile workspaces.
+- **Web UI Actions (E4):** Updated [apps/web/src/pages/CheckInConsolePage.tsx](apps/web/src/pages/CheckInConsolePage.tsx) with Actions column (between Ready and Blockers). Renders per-row action buttons based on `nextAction` from API (priority: scan data > API response > computed fallback). Includes:
+  - **"Check In" button** when `nextAction=checkin` — calls `POST /events/registration/{id}:checkin` with Idempotency-Key, shows loading state, refreshes worklist on success
+  - **"Admit" button** when `nextAction=admit` — calls `POST /tickets/{id}:use` with Idempotency-Key, shows loading state, refreshes worklist on success
+  - **"Admitted" badge** when `nextAction=already_admitted` — displays green badge with timestamp from `ticketUsedAt`
+  - **"Blocked" state** when `nextAction=blocked` — shows dash, no action available
+  - All POST handlers use client-generated UUID for Idempotency-Key (safe retry on network failure)
+- **Seed Script Fix (E5):** Fixed [ops/tools/seed-demo-tenant.mjs](ops/tools/seed-demo-tenant.mjs) SKU conflict handling. Enhanced `findProductBySku()` to list all products locally (filter query unreliable); updated `getOrCreateProductBySku()` with triple fallback: find by name, find by SKU, create with unique SKU suffix (random 5-char). Enables successful seeding when products from previous runs cause conflicts.
+
+**Operator Workflow:**
+1. Navigate to Event Detail → "Operator Console" button → Check-In Console (`/events/:eventId/checkin`)
+2. Worklist loads with all registrations for the event (default filters: confirmed status, not checked-in)
+3. Actions column shows appropriate button per row based on server-computed `nextAction`
+4. Click "Check In" → registration checked in → button changes to "Admit" (or "Blocked" if ticket invalid)
+5. Click "Admit" → ticket used → button changes to "Admitted" badge with timestamp
+6. Use filters to toggle views: "Show checked-in", "Show all statuses", "Blockers", "Search"
+
+**Endpoints (existing, now enhanced):**
+- `GET /events/{eventId}:checkin-worklist` — Now includes ticket fields + `nextAction` per row
+- `POST /events/registration/{id}:checkin` — Check-in action (Idempotency-Key required)
+- `POST /tickets/{id}:use` — Admit action (Idempotency-Key required)
+
+**UI Gotchas & Tips:**
+- **Filter defaults:** Worklist default filters show "confirmed" status and "not checked-in" only. To see seeded demo registrations that are already checked-in (REG1), toggle "Checked In" filter to "Show all" or "Show checked-in only".
+- **Scan-to-row:** Use Scan section above filters to paste a QR code or registrationId and jump directly to matching row (auto-applies search filter).
+- **Action state:** Buttons disable during loading ("Checking in...", "Admitting..."); errors shown as toast; success refreshes worklist automatically.
+
+**Security & Idempotency:**
+- All action POSTs require Idempotency-Key header (client-generated UUID)
+- Replaying same key returns same result (no duplicate check-ins or admits)
+- Different key after success preserves original state (no re-check-in or re-admit)
+- Audit trail: `checkedInBy`, `checkedInAt`, `usedBy`, `usedAt` recorded
+
+**Verification:**
+- ✅ Typecheck: `npm run typecheck -w apps/api` (PASS), `npm run typecheck -w apps/web` (PASS)
+- ✅ Spec pipeline: `npm run spec:lint`, `npm run spec:bundle`, `npm run spec:types:api`, `npm run spec:types:mobile` (all PASS)
+- ✅ Smoke tests: `smoke:checkin:worklist-ready-vs-blocked` (PASS), `smoke:ticketing:use-ticket-idempotent` (PASS)
+- ✅ Seed demo: `npm run seed:demo` creates event + 2 registrations + 2 tickets (REG1 used, REG2 issued)
+
+**Impact:**
+- Operators can now process check-ins and admissions without leaving the worklist table
+- Server-computed nextAction ensures consistent business logic (no client-side drift)
+- Idempotency enables safe retries on network failures or accidental double-clicks
+- Demo seed provides realistic end-to-end dataset for manual testing and validation
+
+**Next Steps (Sprint CI.1 — Operator Polish):**
+- UX: scan-to-row focus (highlight matching row in viewport), clearer filter defaults, prominent "Show checked-in / Show all" toggle
+- Better blocker presentation: tooltip/detail drawer showing specific blocker codes and remediation hints
+- Reduce confusion: ensure default view surfaces seeded demo registrations clearly (adjust default filters or add banner)
+- More smokes: multi-scan workflow, already-used ticket errors, invalid QR format handling, cancelled ticket guards
+
+---
+
 ### Local Dev — Simulated Integrations (Stripe/Postmark/Twilio)
 
 - **API env:** set `FEATURE_STRIPE_SIMULATE=true` and `FEATURE_NOTIFY_SIMULATE=true` to avoid live provider calls. Real provider keys remain optional (`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `POSTMARK_API_TOKEN`, `POSTMARK_FROM_EMAIL`, `POSTMARK_MESSAGE_STREAM`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`).

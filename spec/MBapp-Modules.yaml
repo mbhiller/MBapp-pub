@@ -1725,6 +1725,34 @@ components:
           checkInStatus:
             $ref: '#/components/schemas/CheckInStatus'
             nullable: true
+          ticketId:
+            type: string
+            nullable: true
+            description: ID of admission ticket (if any) associated with this registration (worklist only)
+          ticketStatus:
+            type: string
+            nullable: true
+            enum:
+            - valid
+            - issued
+            - used
+            - cancelled
+            - expired
+            description: Status of the admission ticket (worklist only)
+          ticketUsedAt:
+            type: string
+            format: date-time
+            nullable: true
+            description: Timestamp when ticket was used/admitted (worklist only)
+          nextAction:
+            type: string
+            nullable: true
+            enum:
+            - checkin
+            - admit
+            - already_admitted
+            - blocked
+            description: Operator's next recommended action for this registration (worklist only)
         required:
         - type
         - eventId
@@ -2015,7 +2043,7 @@ components:
     ScanResolutionResult:
       oneOf:
       - type: object
-        description: Successful scan resolution
+        description: Successful scan resolution (Sprint CI E1 - includes ticket summary + nextAction for operator decisions)
         required:
         - ok
         - registrationId
@@ -2046,6 +2074,29 @@ components:
             type: string
             format: date-time
             nullable: true
+          ticketId:
+            type: string
+            nullable: true
+            description: Ticket ID if a ticket QR was scanned (E1 enhancement for ticket summary)
+          ticketStatus:
+            type: string
+            enum: [valid, used, cancelled, expired]
+            nullable: true
+            description: Current state of the ticket if ticket QR scanned
+          ticketUsedAt:
+            type: string
+            format: date-time
+            nullable: true
+            description: Timestamp when ticket was used (if applicable)
+          nextAction:
+            type: string
+            enum: [checkin, admit, already_admitted, blocked]
+            nullable: true
+            description: Recommended next operator action for fast-path decisions (E1 enhancement)
+          nextActionLabel:
+            type: string
+            nullable: true
+            description: Human-readable label for nextAction (e.g. "Check In Required", "Admit Ticket")
       - type: object
         description: Failed scan resolution
         required:
@@ -5396,8 +5447,9 @@ paths:
       operationId: issueTicket
       summary: Issue a ticket for a registration
       description: |-
-        Issues a ticket for a registration. Idempotent via Idempotency-Key header.
-        Registration must meet the same guards as badge issuance (checked in, payment paid).
+        Issues a ticket for a registration (Sprint CI E5 alignment).
+        Requires: partyId present, paymentStatus=paid, registration checked in, and readiness snapshot ready=true.
+        Idempotent via Idempotency-Key header. Matches guards of badge issuance.
       x-mbapp-permission: registration:write
       security:
       - bearerAuth: []
@@ -5433,7 +5485,7 @@ paths:
                   ticket:
                     $ref: '#/components/schemas/Ticket'
         '409':
-          description: Conflict - registration missing party, not checked in, or payment not complete
+          description: Conflict - registration missing party, payment incomplete, not checked in, or blocked by readiness
           content:
             application/json:
               schema:
@@ -5443,6 +5495,7 @@ paths:
                     type: string
                     enum:
                     - party_missing
+                    - payment_unpaid
                     - not_checked_in
                     - checkin_blocked
                   message:

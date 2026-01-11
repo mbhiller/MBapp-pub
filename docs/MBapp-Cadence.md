@@ -10,11 +10,11 @@
 Before starting a sprint or feature work, set up a fresh local tenant with realistic demo data:
 
 ```bash
-# 1. Wipe any existing data
-npm run wipe:demo
+# 1. Wipe any existing data (requires double confirmation)
+npm run wipe:demo -- --confirm --confirm-tenant DemoTenant
 
 # 2. Seed fresh dataset (parties, products, inventory, event, registrations, tickets)
-npm run seed:demo
+npm run seed:demo -- --tenant DemoTenant --seed 2026-01-10
 
 # 3. Web dev — login with dev@example.com (check script output for IDs)
 npm run dev -w apps/web
@@ -23,14 +23,38 @@ npm run dev -w apps/web
 npm run expo:demo
 ```
 
+**Expected Seed Output:**
+- **2 parties:** Customer (Emma Lawson) + Vendor (Red Oak Tack & Supply)
+- **2 products:** Weekend Grounds Pass + Event T-Shirt (with SKUs like `DEMO-GPASS-20260110`)
+- **2 inventory items:** Paired to products (250 + 80 units received)
+- **1 event:** Demo Show Weekend (starts +7 days, 2-day duration, capacity 250)
+- **2 registrations:**
+  - REG1 (`demo.reg1+2026-01-10@example.com`) — confirmed, ticket issued, **checked-in, ticket used** (shows "Admitted")
+  - REG2 (`demo.reg2+2026-01-10@example.com`) — confirmed, ticket issued, **not checked-in** (shows "Admit" button)
+- **2 tickets:** QR-encoded with format `ticket|{eventId}|{registrationId}|{ticketId}`
+
+**Check-In Console Workflow (Web):**
+1. Navigate to `/events` → click event → "Operator Console" button
+2. **Gotcha:** Default filters show "confirmed" + "not checked-in" only
+   - To see REG1 (already checked-in): toggle "Checked In" filter to "Show all" or "Show checked-in only"
+   - To see all statuses: change Status dropdown from "Confirmed" to "Any"
+3. Actions column shows:
+   - REG1: **"Admitted"** badge (green) with timestamp
+   - REG2: **"Admit"** button (ready to click)
+4. Click "Admit" on REG2 → ticket used → row updates to "Admitted" badge
+5. Use Scan section to test QR resolution: paste ticket QR → jumps to matching row
+
 **For Smoke Testing:**
 ```bash
 # Seed SmokeTenant separately for isolated testing
-npm run seed:smoke
+npm run wipe:smoke -- --confirm --confirm-tenant SmokeTenant
+npm run seed:smoke -- --tenant SmokeTenant --seed 2026-01-10
 
 # Run core smoke suite (~40% faster than full)
 npm run smokes:run:core
 ```
+
+**Idempotency Note:** Safe to rerun `npm run seed:demo` without wiping—script reuses existing entities (parties, products, events) and skips duplicate creation.
 
 Full details: [Demo Dataset Seeding](MBapp-Foundations.md#demo-dataset-seeding-deterministic-local-testing) (custom seeds, idempotency, output format, feature flags).
 

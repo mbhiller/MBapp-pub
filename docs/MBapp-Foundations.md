@@ -3225,9 +3225,39 @@ The script automatically includes feature headers for deterministic behavior:
 
 No real payments, SMS, or emails are sent; all flows are deterministic and CI-friendly.
 
+### Check-In Console Workflow (Manual Testing)
+
+After seeding, use the web Check-In Console to validate operator workflows:
+
+**1. Navigate to Console:**
+- Web: Login with `dev@example.com` → Events list → click seeded event → "Operator Console" button
+- URL: `/events/{eventId}/checkin` (permission required: `event:read` + `registration:read`)
+
+**2. Worklist Filters (Important):**
+- **Default view:** Shows "confirmed" status + "not checked-in" registrations only
+- **To see REG1 (already checked-in):** Toggle "Checked In" filter to "Show all" or "Show checked-in only"
+- **To see all statuses:** Change Status dropdown from "Confirmed" to "Any"
+- **Search:** Use Party ID or Registration ID to filter (e.g., paste registrationId from seed output)
+
+**3. Actions Column (Per-Row Buttons):**
+- **REG1:** Shows **"Admitted"** badge (green) with timestamp — already used via seed script
+- **REG2:** Shows **"Admit"** button (blue) — ready to click for ticket use
+- Click "Admit" → POST `/tickets/{id}:use` with Idempotency-Key → row updates to "Admitted" badge
+
+**4. Scan Section (Above Filters):**
+- Paste ticket QR text (e.g., `ticket|{eventId}|{registrationId}|{ticketId}` from seed output)
+- Click "Resolve" → jumps to matching row and highlights it in worklist
+- Useful for testing QR scanner integration without physical scanner hardware
+
+**5. Expected Behavior:**
+- **REG1:** "Admitted" badge displays `ticketUsedAt` timestamp from seed (already processed)
+- **REG2:** Click "Admit" → loading state → success → refreshes worklist → shows "Admitted" badge with new timestamp
+- **Idempotency:** Clicking "Admit" again uses same Idempotency-Key → returns same result (no duplicate)
+- **Blockers:** If registration not ready (e.g., unpaid), shows "Blocked" with blocker codes instead of action buttons
+
 ### Use Cases
 
 1. **Local development:** Run `npm run seed:demo` after `npm run wipe:demo` to start fresh with realistic data for UI/mobile testing.
 2. **Integration testing:** CI can seed SmokeTenant before running extended smoke tests.
-3. **Manual testing:** Verify registration checkout, ticket issuance, check-in workflows without manual API calls.
-4. **Audit & debugging:** Output JSON captures all created IDs and state for troubleshooting.
+3. **Manual testing:** Verify registration checkout, ticket issuance, check-in workflows without manual API calls. Check-In Console provides end-to-end operator experience with seeded registrations.
+4. **Audit & debugging:** Output JSON captures all created IDs and state for troubleshooting. Use eventId, registrationIds, and ticketIds from output to navigate directly to specific entities in web UI.

@@ -415,23 +415,29 @@ export async function handle(event: APIGatewayProxyEventV2) {
 
     const snapshot = computeCheckInStatus({ tenantId, registration: regForSnapshot, holds: holds as any });
 
+    // Build update body, optionally including checkoutIdempotencyKey if header was provided
+    const updateBody: any = {
+      status: REGISTRATION_STATUS.submitted,
+      paymentStatus: REGISTRATION_PAYMENT_STATUS.pending,
+      paymentIntentId: pi.id,
+      paymentIntentClientSecret: pi.clientSecret,
+      submittedAt: new Date().toISOString(),
+      holdExpiresAt: holdUntil,
+      fees: computedFees,
+      totalAmount: amount,
+      currency: "usd",
+      checkInStatus: snapshot,
+    };
+
+    if (idempotencyKey) {
+      updateBody.checkoutIdempotencyKey = idempotencyKey;
+    }
+
     const updated = await updateObject({
       tenantId,
       type: "registration",
       id,
-      body: {
-        status: REGISTRATION_STATUS.submitted,
-        paymentStatus: REGISTRATION_PAYMENT_STATUS.pending,
-        paymentIntentId: pi.id,
-        paymentIntentClientSecret: pi.clientSecret,
-        checkoutIdempotencyKey: idempotencyKey,
-        submittedAt: new Date().toISOString(),
-        holdExpiresAt: holdUntil,
-        fees: computedFees,
-        totalAmount: amount,
-        currency: "usd",
-        checkInStatus: snapshot,
-      },
+      body: updateBody,
     });
 
     return ok({ paymentIntentId: pi.id, clientSecret: pi.clientSecret, totalAmount: amount, currency: "usd" });

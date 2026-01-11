@@ -120,6 +120,40 @@ function debugLog(verbose, message) {
 }
 
 // ============================================================================
+// POLLING UTILITY
+// ============================================================================
+
+/**
+ * Poll a function until it returns { ok: true } or timeout expires.
+ */
+async function pollUntil(label, fn, { timeoutMs = 10000, intervalMs = 500, backoff = 1 } = {}) {
+  const startTime = Date.now();
+  let attempt = 0;
+
+  while (Date.now() - startTime < timeoutMs) {
+    attempt++;
+    try {
+      const result = await fn();
+      if (result?.ok) {
+        return result;
+      }
+    } catch (err) {
+      debugLog(globalThis.__VERBOSE, `${label} attempt ${attempt} failed: ${err?.message}`);
+    }
+
+    const elapsedMs = Date.now() - startTime;
+    if (elapsedMs >= timeoutMs) break;
+
+    const delayMs = Math.min(intervalMs * Math.pow(backoff, attempt - 1), timeoutMs - elapsedMs);
+    if (delayMs > 0) {
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+
+  return { ok: false };
+}
+
+// ============================================================================
 // HTTP CLIENT
 // ============================================================================
 
@@ -368,16 +402,169 @@ async function upsertPartyByName({ name, kind, roles = [] }) {
 async function listProducts(limit = 100) {
   try {
     const res = await get(`/objects/product?limit=${limit}`);
+    debugLog(globalThis.__VERBOSE, `listProducts response: ok=${res.ok}, body type=${typeof res.body}, has items=${Array.isArray(res.body?.items)}`);
     if (res.ok && Array.isArray(res.body?.items)) {
+      debugLog(globalThis.__VERBOSE, `listProducts returning ${res.body.items.length} items from body.items`);
       return { ok: true, items: res.body.items };
     }
     if (res.ok && Array.isArray(res.body)) {
+      debugLog(globalThis.__VERBOSE, `listProducts returning ${res.body.length} items from body`);
       return { ok: true, items: res.body };
     }
+    debugLog(globalThis.__VERBOSE, `listProducts: res.ok=${res.ok}, body=${JSON.stringify(res.body)}`);
     return { ok: false, items: [] };
   } catch (error) {
     debugLog(globalThis.__VERBOSE, `listProducts failed: ${error.message}`);
     return { ok: false, items: [] };
+  }
+}
+
+/**
+ * Find a product by exact SKU.
+ * Throws if none or if multiple are found (ambiguity must be resolved upstream).
+ */
+async function findProductBySku(targetSku) {
+  const sku = (targetSku || "").trim();
+  if (!sku) {
+    throw new Error("findProductBySku: sku is required");
+  }
+
+  // List all products and search locally (filter query may not work reliably)
+  const result = await listProducts(500);
+  if (!result.ok) {
+    throw new Error(`Failed to list products when searching for sku '${sku}'`);
+  }
+
+  debugLog(globalThis.__VERBOSE, `Found ${result.items.length} products, searching for sku=${sku}`);
+  const items = result.items.filter((p) => p.sku === sku);
+
+  if (items.length === 0) {
+    // Debug: show what SKUs are available
+    const availableSkus = result.items.map((p) => p.sku).filter(Boolean);
+    debugLog(globalThis.__VERBOSE, `Available SKUs: ${availableSkus.join(", ")}`);
+    throw new Error(`Product with sku '${sku}' not found after conflict`);
+  }
+  if (items.length > 1) {
+    throw new Error(`Multiple products found with sku '${sku}', cannot disambiguate`);
+  }
+
+  return items[0];
+}
+
+/**
+ * Create product or, on SKU conflict, fetch the existing product by SKU.
+ * Handles both 409 conflicts and 500s that include the SKU error message.
+ * On persistent failure, uses unique SKU to avoid global collision.
+ */
+async function getOrCreateProductBySku({ name, sku, kind = "good", preferredVendorId }) {
+  debugLog(globalThis.__VERBOSE, `Creating product: ${name} (sku: ${sku})`);
+
+  const payload = {
+    type: "product",
+    kind,
+    name,
+    sku,
+  };
+
+  if (preferredVendorId) {
+    payload.preferredVendorId = preferredVendorId;
+  }
+
+  const isSkuConflictError = (error) => {
+    const status = error?.status;
+    const msg = error?.body?.message || error?.message || "";
+    if (!msg) return false;
+    const hasSkuMsg = msg.toLowerCase().includes("sku already exists");
+    return (status === 409 && hasSkuMsg) || (status === 500 && hasSkuMsg);
+  };
+
+  try {
+    const res = await post("/objects/product", payload);
+    const productId = res.body?.id || res.body?.productId;
+    if (!productId) {
+      throw new Error(`Product created but no ID returned: ${JSON.stringify(res.body)}`);
+    }
+
+    return {
+      id: productId,
+      type: "product",
+      kind,
+      name,
+      sku,
+      reused: false,
+    };
+  } catch (error) {
+    debugLog(globalThis.__VERBOSE, `POST /objects/product error: status=${error?.status}, msg=${error?.body?.message || error?.message}`);
+    if (!isSkuConflictError(error)) {
+      throw error;
+    }
+
+    // Conflict path: Try to find by name first (may have been created despite error), then by SKU
+    console.log(`[seed-demo-tenant] SKU conflict detected, trying to find existing product: ${sku}`);
+    
+    try {
+      // Try to find by name first (more reliable than SKU list query)
+      const byName = await findProductByName(name);
+      if (byName) {
+        debugLog(globalThis.__VERBOSE, `Found product by name: ${name} → ${byName.id}`);
+        return {
+          id: byName.id,
+          type: byName.type || "product",
+          kind: byName.kind || kind,
+          name: byName.name || name,
+          sku: byName.sku || sku,
+          reused: true,
+        };
+      }
+    } catch (err) {
+      debugLog(globalThis.__VERBOSE, `Failed to find by name: ${err.message}`);
+    }
+    
+    // Fallback 1: Try by SKU
+    try {
+      const existing = await findProductBySku(sku);
+      return {
+        id: existing.id,
+        type: existing.type || "product",
+        kind: existing.kind || kind,
+        name: existing.name || name,
+        sku: existing.sku || sku,
+        reused: true,
+      };
+    } catch (err) {
+      debugLog(globalThis.__VERBOSE, `Failed to find by SKU: ${err.message}`);
+    }
+    
+    // Fallback 2: Create with unique SKU (tenant-scoped collision avoidance)
+    const uniqueSuffix = Math.random().toString(36).substring(2, 7);
+    const uniqueSku = `${sku}-${uniqueSuffix}`;
+    console.log(`[seed-demo-tenant] ℹ Could not find conflicting product, creating with unique SKU: ${uniqueSku}`);
+    
+    try {
+      const res2 = await post("/objects/product", {
+        type: "product",
+        kind,
+        name,
+        sku: uniqueSku,
+        preferredVendorId,
+      });
+      const productId = res2.body?.id || res2.body?.productId;
+      if (!productId) {
+        throw new Error(`Product created but no ID returned: ${JSON.stringify(res2.body)}`);
+      }
+
+      return {
+        id: productId,
+        type: "product",
+        kind,
+        name,
+        sku: uniqueSku,
+        reused: false,
+      };
+    } catch (err2) {
+      console.log(`[seed-demo-tenant] ✗ Failed to create product even with unique SKU: ${err2.message}`);
+      throw err2;
+    }
   }
 }
 
@@ -394,42 +581,18 @@ async function findProductByName(targetName) {
   }
 }
 
+
 /**
  * Create a new product.
  */
-async function createProduct({ name, sku, kind = "good" }) {
-  debugLog(globalThis.__VERBOSE, `Creating product: ${name} (sku: ${sku})`);
-
-  const payload = {
-    type: "product",
-    kind,
-    name,
-    sku,
-  };
-
-  const res = await post("/objects/product", payload);
-  if (!res.ok) {
-    throw new Error(`Failed to create product '${name}': ${JSON.stringify(res.body)}`);
-  }
-
-  const productId = res.body?.id || res.body?.productId;
-  if (!productId) {
-    throw new Error(`Product created but no ID returned: ${JSON.stringify(res.body)}`);
-  }
-
-  return {
-    id: productId,
-    type: "product",
-    kind,
-    name,
-    sku,
-  };
+async function createProduct({ name, sku, kind = "good", preferredVendorId }) {
+  return getOrCreateProductBySku({ name, sku, kind, preferredVendorId });
 }
 
 /**
  * Upsert product: create if not exists.
  */
-async function upsertProductByName({ name, sku, kind = "good" }) {
+async function upsertProductByName({ name, sku, kind = "good", preferredVendorId }) {
   debugLog(globalThis.__VERBOSE, `Upserting product: ${name}`);
 
   const existing = await findProductByName(name);
@@ -441,10 +604,11 @@ async function upsertProductByName({ name, sku, kind = "good" }) {
       kind: existing.kind || kind,
       name,
       sku: existing.sku || sku,
+      reused: true,
     };
   }
 
-  return await createProduct({ name, sku, kind });
+  return await createProduct({ name, sku, kind, preferredVendorId });
 }
 
 // ============================================================================
@@ -748,16 +912,40 @@ async function createStallResource({ eventId, name, qty = 1 }) {
 }
 
 /**
- * Create a public registration for an event.
+ * Helper to extract registration ID from various response shapes.
+ * Returns { regId, body } or throws with detailed error.
  */
-async function createPublicRegistration({ eventId, email, displayName }) {
+function extractRegistrationId(body, endpoint) {
+  const regId = body?.registrationId ?? body?.registration?.id ?? body?.registration?.registrationId ?? body?.id;
+  
+  if (!regId) {
+    throw new Error(
+      `Failed to extract registration ID from ${endpoint} response. Body: ${JSON.stringify(body)}`
+    );
+  }
+  
+  return { regId, body };
+}
+
+/**
+ * Create a public registration for an event.
+ * If partyId is provided, uses existing party; otherwise creates/finds party by email.
+ */
+async function createPublicRegistration({ eventId, email, displayName, partyId }) {
   debugLog(globalThis.__VERBOSE, `Creating public registration: ${email} for event ${eventId}`);
 
   try {
     const payload = {
-      party: { email, displayName },
       eventId,
     };
+
+    // Prefer explicit partyId to avoid creating duplicate/blank parties
+    if (partyId) {
+      payload.partyId = partyId;
+    } else {
+      // Fallback: party lookup/creation by email + name
+      payload.party = { email, name: displayName };
+    }
 
     const response = await fetch(`${globalThis.__API_BASE}/registrations:public`, {
       method: "POST",
@@ -772,14 +960,16 @@ async function createPublicRegistration({ eventId, email, displayName }) {
 
     if (!response.ok) {
       const errText = await response.text().catch(() => "");
+      const errBody = await response.json().catch(() => ({}));
+      console.error(
+        `[seed-demo-tenant] POST /registrations:public failed: status ${response.status}, body: ${JSON.stringify(errBody)}`
+      );
       throw new Error(`POST /registrations:public returned ${response.status}: ${errText}`);
     }
 
     const data = await response.json().catch(() => ({}));
-    const regId = data.id || data.registrationId;
-    if (!regId) {
-      throw new Error("No registration ID returned from /registrations:public");
-    }
+    
+    const { regId } = extractRegistrationId(data, "/registrations:public");
 
     debugLog(globalThis.__VERBOSE, `✓ Public registration created: ${regId}`);
     return { id: regId, status: data.status, publicToken: data.publicToken };
@@ -791,7 +981,7 @@ async function createPublicRegistration({ eventId, email, displayName }) {
 /**
  * Checkout a registration to reserve capacity.
  */
-async function checkoutRegistration({ registrationId }) {
+async function checkoutRegistration({ registrationId, publicToken }) {
   debugLog(globalThis.__VERBOSE, `Checkout registration: ${registrationId}`);
 
   try {
@@ -803,6 +993,8 @@ async function checkoutRegistration({ registrationId }) {
           "content-type": "application/json",
           "x-tenant-id": globalThis.__TENANT_ID,
           "authorization": `Bearer ${globalThis.__BEARER_TOKEN}`,
+          "idempotency-key": `checkout-${registrationId}-${Date.now()}`,
+          ...(publicToken && { "x-mbapp-public-token": publicToken }),
           ...(globalThis.__FEATURE_HEADERS || {}),
         },
         body: JSON.stringify({}),
@@ -810,13 +1002,68 @@ async function checkoutRegistration({ registrationId }) {
     );
 
     if (!response.ok) {
+      const errBody = await response.json().catch(() => ({}));
       const errText = await response.text().catch(() => "");
+      console.error(
+        `[seed-demo-tenant] POST /events/registration/:checkout for ${registrationId} failed: status ${response.status}, body: ${JSON.stringify(errBody)}`
+      );
       throw new Error(`POST /events/registration/:checkout returned ${response.status}: ${errText}`);
     }
 
     const data = await response.json().catch(() => ({}));
-    debugLog(globalThis.__VERBOSE, `✓ Checkout complete, status: ${data.status}`);
-    return { ok: true, status: data.status };
+    debugLog(globalThis.__VERBOSE, `✓ Checkout complete, status: ${data.status}, paymentIntentId: ${data.paymentIntentId}`);
+    return { ok: true, status: data.status, paymentIntentId: data.paymentIntentId, eventId: data.eventId };
+  } catch (error) {
+    throw error;
+  }
+}
+
+/**
+ * Simulate Stripe webhook payment success for a payment intent.
+ * This allows registrations to reach confirmed status without waiting for actual webhooks.
+ */
+async function simulatePaymentSuccess({ paymentIntentId, registrationId, eventId }) {
+  debugLog(globalThis.__VERBOSE, `Simulating payment success for PI: ${paymentIntentId}`);
+
+  try {
+    // Construct webhook body matching Stripe webhook format
+    const webhookBody = {
+      id: `evt_seed_${paymentIntentId}`,
+      type: "payment_intent.succeeded",
+      data: {
+        object: {
+          id: paymentIntentId,
+          status: "succeeded",
+          metadata: { registrationId, eventId }
+        }
+      }
+    };
+
+    const response = await fetch(
+      `${globalThis.__API_BASE}/webhooks/stripe`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "Stripe-Signature": "sim_valid_signature",
+          "x-tenant-id": globalThis.__TENANT_ID,
+          ...(globalThis.__FEATURE_HEADERS || {}),
+        },
+        body: JSON.stringify(webhookBody),
+      }
+    );
+
+    if (!response.ok) {
+      const errBody = await response.json().catch(() => ({}));
+      const errText = await response.text().catch(() => "");
+      console.error(
+        `[seed-demo-tenant] POST /webhooks/stripe failed: status ${response.status}, body: ${JSON.stringify(errBody)}`
+      );
+      throw new Error(`POST /webhooks/stripe returned ${response.status}: ${errText}`);
+    }
+
+    console.log(`[seed-demo-tenant] ✓ Simulated payment success for PI: ${paymentIntentId}`);
+    return { ok: true };
   } catch (error) {
     throw error;
   }
@@ -835,14 +1082,18 @@ async function pollRegistrationConfirmed(registrationId) {
         headers: {
           "x-tenant-id": globalThis.__TENANT_ID,
           "authorization": `Bearer ${globalThis.__BEARER_TOKEN}`,
+          ...(globalThis.__FEATURE_HEADERS || {}),
         },
       });
 
       if (!response.ok) {
+        const errBody = await response.json().catch(() => ({}));
+        debugLog(globalThis.__VERBOSE, `GET /registrations/${registrationId} failed: ${response.status}, ${JSON.stringify(errBody)}`);
         return { ok: false };
       }
 
       const reg = await response.json().catch(() => ({}));
+      debugLog(globalThis.__VERBOSE, `Registration status: ${reg.status}, paymentStatus: ${reg.paymentStatus}, checkInStatus: ${JSON.stringify(reg.checkInStatus)}`);
       // Check if status is confirmed or if paymentStatus indicates success
       if (reg.status === "confirmed" || reg.paymentStatus === "paid") {
         return { ok: true, registration: reg };
@@ -850,7 +1101,7 @@ async function pollRegistrationConfirmed(registrationId) {
 
       return { ok: false };
     },
-    { timeoutMs: 10000, intervalMs: 500, backoff: 1 }
+    { timeoutMs: 15000, intervalMs: 500, backoff: 1 }
   );
 }
 
@@ -877,16 +1128,27 @@ async function issueTicket({ registrationId, idempotencyKey }) {
     );
 
     if (!response.ok) {
+      const errBody = await response.json().catch(() => ({}));
       const errText = await response.text().catch(() => "");
+      console.error(
+        `[seed-demo-tenant] POST /registrations/:issue-ticket for ${registrationId} failed: status ${response.status}, body: ${JSON.stringify(errBody)}`
+      );
       throw new Error(`POST /registrations/:issue-ticket returned ${response.status}: ${errText}`);
     }
 
     const data = await response.json().catch(() => ({}));
-    const ticketId = data.id || data.ticketId;
-    const qrText = data.qrText || data.qr;
+    
+    // Parse response: API returns { ticket: Ticket } where Ticket has id and payload.qrText
+    const ticket = data?.ticket ?? data?.data?.ticket ?? data?.result?.ticket ?? data;
+    const ticketId = ticket?.id;
+    const qrText = ticket?.payload?.qrText ?? ticket?.qrText;
+
+    if (!ticketId) {
+      throw new Error(`Ticket issued but no ID returned. Response: ${JSON.stringify(data)}`);
+    }
 
     debugLog(globalThis.__VERBOSE, `✓ Ticket issued: ${ticketId}, QR: ${qrText}`);
-    return { id: ticketId, qrText, status: data.status };
+    return { ticketId, qrText, ticket, status: ticket?.status };
   } catch (error) {
     throw error;
   }
@@ -947,15 +1209,20 @@ async function checkinRegistration({ registrationId, idempotencyKey }) {
     );
 
     if (!response.ok) {
+      const errBody = await response.json().catch(() => ({}));
       const errText = await response.text().catch(() => "");
-      throw new Error(`POST /events/registration/:checkin returned ${response.status}: ${errText}`);
+      console.error(
+        `[seed-demo-tenant] POST /events/registration/:checkin for ${registrationId} failed: status ${response.status}, body: ${JSON.stringify(errBody)}`
+      );
+      return { ok: false, status: response.status, body: errBody };
     }
 
     const data = await response.json().catch(() => ({}));
     debugLog(globalThis.__VERBOSE, `✓ Check-in complete`);
     return { ok: true, checkedInAt: data.checkedInAt };
   } catch (error) {
-    throw error;
+    console.error(`[seed-demo-tenant] Check-in request failed: ${error.message}`);
+    return { ok: false, error: error.message };
   }
 }
 
@@ -1157,6 +1424,7 @@ async function main() {
       name: groundsPassProductName,
       sku: groundsPassSku,
       kind: "good",
+      preferredVendorId: dataset.entities.parties.find(p => p.roles?.includes("vendor"))?.id || null,
     });
     dataset.entities.products.push({
       id: groundsProduct.id,
@@ -1164,7 +1432,11 @@ async function main() {
       name: groundsProduct.name,
       sku: groundsProduct.sku,
     });
-    console.log(`[seed-demo-tenant] ✓ Product (Grounds Pass): ${groundsProduct.id}`);
+    console.log(
+      `[seed-demo-tenant] ✓ Product (Grounds Pass): ${groundsProduct.id} (sku=${groundsProduct.sku}${
+        groundsProduct.reused ? ", reused=true" : ""
+      })`
+    );
 
     const groundsItemName = `Grounds Pass (QR) (seed ${seed})`;
     const groundsItem = await upsertInventoryItemForProduct({
@@ -1199,6 +1471,7 @@ async function main() {
       name: tshirtProductName,
       sku: tshirtSku,
       kind: "good",
+      preferredVendorId: dataset.entities.parties.find(p => p.roles?.includes("vendor"))?.id || null,
     });
     dataset.entities.products.push({
       id: tshirtProduct.id,
@@ -1206,7 +1479,11 @@ async function main() {
       name: tshirtProduct.name,
       sku: tshirtProduct.sku,
     });
-    console.log(`[seed-demo-tenant] ✓ Product (T-Shirt): ${tshirtProduct.id}`);
+    console.log(
+      `[seed-demo-tenant] ✓ Product (T-Shirt): ${tshirtProduct.id} (sku=${tshirtProduct.sku}${
+        tshirtProduct.reused ? ", reused=true" : ""
+      })`
+    );
 
     const tshirtItemName = `T-Shirt - Unisex (M) (seed ${seed})`;
     const tshirtItem = await upsertInventoryItemForProduct({
@@ -1324,13 +1601,24 @@ async function main() {
     {
       const email1 = `demo.reg1+${seed}@example.com`;
       const displayName1 = `Demo Reg 1 (seed ${seed})`;
+      const customerPartyId = dataset.entities.parties.find(p => p.roles?.includes("customer"))?.id;
 
       console.log(`[seed-demo-tenant] Creating registration: ${email1}...`);
-      const reg1 = await createPublicRegistration({ eventId, email: email1, displayName: displayName1 });
+      const reg1 = await createPublicRegistration({ eventId, email: email1, displayName: displayName1, partyId: customerPartyId });
       const regId1 = reg1.id;
+      const publicToken1 = reg1.publicToken;
 
       // Checkout
-      await checkoutRegistration({ registrationId: regId1 });
+      const checkout1 = await checkoutRegistration({ registrationId: regId1, publicToken: publicToken1 });
+
+      // Simulate payment success via webhook
+      if (checkout1.paymentIntentId) {
+        await simulatePaymentSuccess({
+          paymentIntentId: checkout1.paymentIntentId,
+          registrationId: regId1,
+          eventId,
+        });
+      }
 
       // Poll until confirmed
       const pollResult1 = await pollRegistrationConfirmed(regId1);
@@ -1338,23 +1626,39 @@ async function main() {
         throw new Error(`Registration ${regId1} failed to confirm after checkout`);
       }
 
-      // Issue ticket
+      // Check-in BEFORE issuing ticket
+      const idempotencyKey1Checkin = `seed-${seed}-reg1-checkin`;
+      const checkinResult1 = await checkinRegistration({ registrationId: regId1, idempotencyKey: idempotencyKey1Checkin });
+      
+      // If check-in failed with blockers, stop here
+      if (!checkinResult1.ok) {
+        console.warn(`[seed-demo-tenant] Check-in for ${regId1} failed; skipping ticket issuance`);
+        throw new Error(`Check-in failed for ${regId1}: ${JSON.stringify(checkinResult1)}`);
+      }
+
+      // Issue ticket AFTER successful check-in
       const idempotencyKey1Ticket = `seed-${seed}-reg1-ticket`;
       const ticket1 = await issueTicket({ registrationId: regId1, idempotencyKey: idempotencyKey1Ticket });
-      const ticketId1 = ticket1.id;
+      const ticketId1 = ticket1.ticketId;
       const qrText1 = ticket1.qrText;
+
+      // Print ticket info for manual testing
+      console.log(`[seed-demo-tenant] REG1 TICKET ID: ${ticketId1}`);
+      console.log(`[seed-demo-tenant] REG1 TICKET QR: ${qrText1}`);
+
+      // Validate ticket ID before attempting to use
+      if (!ticketId1) {
+        throw new Error(`Failed to issue ticket for ${regId1}: no ticket ID returned`);
+      }
 
       // Resolve scan (optional, for readiness)
       if (qrText1) {
         await resolveScan({ scanText: qrText1 });
       }
 
-      // Check-in
-      const idempotencyKey1Checkin = `seed-${seed}-reg1-checkin`;
-      await checkinRegistration({ registrationId: regId1, idempotencyKey: idempotencyKey1Checkin });
-
       // Use ticket
       const idempotencyKey1Use = `seed-${seed}-reg1-use`;
+      console.log(`[seed-demo-tenant] Using ticket: ${ticketId1}`);
       const useResult = await useTicket({ ticketId: ticketId1, idempotencyKey: idempotencyKey1Use });
 
       dataset.entities.registrations.push({
@@ -1382,13 +1686,24 @@ async function main() {
     {
       const email2 = `demo.reg2+${seed}@example.com`;
       const displayName2 = `Demo Reg 2 (seed ${seed})`;
+      const customerPartyId = dataset.entities.parties.find(p => p.roles?.includes("customer"))?.id;
 
       console.log(`[seed-demo-tenant] Creating registration: ${email2}...`);
-      const reg2 = await createPublicRegistration({ eventId, email: email2, displayName: displayName2 });
+      const reg2 = await createPublicRegistration({ eventId, email: email2, displayName: displayName2, partyId: customerPartyId });
       const regId2 = reg2.id;
+      const publicToken2 = reg2.publicToken;
 
       // Checkout
-      await checkoutRegistration({ registrationId: regId2 });
+      const checkout2 = await checkoutRegistration({ registrationId: regId2, publicToken: publicToken2 });
+
+      // Simulate payment success via webhook
+      if (checkout2.paymentIntentId) {
+        await simulatePaymentSuccess({
+          paymentIntentId: checkout2.paymentIntentId,
+          registrationId: regId2,
+          eventId,
+        });
+      }
 
       // Poll until confirmed
       const pollResult2 = await pollRegistrationConfirmed(regId2);
@@ -1396,13 +1711,26 @@ async function main() {
         throw new Error(`Registration ${regId2} failed to confirm after checkout`);
       }
 
-      // Issue ticket
+      // Check-in BEFORE issuing ticket
+      const idempotencyKey2Checkin = `seed-${seed}-reg2-checkin`;
+      const checkinResult2 = await checkinRegistration({ registrationId: regId2, idempotencyKey: idempotencyKey2Checkin });
+      
+      if (!checkinResult2.ok) {
+        console.warn(`[seed-demo-tenant] Check-in for ${regId2} failed; skipping ticket issuance`);
+        throw new Error(`Check-in failed for ${regId2}: ${JSON.stringify(checkinResult2)}`);
+      }
+
+      // Issue ticket AFTER successful check-in
       const idempotencyKey2Ticket = `seed-${seed}-reg2-ticket`;
       const ticket2 = await issueTicket({ registrationId: regId2, idempotencyKey: idempotencyKey2Ticket });
-      const ticketId2 = ticket2.id;
+      const ticketId2 = ticket2.ticketId;
       const qrText2 = ticket2.qrText;
 
-      // NOTE: Skip check-in and use for reg2 (intentionally not used)
+      // Print ticket info for manual testing
+      console.log(`[seed-demo-tenant] REG2 TICKET ID: ${ticketId2}`);
+      console.log(`[seed-demo-tenant] REG2 TICKET QR: ${qrText2}`);
+
+      // NOTE: Skip use for reg2 (intentionally not used)
 
       dataset.entities.registrations.push({
         email: email2,

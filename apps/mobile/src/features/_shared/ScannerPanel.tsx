@@ -11,16 +11,20 @@ export function ScannerPanel({
   onChange,
   onSubmit,
   onManualInputFocus,
+  onScan,
+  autoOpenCamera,
 }: {
   value: string;
   onChange: (next: string) => void;
   onSubmit?: (val: string) => void;
   onManualInputFocus?: () => void;
+  onScan?: (val: string) => void;
+  autoOpenCamera?: boolean;
 }) {
   const t = useColors();
   const toast = useToast();
 
-  const [showCamera, setShowCamera] = React.useState(false);
+  const [showCamera, setShowCamera] = React.useState(autoOpenCamera || false);
   const [permission, requestPermission] = useCameraPermissions();
   const lastRef = React.useRef<{ data?: string; at?: number }>({});
 
@@ -30,6 +34,12 @@ export function ScannerPanel({
     if (permission.canAskAgain) return "prompt" as const;
     return "denied" as const;
   }, [permission]);
+
+  React.useEffect(() => {
+    if (autoOpenCamera && !showCamera) {
+      setShowCamera(true);
+    }
+  }, [autoOpenCamera]);
 
   React.useEffect(() => {
     if (showCamera && !permission?.granted) requestPermission().catch(() => {});
@@ -44,10 +54,11 @@ export function ScannerPanel({
       if (last.data === d && last.at && now - last.at < 1200) return; // debounce
       lastRef.current = { data: d, at: now };
       onChange(d);
+      if (onScan) onScan(d);
       Vibration.vibrate(10);
       toast("Captured", "success");
     },
-    [onChange, toast]
+    [onChange, onScan, toast]
   );
 
   const handleSubmit = React.useCallback(() => {

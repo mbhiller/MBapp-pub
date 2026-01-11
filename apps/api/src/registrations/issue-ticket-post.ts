@@ -1,8 +1,9 @@
 import type { APIGatewayProxyEventV2 } from "aws-lambda";
 import { ok, badRequest, notFound, error as respondError } from "../common/responses";
 import { getTenantId } from "../common/env";
-import { getObjectById, createObject } from "../objects/repo";
+import { getObjectById, createObject, listObjects } from "../objects/repo";
 import { guardRegistrations } from "./feature";
+import { computeCheckInStatus } from "./checkin-readiness";
 import { REGISTRATION_PAYMENT_STATUS } from "./constants";
 import { createHash } from "crypto";
 
@@ -43,7 +44,18 @@ export async function handle(event: APIGatewayProxyEventV2) {
       tenantId,
       type: "registration",
       id,
-      fields: ["id", "type", "partyId", "eventId", "paymentStatus"],
+      fields: [
+        "id",
+        "type",
+        "partyId",
+        "eventId",
+        "paymentStatus",
+        "checkedInAt",
+        "status",
+        "stallQty",
+        "rvQty",
+        "lines",
+      ],
     });
 
     if (!registration || (registration as any).type !== "registration") {
@@ -81,6 +93,53 @@ export async function handle(event: APIGatewayProxyEventV2) {
         body: JSON.stringify({
           code: "payment_unpaid",
           message: "Registration payment is not completed; cannot issue ticket",
+        }),
+      };
+    }
+
+    // E5: Guard - must be checked in (align with badge issuance)
+    const checkedInAt = (registration as any).checkedInAt as string | undefined;
+    if (!checkedInAt) {
+      return {
+        statusCode: 409,
+        headers: {
+          "content-type": "application/json",
+          "access-control-allow-origin": "*",
+          "access-control-allow-methods": "OPTIONS,GET,POST,PUT,DELETE",
+          "access-control-allow-headers": "Authorization,Content-Type,Idempotency-Key,X-Tenant-Id,Accept",
+        },
+        body: JSON.stringify({
+          code: "not_checked_in",
+          message: "Registration must be checked in before ticket can be issued",
+        }),
+      };
+    }
+
+    // E5: Guard - must be ready (align with badge issuance)
+    const holdsPage = await listObjects({
+      tenantId,
+      type: "reservationHold",
+      filters: { ownerType: "registration", ownerId: id },
+      limit: 200,
+      fields: ["id", "itemType", "resourceId", "state", "qty", "metadata"],
+    });
+    const holds = ((holdsPage.items as any[]) || []) as any[];
+
+    const snapshot = computeCheckInStatus({ tenantId, registration: registration as any, holds: holds as any });
+
+    if (!snapshot.ready) {
+      return {
+        statusCode: 409,
+        headers: {
+          "content-type": "application/json",
+          "access-control-allow-origin": "*",
+          "access-control-allow-methods": "OPTIONS,GET,POST,PUT,DELETE",
+          "access-control-allow-headers": "Authorization,Content-Type,Idempotency-Key,X-Tenant-Id,Accept",
+        },
+        body: JSON.stringify({
+          code: "checkin_blocked",
+          message: "Registration is blocked from ticket issuance due to blockers",
+          checkInStatus: snapshot,
         }),
       };
     }

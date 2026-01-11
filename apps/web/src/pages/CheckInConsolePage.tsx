@@ -17,6 +17,13 @@ type BadgeIssuance = {
   issuedBy: string;
 };
 
+type NextActionInfo = {
+  action: "checkin" | "admit" | "already_admitted" | "blocked" | null;
+  ticketId?: string | null;
+  ticketStatus?: "valid" | "used" | null;
+  ticketUsedAt?: string | null;
+};
+
 function formatError(err: unknown): string {
   const e = err as any;
   const parts: string[] = [];
@@ -24,6 +31,32 @@ function formatError(err: unknown): string {
   if (e?.code) parts.push(e.code);
   if (e?.message) parts.push(e.message);
   return parts.join(" · ") || "Request failed";
+}
+
+/**
+ * Compute nextAction based on registration and check-in status.
+ * Does not require ticket data for initial guess (ticket state optional).
+ */
+function computeNextAction(reg: Registration, ticketInfo?: NextActionInfo): NextActionInfo {
+  const isCheckedIn = !!(reg as any)?.checkedInAt;
+  const checkInStatus = (reg as any)?.checkInStatus;
+  const isReady = checkInStatus?.ready === true;
+  const isBlocked = checkInStatus?.ready === false;
+
+  // If ticket info already known, use it
+  if (ticketInfo) {
+    return ticketInfo;
+  }
+
+  // Default logic without ticket data
+  if (isBlocked) {
+    return { action: "blocked" };
+  }
+  if (!isCheckedIn) {
+    return { action: "checkin" };
+  }
+
+  return { action: null };
 }
 
 export default function CheckInConsolePage() {
@@ -45,12 +78,20 @@ export default function CheckInConsolePage() {
   const [issuingBadgeId, setIssuingBadgeId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
+  // Action state per registration
+  const [nextActions, setNextActions] = useState<Record<string, NextActionInfo>>({});
+  const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
+
   // Scan mode state
   const [scanString, setScanString] = useState("");
   const [resolving, setResolving] = useState(false);
   const [scanBanner, setScanBanner] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const [ambiguous, setAmbiguous] = useState<ScanResolutionCandidate[] | null>(null);
   const [highlightId, setHighlightId] = useState<string | null>(null);
+  const [lastResolve, setLastResolve] = useState<ScanResolutionResult | null>(null);
+  const [lastScanString, setLastScanString] = useState<string>("");
+  const [checkingIn, setCheckingIn] = useState(false);
+  const [admitting, setAdmitting] = useState(false);
   const scanInputRef = useRef<HTMLInputElement | null>(null);
 
   const fetchWorklist = useCallback(
@@ -124,6 +165,8 @@ export default function CheckInConsolePage() {
       });
       if (res && (res as any).ok === true) {
         const okRes = res as Extract<ScanResolutionResult, { ok: true }>;
+        setLastResolve(okRes);
+        setLastScanString(s);
         setScanBanner({ kind: "success", message: `Matched registration ${okRes.registrationId}${okRes.partyId ? ` (party ${okRes.partyId})` : ""}` });
         setScanString("");
         await applyResolvedRegistration(okRes.registrationId);
@@ -200,6 +243,137 @@ export default function CheckInConsolePage() {
     }
   };
 
+  const handleCheckIn = async (registrationId: string) => {
+    setCheckingIn(true);
+    setToast(null);
+    setActionLoading((prev) => ({ ...prev, [registrationId]: true }));
+    try {
+      const idempotencyKey = `web-ci-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const res = await apiFetch<{ checkedInAt: string }>(
+        `/events/registration/${encodeURIComponent(registrationId)}:checkin`,
+        {
+          method: "POST",
+          token: token || undefined,
+          tenantId,
+          body: {},
+          headers: {
+            "Idempotency-Key": idempotencyKey,
+          },
+        }
+      );
+      if (res?.checkedInAt) {
+        setToast({ kind: "success", message: `Checked in registration ${registrationId}` });
+        // Refresh worklist and clear next actions so they are recomputed
+        setNextActions((prev) => {
+          const updated = { ...prev };
+          delete updated[registrationId];
+          return updated;
+        });
+        await fetchWorklist();
+        // Re-resolve to update nextAction if scanning
+        if (lastScanString) {
+          const resolveRes = await apiFetch<ScanResolutionResult>("/registrations:resolve-scan", {
+            method: "POST",
+            token: token || undefined,
+            tenantId,
+            body: { eventId, scanString: lastScanString, scanType: "auto" },
+          });
+          if (resolveRes && (resolveRes as any).ok === true) {
+            const okRes = resolveRes as Extract<ScanResolutionResult, { ok: true }>;
+            setLastResolve(okRes);
+          }
+        }
+      } else {
+        setToast({ kind: "error", message: "Check-in succeeded but response was invalid" });
+      }
+    } catch (err: any) {
+      const errMsg = err?.code === "checkin_blocked"
+        ? "Registration is not ready to check in"
+        : err?.code === "already_checked_in"
+        ? "Registration is already checked in"
+        : err?.code === "not_found"
+        ? "Registration not found"
+        : formatError(err);
+      setToast({ kind: "error", message: `Failed to check in: ${errMsg}` });
+    } finally {
+      setCheckingIn(false);
+      setActionLoading((prev) => ({ ...prev, [registrationId]: false }));
+    }
+  };
+
+  const handleAdmit = async (ticketId: string, registrationId?: string) => {
+    setAdmitting(true);
+    setToast(null);
+    if (registrationId) {
+      setActionLoading((prev) => ({ ...prev, [registrationId]: true }));
+    }
+    try {
+      const idempotencyKey = `web-admit-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const res = await apiFetch<{ usedAt: string }>(
+        `/tickets/${encodeURIComponent(ticketId)}:use`,
+        {
+          method: "POST",
+          token: token || undefined,
+          tenantId,
+          body: {},
+          headers: {
+            "Idempotency-Key": idempotencyKey,
+          },
+        }
+      );
+      if (res?.usedAt) {
+        setToast({ kind: "success", message: `Admitted ticket ${ticketId}` });
+        // Refresh worklist and clear next actions so they are recomputed
+        if (registrationId) {
+          setNextActions((prev) => {
+            const updated = { ...prev };
+            delete updated[registrationId];
+            return updated;
+          });
+        }
+        await fetchWorklist();
+        // Re-resolve to update nextAction if scanning
+        if (lastScanString) {
+          const resolveRes = await apiFetch<ScanResolutionResult>("/registrations:resolve-scan", {
+            method: "POST",
+            token: token || undefined,
+            tenantId,
+            body: { eventId, scanString: lastScanString, scanType: "auto" },
+          });
+          if (resolveRes && (resolveRes as any).ok === true) {
+            const okRes = resolveRes as Extract<ScanResolutionResult, { ok: true }>;
+            setLastResolve(okRes);
+          }
+        }
+      } else {
+        setToast({ kind: "error", message: "Admission succeeded but response was invalid" });
+      }
+    } catch (err: any) {
+      const errMsg = err?.code === "ticket_already_used"
+        ? "Ticket is already admitted"
+        : err?.code === "ticket_not_valid"
+        ? "Ticket is not valid for admission"
+        : err?.code === "not_found"
+        ? "Ticket not found"
+        : formatError(err);
+      setToast({ kind: "error", message: `Failed to admit: ${errMsg}` });
+    } finally {
+      setAdmitting(false);
+      if (registrationId) {
+        setActionLoading((prev) => ({ ...prev, [registrationId]: false }));
+      }
+    }
+  };
+
+  const handleScanNext = () => {
+    setScanString("");
+    setLastResolve(null);
+    setHighlightId(null);
+    setScanBanner(null);
+    setAmbiguous(null);
+    scanInputRef.current?.focus();
+  };
+
   const handleFilterChange = (updates: {
     checkedIn?: boolean;
     ready?: boolean | null;
@@ -258,6 +432,11 @@ export default function CheckInConsolePage() {
               <Button onClick={handleScanResolve} disabled={resolving || loading || !scanString.trim()}>
                 {resolving ? "Resolving..." : "Resolve"}
               </Button>
+              {lastResolve?.ok ? (
+                <Button variant="outline" onClick={handleScanNext} disabled={resolving || loading}>
+                  Scan Next
+                </Button>
+              ) : null}
               {q.trim() ? (
                 <Button variant="outline" onClick={clearScanFilter} disabled={resolving || loading}>Clear scan filter</Button>
               ) : null}
@@ -272,7 +451,13 @@ export default function CheckInConsolePage() {
                   : "rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800"
               }
             >
-              {scanBanner.message}
+              <div>{scanBanner.message}</div>
+              {lastResolve?.ok && lastResolve.ticketId ? (
+                <div className="mt-1 text-xs">
+                  Ticket: {lastResolve.ticketId} (status={lastResolve.ticketStatus || "unknown"})
+                  {lastResolve.ticketUsedAt ? ` · Admitted ${new Date(lastResolve.ticketUsedAt).toLocaleString()}` : ""}
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -438,6 +623,7 @@ export default function CheckInConsolePage() {
                 <TableHead className="text-xs uppercase text-center">Checked In</TableHead>
                 <TableHead className="text-xs uppercase text-center">Ready</TableHead>
                 <TableHead className="text-xs uppercase">Blockers</TableHead>
+                <TableHead className="text-xs uppercase">Actions</TableHead>
                 <TableHead className="text-xs uppercase">Badge</TableHead>
                 <TableHead className="text-xs uppercase">Last Evaluated</TableHead>
               </TableRow>
@@ -456,9 +642,88 @@ export default function CheckInConsolePage() {
                   ? reg.checkInStatus.lastEvaluatedAt.substring(0, 19).replace("T", " ")
                   : "—";
 
+                const isResolvedRow = lastResolve?.ok && lastResolve.registrationId === reg.id;
                 const isHighlighted = highlightId && reg.id === highlightId;
                 const badge = badges[reg.id];
                 const isBadgeIssuing = issuingBadgeId === reg.id;
+                const isRowActionLoading = actionLoading[reg.id] || false;
+
+                // Get nextAction from API response or fallback to scan/computation
+                let nextActionInfo: NextActionInfo;
+                const apiNextAction = (reg as any)?.nextAction as string | null | undefined;
+                
+                if (isResolvedRow && lastResolve.ok) {
+                  // Prefer resolved scan data if available for this row
+                  nextActionInfo = {
+                    action: lastResolve.nextAction || null,
+                    ticketId: lastResolve.ticketId,
+                    ticketStatus: lastResolve.ticketStatus,
+                    ticketUsedAt: lastResolve.ticketUsedAt,
+                  };
+                } else if (apiNextAction) {
+                  // Use enriched data from worklist API
+                  nextActionInfo = {
+                    action: apiNextAction as "checkin" | "admit" | "already_admitted" | "blocked" | null,
+                    ticketId: (reg as any)?.ticketId || null,
+                    ticketStatus: (reg as any)?.ticketStatus as "valid" | "used" | null | undefined,
+                    ticketUsedAt: (reg as any)?.ticketUsedAt || null,
+                  };
+                } else {
+                  // Fallback to cached or computed value
+                  nextActionInfo = nextActions[reg.id] || computeNextAction(reg);
+                }
+
+                // Render actions for all rows
+                let actionsDisplay: React.ReactNode = "—";
+                
+                if (nextActionInfo.action === "checkin") {
+                  actionsDisplay = (
+                    <Button
+                      size="sm"
+                      onClick={() => handleCheckIn(reg.id)}
+                      disabled={isRowActionLoading || readyState === false}
+                      title={readyState === false ? "Registration not ready" : "Check in this registration"}
+                    >
+                      {isRowActionLoading ? "Checking In..." : "Check In"}
+                    </Button>
+                  ) as any;
+                } else if (nextActionInfo.action === "admit" && nextActionInfo.ticketId) {
+                  actionsDisplay = (
+                    <Button
+                      size="sm"
+                      onClick={() => handleAdmit(nextActionInfo.ticketId!, reg.id)}
+                      disabled={isRowActionLoading}
+                      title="Admit this ticket"
+                    >
+                      {isRowActionLoading ? "Admitting..." : "Admit"}
+                    </Button>
+                  ) as any;
+                } else if (nextActionInfo.action === "already_admitted") {
+                  const usedAtStr = nextActionInfo.ticketUsedAt
+                    ? new Date(nextActionInfo.ticketUsedAt).toLocaleString()
+                    : "unknown";
+                  actionsDisplay = (
+                    <div className="text-xs">
+                      <Badge variant="success">Admitted</Badge>
+                      <div className="mt-1 text-slate-600">{usedAtStr}</div>
+                    </div>
+                  ) as any;
+                } else if (nextActionInfo.action === "blocked") {
+                  const topBlockers = Array.isArray(reg.checkInStatus?.blockers)
+                    ? (reg.checkInStatus.blockers || []).slice(0, 2)
+                    : [];
+                  actionsDisplay = (
+                    <div className="text-xs">
+                      <Badge variant="destructive">Blocked</Badge>
+                      {topBlockers.length > 0 ? (
+                        <div className="mt-1 text-slate-600">
+                          {topBlockers.map((b) => b.code || "?").join(", ")}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) as any;
+                }
+
                 return (
                   <TableRow key={reg.id} className={isHighlighted ? "bg-yellow-50" : undefined}>
                     <TableCell className="font-mono text-xs text-slate-800">{reg.id}</TableCell>
@@ -471,6 +736,13 @@ export default function CheckInConsolePage() {
                       <Badge variant={readyVariant}>{readyDisplay}</Badge>
                     </TableCell>
                     <TableCell className="text-xs text-slate-700">{blockers}</TableCell>
+                    <TableCell>
+                      {typeof actionsDisplay === "string" ? (
+                        <span className="text-xs text-slate-600">{actionsDisplay}</span>
+                      ) : (
+                        actionsDisplay
+                      )}
+                    </TableCell>
                     <TableCell className="text-center">
                       {badge ? (
                         <div className="flex flex-col items-center gap-1">
