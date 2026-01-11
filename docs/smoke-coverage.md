@@ -102,6 +102,19 @@ Smokes are organized by tier for targeted CI validation:
 
 ---
 
+## Sprint CI.1 — Check-In Operator Polish (Edge Cases & Reason Enrichment)
+
+**Scope:** Validates edge cases in scan resolution (cross-event scans, missing registrations), filter interactions, and server-side blocker reason enrichment.
+
+### EXTENDED
+- **`smoke:checkin:resolve-scan-wrong-event`** — Creates 2 events (A, B), registration in Event A, attempts resolve-scan with registration ID and Event B → expects `ok=false, error="not_in_event"`. Validates cross-event registration rejection.
+- **`smoke:checkin:resolve-scan-not-found`** — Creates event, attempts resolve-scan with non-existent registrationId → expects `ok=false, error="not_found"`. Validates missing registration error path.
+- **`smoke:checkin:resolve-scan-ticket-missing-blocker-reason`** — Creates registration without ticket (ticket_missing blocker), calls `GET :checkin-readiness`, asserts blocker includes `reason="Admission ticket required"`. Validates E5 server-side reason enrichment.
+- **`smoke:checkin:worklist-filter-combinations`** — Seeds 3 registrations (ready+not-checked-in, ready+checked-in, blocked-by-stalls), tests filters: `checkedIn=true/false` returns correct subsets, `blockerCode=stalls_unassigned` filters blocked only, `ready=true` excludes blocked. Validates filter interactions.
+- **`smoke:checkin:blocker-reason-present`** — Generates multiple blocker scenarios (payment_unpaid, stalls_unassigned), calls `GET :checkin-readiness` for each, asserts every blocker includes non-empty `reason` field matching server `BLOCKER_REASONS` map. Validates E5 enrichment across all blocker types.
+
+---
+
 ## Sprint BP — Event Classes Operator Reporting
 
 **Scope:** Validates operator reporting endpoints for event class entries: per-line capacity summary and paged registrations-by-line query.

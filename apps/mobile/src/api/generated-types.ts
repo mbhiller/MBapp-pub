@@ -3739,6 +3739,8 @@ export interface components {
             /** @enum {string} */
             code: "payment_unpaid" | "payment_failed" | "cancelled" | "stalls_unassigned" | "rv_unassigned" | "classes_unassigned" | "ticket_missing";
             message: string;
+            /** @description Human-readable explanation of the blocker (e.g. "Payment not confirmed") for operator UI */
+            reason?: string | null;
             action?: components["schemas"]["CheckInAction"] & (Record<string, never> | null);
         };
         /** @description Precomputed readiness snapshot for registration check-in */

@@ -34,6 +34,37 @@ function formatError(err: unknown): string {
 }
 
 /**
+ * Map of blocker codes to human-readable explanations.
+ * Used in tooltips when hovering over blocker codes in the worklist.
+ */
+const BLOCKER_EXPLANATIONS: Record<string, string> = {
+  payment_unpaid: "Payment not confirmed",
+  stalls_unassigned: "Stall assignment required",
+  classes_unassigned: "Class assignment required",
+  cancelled: "Registration cancelled",
+};
+
+function getBlockerExplanation(code: string, reason?: string | null): string {
+  return reason || BLOCKER_EXPLANATIONS[code] || "No details available";
+}
+
+/**
+ * Renders a single blocker code with a tooltip explanation.
+ * Uses HTML title attribute for native browser tooltip.
+ */
+function BlockerCode({ code, reason }: { code: string; reason?: string | null }) {
+  const explanation = getBlockerExplanation(code, reason);
+  return (
+    <span
+      className="underline decoration-dotted cursor-help text-slate-700 hover:text-slate-900 transition-colors"
+      title={explanation}
+    >
+      {code || "?"}
+    </span>
+  );
+}
+
+/**
  * Compute nextAction based on registration and check-in status.
  * Does not require ticket data for initial guess (ticket state optional).
  */
@@ -59,15 +90,24 @@ function computeNextAction(reg: Registration, ticketInfo?: NextActionInfo): Next
   return { action: null };
 }
 
+// Default filters: show all registrations (operator can narrow down as needed)
+const defaultFilters = {
+  checkedIn: null as boolean | null,
+  ready: null as boolean | null,
+  blockerCode: "",
+  status: "",
+  q: "",
+};
+
 export default function CheckInConsolePage() {
   const { eventId } = useParams<{ eventId: string }>();
   const { token, tenantId } = useAuth();
 
-  const [checkedIn, setCheckedIn] = useState(false);
-  const [ready, setReady] = useState<boolean | null>(null);
-  const [blockerCode, setBlockerCode] = useState("");
-  const [status, setStatus] = useState("confirmed");
-  const [q, setQ] = useState("");
+  const [checkedIn, setCheckedIn] = useState<boolean | null>(defaultFilters.checkedIn);
+  const [ready, setReady] = useState<boolean | null>(defaultFilters.ready);
+  const [blockerCode, setBlockerCode] = useState(defaultFilters.blockerCode);
+  const [status, setStatus] = useState(defaultFilters.status);
+  const [q, setQ] = useState(defaultFilters.q);
   const [items, setItems] = useState<Registration[]>([]);
   const [next, setNext] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -86,6 +126,7 @@ export default function CheckInConsolePage() {
   const [scanString, setScanString] = useState("");
   const [resolving, setResolving] = useState(false);
   const [scanBanner, setScanBanner] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const [lastScanError, setLastScanError] = useState<null | { error: string; reason?: string; scanString: string }>(null);
   const [ambiguous, setAmbiguous] = useState<ScanResolutionCandidate[] | null>(null);
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const [lastResolve, setLastResolve] = useState<ScanResolutionResult | null>(null);
@@ -94,30 +135,86 @@ export default function CheckInConsolePage() {
   const [admitting, setAdmitting] = useState(false);
   const scanInputRef = useRef<HTMLInputElement | null>(null);
 
+  /**
+   * Refocus the scan input safely after state updates.
+   * Uses requestAnimationFrame to ensure the DOM is settled before focusing.
+   */
+  const refocusScan = () => requestAnimationFrame(() => scanInputRef.current?.focus());
+
   const fetchWorklist = useCallback(
     async (cursor?: string) => {
       if (!eventId) return;
       setLoading(true);
       setError(null);
       try {
-        const res = await apiFetch<CheckInWorklistPage>(
-          `/events/${encodeURIComponent(eventId)}:checkin-worklist`,
-          {
-            token: token || undefined,
-            tenantId,
-            query: {
-              checkedIn,
-              ready: ready ?? undefined,
-              blockerCode: blockerCode.trim() || undefined,
-              status: status || undefined,
-              q: q.trim() || undefined,
-              limit: 50,
-              next: cursor ?? undefined,
-            },
-          }
-        );
-        setItems((prev) => (cursor ? [...prev, ...(res.items ?? [])] : res.items ?? []));
-        setNext(res.next ?? null);
+        // When checkedIn is null, fetch both checked-in and not-checked-in registrations
+        if (checkedIn === null && !cursor) {
+          const [notCheckedInRes, checkedInRes] = await Promise.all([
+            apiFetch<CheckInWorklistPage>(
+              `/events/${encodeURIComponent(eventId)}:checkin-worklist`,
+              {
+                token: token || undefined,
+                tenantId,
+                query: {
+                  checkedIn: false,
+                  ready: ready ?? undefined,
+                  blockerCode: blockerCode.trim() || undefined,
+                  status: status || undefined,
+                  q: q.trim() || undefined,
+                  limit: 50,
+                },
+              }
+            ),
+            apiFetch<CheckInWorklistPage>(
+              `/events/${encodeURIComponent(eventId)}:checkin-worklist`,
+              {
+                token: token || undefined,
+                tenantId,
+                query: {
+                  checkedIn: true,
+                  ready: ready ?? undefined,
+                  blockerCode: blockerCode.trim() || undefined,
+                  status: status || undefined,
+                  q: q.trim() || undefined,
+                  limit: 50,
+                },
+              }
+            ),
+          ]);
+          
+          // Merge results, deduplicate by registration ID
+          const merged = [...(notCheckedInRes.items ?? []), ...(checkedInRes.items ?? [])];
+          const seen = new Set<string>();
+          const deduplicated = merged.filter((reg) => {
+            if (seen.has(reg.id)) return false;
+            seen.add(reg.id);
+            return true;
+          });
+          
+          setItems(deduplicated);
+          // Note: pagination not fully supported in "All" mode (would need complex cursor merging)
+          setNext(null);
+        } else {
+          // Single fetch for specific checkedIn value or pagination
+          const res = await apiFetch<CheckInWorklistPage>(
+            `/events/${encodeURIComponent(eventId)}:checkin-worklist`,
+            {
+              token: token || undefined,
+              tenantId,
+              query: {
+                checkedIn: checkedIn ?? false,
+                ready: ready ?? undefined,
+                blockerCode: blockerCode.trim() || undefined,
+                status: status || undefined,
+                q: q.trim() || undefined,
+                limit: 50,
+                next: cursor ?? undefined,
+              },
+            }
+          );
+          setItems((prev) => (cursor ? [...prev, ...(res.items ?? [])] : res.items ?? []));
+          setNext(res.next ?? null);
+        }
       } catch (err) {
         setError(formatError(err));
       } finally {
@@ -169,20 +266,26 @@ export default function CheckInConsolePage() {
         setLastScanString(s);
         setScanBanner({ kind: "success", message: `Matched registration ${okRes.registrationId}${okRes.partyId ? ` (party ${okRes.partyId})` : ""}` });
         setScanString("");
+        setLastScanError(null);
         await applyResolvedRegistration(okRes.registrationId);
+        refocusScan();
       } else {
         const errRes = res as Extract<ScanResolutionResult, { ok: false }>;
         if (errRes.error === "ambiguous" && Array.isArray(errRes.candidates) && errRes.candidates.length > 0) {
           setAmbiguous(errRes.candidates);
           setScanBanner({ kind: "error", message: `Ambiguous: ${errRes.reason || "multiple candidates"}` });
+          setLastScanError({ error: "ambiguous", reason: errRes.reason, scanString: s });
         } else {
           setScanBanner({ kind: "error", message: `${errRes.error}: ${errRes.reason}` });
+          setLastScanError({ error: errRes.error, reason: errRes.reason, scanString: s });
         }
         // Focus back to input for retry
         scanInputRef.current?.focus();
       }
-    } catch (err) {
-      setScanBanner({ kind: "error", message: formatError(err) });
+    } catch (err: any) {
+      const errorMsg = formatError(err);
+      setScanBanner({ kind: "error", message: errorMsg });
+      setLastScanError({ error: "request_failed", reason: errorMsg, scanString: s });
       scanInputRef.current?.focus();
     } finally {
       setResolving(false);
@@ -228,6 +331,7 @@ export default function CheckInConsolePage() {
       if (res?.issuance) {
         setBadges((prev) => ({ ...prev, [registrationId]: res.issuance }));
         setToast({ kind: "success", message: `Badge issued for registration ${registrationId}` });
+        refocusScan();
       } else {
         setToast({ kind: "error", message: "Badge issued but response was invalid" });
       }
@@ -263,6 +367,7 @@ export default function CheckInConsolePage() {
       );
       if (res?.checkedInAt) {
         setToast({ kind: "success", message: `Checked in registration ${registrationId}` });
+        refocusScan();
         // Refresh worklist and clear next actions so they are recomputed
         setNextActions((prev) => {
           const updated = { ...prev };
@@ -323,6 +428,7 @@ export default function CheckInConsolePage() {
       );
       if (res?.usedAt) {
         setToast({ kind: "success", message: `Admitted ticket ${ticketId}` });
+        refocusScan();
         // Refresh worklist and clear next actions so they are recomputed
         if (registrationId) {
           setNextActions((prev) => {
@@ -375,7 +481,7 @@ export default function CheckInConsolePage() {
   };
 
   const handleFilterChange = (updates: {
-    checkedIn?: boolean;
+    checkedIn?: boolean | null;
     ready?: boolean | null;
     blockerCode?: string;
     status?: string;
@@ -389,6 +495,23 @@ export default function CheckInConsolePage() {
     setItems([]);
     setNext(null);
   };
+
+  const clearFilters = () => {
+    setCheckedIn(defaultFilters.checkedIn);
+    setReady(defaultFilters.ready);
+    setBlockerCode(defaultFilters.blockerCode);
+    setStatus(defaultFilters.status);
+    setQ(defaultFilters.q);
+    setItems([]);
+    setNext(null);
+  };
+
+  const isFiltersDefault =
+    checkedIn === defaultFilters.checkedIn &&
+    ready === defaultFilters.ready &&
+    blockerCode === defaultFilters.blockerCode &&
+    status === defaultFilters.status &&
+    q === defaultFilters.q;
 
   if (!eventId) {
     return (
@@ -503,7 +626,15 @@ export default function CheckInConsolePage() {
             <Label>Check-In Status</Label>
             <div className="flex flex-wrap gap-2">
               <Button
-                variant={!checkedIn ? "default" : "outline"}
+                variant={checkedIn === null ? "default" : "outline"}
+                size="sm"
+                onClick={() => handleFilterChange({ checkedIn: null })}
+                disabled={loading}
+              >
+                All
+              </Button>
+              <Button
+                variant={checkedIn === false ? "default" : "outline"}
                 size="sm"
                 onClick={() => handleFilterChange({ checkedIn: false })}
                 disabled={loading}
@@ -511,7 +642,7 @@ export default function CheckInConsolePage() {
                 Not Checked In
               </Button>
               <Button
-                variant={checkedIn ? "default" : "outline"}
+                variant={checkedIn === true ? "default" : "outline"}
                 size="sm"
                 onClick={() => handleFilterChange({ checkedIn: true })}
                 disabled={loading}
@@ -591,8 +722,46 @@ export default function CheckInConsolePage() {
               disabled={loading}
             />
           </div>
+
+          <div className="pt-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={clearFilters}
+              disabled={loading || isFiltersDefault}
+              className="w-full"
+            >
+              Clear Filters
+            </Button>
+          </div>
         </CardContent>
       </Card>
+
+      {lastScanError ? (
+        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-red-800 mb-1">
+                Scan failed: {lastScanError.error}
+              </p>
+              {lastScanError.reason ? (
+                <p className="text-xs text-red-700 mb-1">{lastScanError.reason}</p>
+              ) : null}
+              <p className="text-xs text-red-600 font-mono break-all">
+                Scanned: {lastScanError.scanString.length > 60 ? lastScanError.scanString.substring(0, 60) + "…" : lastScanError.scanString}
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setLastScanError(null)}
+              className="text-red-700 hover:text-red-900 hover:bg-red-100"
+            >
+              Dismiss
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       {error ? (
         <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
@@ -606,9 +775,18 @@ export default function CheckInConsolePage() {
         </div>
       ) : null}
 
-      {!loading && items.length === 0 && !error ? (
-        <div className="rounded-md border border-slate-200 bg-white px-4 py-8 text-center text-slate-600">
-          No registrations found for this filter combination.
+      {!loading && items.length === 0 && !next && !error ? (
+        <div className="rounded-md border border-slate-200 bg-white px-4 py-8 text-center">
+          <p className="text-sm text-slate-600 mb-3">No registrations match current filters.</p>
+          <p className="text-xs text-slate-500 mb-4">Try adjusting Check-In Status or Status filters.</p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={clearFilters}
+            disabled={loading}
+          >
+            Clear Filters
+          </Button>
         </div>
       ) : null}
 
@@ -630,9 +808,18 @@ export default function CheckInConsolePage() {
             </TableHeader>
             <TableBody>
               {items.map((reg) => {
-                const blockers = Array.isArray(reg.checkInStatus?.blockers)
-                  ? reg.checkInStatus.blockers!.map((b) => b.code || "?").join(", ")
-                  : "—";
+                const blockersList = Array.isArray(reg.checkInStatus?.blockers)
+                  ? reg.checkInStatus.blockers!
+                  : [];
+                const blockersDisplay =
+                  blockersList.length > 0
+                    ? blockersList.map((b, idx) => (
+                        <span key={idx}>
+                          {idx > 0 && <span className="mx-1">,</span>}
+                          <BlockerCode code={b.code || "?"} reason={b.reason} />
+                        </span>
+                      ))
+                    : "—";
                 const readyState = reg.checkInStatus?.ready;
                 const readyDisplay = readyState === true ? "Ready" : readyState === false ? "Blocked" : "—";
                 const readyVariant = readyState === true ? "success" : readyState === false ? "destructive" : "secondary";
@@ -716,8 +903,13 @@ export default function CheckInConsolePage() {
                     <div className="text-xs">
                       <Badge variant="destructive">Blocked</Badge>
                       {topBlockers.length > 0 ? (
-                        <div className="mt-1 text-slate-600">
-                          {topBlockers.map((b) => b.code || "?").join(", ")}
+                        <div className="mt-1 text-slate-600 space-x-1">
+                          {topBlockers.map((b, idx) => (
+                            <span key={idx}>
+                              {idx > 0 && <span>,</span>}
+                              <BlockerCode code={b.code || "?"} reason={b.reason} />
+                            </span>
+                          ))}
                         </div>
                       ) : null}
                     </div>
@@ -735,7 +927,7 @@ export default function CheckInConsolePage() {
                     <TableCell className="text-center">
                       <Badge variant={readyVariant}>{readyDisplay}</Badge>
                     </TableCell>
-                    <TableCell className="text-xs text-slate-700">{blockers}</TableCell>
+                    <TableCell className="text-xs text-slate-700">{blockersDisplay}</TableCell>
                     <TableCell>
                       {typeof actionsDisplay === "string" ? (
                         <span className="text-xs text-slate-600">{actionsDisplay}</span>

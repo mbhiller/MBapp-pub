@@ -99,6 +99,22 @@ Foundation for operator visibility into class entry capacity and registration de
   - `GET /events/{eventId}:classes-summary` — Per-line capacity summary with operational metrics
   - `GET /events/{eventId}:registrations-by-line` — Paged registrations filtered by optional event line
 
+---
+
+## Operator UX Principles (Sprint CI.1)
+
+Guidelines for building operator-facing workflows that reduce confusion and support continuous keyboard-driven interaction:
+
+- **Default-to-visible data:** Avoid empty lists without explanation. Default filters should show actionable data (e.g., "all registrations" not "confirmed + not-checked-in only"). Provide a Clear Filters affordance when operators apply complex filter combinations.
+
+- **Scanning is the primary interaction:** Operators work fastest with continuous scan workflows. After successful actions (Check In, Admit, Issue Badge, Scan Resolution), auto-focus the scan input so operators can immediately scan the next item without clicking.
+
+- **Blockers must be human-readable at point-of-use:** Blocker codes like `payment_unpaid` are not operator-friendly. APIs should return a `reason` field (e.g., "Payment not confirmed") so UIs don't re-derive copy. Prefer server-side reason enrichment over client-side maps for consistency.
+
+- **Sticky error state:** Transient errors disappear before operators can read them. Scan errors and validation failures should persist in a dismissible panel until the operator explicitly dismisses them or resolves the issue with a successful action.
+
+- **Empty-state guidance:** When filters produce empty results, show actionable guidance ("Try clearing filters" with a button) rather than a generic "No results" message. Guard against pagination artifacts (e.g., only show empty-state when `!nextCursor`).
+
 ### Check-In Readiness v0 (Sprint BT)
 
 Provides a snapshot-based readiness contract for event check-in operations. The `Registration.checkInStatus` field stores a precomputed snapshot indicating whether a registration is ready for check-in and what blockers exist if not.

@@ -98,6 +98,17 @@ Note: Include documentation updates in each labeled edit prompt when behavior or
 ### 3C) Commands (labeled run list)
 - Provide a labeled command list for:
   - Typechecks
+  - Spec workflow (when MBapp-Modules.yaml changes):
+    ```bash
+    npm run spec:lint           # Validate YAML syntax
+    npm run spec:bundle         # Generate openapi.json
+    npm run spec:types:api      # Regenerate API types
+    npm run spec:types:mobile   # Regenerate mobile types
+    ```
+  - Smoke tests (when operator flows or contracts change):
+    - Prefer adding at least one smoke (core or extended) to prevent regressions.
+    - Core smokes run on every PR; extended smokes run nightly.
+    - Register new smokes in `ops/ci-smokes.json` (tier: "core" or "extended").
   - Smokes (targeted + CI list)
   - Spec scripts (when relevant)
 - Include the **testing/deploy rules** (below) so we don’t run smokes against stale backend.

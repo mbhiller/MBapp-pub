@@ -22713,6 +22713,259 @@ const tests = {
         code: checkinRes.body?.code
       }
     };
+ },
+
+  // Extended tier: CI.1 edge cases for operator polish
+
+  "smoke:checkin:resolve-scan-wrong-event": async () => {
+    await ensureBearer();
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // Create two events
+    const evt1 = await post("/objects/event", { type: "event", status: "open", name: smokeTag("scan_wrong_evt_a"), capacity: 5, reservedCount: 0 });
+    if (!evt1.ok || !evt1.body?.id) return { test: "checkin:resolve-scan-wrong-event", result: "FAIL", reason: "event-a-failed", evt1 };
+    const eventA = evt1.body.id;
+
+    const evt2 = await post("/objects/event", { type: "event", status: "open", name: smokeTag("scan_wrong_evt_b"), capacity: 5, reservedCount: 0 });
+    if (!evt2.ok || !evt2.body?.id) return { test: "checkin:resolve-scan-wrong-event", result: "FAIL", reason: "event-b-failed", evt2 };
+    const eventB = evt2.body.id;
+
+    // Create registration in Event A
+    const regCreate = await post("/registrations:public", { eventId: eventA, party: { email: `scan_wrong+${SMOKE_RUN_ID}@example.com` } }, featureHeaders, { auth: "none" });
+    if (!regCreate.ok || !regCreate.body?.registration?.id) return { test: "checkin:resolve-scan-wrong-event", result: "FAIL", reason: "reg-create-failed", regCreate };
+    const regIdA = regCreate.body.registration.id;
+
+    // Try to resolve registration from Event A using Event B
+    const scanBody = { eventId: eventB, scanString: JSON.stringify({ id: regIdA }), scanType: "auto" };
+    const resWrongEvent = await post("/registrations:resolve-scan", scanBody, featureHeaders);
+    const okWrongEvent = resWrongEvent.ok && resWrongEvent.body?.ok === false && resWrongEvent.body?.error === "not_in_event";
+
+    if (!okWrongEvent) {
+      return { test: "checkin:resolve-scan-wrong-event", result: "FAIL", expectedError: "not_in_event", got: resWrongEvent.body };
+    }
+
+    return { test: "checkin:resolve-scan-wrong-event", result: "PASS", summary: "Cross-event registration scan returns not_in_event" };
+  },
+
+  "smoke:checkin:resolve-scan-not-found": async () => {
+    await ensureBearer();
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // Create event
+    const evt = await post("/objects/event", { type: "event", status: "open", name: smokeTag("scan_notfound_evt"), capacity: 5, reservedCount: 0 });
+    if (!evt.ok || !evt.body?.id) return { test: "checkin:resolve-scan-not-found", result: "FAIL", reason: "event-failed", evt };
+    const eventId = evt.body.id;
+
+    // Try to resolve non-existent registration
+    const fakeRegId = `REG-NOTEXIST-${SMOKE_RUN_ID}`;
+    const scanBody = { eventId, scanString: JSON.stringify({ id: fakeRegId }), scanType: "auto" };
+    const resNotFound = await post("/registrations:resolve-scan", scanBody, featureHeaders);
+    const okNotFound = resNotFound.ok && resNotFound.body?.ok === false && resNotFound.body?.error === "not_found";
+
+    if (!okNotFound) {
+      return { test: "checkin:resolve-scan-not-found", result: "FAIL", expectedError: "not_found", got: resNotFound.body };
+    }
+
+    return { test: "checkin:resolve-scan-not-found", result: "PASS", summary: "Non-existent registration scan returns not_found" };
+  },
+
+  "smoke:checkin:resolve-scan-ticket-missing-blocker-reason": async () => {
+    await ensureBearer();
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // Create event + registration (no ticket issued)
+    const evt = await post("/objects/event", { type: "event", status: "open", name: smokeTag("ticket_missing_reason_evt"), capacity: 5, reservedCount: 0 });
+    if (!evt.ok || !evt.body?.id) return { test: "checkin:resolve-scan-ticket-missing-blocker-reason", result: "FAIL", reason: "event-failed", evt };
+    const eventId = evt.body.id;
+
+    const regCreate = await post("/registrations:public", { eventId, party: { email: `ticket_missing_reason+${SMOKE_RUN_ID}@example.com` } }, featureHeaders, { auth: "none" });
+    if (!regCreate.ok || !regCreate.body?.registration?.id) return { test: "checkin:resolve-scan-ticket-missing-blocker-reason", result: "FAIL", reason: "reg-create-failed", regCreate };
+    const regId = regCreate.body.registration.id;
+
+    // Get readiness snapshot
+    const readyRes = await get(`/registrations/${encodeURIComponent(regId)}:checkin-readiness`, undefined, { headers: featureHeaders });
+    if (!readyRes.ok) return { test: "checkin:resolve-scan-ticket-missing-blocker-reason", result: "FAIL", reason: "readiness-fetch-failed", readyRes };
+
+    // Find ticket_missing blocker
+    const blockers = readyRes.body?.blockers || [];
+    const ticketMissingBlocker = blockers.find(b => b.code === "ticket_missing");
+
+    if (!ticketMissingBlocker) {
+      return { test: "checkin:resolve-scan-ticket-missing-blocker-reason", result: "FAIL", reason: "ticket_missing-not-found", blockers: blockers.map(b => b.code) };
+    }
+
+    // Verify reason is present and matches expected
+    const expectedReason = "Admission ticket required";
+    const hasReason = ticketMissingBlocker.reason && ticketMissingBlocker.reason.length > 0;
+    const reasonMatches = ticketMissingBlocker.reason === expectedReason;
+
+    if (!hasReason) {
+      return { test: "checkin:resolve-scan-ticket-missing-blocker-reason", result: "FAIL", reason: "reason-missing", blocker: ticketMissingBlocker };
+    }
+
+    if (!reasonMatches) {
+      return { test: "checkin:resolve-scan-ticket-missing-blocker-reason", result: "FAIL", reason: "reason-mismatch", expected: expectedReason, got: ticketMissingBlocker.reason };
+    }
+
+    return { test: "checkin:resolve-scan-ticket-missing-blocker-reason", result: "PASS", summary: "ticket_missing blocker includes correct reason" };
+  },
+
+  "smoke:checkin:worklist-filter-combinations": async () => {
+    await ensureBearer();
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // Create event with stalls
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: smokeTag("filter_combo_evt"),
+      capacity: 10,
+      reservedCount: 0,
+      stallEnabled: true,
+      stallCapacity: 5,
+      stallReserved: 0,
+      stallUnitAmount: 5000
+    });
+    if (!evt.ok || !evt.body?.id) return { test: "checkin:worklist-filter-combinations", result: "FAIL", reason: "event-failed", evt };
+    const eventId = evt.body.id;
+
+    // Create 3 registrations with different states
+    const regs = [];
+    // Reg 1: ready, not checked-in
+    const r1 = await post("/registrations:public", { eventId, party: { email: `filter_combo_ready+${SMOKE_RUN_ID}@example.com` } }, featureHeaders, { auth: "none" });
+    if (!r1.ok || !r1.body?.registration?.id) return { test: "checkin:worklist-filter-combinations", result: "FAIL", reason: "reg1-failed", r1 };
+    regs.push({ id: r1.body.registration.id, name: "ready-not-checked" });
+
+    // Reg 2: ready, checked-in (via resolve-scan then checkin)
+    const r2 = await post("/registrations:public", { eventId, party: { email: `filter_combo_checked+${SMOKE_RUN_ID}@example.com` } }, featureHeaders, { auth: "none" });
+    if (!r2.ok || !r2.body?.registration?.id) return { test: "checkin:worklist-filter-combinations", result: "FAIL", reason: "reg2-failed", r2 };
+    const r2id = r2.body.registration.id;
+    const checkInRes = await post(`/events/registration/${encodeURIComponent(r2id)}:checkin`, {}, { ...featureHeaders, "Idempotency-Key": idem() });
+    if (checkInRes.status !== 200 && checkInRes.status !== 409) return { test: "checkin:worklist-filter-combinations", result: "FAIL", reason: "reg2-checkin-failed", checkInRes };
+    regs.push({ id: r2id, name: "ready-checked" });
+
+    // Reg 3: blocked by stalls, not checked-in
+    const r3 = await post("/registrations:public", { eventId, stallQty: 2, party: { email: `filter_combo_blocked+${SMOKE_RUN_ID}@example.com` } }, featureHeaders, { auth: "none" });
+    if (!r3.ok || !r3.body?.registration?.id) return { test: "checkin:worklist-filter-combinations", result: "FAIL", reason: "reg3-failed", r3 };
+    regs.push({ id: r3.body.registration.id, name: "blocked-stalls" });
+
+    // Test filters
+    // a) checkedIn=true should return only reg2
+    const wl1 = await get(`/events/${encodeURIComponent(eventId)}:checkin-worklist?checkedIn=true`, undefined, { headers: featureHeaders });
+    if (!wl1.ok || !Array.isArray(wl1.body?.items)) return { test: "checkin:worklist-filter-combinations", result: "FAIL", step: "checkedIn=true-failed", wl1 };
+    const onlyChecked = wl1.body.items.every(r => r.checkedInAt);
+    if (!onlyChecked) return { test: "checkin:worklist-filter-combinations", result: "FAIL", step: "checkedIn=true-has-unchecked" };
+
+    // b) checkedIn=false should return reg1 and reg3
+    const wl2 = await get(`/events/${encodeURIComponent(eventId)}:checkin-worklist?checkedIn=false`, undefined, { headers: featureHeaders });
+    if (!wl2.ok || !Array.isArray(wl2.body?.items)) return { test: "checkin:worklist-filter-combinations", result: "FAIL", step: "checkedIn=false-failed", wl2 };
+    const allUnchecked = wl2.body.items.every(r => !r.checkedInAt);
+    if (!allUnchecked) return { test: "checkin:worklist-filter-combinations", result: "FAIL", step: "checkedIn=false-has-checked" };
+
+    // c) blockerCode=stalls_unassigned should return reg3 only
+    const wl3 = await get(`/events/${encodeURIComponent(eventId)}:checkin-worklist?blockerCode=stalls_unassigned`, undefined, { headers: featureHeaders });
+    if (!wl3.ok || !Array.isArray(wl3.body?.items)) return { test: "checkin:worklist-filter-combinations", result: "FAIL", step: "blocker-filter-failed", wl3 };
+    const onlyStallsBlocked = wl3.body.items.every(r => r.checkInStatus?.blockers?.some(b => b.code === "stalls_unassigned"));
+    if (!onlyStallsBlocked) return { test: "checkin:worklist-filter-combinations", result: "FAIL", step: "blocker-filter-not-exclusive" };
+
+    // d) ready=true should return only reg1 and reg2
+    const wl4 = await get(`/events/${encodeURIComponent(eventId)}:checkin-worklist?ready=true`, undefined, { headers: featureHeaders });
+    if (!wl4.ok || !Array.isArray(wl4.body?.items)) return { test: "checkin:worklist-filter-combinations", result: "FAIL", step: "ready-true-failed", wl4 };
+    const allReady = wl4.body.items.every(r => r.checkInStatus?.ready === true);
+    if (!allReady) return { test: "checkin:worklist-filter-combinations", result: "FAIL", step: "ready-true-has-blocked" };
+
+    return { test: "checkin:worklist-filter-combinations", result: "PASS", summary: "All filter combinations work as expected" };
+  },
+
+  "smoke:checkin:blocker-reason-present": async () => {
+    await ensureBearer();
+    const featureHeaders = {
+      "X-Feature-Registrations-Enabled": "true",
+      "X-Feature-Stripe-Simulate": "true",
+      "X-Feature-Notify-Simulate": "true"
+    };
+
+    // Test scenarios that trigger different blockers
+    const scenarios = [
+      { name: "payment_unpaid", stallQty: 0 },
+      { name: "stalls_unassigned", stallQty: 1 }
+    ];
+
+    const evt = await post("/objects/event", {
+      type: "event",
+      status: "open",
+      name: smokeTag("blocker_reason_evt"),
+      capacity: 10,
+      reservedCount: 0,
+      stallEnabled: true,
+      stallCapacity: 5,
+      stallReserved: 0,
+      stallUnitAmount: 5000
+    });
+    if (!evt.ok || !evt.body?.id) return { test: "checkin:blocker-reason-present", result: "FAIL", reason: "event-failed", evt };
+    const eventId = evt.body.id;
+
+    const expectedReasons = {
+      payment_unpaid: "Payment not confirmed",
+      stalls_unassigned: "Stall assignment required",
+      classes_unassigned: "Class assignment required",
+      cancelled: "Registration cancelled",
+      ticket_missing: "Admission ticket required"
+    };
+
+    for (const scenario of scenarios) {
+      const regCreate = await post("/registrations:public", {
+        eventId,
+        stallQty: scenario.stallQty,
+        party: { email: `blocker_reason_${scenario.name}+${SMOKE_RUN_ID}@example.com` }
+      }, featureHeaders, { auth: "none" });
+
+      if (!regCreate.ok || !regCreate.body?.registration?.id) {
+        return { test: "checkin:blocker-reason-present", result: "FAIL", reason: `${scenario.name}-reg-failed`, regCreate };
+      }
+
+      const regId = regCreate.body.registration.id;
+      const readyRes = await get(`/registrations/${encodeURIComponent(regId)}:checkin-readiness`, undefined, { headers: featureHeaders });
+      if (!readyRes.ok) return { test: "checkin:blocker-reason-present", result: "FAIL", reason: `${scenario.name}-readiness-failed`, readyRes };
+
+      const blockers = readyRes.body?.blockers || [];
+      if (blockers.length === 0) {
+        return { test: "checkin:blocker-reason-present", result: "FAIL", reason: `${scenario.name}-no-blockers` };
+      }
+
+      for (const blocker of blockers) {
+        if (!blocker.code) {
+          return { test: "checkin:blocker-reason-present", result: "FAIL", reason: `${scenario.name}-blocker-no-code` };
+        }
+
+        if (!blocker.reason || blocker.reason.length === 0) {
+          return { test: "checkin:blocker-reason-present", result: "FAIL", reason: `${scenario.name}-${blocker.code}-no-reason`, blocker };
+        }
+
+        const expectedReason = expectedReasons[blocker.code];
+        if (expectedReason && blocker.reason !== expectedReason) {
+          return { test: "checkin:blocker-reason-present", result: "FAIL", reason: `${scenario.name}-${blocker.code}-reason-mismatch`, expected: expectedReason, got: blocker.reason };
+        }
+      }
+    }
+
+    return { test: "checkin:blocker-reason-present", result: "PASS", summary: "All blockers include proper reason fields" };
   }
 
 };
